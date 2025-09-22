@@ -1,16 +1,14 @@
-import { Client, Events, GatewayIntentBits, Collection, BaseInteraction } from 'discord.js';
+import { Client, Events, GatewayIntentBits, Collection, BaseInteraction, MessageFlags, TextChannel } from 'discord.js';
 import * as dotenv from 'dotenv';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { activePolls } from './commands/vote.js'; // 引入 activePolls
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 dotenv.config();
 
-// 擴充 Client 類別，使其可以存放 commands 集合
 class CustomClient extends Client {
   commands = new Collection<string, any>();
 }
@@ -42,7 +40,6 @@ client.once(Events.ClientReady, c => {
 });
 
 client.on(Events.InteractionCreate, async (interaction: BaseInteraction) => {
-  // 處理斜線指令
   if (interaction.isChatInputCommand()) {
     const command = (interaction.client as CustomClient).commands.get(interaction.commandName);
     if (!command) {
@@ -53,12 +50,13 @@ client.on(Events.InteractionCreate, async (interaction: BaseInteraction) => {
       await command.execute(interaction);
     } catch (error) {
       console.error(error);
-      await interaction.reply({ content: '執行此指令時發生錯誤！', ephemeral: true });
+      if (interaction.replied || interaction.deferred) {
+        await interaction.followUp({ content: '執行此指令時發生錯誤！', flags: [MessageFlags.Ephemeral] });
+      }
+      else {
+        await interaction.reply({ content: '執行此指令時發生錯誤！', flags: [MessageFlags.Ephemeral] });
+      }
     }
-  }
-  // 處理按鈕點擊 (下一步實作)
-  else if (interaction.isButton()) {
-    // 這裡是我們之後要加入按鈕處理邏輯的地方
   }
 });
 
