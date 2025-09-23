@@ -10,6 +10,7 @@ function setupDatabase() {
   db.exec(`
     CREATE TABLE IF NOT EXISTS bets (
       id TEXT PRIMARY KEY,
+      creatorId TEXT NOT NULL,
       channelId TEXT NOT NULL,
       topic TEXT NOT NULL,
       options TEXT NOT NULL,
@@ -85,8 +86,8 @@ export function setUserPoints(userId: string, points: number) {
  */
 export function saveBet(bet: Bet) {
   const stmt = db.prepare(`
-    INSERT INTO bets (id, channelId, topic, options, endTime, isActive, winningOption)
-    VALUES (?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO bets (id, creatorId, channelId, topic, options, endTime, isActive, winningOption)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(id) DO UPDATE SET
       options = excluded.options,
       endTime = excluded.endTime,
@@ -96,6 +97,7 @@ export function saveBet(bet: Bet) {
 
   stmt.run(
     bet.id,
+    bet.creatorId,
     bet.channelId,
     bet.topic,
     JSON.stringify(bet.options), // Save the options array as a JSON string

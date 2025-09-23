@@ -1,5 +1,6 @@
 import { SlashCommandBuilder, CommandInteraction, TextChannel, MessageFlags, Client, DiscordAPIError } from 'discord.js';
 import { Bet } from '../models/Bet.js';
+import { logAction } from '../logger.js';
 import { saveBet, getBet, getUserPoints, placeBetTransaction, getWagersForBet, payoutWinnings } from '../database.js';
 
 export const data = new SlashCommandBuilder()
@@ -99,7 +100,7 @@ export async function execute(interaction: CommandInteraction) {
       const totalMilliseconds = (days * 24 * 60 * 60 + hours * 60 * 60 + minutes * 60) * 1000;
       const endTime = totalMilliseconds > 0 ? Date.now() + totalMilliseconds : null;
 
-      const bet = new Bet(interaction.channelId, topic, optionsInput, endTime);
+      const bet = new Bet(interaction.user.id, interaction.channelId, topic, optionsInput, endTime);
 
       const response = await interaction.reply({ embeds: [bet.createBetEmbed()] });
       const message = await response.fetch();
@@ -109,6 +110,11 @@ export async function execute(interaction: CommandInteraction) {
       await message.edit({ embeds: [bet.createBetEmbed()] });
 
       saveBet(bet);
+
+      const logTitle = "新賭注已建立";
+      const logMessage = `**建立者:** ${interaction.user.tag} (\`${interaction.user.id}\`)\n**賭注主題:** ${bet.topic}\n**ID:** \`${bet.id}\``;
+      await logAction(interaction.client, logTitle, logMessage);
+
       break;
     }
     case 'place': {
@@ -142,6 +148,10 @@ export async function execute(interaction: CommandInteraction) {
       const updatedBet = getBet(betId)!; // Refetch the bet to get the new totals
       await updateBetMessage(interaction.client, updatedBet);
 
+      const logTitle = "新的下注";
+      const logMessage = `**下注者:** ${interaction.user.tag} (\`${interaction.user.id}\`)\n**賭注主題:** ${updatedBet.topic}(\`${bet.id}\`)\n**選項:** ${updatedBet.options[optionIndex]?.label}\n**點數:** ${amount} 點`;
+      await logAction(interaction.client, logTitle, logMessage);
+
       // 4. Confirm to the user
       await interaction.reply({ content: `您已成功在「${updatedBet.options[optionIndex]?.label}」上下注 ${amount} 點！`, flags: [MessageFlags.Ephemeral] });
       break;
@@ -155,6 +165,15 @@ export async function execute(interaction: CommandInteraction) {
       if (!bet) {
         return interaction.reply({ content: '找不到賭注。', flags: [MessageFlags.Ephemeral] });
       }
+
+      if (interaction.user.id !== bet.creatorId) {
+        return interaction.reply({ content: '只有建立此賭注的人才能進行結算。', flags: [MessageFlags.Ephemeral] });
+      }
+
+      if (bet.endTime && Date.now() < bet.endTime) {
+        return interaction.reply({ content: '此賭注尚未到達截止時間，無法提前結算。', flags: [MessageFlags.Ephemeral] });
+      }
+
       if (!bet.isActive) {
         return interaction.reply({ content: '此賭注已結算。', flags: [MessageFlags.Ephemeral] });
       }
@@ -202,6 +221,10 @@ export async function execute(interaction: CommandInteraction) {
           console.error(`無法發送賭注 ${betId} 的獲勝通知：`, error);
         }
       }
+
+      const logTitle = "賭注已結算";
+      const logMessage = `**操作者:** ${interaction.user.tag} (\`${interaction.user.id}\`)\n**賭注主題:** ${bet.topic}(\`${bet.id}\`)\n**獲勝選項:** ${bet.options[winningOptionIndex]?.label}`;
+      await logAction(interaction.client, logTitle, logMessage);
 
       await interaction.reply({ content: `賭注 ${bet.topic} 已結算！獲勝方為「${bet.options[winningOptionIndex]?.label}」。總計已向 ${payouts.length} 位贏家派發 ${totalPool} 點。`, flags: [MessageFlags.Ephemeral] });
     }

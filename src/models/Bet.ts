@@ -10,6 +10,7 @@ interface BetOption {
 // This interface defines the simple object structure for saving to JSON
 export interface BetJSON {
   id: string;
+  creatorId: string;
   channelId: string;
   topic: string;
   options: BetOption[];
@@ -20,6 +21,7 @@ export interface BetJSON {
 
 export class Bet {
   public id: string; // The Discord message ID
+  public creatorId: string;
   public channelId: string;
   public topic: string;
   public options: BetOption[];
@@ -27,8 +29,9 @@ export class Bet {
   public isActive: boolean;
   public winningOption: number | null;
 
-  constructor(channelId: string, topic: string, options: string[], endTime: number | null = null, id: string = '') {
+  constructor(creatorId: string, channelId: string, topic: string, options: string[], endTime: number | null = null, id: string = '') {
     this.id = id;
+    this.creatorId = creatorId;
     this.channelId = channelId;
     this.topic = topic;
     this.options = options.map(opt => ({ label: opt, pointsPool: 0, bettorCount: 0, maxBet: 0 }));
@@ -43,6 +46,7 @@ export class Bet {
   toJSON(): BetJSON {
     return {
       id: this.id,
+      creatorId: this.creatorId,
       channelId: this.channelId,
       topic: this.topic,
       options: this.options,
@@ -54,7 +58,7 @@ export class Bet {
 
   // Creates a Poll instance from a simple JSON object
   static fromJSON(data: BetJSON): Bet {
-    const poll = new Bet(data.channelId, data.topic, [], data.endTime, data.id);
+    const poll = new Bet(data.creatorId, data.channelId, data.topic, [], data.endTime, data.id);
     poll.options = data.options;
     poll.isActive = data.isActive;
     return poll;
@@ -122,7 +126,7 @@ export class Bet {
   static fromDbRow(row: any): Bet {
     // The constructor expects an array of strings (labels) for the options
     const optionsLabels = (JSON.parse(row.options) as BetOption[]).map(o => o.label);
-    const bet = new Bet(row.channelId, row.topic, optionsLabels, row.endTime, row.id);
+    const bet = new Bet(row.creatorId, row.channelId, row.topic, optionsLabels, row.endTime, row.id);
 
     // Now we can manually set the other properties
     bet.isActive = row.isActive === 1;
