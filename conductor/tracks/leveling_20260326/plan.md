@@ -9,14 +9,14 @@
     - [x] Implement `addXp` and `setLevel` methods in `PlayerRepository`.
 - [x] Task: Conductor - User Manual Verification 'Phase 1: Data Model & Persistence' (Protocol in workflow.md) 7559533
 
-## Phase 2: Core Leveling Logic
+## Phase 2: Core Leveling Logic [checkpoint: 6f0bc2e]
 - [x] Task: Implement XP threshold and level-up calculation logic. 204eab9
     - [x] Write unit tests for the level-up formula and threshold calculations.
     - [x] Implement the logic in a new `LevelingService` or within the `Player` model.
 - [x] Task: Integrate leveling logic with XP gain. 3bcf290
     - [x] Write tests for the automatic level-up when XP is added.
     - [x] Update the `addXp` logic to trigger level-up checks and updates.
-- [ ] Task: Conductor - User Manual Verification 'Phase 2: Core Leveling Logic' (Protocol in workflow.md)
+- [x] Task: Conductor - User Manual Verification 'Phase 2: Core Leveling Logic' (Protocol in workflow.md) 6f0bc2e
 
 ## Phase 3: Integration with Hunt Command
 - [ ] Task: Award XP upon successful hunt completion.
