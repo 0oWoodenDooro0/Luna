@@ -13,9 +13,9 @@
 - [x] Task: Implement XP threshold and level-up calculation logic. 204eab9
     - [x] Write unit tests for the level-up formula and threshold calculations.
     - [x] Implement the logic in a new `LevelingService` or within the `Player` model.
-- [ ] Task: Integrate leveling logic with XP gain.
-    - [ ] Write tests for the automatic level-up when XP is added.
-    - [ ] Update the `addXp` logic to trigger level-up checks and updates.
+- [x] Task: Integrate leveling logic with XP gain. 3bcf290
+    - [x] Write tests for the automatic level-up when XP is added.
+    - [x] Update the `addXp` logic to trigger level-up checks and updates.
 - [ ] Task: Conductor - User Manual Verification 'Phase 2: Core Leveling Logic' (Protocol in workflow.md)
 
 ## Phase 3: Integration with Hunt Command
