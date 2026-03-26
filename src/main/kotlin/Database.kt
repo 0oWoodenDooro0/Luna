@@ -19,6 +19,6 @@ fun initDatabase() {
     Database.connect("jdbc:sqlite:rpg_data.db", driver = "org.sqlite.JDBC")
 
     transaction {
-        SchemaUtils.create(Players)
+        SchemaUtils.createMissingTablesAndColumns(Players)
     }
 }
