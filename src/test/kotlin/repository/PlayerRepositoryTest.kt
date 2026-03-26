@@ -75,4 +75,20 @@ class PlayerRepositoryTest {
         assertEquals(2, player.level, "Player should have leveled up to 2")
         assertEquals(10, player.xp, "Player should have 10 xp remaining")
     }
+
+    @Test
+    fun `test generic CRUD on PlayerRepository`() {
+        val userId = "genericUser1"
+        val player = PlayerData(userId, 1, 0, 0, 0L)
+        
+        PlayerRepository.create(player)
+        assertEquals(player, PlayerRepository.getById(userId))
+        
+        val updated = player.copy(gold = 100)
+        PlayerRepository.update(userId, updated)
+        assertEquals(updated, PlayerRepository.getById(userId))
+        
+        PlayerRepository.delete(userId)
+        assertNull(PlayerRepository.getById(userId))
+    }
 }

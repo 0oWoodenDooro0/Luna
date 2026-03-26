@@ -1,8 +1,9 @@
 package website.woodendoor.repository
 
+import org.jetbrains.exposed.v1.core.Column
+import org.jetbrains.exposed.v1.core.ResultRow
 import org.jetbrains.exposed.v1.core.eq
-import org.jetbrains.exposed.v1.jdbc.insert
-import org.jetbrains.exposed.v1.jdbc.selectAll
+import org.jetbrains.exposed.v1.core.statements.UpdateBuilder
 import org.jetbrains.exposed.v1.jdbc.transactions.transaction
 import org.jetbrains.exposed.v1.jdbc.update
 import website.woodendoor.LevelingService
@@ -16,40 +17,39 @@ data class PlayerData(
     val lastHuntTime: Long
 )
 
-object PlayerRepository {
+/**
+ * Repository for managing [PlayerData].
+ */
+object PlayerRepository : ExposedRepository<PlayerData, String, Players>(Players) {
+
+    override fun idColumn(): Column<String> = Players.userId
+
+    override fun toEntity(row: ResultRow): PlayerData = PlayerData(
+        userId = row[Players.userId],
+        level = row[Players.level],
+        xp = row[Players.xp],
+        gold = row[Players.gold],
+        lastHuntTime = row[Players.lastHuntTime]
+    )
+
+    override fun fromEntity(it: UpdateBuilder<*>, entity: PlayerData) {
+        it[Players.userId] = entity.userId
+        it[Players.level] = entity.level
+        it[Players.xp] = entity.xp
+        it[Players.gold] = entity.gold
+        it[Players.lastHuntTime] = entity.lastHuntTime
+    }
 
     fun isRegistered(targetUserId: String): Boolean {
-        return transaction {
-            Players.selectAll().where { Players.userId eq targetUserId }.count() > 0
-        }
+        return getById(targetUserId) != null
     }
 
     fun createPlayer(targetUserId: String) {
-        transaction {
-            Players.insert {
-                it[userId] = targetUserId
-                it[lastHuntTime] = 0L
-                it[gold] = 0
-            }
-        }
+        create(PlayerData(targetUserId, 1, 0, 0, 0L))
     }
 
     fun getPlayer(targetUserId: String): PlayerData? {
-        return transaction {
-            val row = Players.selectAll().where { Players.userId eq targetUserId }.singleOrNull()
-
-            if (row == null) {
-                null
-            } else {
-                PlayerData(
-                    userId = row[Players.userId],
-                    level = row[Players.level],
-                    xp = row[Players.xp],
-                    gold = row[Players.gold],
-                    lastHuntTime = row[Players.lastHuntTime]
-                )
-            }
-        }
+        return getById(targetUserId)
     }
 
     fun updateHuntResult(targetUserId: String, newGold: Int, newTime: Long) {
