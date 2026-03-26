@@ -4,5 +4,5 @@ This file tracks all major tracks for the project. Each track has its own detail
 
 ---
 
-- [ ] **Track: Implement player leveling and experience system**
+- [~] **Track: Implement player leveling and experience system**
   *Link: [./tracks/leveling_20260326/](./tracks/leveling_20260326/)*
