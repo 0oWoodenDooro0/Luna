@@ -8,7 +8,7 @@ import org.jetbrains.exposed.v1.jdbc.transactions.transaction
 object Players : Table() {
     val userId = varchar("user_id", 30)
     val level = integer("level").default(1)
-    val exp = integer("exp").default(0)
+    val xp = integer("xp").default(0)
     val gold = integer("gold").default(0)
     val lastHuntTime = long("last_hunt_time").default(0L)
 

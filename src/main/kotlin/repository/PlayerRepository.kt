@@ -10,7 +10,7 @@ import website.woodendoor.Players
 data class PlayerData(
     val userId: String,
     val level: Int,
-    val exp: Int,
+    val xp: Int,
     val gold: Int,
     val lastHuntTime: Long
 )
@@ -43,7 +43,7 @@ object PlayerRepository {
                 PlayerData(
                     userId = row[Players.userId],
                     level = row[Players.level],
-                    exp = row[Players.exp],
+                    xp = row[Players.xp],
                     gold = row[Players.gold],
                     lastHuntTime = row[Players.lastHuntTime]
                 )
