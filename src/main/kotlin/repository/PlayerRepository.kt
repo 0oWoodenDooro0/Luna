@@ -59,4 +59,21 @@ object PlayerRepository {
             }
         }
     }
+
+    fun setLevel(targetUserId: String, newLevel: Int) {
+        transaction {
+            Players.update({ Players.userId eq targetUserId }) {
+                it[level] = newLevel
+            }
+        }
+    }
+
+    fun addXp(targetUserId: String, xpToAdd: Int) {
+        transaction {
+            val currentXp = Players.selectAll().where { Players.userId eq targetUserId }.singleOrNull()?.get(Players.xp) ?: 0
+            Players.update({ Players.userId eq targetUserId }) {
+                it[xp] = currentXp + xpToAdd
+            }
+        }
+    }
 }

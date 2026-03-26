@@ -34,6 +34,32 @@ class PlayerRepositoryTest {
         assertNotNull(player)
         assertEquals(userId, player.userId)
         assertEquals(1, player.level, "New player should be level 1")
-        assertEquals(0, player.xp, "New player should have 0 xp") // This will fail to compile if field is 'exp'
+        assertEquals(0, player.xp, "New player should have 0 xp")
+    }
+
+    @Test
+    fun `test updating a player's level and xp`() {
+        val userId = "testUser2"
+        PlayerRepository.createPlayer(userId)
+
+        // Initial check
+        var player = PlayerRepository.getPlayer(userId)!!
+        assertEquals(1, player.level)
+        assertEquals(0, player.xp)
+
+        // Update level
+        PlayerRepository.setLevel(userId, 5)
+        player = PlayerRepository.getPlayer(userId)!!
+        assertEquals(5, player.level, "Player level should be updated to 5")
+
+        // Update XP (add)
+        PlayerRepository.addXp(userId, 150)
+        player = PlayerRepository.getPlayer(userId)!!
+        assertEquals(150, player.xp, "Player xp should be updated to 150")
+
+        // Add more XP
+        PlayerRepository.addXp(userId, 50)
+        player = PlayerRepository.getPlayer(userId)!!
+        assertEquals(200, player.xp, "Player xp should be increased to 200")
     }
 }
