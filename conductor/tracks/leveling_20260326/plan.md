@@ -1,9 +1,9 @@
 # Implementation Plan: Player Leveling and Experience System
 
 ## Phase 1: Data Model & Persistence
-- [ ] Task: Update the `Player` table schema to include `xp` and `level` columns.
-    - [ ] Write tests for database schema migration and player data retrieval.
-    - [ ] Implement the schema changes and update the `PlayerRepository`.
+- [x] Task: Update the `Player` table schema to include `xp` and `level` columns. 26fe7fc
+    - [x] Write tests for database schema migration and player data retrieval.
+    - [x] Implement the schema changes and update the `PlayerRepository`.
 - [ ] Task: Implement XP and Level update methods in `PlayerRepository`.
     - [ ] Write tests for updating XP and level fields in the database.
     - [ ] Implement `addXp` and `setLevel` methods in `PlayerRepository`.
