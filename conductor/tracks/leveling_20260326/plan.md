@@ -22,7 +22,7 @@
 - [x] Task: Award XP upon successful hunt completion. 56b5890
     - [x] Write integration tests for the `HuntCommand` to verify XP is awarded.
     - [x] Update `HuntCommand` to call the XP awarding logic after a hunt.
-- [ ] Task: Update Discord feedback for XP gains and level-ups.
-    - [ ] Write tests for generating the correct Discord message content.
-    - [ ] Update the `HuntCommand` response to include XP gain and level-up notifications.
+- [x] Task: Update Discord feedback for XP gains and level-ups. 916ff84
+    - [x] Write tests for generating the correct Discord message content.
+    - [x] Update the `HuntCommand` response to include XP gain and level-up notifications.
 - [ ] Task: Conductor - User Manual Verification 'Phase 3: Integration with Hunt Command' (Protocol in workflow.md)
