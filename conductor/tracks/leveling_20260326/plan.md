@@ -10,9 +10,9 @@
 - [x] Task: Conductor - User Manual Verification 'Phase 1: Data Model & Persistence' (Protocol in workflow.md) 7559533
 
 ## Phase 2: Core Leveling Logic
-- [ ] Task: Implement XP threshold and level-up calculation logic.
-    - [ ] Write unit tests for the level-up formula and threshold calculations.
-    - [ ] Implement the logic in a new `LevelingService` or within the `Player` model.
+- [x] Task: Implement XP threshold and level-up calculation logic. 204eab9
+    - [x] Write unit tests for the level-up formula and threshold calculations.
+    - [x] Implement the logic in a new `LevelingService` or within the `Player` model.
 - [ ] Task: Integrate leveling logic with XP gain.
     - [ ] Write tests for the automatic level-up when XP is added.
     - [ ] Update the `addXp` logic to trigger level-up checks and updates.
