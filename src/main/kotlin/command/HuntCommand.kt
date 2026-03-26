@@ -41,6 +41,8 @@ class HuntCommand : Command {
         } else {
             val newGold = playerData.gold + 10
             PlayerRepository.updateHuntResult(userDiscordId, newGold, currentTime)
+            PlayerRepository.addXp(userDiscordId, 20)
+
             val response = interaction.deferPublicResponse()
             response.respond {
                 content = "⚔️ 你揮舞武器打倒了怪物！獲得了 10 枚金幣。 (目前總金幣: $newGold)"

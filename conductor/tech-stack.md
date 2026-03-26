@@ -12,3 +12,7 @@
 
 ## Logging & Utilities
 - **SLF4J:** A simple logging facade for Java, used for standardized logging throughout the application.
+
+## Testing
+- **Kotlin Test:** The built-in Kotlin testing framework used for unit and integration tests.
+- **MockK:** A powerful mocking library for Kotlin, used to mock objects and verify behavior in tests.

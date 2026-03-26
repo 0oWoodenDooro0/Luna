@@ -11,6 +11,7 @@ repositories {
 
 dependencies {
     testImplementation(kotlin("test"))
+    testImplementation("io.mockk:mockk:1.13.17")
     implementation("dev.kord:kord-core:0.18.0")
     implementation("org.slf4j:slf4j-simple:2.0.17")
     implementation("org.xerial:sqlite-jdbc:3.51.3.0")
@@ -24,4 +25,5 @@ kotlin {
 
 tasks.test {
     useJUnitPlatform()
+    systemProperty("net.bytebuddy.experimental", "true")
 }
