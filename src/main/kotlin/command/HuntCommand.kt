@@ -39,13 +39,17 @@ class HuntCommand : Command {
                 content = "⏳ 你太累了！請再休息 **$remainingSeconds** 秒後再出發。"
             }
         } else {
+            val result = PlayerRepository.addXp(userDiscordId, 20)
             val newGold = playerData.gold + 10
             PlayerRepository.updateHuntResult(userDiscordId, newGold, currentTime)
-            PlayerRepository.addXp(userDiscordId, 20)
 
             val response = interaction.deferPublicResponse()
             response.respond {
-                content = "⚔️ 你揮舞武器打倒了怪物！獲得了 10 枚金幣。 (目前總金幣: $newGold)"
+                var msg = "⚔️ 你揮舞武器打倒了怪物！獲得了 10 枚金幣與 20 點經驗值。 (目前總金幣: $newGold)"
+                if (result.leveledUp) {
+                    msg += "\n🎉 恭喜！你等級提升至 **${result.newLevel}** 了！"
+                }
+                content = msg
             }
         }
     }
