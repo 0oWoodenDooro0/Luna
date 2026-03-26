@@ -19,9 +19,9 @@
 - [x] Task: Conductor - User Manual Verification 'Phase 2: Core Leveling Logic' (Protocol in workflow.md) 6f0bc2e
 
 ## Phase 3: Integration with Hunt Command
-- [ ] Task: Award XP upon successful hunt completion.
-    - [ ] Write integration tests for the `HuntCommand` to verify XP is awarded.
-    - [ ] Update `HuntCommand` to call the XP awarding logic after a hunt.
+- [x] Task: Award XP upon successful hunt completion. 56b5890
+    - [x] Write integration tests for the `HuntCommand` to verify XP is awarded.
+    - [x] Update `HuntCommand` to call the XP awarding logic after a hunt.
 - [ ] Task: Update Discord feedback for XP gains and level-ups.
     - [ ] Write tests for generating the correct Discord message content.
     - [ ] Update the `HuntCommand` response to include XP gain and level-up notifications.
