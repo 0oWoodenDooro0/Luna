@@ -25,4 +25,8 @@
 - [x] Task: Refactor HuntCommand bcc8baa
     - [x] Write failing tests for `HuntCommand` using mocked dependencies.
     - [x] Refactor `HuntCommand` to adhere to the Layered Architecture.
-- [x] Task: Conductor - User Manual Verification 'Phase 4: Refactor Commands' (Protocol in workflow.md) bcc8baa
+## Phase: Review Fixes
+- [x] Task: Apply review suggestions d0251a7
+    - [x] Add unit tests for InitCommand using MockK.
+    - [x] Add unit tests for HuntCommand using MockK.
+    - [x] Add unit tests for LevelingService with mocked repositories.
