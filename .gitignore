@@ -51,3 +51,4 @@ bin/
 .sidecar-start.sh
 .sidecar-base
 .td-root
+rpg_data.db
