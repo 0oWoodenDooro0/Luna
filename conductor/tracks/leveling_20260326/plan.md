@@ -4,9 +4,9 @@
 - [x] Task: Update the `Player` table schema to include `xp` and `level` columns. 26fe7fc
     - [x] Write tests for database schema migration and player data retrieval.
     - [x] Implement the schema changes and update the `PlayerRepository`.
-- [ ] Task: Implement XP and Level update methods in `PlayerRepository`.
-    - [ ] Write tests for updating XP and level fields in the database.
-    - [ ] Implement `addXp` and `setLevel` methods in `PlayerRepository`.
+- [x] Task: Implement XP and Level update methods in `PlayerRepository`. 14dc257
+    - [x] Write tests for updating XP and level fields in the database.
+    - [x] Implement `addXp` and `setLevel` methods in `PlayerRepository`.
 - [ ] Task: Conductor - User Manual Verification 'Phase 1: Data Model & Persistence' (Protocol in workflow.md)
 
 ## Phase 2: Core Leveling Logic
