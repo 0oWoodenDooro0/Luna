@@ -1,9 +1,9 @@
 # Implementation Plan: Architecture Unification and Generic Repository
 
 ## Phase 1: Generic Repository Setup
-- [ ] Task: Define the Generic Repository Interface
-    - [ ] Write failing tests for generic repository data access logic (using a test entity).
-    - [ ] Implement `IRepository<T, ID>` interface and base Exposed-backed implementation.
+- [x] Task: Define the Generic Repository Interface 62bf9ba
+    - [x] Write failing tests for generic repository data access logic (using a test entity).
+    - [x] Implement `IRepository<T, ID>` interface and base Exposed-backed implementation.
 - [ ] Task: Conductor - User Manual Verification 'Phase 1: Generic Repository Setup' (Protocol in workflow.md)
 
 ## Phase 2: Refactor Repositories
