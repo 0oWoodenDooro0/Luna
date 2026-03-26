@@ -5,6 +5,7 @@ import org.jetbrains.exposed.v1.jdbc.insert
 import org.jetbrains.exposed.v1.jdbc.selectAll
 import org.jetbrains.exposed.v1.jdbc.transactions.transaction
 import org.jetbrains.exposed.v1.jdbc.update
+import website.woodendoor.LevelingService
 import website.woodendoor.Players
 
 data class PlayerData(
@@ -68,12 +69,15 @@ object PlayerRepository {
         }
     }
 
-    fun addXp(targetUserId: String, xpToAdd: Int) {
-        transaction {
-            val currentXp = Players.selectAll().where { Players.userId eq targetUserId }.singleOrNull()?.get(Players.xp) ?: 0
+    fun addXp(targetUserId: String, xpToAdd: Int): LevelingService.LevelUpResult {
+        return transaction {
+            val player = getPlayer(targetUserId) ?: throw IllegalArgumentException("Player not found")
+            val result = LevelingService.calculateLevelUp(player.level, player.xp, xpToAdd)
             Players.update({ Players.userId eq targetUserId }) {
-                it[xp] = currentXp + xpToAdd
+                it[level] = result.newLevel
+                it[xp] = result.newXp
             }
+            result
         }
     }
 }

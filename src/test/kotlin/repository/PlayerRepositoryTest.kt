@@ -62,4 +62,17 @@ class PlayerRepositoryTest {
         player = PlayerRepository.getPlayer(userId)!!
         assertEquals(200, player.xp, "Player xp should be increased to 200")
     }
+
+    @Test
+    fun `test addXp triggers level up`() {
+        val userId = "testUser3"
+        PlayerRepository.createPlayer(userId)
+
+        // Add enough XP to level up (threshold for lvl 1 is 100)
+        PlayerRepository.addXp(userId, 110)
+
+        val player = PlayerRepository.getPlayer(userId)!!
+        assertEquals(2, player.level, "Player should have leveled up to 2")
+        assertEquals(10, player.xp, "Player should have 10 xp remaining")
+    }
 }
