@@ -20,10 +20,22 @@ dependencies {
 }
 
 kotlin {
-    jvmToolchain(25)
+    jvmToolchain(17)
 }
 
 tasks.test {
     useJUnitPlatform()
     systemProperty("net.bytebuddy.experimental", "true")
+}
+
+tasks.jar {
+    manifest {
+        attributes["Main-Class"] = "website.woodendoor.MainKt"
+    }
+
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+
+    configurations["compileClasspath"].forEach { file: File ->
+        from(zipTree(file.absoluteFile))
+    }
 }
