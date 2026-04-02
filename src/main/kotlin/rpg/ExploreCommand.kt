@@ -9,6 +9,7 @@ import org.jetbrains.exposed.v1.jdbc.update
 import org.jetbrains.exposed.v1.jdbc.selectAll
 import org.jetbrains.exposed.v1.jdbc.transactions.transaction
 import website.woodendoor.Command
+import website.woodendoor.repository.PlayerRepository
 import website.woodendoor.repository.PlayersTable
 import kotlin.math.max
 import kotlin.random.Random
@@ -25,13 +26,10 @@ class ExploreCommand : Command {
         val userId = interaction.user.id.toString()
         val username = interaction.user.username
 
-        val (player, floorInfo) = transaction {
-            val p = PlayersTable.fetchPlayer(userId) ?: run {
-                PlayersTable.insertPlayer(userId, 100, 100, 10, 5, 8, 0, 0, 0, 1)
-                PlayersTable.fetchPlayer(userId)!!
-            }
+        val player = PlayerRepository.getOrCreatePlayer(userId)
+        val floorInfo = transaction {
             val row = PlayersTable.selectAll().where { PlayersTable.id eq userId }.single()
-            p to Pair(row[PlayersTable.currentFloor], row[PlayersTable.roomsExplored])
+            Pair(row[PlayersTable.currentFloor], row[PlayersTable.roomsExplored])
         }
 
         val eventRoll = Random.nextInt(100)
@@ -87,12 +85,13 @@ class ExploreCommand : Command {
             val monster = Monster(monsterName, monsterAttr)
 
             val combatLog = mutableListOf<String>()
-            var playerHP = player.attributes.hp
+            val effective = player.effectiveAttributes
+            var playerHP = effective.hp
             var monsterHP = monster.attributes.hp
 
             combatLog.add("⚔️ 遭遇了 $monsterName (HP: $monsterHP)！")
 
-            val entities = if (player.attributes.spd >= monster.attributes.spd) {
+            val entities = if (effective.spd >= monster.attributes.spd) {
                 listOf("Player", "Monster")
             } else {
                 listOf("Monster", "Player")
@@ -102,12 +101,12 @@ class ExploreCommand : Command {
             while (playerHP > 0 && monsterHP > 0 && turn <= 20) {
                 for (entity in entities) {
                     if (entity == "Player") {
-                        val dmg = max(1, player.attributes.atk - monster.attributes.def)
+                        val dmg = max(1, effective.atk - monster.attributes.def)
                         monsterHP -= dmg
                         combatLog.add("回合 $turn: $username 攻擊 $monsterName，造成 $dmg 傷害！($monsterName HP: ${max(0, monsterHP)})")
                         if (monsterHP <= 0) break
                     } else {
-                        val dmg = max(1, monster.attributes.atk - player.attributes.def)
+                        val dmg = max(1, monster.attributes.atk - effective.def)
                         playerHP -= dmg
                         combatLog.add("回合 $turn: $monsterName 攻擊 $username，造成 $dmg 傷害！($username HP: ${max(0, playerHP)})")
                         if (playerHP <= 0) break
@@ -121,7 +120,11 @@ class ExploreCommand : Command {
 
             transaction {
                 PlayersTable.update({ PlayersTable.id eq userId }) {
-                    it[hp] = if (won) playerHP else 0
+                    // Update current HP based on final playerHP
+                    // Note: attributes.hp is the base HP in the DB, we need to handle the bonus.
+                    // If effective.hp = base.hp + bonus, then base.hp = effective.hp - bonus.
+                    val bonusHp = player.armorLevel * RpgConfig.EQUIPMENT_BONUS_PER_LEVEL
+                    it[hp] = if (won) max(0, playerHP - bonusHp) else 0
                 }
             }
 
