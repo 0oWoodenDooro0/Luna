@@ -27,4 +27,8 @@
     - [x] Replace `/auto_advance` and `/next_floor` with a unified `/settings` command.
     - [x] Update `/explore` to increment rooms and handle transition based on `floor_size`.
     - [x] Update `/status` to display room progress.
+- [x] Task: System-wide Configuration (1111669)
+    - [x] Create `RpgConfig` for global constants (FLOOR_SIZE = 5).
+    - [x] Change `auto_advance` default to `true`.
+    - [x] Remove `floor_size` from database.
 - [ ] Task: Conductor - User Manual Verification 'Core Commands and Exploration' (Protocol in workflow.md)
