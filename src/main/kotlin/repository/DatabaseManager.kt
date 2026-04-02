@@ -16,7 +16,7 @@ object DatabaseManager {
         Database.connect("jdbc:sqlite:data/rpg.db", driver = "org.sqlite.JDBC")
 
         transaction {
-            SchemaUtils.create(PlayersTable)
+            SchemaUtils.createMissingTablesAndColumns(PlayersTable)
         }
     }
 }

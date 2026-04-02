@@ -24,7 +24,7 @@ class DatabaseTest {
     @Test
     fun testPlayersTableExists() {
         transaction {
-            SchemaUtils.create(PlayersTable)
+            SchemaUtils.createMissingTablesAndColumns(PlayersTable)
             assertTrue(SchemaUtils.listTables().any { it.equals(PlayersTable.tableName, ignoreCase = true) })
         }
     }
@@ -32,8 +32,9 @@ class DatabaseTest {
     @Test
     fun testInsertAndFetchPlayer() {
         transaction {
-            SchemaUtils.create(PlayersTable)
+            SchemaUtils.createMissingTablesAndColumns(PlayersTable)
             PlayersTable.insertPlayer(
+
                 id = "user123",
                 hp = 100,
                 maxHp = 100,
