@@ -27,7 +27,10 @@ data class RpgAttributes(
 data class Player(
     val id: String,
     val name: String,
-    val attributes: RpgAttributes
+    val attributes: RpgAttributes,
+    val weaponLevel: Int = 0,
+    val shieldLevel: Int = 0,
+    val armorLevel: Int = 0
 )
 
 /**

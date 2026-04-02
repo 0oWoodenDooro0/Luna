@@ -21,6 +21,9 @@ object PlayersTable : Table("players") {
     val currentFloor = integer("current_floor")
     val autoAdvance = bool("auto_advance").default(true)
     val roomsExplored = integer("rooms_explored").default(0)
+    val weaponLevel = integer("weapon_level").default(0)
+    val shieldLevel = integer("shield_level").default(0)
+    val armorLevel = integer("armor_level").default(0)
 
     override val primaryKey = PrimaryKey(id)
 
@@ -36,7 +39,10 @@ object PlayersTable : Table("players") {
         metal: Int,
         floor: Int,
         autoAdvance: Boolean = true,
-        roomsExplored: Int = 0
+        roomsExplored: Int = 0,
+        weaponLevel: Int = 0,
+        shieldLevel: Int = 0,
+        armorLevel: Int = 0
     ) {
         insert {
             it[this.id] = id
@@ -51,6 +57,9 @@ object PlayersTable : Table("players") {
             it[this.currentFloor] = floor
             it[this.autoAdvance] = autoAdvance
             it[this.roomsExplored] = roomsExplored
+            it[this.weaponLevel] = weaponLevel
+            it[this.shieldLevel] = shieldLevel
+            it[this.armorLevel] = armorLevel
         }
     }
 
@@ -71,7 +80,10 @@ object PlayersTable : Table("players") {
         return Player(
             id = this[id],
             name = "Player",
-            attributes = attributes
+            attributes = attributes,
+            weaponLevel = this[weaponLevel],
+            shieldLevel = this[shieldLevel],
+            armorLevel = this[armorLevel]
         )
     }
 }
