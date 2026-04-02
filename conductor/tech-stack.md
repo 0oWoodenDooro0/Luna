@@ -1,7 +1,7 @@
 # Technology Stack: Luna Discord RPG
 
 ## Core Language & Runtime
-- **Kotlin (Java 26):** Modern, expressive language for the JVM, providing strong type safety and coroutines for asynchronous Discord interactions.
+- **Kotlin (JVM 17):** Modern, expressive language for the JVM, providing strong type safety and coroutines for asynchronous Discord interactions.
 - **Gradle (Kotlin DSL):** Build tool for dependency management and project automation.
 
 ## Discord Integration
