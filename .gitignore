@@ -52,7 +52,5 @@ bin/
 .sidecar-base
 .td-root
 
-rpg_data.db
-
 # RPG Database
 data/
