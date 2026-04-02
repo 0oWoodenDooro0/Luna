@@ -32,3 +32,6 @@
     - [x] Change `auto_advance` default to `true`.
     - [x] Remove `floor_size` from database.
 - [x] Task: Conductor - User Manual Verification 'Core Commands and Exploration' (Protocol in workflow.md) (8702d8a)
+
+## Phase: Review Fixes
+- [x] Task: Apply review suggestions (e0cc67e)
