@@ -4,9 +4,9 @@
 - [x] Task: Define RPG Core Data Models (62d3f62)
     - [x] Create `RpgAttributes` data class (HP, ATK, DEF, SPD).
     - [x] Create `Player` and `Monster` classes using `RpgAttributes`.
-- [ ] Task: Set Up SQLite Tables for RPG
-    - [ ] Define `PlayersTable` in Exposed (id, hp, max_hp, atk, def, spd, wood, stone, metal, current_floor).
-    - [ ] Initialize tables in a new `DatabaseManager`.
+- [x] Task: Set Up SQLite Tables for RPG (87dc2af)
+    - [x] Define `PlayersTable` in Exposed (id, hp, max_hp, atk, def, spd, wood, stone, metal, current_floor).
+    - [x] Initialize tables in a new `DatabaseManager`.
 - [ ] Task: Conductor - User Manual Verification 'Data Models and Persistence' (Protocol in workflow.md)
 
 ## Phase 2: Core Commands and Exploration
