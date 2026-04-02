@@ -22,4 +22,9 @@
     - [x] Implement `/auto_advance` toggle command.
     - [x] Implement `/next_floor` manual command.
     - [x] Update `/explore` to honor the `auto_advance` setting.
+- [x] Task: Implement Room-based Progression (496dc46)
+    - [x] Add `rooms_explored` and `floor_size` columns to `PlayersTable`.
+    - [x] Replace `/auto_advance` and `/next_floor` with a unified `/settings` command.
+    - [x] Update `/explore` to increment rooms and handle transition based on `floor_size`.
+    - [x] Update `/status` to display room progress.
 - [ ] Task: Conductor - User Manual Verification 'Core Commands and Exploration' (Protocol in workflow.md)
