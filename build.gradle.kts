@@ -1,9 +1,14 @@
 plugins {
     kotlin("jvm") version "2.3.10"
+    application
 }
 
 group = "website.woodendoor"
 version = "1.0-SNAPSHOT"
+
+application {
+    mainClass.set("website.woodendoor.MainKt")
+}
 
 repositories {
     mavenCentral()
