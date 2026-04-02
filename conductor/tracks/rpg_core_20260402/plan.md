@@ -10,9 +10,9 @@
 - [x] Task: Conductor - User Manual Verification 'Data Models and Persistence' (Protocol in workflow.md) (5c6129e)
 
 ## Phase 2: Core Commands and Exploration
-- [ ] Task: Implement /status Command
-    - [ ] Register `/status` slash command.
-    - [ ] Implement handler to fetch and display player stats via Rich Embed.
+- [x] Task: Implement /status Command (58beda5)
+    - [x] Register `/status` slash command.
+    - [x] Implement handler to fetch and display player stats via Rich Embed.
 - [ ] Task: Implement Basic /explore Command
     - [ ] Register `/explore` slash command.
     - [ ] Implement random event logic: 50% chance of finding resources, 50% chance of encountering a monster.
