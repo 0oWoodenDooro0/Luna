@@ -36,16 +36,10 @@ data class Player(
     val armorLevel: Int = 0
 ) {
     /**
-     * 計算加成後的最終屬性
+     * 計算加成後的最終屬性 (目前直接從資料庫讀取已加成的數值)
      */
     val effectiveAttributes: RpgAttributes
-        get() = RpgAttributes(
-            maxHp = attributes.maxHp + armorLevel * RpgConfig.EQUIPMENT_BONUS_PER_LEVEL,
-            hp = attributes.hp + armorLevel * RpgConfig.EQUIPMENT_BONUS_PER_LEVEL, // 同步增加當前血量
-            atk = attributes.atk + weaponLevel * RpgConfig.EQUIPMENT_BONUS_PER_LEVEL,
-            def = attributes.def + shieldLevel * RpgConfig.EQUIPMENT_BONUS_PER_LEVEL,
-            spd = attributes.spd
-        )
+        get() = attributes
 }
 
 /**

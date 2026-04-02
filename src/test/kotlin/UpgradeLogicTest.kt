@@ -46,6 +46,7 @@ class UpgradeLogicTest {
             assertTrue(result is PlayerRepository.UpgradeResult.Success)
             val updatedPlayer = (result as PlayerRepository.UpgradeResult.Success).player
             assertEquals(1, updatedPlayer.weaponLevel)
+            assertEquals(15, updatedPlayer.attributes.atk) // Base 10 + 5
             
             // Weapon costs (0+1)*10 wood and (0+1)*5 metal
             assertEquals(10, updatedPlayer.wood)

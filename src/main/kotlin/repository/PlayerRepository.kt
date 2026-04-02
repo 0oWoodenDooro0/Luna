@@ -48,7 +48,6 @@ object PlayerRepository {
         val requirements = RpgConfig.UPGRADE_REQUIREMENTS[typeKey] ?: return UpgradeResult.Error
 
         return transaction {
-            SchemaUtils.createMissingTablesAndColumns(PlayersTable)
             val player = PlayersTable.fetchPlayer(userId) ?: return@transaction UpgradeResult.Error
             
             val currentLevel = when (typeKey) {
@@ -85,9 +84,19 @@ object PlayerRepository {
                 }
                 
                 when (typeKey) {
-                    "weapon" -> it[PlayersTable.weaponLevel] = currentLevel + 1
-                    "shield" -> it[PlayersTable.shieldLevel] = currentLevel + 1
-                    "armor" -> it[PlayersTable.armorLevel] = currentLevel + 1
+                    "weapon" -> {
+                        it[PlayersTable.weaponLevel] = currentLevel + 1
+                        it[PlayersTable.atk] = player.attributes.atk + RpgConfig.EQUIPMENT_BONUS_PER_LEVEL
+                    }
+                    "shield" -> {
+                        it[PlayersTable.shieldLevel] = currentLevel + 1
+                        it[PlayersTable.def] = player.attributes.def + RpgConfig.EQUIPMENT_BONUS_PER_LEVEL
+                    }
+                    "armor" -> {
+                        it[PlayersTable.armorLevel] = currentLevel + 1
+                        it[PlayersTable.maxHp] = player.attributes.maxHp + RpgConfig.EQUIPMENT_BONUS_PER_LEVEL
+                        it[PlayersTable.hp] = player.attributes.hp + RpgConfig.EQUIPMENT_BONUS_PER_LEVEL // Heal as well
+                    }
                 }
             }
             

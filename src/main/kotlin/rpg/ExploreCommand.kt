@@ -120,11 +120,7 @@ class ExploreCommand : Command {
 
             transaction {
                 PlayersTable.update({ PlayersTable.id eq userId }) {
-                    // Update current HP based on final playerHP
-                    // Note: attributes.hp is the base HP in the DB, we need to handle the bonus.
-                    // If effective.hp = base.hp + bonus, then base.hp = effective.hp - bonus.
-                    val bonusHp = player.armorLevel * RpgConfig.EQUIPMENT_BONUS_PER_LEVEL
-                    it[hp] = if (won) max(0, playerHP - bonusHp) else 0
+                    it[hp] = if (won) playerHP else 0
                 }
             }
 
