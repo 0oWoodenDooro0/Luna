@@ -51,5 +51,8 @@ bin/
 .sidecar-start.sh
 .sidecar-base
 .td-root
+
 rpg_data.db
-\n# RPG Database\ndata/
+
+# RPG Database
+data/
