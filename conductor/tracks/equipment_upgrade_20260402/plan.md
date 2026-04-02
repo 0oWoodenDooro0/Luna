@@ -14,7 +14,7 @@ This phase focus on extending the data storage and models to support equipment l
 ## Phase 2: Upgrade Logic & Command
 Implementing the core logic for upgrading equipment and the user command.
 
-- [x] Task: Implement Equipment Upgrade Logic 0a75684 (Configurable) 222f7ec (80% Coverage)
+- [x] Task: Implement Equipment Upgrade Logic 4c1d78a (Per-resource quantities)
     - [ ] Write failing tests for material cost calculation (e.g., level * 10).
     - [ ] Implement logic to check material availability and deduct costs.
     - [ ] Implement stat bonus calculation (e.g., +5 per level).
