@@ -13,8 +13,8 @@
 - [x] Task: Implement /status Command (58beda5)
     - [x] Register `/status` slash command.
     - [x] Implement handler to fetch and display player stats via Rich Embed.
-- [ ] Task: Implement Basic /explore Command
-    - [ ] Register `/explore` slash command.
-    - [ ] Implement random event logic: 50% chance of finding resources, 50% chance of encountering a monster.
-    - [ ] Implement simple automated combat logic.
+- [x] Task: Implement Basic /explore Command (ba1c4b7)
+    - [x] Register `/explore` slash command.
+    - [x] Implement random event logic: 50% chance of finding resources, 50% chance of encountering a monster.
+    - [x] Implement simple automated combat logic.
 - [ ] Task: Conductor - User Manual Verification 'Core Commands and Exploration' (Protocol in workflow.md)
