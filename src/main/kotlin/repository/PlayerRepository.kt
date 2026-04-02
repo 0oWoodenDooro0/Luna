@@ -32,10 +32,9 @@ object PlayerRepository {
 
     /**
      * Calculates the cost of an upgrade based on the current level.
-     * Formula: (level + 1) * 10
      */
     fun getUpgradeCost(currentLevel: Int): Int {
-        return (currentLevel + 1) * 10
+        return (currentLevel + 1) * RpgConfig.UPGRADE_BASE_COST
     }
 
     sealed class UpgradeResult {
@@ -45,14 +44,14 @@ object PlayerRepository {
     }
 
     fun upgradeEquipment(userId: String, type: String): UpgradeResult {
+        val typeKey = type.lowercase()
+        val requirements = RpgConfig.UPGRADE_REQUIREMENTS[typeKey] ?: return UpgradeResult.Error
+
         return transaction {
             SchemaUtils.createMissingTablesAndColumns(PlayersTable)
-            val player = PlayersTable.fetchPlayer(userId) ?: run {
-                println("UPGRADE FAILED: Player not found for $userId")
-                return@transaction UpgradeResult.Error
-            }
+            val player = PlayersTable.fetchPlayer(userId) ?: return@transaction UpgradeResult.Error
             
-            val currentLevel = when (type.lowercase()) {
+            val currentLevel = when (typeKey) {
                 "weapon" -> player.weaponLevel
                 "shield" -> player.shieldLevel
                 "armor" -> player.armorLevel
@@ -61,45 +60,34 @@ object PlayerRepository {
 
             val cost = getUpgradeCost(currentLevel)
             
-            val wood = player.wood
-            val stone = player.stone
-            val metal = player.metal
+            // Check resources dynamically based on config
+            for (resourceName in requirements) {
+                val (currentValue, displayName) = when (resourceName) {
+                    "wood" -> player.wood to "木頭"
+                    "stone" -> player.stone to "石頭"
+                    "metal" -> player.metal to "金屬"
+                    else -> 0 to "未知資源"
+                }
+                
+                if (currentValue < cost) {
+                    return@transaction UpgradeResult.InsufficientResources(displayName, cost, currentValue)
+                }
+            }
 
-            // Requirements:
-            // Weapon: Wood + Metal
-            // Shield: Stone + Metal
-            // Armor: Wood + Stone
-            
-            when (type.lowercase()) {
-                "weapon" -> {
-                    if (wood < cost) return@transaction UpgradeResult.InsufficientResources("木頭", cost, wood)
-                    if (metal < cost) return@transaction UpgradeResult.InsufficientResources("金屬", cost, metal)
-                    
-                    PlayersTable.update({ PlayersTable.id eq userId }) {
-                        it[PlayersTable.wood] = wood - cost
-                        it[PlayersTable.metal] = metal - cost
-                        it[PlayersTable.weaponLevel] = currentLevel + 1
+            // Deduct resources and upgrade
+            PlayersTable.update({ PlayersTable.id eq userId }) {
+                for (resourceName in requirements) {
+                    when (resourceName) {
+                        "wood" -> it[PlayersTable.wood] = player.wood - cost
+                        "stone" -> it[PlayersTable.stone] = player.stone - cost
+                        "metal" -> it[PlayersTable.metal] = player.metal - cost
                     }
                 }
-                "shield" -> {
-                    if (stone < cost) return@transaction UpgradeResult.InsufficientResources("石頭", cost, stone)
-                    if (metal < cost) return@transaction UpgradeResult.InsufficientResources("金屬", cost, metal)
-                    
-                    PlayersTable.update({ PlayersTable.id eq userId }) {
-                        it[PlayersTable.stone] = stone - cost
-                        it[PlayersTable.metal] = metal - cost
-                        it[PlayersTable.shieldLevel] = currentLevel + 1
-                    }
-                }
-                "armor" -> {
-                    if (wood < cost) return@transaction UpgradeResult.InsufficientResources("木頭", cost, wood)
-                    if (stone < cost) return@transaction UpgradeResult.InsufficientResources("石頭", cost, stone)
-                    
-                    PlayersTable.update({ PlayersTable.id eq userId }) {
-                        it[PlayersTable.wood] = wood - cost
-                        it[PlayersTable.stone] = stone - cost
-                        it[PlayersTable.armorLevel] = currentLevel + 1
-                    }
+                
+                when (typeKey) {
+                    "weapon" -> it[PlayersTable.weaponLevel] = currentLevel + 1
+                    "shield" -> it[PlayersTable.shieldLevel] = currentLevel + 1
+                    "armor" -> it[PlayersTable.armorLevel] = currentLevel + 1
                 }
             }
             
