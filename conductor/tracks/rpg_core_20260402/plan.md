@@ -1,9 +1,9 @@
 # Implementation Plan: Implement Core RPG Stats and Exploration Mechanics
 
 ## Phase 1: Data Models and Persistence
-- [ ] Task: Define RPG Core Data Models
-    - [ ] Create `RpgAttributes` data class (HP, ATK, DEF, SPD).
-    - [ ] Create `Player` and `Monster` classes using `RpgAttributes`.
+- [x] Task: Define RPG Core Data Models (62d3f62)
+    - [x] Create `RpgAttributes` data class (HP, ATK, DEF, SPD).
+    - [x] Create `Player` and `Monster` classes using `RpgAttributes`.
 - [ ] Task: Set Up SQLite Tables for RPG
     - [ ] Define `PlayersTable` in Exposed (id, hp, max_hp, atk, def, spd, wood, stone, metal, current_floor).
     - [ ] Initialize tables in a new `DatabaseManager`.
