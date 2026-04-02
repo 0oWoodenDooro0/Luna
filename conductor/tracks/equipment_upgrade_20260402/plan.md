@@ -1,6 +1,6 @@
 # Implementation Plan: Material & Equipment System
 
-## Phase 1: Database & Data Models
+## Phase 1: Database ## Phase 1: Database & Data Models Data Models [checkpoint: 54daa26]
 This phase focus on extending the data storage and models to support equipment levels.
 
 - [x] Task: Update `PlayersTable` 8821086 (80% Coverage)
@@ -9,7 +9,7 @@ This phase focus on extending the data storage and models to support equipment l
 - [x] Task: Extend `Player` ee22fe6 and `RpgAttributes` Models (80% Coverage)
     - [ ] Add equipment level fields to the `Player` data class.
     - [ ] Update `RpgAttributes` to include equipment-based bonuses.
-- [ ] Task: Conductor - User Manual Verification 'Database & Data Models' (Protocol in workflow.md)
+- [x] Task: Conductor - User Manual Verification 'Database - [ ] Task: Conductor - User Manual Verification 'Database & Data Models' Data Models' 54daa26 (Protocol in workflow.md)
 
 ## Phase 2: Upgrade Logic & Command
 Implementing the core logic for upgrading equipment and the user command.
