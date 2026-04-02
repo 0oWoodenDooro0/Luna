@@ -17,4 +17,9 @@
     - [x] Register `/explore` slash command.
     - [x] Implement random event logic: 50% chance of finding resources, 50% chance of encountering a monster.
     - [x] Implement simple automated combat logic.
+- [x] Task: Implement Floor Advancement Control (fb8ea56)
+    - [x] Add `auto_advance` column to `PlayersTable`.
+    - [x] Implement `/auto_advance` toggle command.
+    - [x] Implement `/next_floor` manual command.
+    - [x] Update `/explore` to honor the `auto_advance` setting.
 - [ ] Task: Conductor - User Manual Verification 'Core Commands and Exploration' (Protocol in workflow.md)
