@@ -19,6 +19,7 @@ object PlayersTable : Table("players") {
     val stone = integer("stone")
     val metal = integer("metal")
     val currentFloor = integer("current_floor")
+    val autoAdvance = bool("auto_advance").default(false)
 
     override val primaryKey = PrimaryKey(id)
 
@@ -32,7 +33,8 @@ object PlayersTable : Table("players") {
         wood: Int,
         stone: Int,
         metal: Int,
-        floor: Int
+        floor: Int,
+        autoAdvance: Boolean = false
     ) {
         insert {
             it[this.id] = id
@@ -45,6 +47,7 @@ object PlayersTable : Table("players") {
             it[this.stone] = stone
             it[this.metal] = metal
             it[this.currentFloor] = floor
+            it[this.autoAdvance] = autoAdvance
         }
     }
 

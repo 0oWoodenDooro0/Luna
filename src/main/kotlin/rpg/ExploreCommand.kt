@@ -113,14 +113,28 @@ class ExploreCommand : Command {
 
             val won = monsterHP <= 0
             if (won) {
-                combatLog.add("🏆 勝利！你擊敗了 $monsterName，前往下一層！")
-                transaction {
-                    PlayersTable.update({ PlayersTable.id eq userId }) {
-                        it[hp] = playerHP
-                        it[currentFloor] = floor + 1
+                val autoAdvance = transaction {
+                    PlayersTable.selectAll().where { PlayersTable.id eq userId }.single()[PlayersTable.autoAdvance]
+                }
+
+                if (autoAdvance) {
+                    combatLog.add("🏆 勝利！你擊敗了 $monsterName，前往下一層！")
+                    transaction {
+                        PlayersTable.update({ PlayersTable.id eq userId }) {
+                            it[hp] = playerHP
+                            it[currentFloor] = floor + 1
+                        }
+                    }
+                } else {
+                    combatLog.add("🏆 勝利！你擊敗了 $monsterName。你可以手動使用 /next_floor 前往下一層。")
+                    transaction {
+                        PlayersTable.update({ PlayersTable.id eq userId }) {
+                            it[hp] = playerHP
+                        }
                     }
                 }
             } else {
+
                 combatLog.add("💀 戰敗... $monsterName 擊敗了你。")
                 transaction {
                     PlayersTable.update({ PlayersTable.id eq userId }) {

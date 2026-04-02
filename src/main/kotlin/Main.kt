@@ -9,14 +9,23 @@ import dev.kord.core.on
 import website.woodendoor.command.RevealCommand
 import website.woodendoor.command.UndercoverCommand
 import website.woodendoor.repository.DatabaseManager
+import website.woodendoor.rpg.AutoAdvanceCommand
 import website.woodendoor.rpg.ExploreCommand
+import website.woodendoor.rpg.NextFloorCommand
 import website.woodendoor.rpg.StatusCommand
 
 suspend fun main() {
     DatabaseManager.init()
     val kord = Kord(System.getenv("DISCORD_TOKEN") ?: error("Missing discord token"))
 
-    val commands = listOf(UndercoverCommand(), RevealCommand(), StatusCommand(), ExploreCommand())
+    val commands = listOf(
+        UndercoverCommand(),
+        RevealCommand(),
+        StatusCommand(),
+        ExploreCommand(),
+        AutoAdvanceCommand(),
+        NextFloorCommand()
+    )
     commands.forEach { it.register(kord) }
 
     kord.on<ChatInputCommandInteractionCreateEvent> {
