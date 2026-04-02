@@ -26,10 +26,8 @@ Implementing the core logic for upgrading equipment and the user command.
 ## Phase 3: Integration & UI Updates
 Finalizing the player experience and ensuring stats are correctly applied.
 
-- [ ] Task: Update `/status` Command (80% Coverage)
-    - [ ] Write failing tests for displaying equipment stats in the status embed.
-    - [ ] Modify the status embed to show equipment levels and their total bonus.
-- [ ] Task: Integrate Equipment Bonuses into Exploration (80% Coverage)
+- [x] Task: Update `/status` Command (Completed in Phase 2)
+- [x] Task: Integrate Equipment Bonuses into Exploration 87f6fdd (80% Coverage)
     - [ ] Update `/explore` to ensure combat calculations use the enhanced `RpgAttributes`.
     - [ ] Verify that equipment bonuses are correctly applied in monster encounters.
 - [ ] Task: Conductor - User Manual Verification 'Integration & UI Updates' (Protocol in workflow.md)
