@@ -31,10 +31,10 @@ object PlayerRepository {
     }
 
     /**
-     * Calculates the cost of an upgrade based on the current level.
+     * Calculates the cost of a specific resource for an upgrade.
      */
-    fun getUpgradeCost(currentLevel: Int): Int {
-        return (currentLevel + 1) * RpgConfig.UPGRADE_BASE_COST
+    fun getResourceCost(currentLevel: Int, baseAmount: Int): Int {
+        return (currentLevel + 1) * baseAmount
     }
 
     sealed class UpgradeResult {
@@ -58,10 +58,9 @@ object PlayerRepository {
                 else -> return@transaction UpgradeResult.Error
             }
 
-            val cost = getUpgradeCost(currentLevel)
-            
             // Check resources dynamically based on config
-            for (resourceName in requirements) {
+            for ((resourceName, baseAmount) in requirements) {
+                val cost = getResourceCost(currentLevel, baseAmount)
                 val (currentValue, displayName) = when (resourceName) {
                     "wood" -> player.wood to "木頭"
                     "stone" -> player.stone to "石頭"
@@ -76,7 +75,8 @@ object PlayerRepository {
 
             // Deduct resources and upgrade
             PlayersTable.update({ PlayersTable.id eq userId }) {
-                for (resourceName in requirements) {
+                for ((resourceName, baseAmount) in requirements) {
+                    val cost = getResourceCost(currentLevel, baseAmount)
                     when (resourceName) {
                         "wood" -> it[PlayersTable.wood] = player.wood - cost
                         "stone" -> it[PlayersTable.stone] = player.stone - cost

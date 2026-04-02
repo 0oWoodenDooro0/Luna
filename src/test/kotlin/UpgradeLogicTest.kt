@@ -14,14 +14,22 @@ class UpgradeLogicTest {
 
     @BeforeEach
     fun setup() {
-        DatabaseManager.init("jdbc:sqlite:file:testdb?mode=memory&cache=shared")
+        // Shared in-memory DB
+        Database.connect("jdbc:sqlite:file:testdb?mode=memory&cache=shared", driver = "org.sqlite.JDBC")
+        transaction {
+            SchemaUtils.create(PlayersTable)
+        }
     }
 
     @Test
-    fun testUpgradeCostCalculation() {
-        assertEquals(10, PlayerRepository.getUpgradeCost(0))
-        assertEquals(20, PlayerRepository.getUpgradeCost(1))
-        assertEquals(30, PlayerRepository.getUpgradeCost(2))
+    fun testResourceCostCalculation() {
+        // Base amount 10
+        assertEquals(10, PlayerRepository.getResourceCost(0, 10))
+        assertEquals(20, PlayerRepository.getResourceCost(1, 10))
+        
+        // Base amount 5
+        assertEquals(5, PlayerRepository.getResourceCost(0, 5))
+        assertEquals(10, PlayerRepository.getResourceCost(1, 5))
     }
 
     @Test
@@ -38,8 +46,10 @@ class UpgradeLogicTest {
             assertTrue(result is PlayerRepository.UpgradeResult.Success)
             val updatedPlayer = (result as PlayerRepository.UpgradeResult.Success).player
             assertEquals(1, updatedPlayer.weaponLevel)
+            
+            // Weapon costs (0+1)*10 wood and (0+1)*5 metal
             assertEquals(10, updatedPlayer.wood)
-            assertEquals(10, updatedPlayer.metal)
+            assertEquals(15, updatedPlayer.metal)
         }
     }
 
@@ -56,6 +66,7 @@ class UpgradeLogicTest {
             val result = PlayerRepository.upgradeEquipment(userId, "weapon")
             assertTrue(result is PlayerRepository.UpgradeResult.InsufficientResources)
             assertEquals("木頭", (result as PlayerRepository.UpgradeResult.InsufficientResources).missingResource)
+            assertEquals(10, (result as PlayerRepository.UpgradeResult.InsufficientResources).required)
         }
     }
 }
