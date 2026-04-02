@@ -52,10 +52,9 @@ class StatusCommand : Command {
 
         val extraInfo = transaction {
             val row = PlayersTable.selectAll().where { PlayersTable.id eq userId }.single()
-            Triple(
+            Pair(
                 row[PlayersTable.currentFloor],
-                row[PlayersTable.roomsExplored],
-                row[PlayersTable.floorSize]
+                row[PlayersTable.roomsExplored]
             )
         }
 
@@ -86,7 +85,7 @@ class StatusCommand : Command {
                     name = "目前進度"
                     value = """
                         層數：第 ${extraInfo.first} 層
-                        房間：${extraInfo.second} / ${extraInfo.third}
+                        房間：${extraInfo.second} / ${RpgConfig.FLOOR_SIZE}
                     """.trimIndent()
                     inline = true
                 }
