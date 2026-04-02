@@ -31,3 +31,7 @@ Finalizing the player experience and ensuring stats are correctly applied.
     - [ ] Update `/explore` to ensure combat calculations use the enhanced `RpgAttributes`.
     - [ ] Verify that equipment bonuses are correctly applied in monster encounters.
 - [x] Task: Conductor - User Manual Verification 'Integration & UI Updates' (Protocol in workflow.md)
+
+## Phase: Review Fixes
+- [x] Task: Apply review suggestions (HP & Attribute Logic Update) 03b2285
+
