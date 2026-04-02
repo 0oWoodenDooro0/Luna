@@ -8,7 +8,6 @@ import org.jetbrains.exposed.v1.core.eq
 import org.jetbrains.exposed.v1.jdbc.selectAll
 import org.jetbrains.exposed.v1.jdbc.transactions.transaction
 import website.woodendoor.Command
-
 import website.woodendoor.repository.PlayersTable
 
 class StatusCommand : Command {
@@ -51,6 +50,15 @@ class StatusCommand : Command {
             return
         }
 
+        val extraInfo = transaction {
+            val row = PlayersTable.selectAll().where { PlayersTable.id eq userId }.single()
+            Triple(
+                row[PlayersTable.currentFloor],
+                row[PlayersTable.roomsExplored],
+                row[PlayersTable.floorSize]
+            )
+        }
+
         val resources = transaction {
             val row = PlayersTable.selectAll().where { PlayersTable.id eq userId }.single()
             mapOf(
@@ -58,10 +66,6 @@ class StatusCommand : Command {
                 "🪨 石頭" to row[PlayersTable.stone],
                 "🔗 金屬" to row[PlayersTable.metal]
             )
-        }
-        
-        val floor = transaction {
-            PlayersTable.selectAll().where { PlayersTable.id eq userId }.single()[PlayersTable.currentFloor]
         }
 
         val response = interaction.deferPublicResponse()
@@ -79,8 +83,11 @@ class StatusCommand : Command {
                     inline = true
                 }
                 field {
-                    name = "目前層數"
-                    value = "第 $floor 層"
+                    name = "目前進度"
+                    value = """
+                        層數：第 ${extraInfo.first} 層
+                        房間：${extraInfo.second} / ${extraInfo.third}
+                    """.trimIndent()
                     inline = true
                 }
                 field {

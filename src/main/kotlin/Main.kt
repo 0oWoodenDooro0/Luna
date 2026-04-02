@@ -9,9 +9,8 @@ import dev.kord.core.on
 import website.woodendoor.command.RevealCommand
 import website.woodendoor.command.UndercoverCommand
 import website.woodendoor.repository.DatabaseManager
-import website.woodendoor.rpg.AutoAdvanceCommand
 import website.woodendoor.rpg.ExploreCommand
-import website.woodendoor.rpg.NextFloorCommand
+import website.woodendoor.rpg.SettingsCommand
 import website.woodendoor.rpg.StatusCommand
 
 suspend fun main() {
@@ -23,8 +22,7 @@ suspend fun main() {
         RevealCommand(),
         StatusCommand(),
         ExploreCommand(),
-        AutoAdvanceCommand(),
-        NextFloorCommand()
+        SettingsCommand()
     )
     commands.forEach { it.register(kord) }
 

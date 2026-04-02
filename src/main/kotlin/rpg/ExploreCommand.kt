@@ -25,11 +25,13 @@ class ExploreCommand : Command {
         val userId = interaction.user.id.toString()
         val username = interaction.user.username
 
-        val player = transaction {
-            PlayersTable.fetchPlayer(userId) ?: run {
+        val (player, floorInfo) = transaction {
+            val p = PlayersTable.fetchPlayer(userId) ?: run {
                 PlayersTable.insertPlayer(userId, 100, 100, 10, 5, 8, 0, 0, 0, 1)
                 PlayersTable.fetchPlayer(userId)!!
             }
+            val row = PlayersTable.selectAll().where { PlayersTable.id eq userId }.single()
+            p to Triple(row[PlayersTable.currentFloor], row[PlayersTable.roomsExplored], row[PlayersTable.floorSize])
         }
 
         val eventRoll = Random.nextInt(100)
@@ -39,6 +41,8 @@ class ExploreCommand : Command {
             val resources = listOf("🪵 木頭", "🪨 石頭", "🔗 金屬")
             val foundResource = resources.random()
             val amount = Random.nextInt(1, 6)
+
+            val (newRoomCount, floorMsg) = updateProgression(userId, floorInfo)
 
             transaction {
                 val current = PlayersTable.selectAll().where { PlayersTable.id eq userId }.single()
@@ -61,16 +65,19 @@ class ExploreCommand : Command {
             response.respond {
                 embed {
                     title = "探索結果：發現資源！"
-                    description = "$username 在探索中發現了 $foundResource x $amount！"
-                    color = dev.kord.common.Color(0x00FF00) // Green
+                    description = """
+                        $username 在第 ${floorInfo.first} 層探索中發現了 $foundResource x $amount！
+                        
+                        進度：$newRoomCount / ${floorInfo.third} 房間
+                        $floorMsg
+                    """.trimIndent()
+                    color = dev.kord.common.Color(0x00FF00)
                 }
             }
         } else {
             val response = interaction.deferPublicResponse()
             val monsterName = listOf("史萊姆", "哥布林", "小蝙蝠").random()
-            val floor = transaction {
-                PlayersTable.selectAll().where { PlayersTable.id eq userId }.single()[PlayersTable.currentFloor]
-            }
+            val floor = floorInfo.first
             
             val monsterAttr = RpgAttributes(
                 hp = 20 + (floor * 5),
@@ -112,44 +119,62 @@ class ExploreCommand : Command {
             }
 
             val won = monsterHP <= 0
-            if (won) {
-                val autoAdvance = transaction {
-                    PlayersTable.selectAll().where { PlayersTable.id eq userId }.single()[PlayersTable.autoAdvance]
-                }
+            val (newRoomCount, floorMsg) = updateProgression(userId, floorInfo)
 
-                if (autoAdvance) {
-                    combatLog.add("🏆 勝利！你擊敗了 $monsterName，前往下一層！")
-                    transaction {
-                        PlayersTable.update({ PlayersTable.id eq userId }) {
-                            it[hp] = playerHP
-                            it[currentFloor] = floor + 1
-                        }
-                    }
-                } else {
-                    combatLog.add("🏆 勝利！你擊敗了 $monsterName。你可以手動使用 /next_floor 前往下一層。")
-                    transaction {
-                        PlayersTable.update({ PlayersTable.id eq userId }) {
-                            it[hp] = playerHP
-                        }
-                    }
-                }
-            } else {
-
-                combatLog.add("💀 戰敗... $monsterName 擊敗了你。")
-                transaction {
-                    PlayersTable.update({ PlayersTable.id eq userId }) {
-                        it[hp] = 0 // Player died
-                    }
+            transaction {
+                PlayersTable.update({ PlayersTable.id eq userId }) {
+                    it[hp] = if (won) playerHP else 0
                 }
             }
 
             response.respond {
                 embed {
                     title = if (won) "探索結果：戰鬥勝利！" else "探索結果：戰鬥失敗"
-                    description = combatLog.joinToString("\n")
+                    description = """
+                        ${combatLog.joinToString("\n")}
+                        
+                        進度：$newRoomCount / ${floorInfo.third} 房間
+                        $floorMsg
+                    """.trimIndent()
                     color = if (won) dev.kord.common.Color(0x00FF00) else dev.kord.common.Color(0xFF0000)
                 }
             }
         }
+    }
+
+    private fun updateProgression(userId: String, floorInfo: Triple<Int, Int, Int>): Pair<Int, String> {
+        val currentFloor = floorInfo.first
+        val roomsExplored = floorInfo.second
+        val floorSize = floorInfo.third
+
+        val nextRoomCount = roomsExplored + 1
+        var message = ""
+        var finalRoomCount = nextRoomCount
+
+        transaction {
+            val autoAdvance = PlayersTable.selectAll().where { PlayersTable.id eq userId }.single()[PlayersTable.autoAdvance]
+            
+            if (nextRoomCount >= floorSize) {
+                if (autoAdvance) {
+                    PlayersTable.update({ PlayersTable.id eq userId }) {
+                        it[PlayersTable.currentFloor] = currentFloor + 1
+                        it[this.roomsExplored] = 0
+                    }
+                    message = "✨ 此層已探索完成！自動前往第 ${currentFloor + 1} 層。"
+                    finalRoomCount = 0
+                } else {
+                    PlayersTable.update({ PlayersTable.id eq userId }) {
+                        it[this.roomsExplored] = 0
+                    }
+                    message = "📍 此層已探索完成！保留在第 $currentFloor 層農資源。"
+                    finalRoomCount = 0
+                }
+            } else {
+                PlayersTable.update({ PlayersTable.id eq userId }) {
+                    it[this.roomsExplored] = nextRoomCount
+                }
+            }
+        }
+        return finalRoomCount to message
     }
 }
