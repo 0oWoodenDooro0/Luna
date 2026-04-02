@@ -18,7 +18,7 @@ Implementing the core logic for upgrading equipment and the user command.
     - [ ] Write failing tests for material cost calculation (e.g., level * 10).
     - [ ] Implement logic to check material availability and deduct costs.
     - [ ] Implement stat bonus calculation (e.g., +5 per level).
-- [ ] Task: Create `/upgrade` Slash Command (80% Coverage)
+- [x] Task: Create `/upgrade` ea3754b Slash Command (80% Coverage)
     - [ ] Register `/upgrade <type>` with autocompletion/choices (weapon, shield, armor).
     - [ ] Implement command handler to trigger upgrades and provide feedback.
 - [ ] Task: Conductor - User Manual Verification 'Upgrade Logic & Command' (Protocol in workflow.md)
