@@ -31,7 +31,19 @@ data class Player(
     val weaponLevel: Int = 0,
     val shieldLevel: Int = 0,
     val armorLevel: Int = 0
-)
+) {
+    /**
+     * 計算加成後的最終屬性
+     */
+    val effectiveAttributes: RpgAttributes
+        get() = RpgAttributes(
+            maxHp = attributes.maxHp + armorLevel * RpgConfig.EQUIPMENT_BONUS_PER_LEVEL,
+            hp = attributes.hp + armorLevel * RpgConfig.EQUIPMENT_BONUS_PER_LEVEL, // 同步增加當前血量
+            atk = attributes.atk + weaponLevel * RpgConfig.EQUIPMENT_BONUS_PER_LEVEL,
+            def = attributes.def + shieldLevel * RpgConfig.EQUIPMENT_BONUS_PER_LEVEL,
+            spd = attributes.spd
+        )
+}
 
 /**
  * Represents a monster in the RPG.
