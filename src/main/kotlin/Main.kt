@@ -12,6 +12,7 @@ import website.woodendoor.repository.DatabaseManager
 import website.woodendoor.rpg.ExploreCommand
 import website.woodendoor.rpg.SettingsCommand
 import website.woodendoor.rpg.StatusCommand
+import website.woodendoor.rpg.UpgradeCommand
 
 suspend fun main() {
     DatabaseManager.init()
