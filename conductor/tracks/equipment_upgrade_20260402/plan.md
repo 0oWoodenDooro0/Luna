@@ -3,7 +3,7 @@
 ## Phase 1: Database & Data Models
 This phase focus on extending the data storage and models to support equipment levels.
 
-- [ ] Task: Update `PlayersTable` (80% Coverage)
+- [x] Task: Update `PlayersTable` 8821086 (80% Coverage)
     - [ ] Add `weapon_level`, `shield_level`, and `armor_level` columns (default 0).
     - [ ] Update `insertPlayer` and `toPlayer` mapping.
 - [ ] Task: Extend `Player` and `RpgAttributes` Models (80% Coverage)
