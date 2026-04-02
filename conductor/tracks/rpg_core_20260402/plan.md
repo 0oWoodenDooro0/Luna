@@ -9,7 +9,7 @@
     - [x] Initialize tables in a new `DatabaseManager`.
 - [x] Task: Conductor - User Manual Verification 'Data Models and Persistence' (Protocol in workflow.md) (5c6129e)
 
-## Phase 2: Core Commands and Exploration
+## Phase 2: Core Commands and Exploration [checkpoint: 8702d8a]
 - [x] Task: Implement /status Command (58beda5)
     - [x] Register `/status` slash command.
     - [x] Implement handler to fetch and display player stats via Rich Embed.
@@ -31,4 +31,4 @@
     - [x] Create `RpgConfig` for global constants (FLOOR_SIZE = 5).
     - [x] Change `auto_advance` default to `true`.
     - [x] Remove `floor_size` from database.
-- [ ] Task: Conductor - User Manual Verification 'Core Commands and Exploration' (Protocol in workflow.md)
+- [x] Task: Conductor - User Manual Verification 'Core Commands and Exploration' (Protocol in workflow.md) (8702d8a)
