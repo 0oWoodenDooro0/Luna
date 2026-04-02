@@ -1,0 +1,20 @@
+# Implementation Plan: Implement Core RPG Stats and Exploration Mechanics
+
+## Phase 1: Data Models and Persistence
+- [ ] Task: Define RPG Core Data Models
+    - [ ] Create `RpgAttributes` data class (HP, ATK, DEF, SPD).
+    - [ ] Create `Player` and `Monster` classes using `RpgAttributes`.
+- [ ] Task: Set Up SQLite Tables for RPG
+    - [ ] Define `PlayersTable` in Exposed (id, hp, max_hp, atk, def, spd, wood, stone, metal, current_floor).
+    - [ ] Initialize tables in a new `DatabaseManager`.
+- [ ] Task: Conductor - User Manual Verification 'Data Models and Persistence' (Protocol in workflow.md)
+
+## Phase 2: Core Commands and Exploration
+- [ ] Task: Implement /status Command
+    - [ ] Register `/status` slash command.
+    - [ ] Implement handler to fetch and display player stats via Rich Embed.
+- [ ] Task: Implement Basic /explore Command
+    - [ ] Register `/explore` slash command.
+    - [ ] Implement random event logic: 50% chance of finding resources, 50% chance of encountering a monster.
+    - [ ] Implement simple automated combat logic.
+- [ ] Task: Conductor - User Manual Verification 'Core Commands and Exploration' (Protocol in workflow.md)
