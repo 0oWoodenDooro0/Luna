@@ -22,7 +22,8 @@ suspend fun main() {
         RevealCommand(),
         StatusCommand(),
         ExploreCommand(),
-        SettingsCommand()
+        SettingsCommand(),
+        UpgradeCommand()
     )
     commands.forEach { it.register(kord) }
 
