@@ -6,16 +6,13 @@ import dev.kord.core.behavior.interaction.response.respond
 import dev.kord.core.event.interaction.ChatInputCommandInteractionCreateEvent
 import dev.kord.core.event.interaction.SelectMenuInteractionCreateEvent
 import dev.kord.core.on
-import website.woodendoor.command.HuntCommand
-import website.woodendoor.command.InitCommand
 import website.woodendoor.command.RevealCommand
 import website.woodendoor.command.UndercoverCommand
 
 suspend fun main() {
-    initDatabase()
     val kord = Kord(System.getenv("DISCORD_TOKEN") ?: error("Missing discord token"))
 
-    val commands = listOf(InitCommand(), HuntCommand(), UndercoverCommand(), RevealCommand())
+    val commands = listOf(UndercoverCommand(), RevealCommand())
     commands.forEach { it.register(kord) }
 
     kord.on<ChatInputCommandInteractionCreateEvent> {
