@@ -28,6 +28,9 @@ data class Player(
     val id: String,
     val name: String,
     val attributes: RpgAttributes,
+    val wood: Int = 0,
+    val stone: Int = 0,
+    val metal: Int = 0,
     val weaponLevel: Int = 0,
     val shieldLevel: Int = 0,
     val armorLevel: Int = 0

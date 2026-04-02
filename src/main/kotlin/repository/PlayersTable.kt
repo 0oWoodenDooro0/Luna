@@ -81,6 +81,9 @@ object PlayersTable : Table("players") {
             id = this[id],
             name = "Player",
             attributes = attributes,
+            wood = this[wood],
+            stone = this[stone],
+            metal = this[metal],
             weaponLevel = this[weaponLevel],
             shieldLevel = this[shieldLevel],
             armorLevel = this[armorLevel]
