@@ -6,7 +6,7 @@ This phase focus on extending the data storage and models to support equipment l
 - [x] Task: Update `PlayersTable` 8821086 (80% Coverage)
     - [ ] Add `weapon_level`, `shield_level`, and `armor_level` columns (default 0).
     - [ ] Update `insertPlayer` and `toPlayer` mapping.
-- [ ] Task: Extend `Player` and `RpgAttributes` Models (80% Coverage)
+- [x] Task: Extend `Player` ee22fe6 and `RpgAttributes` Models (80% Coverage)
     - [ ] Add equipment level fields to the `Player` data class.
     - [ ] Update `RpgAttributes` to include equipment-based bonuses.
 - [ ] Task: Conductor - User Manual Verification 'Database & Data Models' (Protocol in workflow.md)
