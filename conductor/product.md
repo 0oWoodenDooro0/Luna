@@ -16,6 +16,7 @@ A simple, solo-focused Discord Text RPG where players explore endless dungeons, 
 - **Endless Dungeon Exploration:** A continuous exploration mode where players encounter monsters and find resources.
 - **Automated Turn-Based Combat:** Tactical but fast-paced combat based on HP, ATK, DEF, and SPD stats.
 - **Material & Equipment System:** Collecting Wood, Stone, and Metal to upgrade weapons and armor for permanent stat boosts.
+- **Recovery System:** After falling in combat, players enter a cooldown based on their Max HP. A new upgrade reduces this cooldown. Once the cooldown ends, HP is automatically restored.
 - **Rebirth (Prestige) System:** Resetting level and equipment for permanent powerful buffs (increased resource gain, base stats, etc.).
 
 ## Player Interaction
