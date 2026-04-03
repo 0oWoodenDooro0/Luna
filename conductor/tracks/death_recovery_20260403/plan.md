@@ -6,13 +6,13 @@
 - [x] Task: Update `PlayerData` model in `RpgModels.kt` to include the new fields. 212053e
 - [x] Task: Conductor - User Manual Verification 'Configuration & Database Persistence' (Protocol in workflow.md) d7af543
 
-## Phase 2: Core Recovery Logic
+## Phase 2: Core Recovery Logic [checkpoint: 97e126a]
 - [x] Task: Implement `calculateRecoveryCooldown(maxHp, recoveryLevel)` function in `RpgConfig.kt` or a service class. 710cf0f
 - [x] Task: Create `isRecovering(player)` and `restoreHpIfRecovered(player)` functions in `PlayerRepository`. ebb4a92
 - [x] Task: Update `ExploreCommand` to trigger the recovery cooldown when a player dies in combat (0 HP). 78595ec
 - [x] Task: Update `ExploreCommand` to check `isRecovering` and prevent exploration with a timer message. 78595ec
 - [x] Task: Update `StatusCommand` and `ExploreCommand` to call `restoreHpIfRecovered` before processing. 78595ec
-- [ ] Task: Conductor - User Manual Verification 'Core Recovery Logic' (Protocol in workflow.md)
+- [x] Task: Conductor - User Manual Verification 'Core Recovery Logic' (Protocol in workflow.md) 97e126a
 
 ## Phase 3: Recovery Speed Upgrade
 - [ ] Task: Add "Recovery Speed" (康復速度) to the `UpgradeCommand` list.
