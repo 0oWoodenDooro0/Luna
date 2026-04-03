@@ -3,7 +3,7 @@
 ## Phase 1: Configuration & Database Persistence
 - [x] Task: Add configurable parameters for recovery in `RpgConfig.kt`. 529fd3f
 - [x] Task: Update `PlayersTable` schema to include `recovery_start_at` (Long) and `recovery_level` (Int). dc66eee
-- [ ] Task: Update `PlayerData` model in `RpgModels.kt` to include the new fields.
+- [x] Task: Update `PlayerData` model in `RpgModels.kt` to include the new fields. 212053e
 - [ ] Task: Conductor - User Manual Verification 'Configuration & Database Persistence' (Protocol in workflow.md)
 
 ## Phase 2: Core Recovery Logic
