@@ -21,6 +21,15 @@ object RpgConfig {
      */
     const val RECOVERY_MIN_SECONDS = 5.0
 
+    /**
+     * 計算康復所需時間 (秒)
+     */
+    fun calculateRecoveryCooldown(maxHp: Int, recoveryLevel: Int): Long {
+        val base = maxHp * RECOVERY_BASE_SECONDS_PER_HP
+        val reduction = recoveryLevel * RECOVERY_UPGRADE_REDUCTION_SECONDS
+        return Math.max(RECOVERY_MIN_SECONDS, base - reduction).toLong()
+    }
+
 /**
  * 裝備每級增加的屬性值
  */

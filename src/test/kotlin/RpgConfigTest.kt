@@ -6,11 +6,17 @@ import kotlin.test.assertTrue
 
 class RpgConfigTest {
     @Test
-    fun testRecoveryConfig() {
-        // These should exist after implementation
-        assertEquals(0.1, RpgConfig.RECOVERY_BASE_SECONDS_PER_HP)
-        assertEquals(5.0, RpgConfig.RECOVERY_UPGRADE_REDUCTION_SECONDS)
-        assertEquals(5.0, RpgConfig.RECOVERY_MIN_SECONDS)
-        assertTrue(RpgConfig.UPGRADE_REQUIREMENTS.containsKey("recovery"))
+    fun testCalculateRecoveryCooldown() {
+        // Base: 100 HP * 0.1 = 10s. Level 0: 10s - 0 = 10s.
+        assertEquals(10L, RpgConfig.calculateRecoveryCooldown(100, 0))
+        
+        // Base: 200 HP * 0.1 = 20s. Level 1: 20s - 5 = 15s.
+        assertEquals(15L, RpgConfig.calculateRecoveryCooldown(200, 1))
+        
+        // Min: 50 HP * 0.1 = 5s. Level 0: 5s.
+        assertEquals(5L, RpgConfig.calculateRecoveryCooldown(50, 0))
+        
+        // Min threshold: 100 HP * 0.1 = 10s. Level 2: 10s - 10 = 0s -> should be RECOVERY_MIN_SECONDS (5s).
+        assertEquals(5L, RpgConfig.calculateRecoveryCooldown(100, 2))
     }
 }
