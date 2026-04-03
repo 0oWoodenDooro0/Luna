@@ -7,7 +7,7 @@
 - [x] Task: Conductor - User Manual Verification 'Configuration & Database Persistence' (Protocol in workflow.md) d7af543
 
 ## Phase 2: Core Recovery Logic
-- [ ] Task: Implement `calculateRecoveryCooldown(maxHp, recoveryLevel)` function in `RpgConfig.kt` or a service class.
+- [x] Task: Implement `calculateRecoveryCooldown(maxHp, recoveryLevel)` function in `RpgConfig.kt` or a service class. 710cf0f
 - [ ] Task: Create `isRecovering(player)` and `restoreHpIfRecovered(player)` functions in `PlayerRepository`.
 - [ ] Task: Update `ExploreCommand` to trigger the recovery cooldown when a player dies in combat (0 HP).
 - [ ] Task: Update `ExploreCommand` to check `isRecovering` and prevent exploration with a timer message.
