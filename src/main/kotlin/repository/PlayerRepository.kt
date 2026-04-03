@@ -31,6 +31,40 @@ object PlayerRepository {
     }
 
     /**
+     * 計算剩餘康復時間 (秒)
+     */
+    fun getRemainingRecoveryTime(player: Player): Long {
+        if (player.attributes.hp > 0) return 0L
+        val cooldown = RpgConfig.calculateRecoveryCooldown(player.attributes.maxHp, player.recoveryLevel)
+        val elapsed = (System.currentTimeMillis() - player.recoveryStartAt) / 1000
+        return Math.max(0L, cooldown - elapsed)
+    }
+
+    /**
+     * 是否正在康復中
+     */
+    fun isRecovering(player: Player): Boolean {
+        return getRemainingRecoveryTime(player) > 0L
+    }
+
+    /**
+     * 如果康復時間已到且血量為 0，則恢復滿血
+     */
+    fun restoreHpIfRecovered(userId: String): Player? {
+        return transaction {
+            val player = PlayersTable.fetchPlayer(userId) ?: return@transaction null
+            if (player.attributes.hp == 0 && getRemainingRecoveryTime(player) == 0L) {
+                PlayersTable.update({ PlayersTable.id eq userId }) {
+                    it[hp] = player.attributes.maxHp
+                }
+                PlayersTable.fetchPlayer(userId)!!
+            } else {
+                player
+            }
+        }
+    }
+
+    /**
      * Calculates the cost of a specific resource for an upgrade.
      */
     fun getResourceCost(currentLevel: Int, baseAmount: Int): Int {
