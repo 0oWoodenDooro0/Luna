@@ -1,0 +1,29 @@
+# Plan: Death Cooldown & Automatic Recovery
+
+## Phase 1: Configuration & Database Persistence
+- [ ] Task: Add configurable parameters for recovery in `RpgConfig.kt`.
+- [ ] Task: Update `PlayersTable` schema to include `recovery_start_at` (Long) and `recovery_level` (Int).
+- [ ] Task: Update `PlayerData` model in `RpgModels.kt` to include the new fields.
+- [ ] Task: Conductor - User Manual Verification 'Configuration & Database Persistence' (Protocol in workflow.md)
+
+## Phase 2: Core Recovery Logic
+- [ ] Task: Implement `calculateRecoveryCooldown(maxHp, recoveryLevel)` function in `RpgConfig.kt` or a service class.
+- [ ] Task: Create `isRecovering(player)` and `restoreHpIfRecovered(player)` functions in `PlayerRepository`.
+- [ ] Task: Update `ExploreCommand` to trigger the recovery cooldown when a player dies in combat (0 HP).
+- [ ] Task: Update `ExploreCommand` to check `isRecovering` and prevent exploration with a timer message.
+- [ ] Task: Update `StatusCommand` and `ExploreCommand` to call `restoreHpIfRecovered` before processing.
+- [ ] Task: Conductor - User Manual Verification 'Core Recovery Logic' (Protocol in workflow.md)
+
+## Phase 3: Recovery Speed Upgrade
+- [ ] Task: Add "Recovery Speed" (康復速度) to the `UpgradeCommand` list.
+- [ ] Task: Implement the upgrade logic for "Recovery Speed" in `PlayerRepository`.
+- [ ] Task: Verify the upgrade reduces the cooldown correctly in subsequent combats.
+- [ ] Task: Conductor - User Manual Verification 'Recovery Speed Upgrade' (Protocol in workflow.md)
+
+## Phase 4: Final Integration & Polish
+- [ ] Task: Run full regression tests to ensure no breakage in `ExploreCommand` or `UpgradeCommand`.
+- [ ] Task: Final code style review and documentation updates.
+- [ ] Task: Conductor - User Manual Verification 'Final Integration & Polish' (Protocol in workflow.md)
+
+---
+*Note: Each task will follow the TDD workflow (Red -> Green -> Refactor).*

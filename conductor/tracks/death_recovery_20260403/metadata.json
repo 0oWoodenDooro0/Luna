@@ -1,0 +1,8 @@
+{
+  "track_id": "death_recovery_20260403",
+  "type": "feature",
+  "status": "new",
+  "created_at": "2026-04-03T10:00:00Z",
+  "updated_at": "2026-04-03T10:00:00Z",
+  "description": "幫我規劃死亡後會根據血量來進入冷卻時間 在冷卻時間內無法使用explore 指令 冷卻時間根據血量越多時間越久 冷卻時間結束血量恢復滿血 並且新增一個新的升級 可以減少冷卻時間"
+}
