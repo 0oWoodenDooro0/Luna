@@ -83,6 +83,7 @@ class StatusCommand : Command {
                         ⚔️ 武器 (Weapon): Lv.${player.weaponLevel}
                         🛡️ 盾牌 (Shield): Lv.${player.shieldLevel}
                         👕 護甲 (Armor): Lv.${player.armorLevel}
+                        ❤️ 康復速度 (Recovery): Lv.${player.recoveryLevel}
                     """.trimIndent()
                     inline = false
                 }
