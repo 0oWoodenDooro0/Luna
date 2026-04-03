@@ -111,4 +111,28 @@ class RecoveryLogicTest {
             assertEquals(90, player.metal)
         }
     }
+
+    @Test
+    fun testCooldownReductionAfterUpgrade() {
+        val maxHp = 100 // Base cooldown 10s
+        
+        val playerLvl0 = website.woodendoor.rpg.Player(
+            id = "lvl0", name = "Lvl0",
+            attributes = website.woodendoor.rpg.RpgAttributes(0, maxHp, 10, 5, 8),
+            recoveryLevel = 0,
+            recoveryStartAt = System.currentTimeMillis()
+        )
+        val cooldownLvl0 = PlayerRepository.getRemainingRecoveryTime(playerLvl0)
+        assertTrue(cooldownLvl0 in 9..10)
+        
+        val playerLvl1 = website.woodendoor.rpg.Player(
+            id = "lvl1", name = "Lvl1",
+            attributes = website.woodendoor.rpg.RpgAttributes(0, maxHp, 10, 5, 8),
+            recoveryLevel = 1,
+            recoveryStartAt = System.currentTimeMillis()
+        )
+        val cooldownLvl1 = PlayerRepository.getRemainingRecoveryTime(playerLvl1)
+        // Lvl 1 should reduce by 5s. 10 - 5 = 5s.
+        assertTrue(cooldownLvl1 in 4..5)
+    }
 }
