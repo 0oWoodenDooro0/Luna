@@ -20,10 +20,10 @@
 - [x] Task: Verify the upgrade reduces the cooldown correctly in subsequent combats. 49e1c32
 - [x] Task: Conductor - User Manual Verification 'Recovery Speed Upgrade' (Protocol in workflow.md) e2e027f
 
-## Phase 4: Final Integration & Polish
-- [ ] Task: Run full regression tests to ensure no breakage in `ExploreCommand` or `UpgradeCommand`.
-- [ ] Task: Final code style review and documentation updates.
-- [ ] Task: Conductor - User Manual Verification 'Final Integration & Polish' (Protocol in workflow.md)
+## Phase 4: Final Integration & Polish [checkpoint: 52f376f]
+- [x] Task: Run full regression tests to ensure no breakage in `ExploreCommand` or `UpgradeCommand`. 1d30338
+- [x] Task: Final code style review and documentation updates. 1d30338
+- [x] Task: Conductor - User Manual Verification 'Final Integration & Polish' (Protocol in workflow.md) 52f376f
 
 ---
 *Note: Each task will follow the TDD workflow (Red -> Green -> Refactor).*
