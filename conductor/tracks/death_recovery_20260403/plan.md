@@ -15,9 +15,9 @@
 - [x] Task: Conductor - User Manual Verification 'Core Recovery Logic' (Protocol in workflow.md) 97e126a
 
 ## Phase 3: Recovery Speed Upgrade
-- [x] Task: Add "Recovery Speed" (康復速度) to the `UpgradeCommand` list. 78595ec
+- [x] Task: Add "Recovery Speed" (康復速度) to the `UpgradeCommand` list. a8f721a
 - [x] Task: Implement the upgrade logic for "Recovery Speed" in `PlayerRepository`. 49e1c32
-- [ ] Task: Verify the upgrade reduces the cooldown correctly in subsequent combats.
+- [x] Task: Verify the upgrade reduces the cooldown correctly in subsequent combats. 49e1c32
 - [ ] Task: Conductor - User Manual Verification 'Recovery Speed Upgrade' (Protocol in workflow.md)
 
 ## Phase 4: Final Integration & Polish
