@@ -24,6 +24,8 @@ object PlayersTable : Table("players") {
     val weaponLevel = integer("weapon_level").default(0)
     val shieldLevel = integer("shield_level").default(0)
     val armorLevel = integer("armor_level").default(0)
+    val recoveryLevel = integer("recovery_level").default(0)
+    val recoveryStartAt = long("recovery_start_at").default(0L)
 
     override val primaryKey = PrimaryKey(id)
 
@@ -42,7 +44,9 @@ object PlayersTable : Table("players") {
         roomsExplored: Int = 0,
         weaponLevel: Int = 0,
         shieldLevel: Int = 0,
-        armorLevel: Int = 0
+        armorLevel: Int = 0,
+        recoveryLevel: Int = 0,
+        recoveryStartAt: Long = 0L
     ) {
         insert {
             it[this.id] = id
@@ -60,6 +64,8 @@ object PlayersTable : Table("players") {
             it[this.weaponLevel] = weaponLevel
             it[this.shieldLevel] = shieldLevel
             it[this.armorLevel] = armorLevel
+            it[this.recoveryLevel] = recoveryLevel
+            it[this.recoveryStartAt] = recoveryStartAt
         }
     }
 
