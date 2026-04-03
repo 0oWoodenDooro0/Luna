@@ -8,7 +8,7 @@
 
 ## Phase 2: Core Recovery Logic
 - [x] Task: Implement `calculateRecoveryCooldown(maxHp, recoveryLevel)` function in `RpgConfig.kt` or a service class. 710cf0f
-- [ ] Task: Create `isRecovering(player)` and `restoreHpIfRecovered(player)` functions in `PlayerRepository`.
+- [x] Task: Create `isRecovering(player)` and `restoreHpIfRecovered(player)` functions in `PlayerRepository`. ebb4a92
 - [ ] Task: Update `ExploreCommand` to trigger the recovery cooldown when a player dies in combat (0 HP).
 - [ ] Task: Update `ExploreCommand` to check `isRecovering` and prevent exploration with a timer message.
 - [ ] Task: Update `StatusCommand` and `ExploreCommand` to call `restoreHpIfRecovered` before processing.
