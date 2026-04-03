@@ -89,4 +89,26 @@ class RecoveryLogicTest {
             assertEquals(0, player!!.attributes.hp)
         }
     }
+
+    @Test
+    fun testUpgradeRecoverySpeed() {
+        transaction {
+            SchemaUtils.createMissingTablesAndColumns(PlayersTable)
+            val userId = "upgrade_user"
+            PlayersTable.insertPlayer(
+                id = userId, hp = 100, maxHp = 100, atk = 10, def = 5, spd = 8,
+                wood = 100, stone = 100, metal = 100, floor = 1
+            )
+            
+            val result = PlayerRepository.upgradeEquipment(userId, "recovery")
+            assertTrue(result is PlayerRepository.UpgradeResult.Success)
+            val player = (result as PlayerRepository.UpgradeResult.Success).player
+            assertEquals(1, player.recoveryLevel)
+
+            // Verify resources deducted (Cost for level 0 is 10 wood, 10 stone, 10 metal)
+            assertEquals(90, player.wood)
+            assertEquals(90, player.stone)
+            assertEquals(90, player.metal)
+        }
+    }
 }

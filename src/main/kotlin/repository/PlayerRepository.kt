@@ -88,6 +88,7 @@ object PlayerRepository {
                 "weapon" -> player.weaponLevel
                 "shield" -> player.shieldLevel
                 "armor" -> player.armorLevel
+                "recovery" -> player.recoveryLevel
                 else -> return@transaction UpgradeResult.Error
             }
 
@@ -130,6 +131,9 @@ object PlayerRepository {
                         it[PlayersTable.armorLevel] = currentLevel + 1
                         it[PlayersTable.maxHp] = player.attributes.maxHp + RpgConfig.EQUIPMENT_BONUS_PER_LEVEL
                         it[PlayersTable.hp] = player.attributes.hp + RpgConfig.EQUIPMENT_BONUS_PER_LEVEL // Heal as well
+                    }
+                    "recovery" -> {
+                        it[PlayersTable.recoveryLevel] = currentLevel + 1
                     }
                 }
             }
