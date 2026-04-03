@@ -17,10 +17,18 @@ class RpgCoreTest {
     @Test
     fun testPlayerModel() {
         val attributes = RpgAttributes(hp = 100, maxHp = 100, atk = 10, def = 5, spd = 8)
-        val player = Player(id = "player1", name = "Hero", attributes = attributes)
+        val player = Player(
+            id = "player1",
+            name = "Hero",
+            attributes = attributes,
+            recoveryLevel = 1,
+            recoveryStartAt = 123456789L
+        )
         assertEquals("player1", player.id)
         assertEquals("Hero", player.name)
         assertEquals(attributes, player.attributes)
+        assertEquals(1, player.recoveryLevel)
+        assertEquals(123456789L, player.recoveryStartAt)
     }
 
     @Test

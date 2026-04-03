@@ -33,7 +33,9 @@ data class Player(
     val metal: Int = 0,
     val weaponLevel: Int = 0,
     val shieldLevel: Int = 0,
-    val armorLevel: Int = 0
+    val armorLevel: Int = 0,
+    val recoveryLevel: Int = 0,
+    val recoveryStartAt: Long = 0L
 ) {
     /**
      * 計算加成後的最終屬性 (目前直接從資料庫讀取已加成的數值)

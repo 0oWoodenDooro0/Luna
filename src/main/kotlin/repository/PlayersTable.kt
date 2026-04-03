@@ -92,7 +92,9 @@ object PlayersTable : Table("players") {
             metal = this[metal],
             weaponLevel = this[weaponLevel],
             shieldLevel = this[shieldLevel],
-            armorLevel = this[armorLevel]
+            armorLevel = this[armorLevel],
+            recoveryLevel = this[recoveryLevel],
+            recoveryStartAt = this[recoveryStartAt]
         )
     }
 }
