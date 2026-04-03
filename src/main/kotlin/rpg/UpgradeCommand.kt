@@ -18,6 +18,7 @@ class UpgradeCommand : Command {
                 choice("武器 (Weapon)", "weapon")
                 choice("盾牌 (Shield)", "shield")
                 choice("護甲 (Armor)", "armor")
+                choice("康復速度 (Recovery)", "recovery")
             }
         }
     }
@@ -36,12 +37,14 @@ class UpgradeCommand : Command {
                     "weapon" -> player.weaponLevel
                     "shield" -> player.shieldLevel
                     "armor" -> player.armorLevel
+                    "recovery" -> player.recoveryLevel
                     else -> 0
                 }
                 val typeName = when (type) {
                     "weapon" -> "武器"
                     "shield" -> "盾牌"
                     "armor" -> "護甲"
+                    "recovery" -> "康復速度"
                     else -> "裝備"
                 }
                 response.respond {
