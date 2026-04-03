@@ -26,7 +26,21 @@ class ExploreCommand : Command {
         val userId = interaction.user.id.toString()
         val username = interaction.user.username
 
+        PlayerRepository.restoreHpIfRecovered(userId)
         val player = PlayerRepository.getOrCreatePlayer(userId)
+        
+        val remaining = PlayerRepository.getRemainingRecoveryTime(player)
+        if (remaining > 0) {
+            interaction.deferPublicResponse().respond {
+                embed {
+                    title = "探索失敗"
+                    description = "❤️ 你正在康復中... 剩餘時間: $remaining 秒。"
+                    color = dev.kord.common.Color(0xFF0000)
+                }
+            }
+            return
+        }
+
         val floorInfo = transaction {
             val row = PlayersTable.selectAll().where { PlayersTable.id eq userId }.single()
             Pair(row[PlayersTable.currentFloor], row[PlayersTable.roomsExplored])
@@ -121,6 +135,9 @@ class ExploreCommand : Command {
             transaction {
                 PlayersTable.update({ PlayersTable.id eq userId }) {
                     it[hp] = if (won) playerHP else 0
+                    if (!won) {
+                        it[recoveryStartAt] = System.currentTimeMillis()
+                    }
                 }
             }
 

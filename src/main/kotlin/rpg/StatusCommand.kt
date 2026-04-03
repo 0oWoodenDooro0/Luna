@@ -23,6 +23,7 @@ class StatusCommand : Command {
         val userId = interaction.user.id.toString()
         val username = interaction.user.username
 
+        PlayerRepository.restoreHpIfRecovered(userId)
         val player = PlayerRepository.getOrCreatePlayer(userId)
 
         val extraInfo = transaction {
@@ -49,6 +50,16 @@ class StatusCommand : Command {
                     """.trimIndent()
                     inline = true
                 }
+                
+                val remaining = PlayerRepository.getRemainingRecoveryTime(player)
+                if (remaining > 0) {
+                    field {
+                        name = "❤️ 康復中"
+                        value = "剩餘時間: $remaining 秒"
+                        inline = true
+                    }
+                }
+
                 field {
                     name = "目前進度"
                     value = """
