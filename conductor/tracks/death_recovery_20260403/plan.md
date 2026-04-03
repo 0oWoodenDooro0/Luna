@@ -1,10 +1,10 @@
 # Plan: Death Cooldown & Automatic Recovery
 
-## Phase 1: Configuration & Database Persistence
+## Phase 1: Configuration & Database Persistence [checkpoint: d7af543]
 - [x] Task: Add configurable parameters for recovery in `RpgConfig.kt`. 529fd3f
 - [x] Task: Update `PlayersTable` schema to include `recovery_start_at` (Long) and `recovery_level` (Int). dc66eee
 - [x] Task: Update `PlayerData` model in `RpgModels.kt` to include the new fields. 212053e
-- [ ] Task: Conductor - User Manual Verification 'Configuration & Database Persistence' (Protocol in workflow.md)
+- [x] Task: Conductor - User Manual Verification 'Configuration & Database Persistence' (Protocol in workflow.md) d7af543
 
 ## Phase 2: Core Recovery Logic
 - [ ] Task: Implement `calculateRecoveryCooldown(maxHp, recoveryLevel)` function in `RpgConfig.kt` or a service class.
