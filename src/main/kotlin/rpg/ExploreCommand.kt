@@ -122,6 +122,13 @@ class ExploreCommand : Command {
         
         val result = CombatEngine.simulate(player, monster, username)
         val won = result.won
+        val currentFloor = floorInfo.first
+        
+        val reward = if (won) {
+            PlayerRepository.calculateMonsterReward(currentFloor)
+        } else {
+            null
+        }
         
         val (newRoomCount, floorMsg) = if (won) {
             updateProgression(userId, floorInfo)
@@ -129,7 +136,7 @@ class ExploreCommand : Command {
             floorInfo.second to ""
         }
 
-        PlayerRepository.recordCombatResult(userId, result.playerFinalHP, result.monsterFinalHP, monster)
+        PlayerRepository.recordCombatResult(userId, result.playerFinalHP, result.monsterFinalHP, monster, reward)
 
         interaction.deferPublicResponse().respond {
             embed {
@@ -142,7 +149,7 @@ class ExploreCommand : Command {
                     ${if (isResumption) "🔄 繼續與 ${monster.name} 的戰鬥！" else ""}
                     ${result.combatLog.joinToString("\n")}
                     
-                    ${if (won) "✨ 你擊敗了 ${monster.name}！" else "💀 你被打敗了... 但你設法在同一個房間裡甦醒。"}
+                    ${if (won) "✨ 你擊敗了 ${monster.name}！並獲得了 **${reward?.first} x ${reward?.second}**！" else "💀 你被打敗了... 但你設法在同一個房間裡甦醒。"}
                     
                     進度：$newRoomCount / ${RpgConfig.Exploration.FLOOR_SIZE} 房間
                     $floorMsg

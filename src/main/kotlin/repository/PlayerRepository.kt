@@ -186,13 +186,24 @@ object PlayerRepository {
         }
     }
 
-    fun recordCombatResult(userId: String, playerHP: Int, monsterHP: Int, monster: website.woodendoor.rpg.Monster) {
+    fun recordCombatResult(userId: String, playerHP: Int, monsterHP: Int, monster: website.woodendoor.rpg.Monster, reward: Pair<String, Int>? = null) {
         val won = monsterHP <= 0
         transaction {
+            val current = PlayersTable.selectAll().where { PlayersTable.id eq userId }.single()
+            
             PlayersTable.update({ PlayersTable.id eq userId }) {
                 it[hp] = playerHP
                 if (!won) {
                     it[recoveryStartAt] = System.currentTimeMillis()
+                }
+                
+                if (won && reward != null) {
+                    val (resourceName, amount) = reward
+                    when (resourceName) {
+                        "🪵 木頭" -> it[wood] = current[PlayersTable.wood] + amount
+                        "🪨 石頭" -> it[stone] = current[PlayersTable.stone] + amount
+                        "🔗 金屬" -> it[metal] = current[PlayersTable.metal] + amount
+                    }
                 }
             }
             if (!won) {
