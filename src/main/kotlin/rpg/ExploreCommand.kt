@@ -130,22 +130,21 @@ class ExploreCommand : Command {
             }
 
             val won = monsterHP <= 0
-            val (newRoomCount, floorMsg) = updateProgression(userId, floorInfo)
-
-            transaction {
-                PlayersTable.update({ PlayersTable.id eq userId }) {
-                    it[hp] = if (won) playerHP else 0
-                    if (!won) {
-                        it[recoveryStartAt] = System.currentTimeMillis()
-                    }
-                }
+            val (newRoomCount, floorMsg) = if (won) {
+                updateProgression(userId, floorInfo)
+            } else {
+                floorInfo.second to ""
             }
+
+            PlayerRepository.recordCombatResult(userId, if (won) playerHP else 0, max(0, monsterHP), monster)
 
             interaction.deferPublicResponse().respond {
                 embed {
                     title = if (won) "探索結果：戰鬥勝利！" else "探索結果：戰鬥失敗"
                     description = """
                         ${combatLog.joinToString("\n")}
+                        
+                        ${if (won) "✨ 你擊敗了 $monsterName！" else "💀 你被打敗了... 但你設法在同一個房間裡甦醒。"}
                         
                         進度：$newRoomCount / ${RpgConfig.FLOOR_SIZE} 房間
                         $floorMsg

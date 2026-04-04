@@ -6,9 +6,13 @@ import org.jetbrains.exposed.v1.jdbc.transactions.transaction
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import website.woodendoor.rpg.RpgConfig
+import website.woodendoor.rpg.RpgAttributes
+import org.jetbrains.exposed.v1.jdbc.selectAll
+import org.jetbrains.exposed.v1.core.eq
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
+import kotlin.test.assertNotNull
 
 class RecoveryLogicTest {
 
@@ -134,5 +138,37 @@ class RecoveryLogicTest {
         val cooldownLvl1 = PlayerRepository.getRemainingRecoveryTime(playerLvl1)
         // Lvl 1 should reduce by 5s. 10 - 5 = 5s.
         assertTrue(cooldownLvl1 in 4..5)
+    }
+
+    @Test
+    fun testRecordCombatResult_Death() {
+        transaction {
+            SchemaUtils.createMissingTablesAndColumns(PlayersTable)
+            val userId = "death_user"
+            PlayersTable.insertPlayer(
+                id = userId, hp = 100, maxHp = 100, atk = 10, def = 5, spd = 8,
+                wood = 0, stone = 0, metal = 0, floor = 1, roomsExplored = 5
+            )
+
+            val monster = website.woodendoor.rpg.Monster(
+                name = "Slime",
+                attributes = website.woodendoor.rpg.RpgAttributes(10, 50, 5, 2, 10)
+            )
+
+            // When player dies (playerHP = 0, monsterHP = 10)
+            PlayerRepository.recordCombatResult(userId, playerHP = 0, monsterHP = 10, monster = monster)
+
+            val player = PlayerRepository.getOrCreatePlayer(userId)
+            assertEquals(0, player.attributes.hp)
+            assertTrue(player.recoveryStartAt > 0)
+            
+            // Progress should NOT be incremented
+            assertEquals(5, transaction { PlayersTable.selectAll().where { PlayersTable.id eq userId }.single()[PlayersTable.roomsExplored] })
+
+            // Monster state SHOULD be saved
+            assertNotNull(player.currentMonster)
+            assertEquals(10, player.currentMonster!!.attributes.hp)
+            assertEquals("Slime", player.currentMonster!!.name)
+        }
     }
 }

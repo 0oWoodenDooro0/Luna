@@ -169,4 +169,23 @@ object PlayerRepository {
             PlayersTable.fetchPlayer(userId)?.currentMonster
         }
     }
+
+    fun recordCombatResult(userId: String, playerHP: Int, monsterHP: Int, monster: website.woodendoor.rpg.Monster) {
+        val won = monsterHP <= 0
+        transaction {
+            PlayersTable.update({ PlayersTable.id eq userId }) {
+                it[hp] = playerHP
+                if (!won) {
+                    it[recoveryStartAt] = System.currentTimeMillis()
+                }
+            }
+            if (!won) {
+                // Save monster state with REMAINING hp
+                saveMonsterState(userId, monster.copy(attributes = monster.attributes.copy(hp = monsterHP)))
+            } else {
+                // Clear monster state on victory
+                saveMonsterState(userId, null)
+            }
+        }
+    }
 }
