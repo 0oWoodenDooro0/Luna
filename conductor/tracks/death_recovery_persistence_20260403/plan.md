@@ -30,3 +30,6 @@
     - [x] Verify monster state is persisted.
     - [x] Verify `explore` works correctly during revival and after full health.
 - [x] Task: Conductor - User Manual Verification 'Phase 4: Final Verification' (Protocol in workflow.md) e7f4c65
+
+## Phase: Review Fixes
+- [x] Task: Apply review suggestions 0c23ce6
