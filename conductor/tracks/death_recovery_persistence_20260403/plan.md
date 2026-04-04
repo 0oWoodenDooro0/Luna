@@ -16,13 +16,13 @@
     - [x] Add unit tests for death state saving in `RecoveryLogicTest`.
 - [x] Task: Conductor - User Manual Verification 'Phase 2: Death Logic' (Protocol in workflow.md) 3d6d6e0
 
-## Phase 3: Fight Resumption Logic
+## Phase 3: Fight Resumption Logic [checkpoint: 29c0747]
 - [x] Task: Update `ExploreCommand` to handle fight resumption. 02a0a4d
     - [x] Add a check at the beginning of `ExploreCommand` to see if a monster state is saved.
     - [x] Implement the "Reviving" check: if player is not at full health, block `explore` and show message.
     - [x] If player is at full health and a monster is saved, resume the fight using the loaded monster state.
     - [x] Add unit tests for fight resumption in `RpgCoreTest`.
-- [ ] Task: Conductor - User Manual Verification 'Phase 3: Resumption Logic' (Protocol in workflow.md)
+- [x] Task: Conductor - User Manual Verification 'Phase 3: Resumption Logic' (Protocol in workflow.md) 29c0747
 
 ## Phase 4: Final Verification
 - [ ] Task: End-to-end manual testing.
