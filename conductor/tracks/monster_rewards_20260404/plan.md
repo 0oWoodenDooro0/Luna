@@ -22,8 +22,8 @@
     - [x] Test that resources are correctly added to the database.
 - [x] Task: Conductor - User Manual Verification 'Phase 2: Rewards' (Protocol in workflow.md) 33c9d40
 
-## Phase 3: Final Integration & Verification
-- [ ] Task: Verify all configuration parameters are correctly applied in the game.
-    - [ ] Change a few values in `RpgConfig` (e.g., turn limit, floor size) and ensure they reflect in gameplay/tests.
-- [ ] Task: End-to-end manual testing of the exploration and combat reward flow.
-- [ ] Task: Conductor - User Manual Verification 'Phase 3: Final Verification' (Protocol in workflow.md)
+## Phase 3: Final Integration & Verification [checkpoint: c6ae74f]
+- [x] Task: Verify all configuration parameters are correctly applied in the game. [verified]
+    - [x] Change a few values in `RpgConfig` (e.g., turn limit, floor size) and ensure they reflect in gameplay/tests.
+- [x] Task: End-to-end manual testing of the exploration and combat reward flow. c6ae74f
+- [x] Task: Conductor - User Manual Verification 'Phase 3: Final Verification' (Protocol in workflow.md) c6ae74f
