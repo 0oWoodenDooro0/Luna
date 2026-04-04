@@ -25,7 +25,7 @@ object CombatEngine {
         }
 
         var turn = 1
-        while (playerHP > 0 && monsterHP > 0 && turn <= 20) {
+        while (playerHP > 0 && monsterHP > 0 && turn <= RpgConfig.Combat.MAX_TURNS) {
             for (entity in entities) {
                 if (entity == "Player") {
                     val dmg = max(1, effective.atk - monster.attributes.def)

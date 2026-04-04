@@ -62,17 +62,4 @@ object RpgConfig {
             return max(MIN_SECONDS, base - reduction).toLong()
         }
     }
-
-    // --- Deprecated / Legacy Support (to be removed in Task 2) ---
-    @Deprecated("Use Exploration.FLOOR_SIZE", ReplaceWith("Exploration.FLOOR_SIZE"))
-    const val FLOOR_SIZE = Exploration.FLOOR_SIZE
-
-    @Deprecated("Use Recovery.calculateCooldown", ReplaceWith("Recovery.calculateCooldown(maxHp, recoveryLevel)"))
-    fun calculateRecoveryCooldown(maxHp: Int, recoveryLevel: Int) = Recovery.calculateCooldown(maxHp, recoveryLevel)
-
-    @Deprecated("Use Economy.UPGRADE_REQUIREMENTS", ReplaceWith("Economy.UPGRADE_REQUIREMENTS"))
-    val UPGRADE_REQUIREMENTS = Economy.UPGRADE_REQUIREMENTS
-
-    @Deprecated("Use Economy.EQUIPMENT_BONUS_PER_LEVEL", ReplaceWith("Economy.EQUIPMENT_BONUS_PER_LEVEL"))
-    const val EQUIPMENT_BONUS_PER_LEVEL = Economy.EQUIPMENT_BONUS_PER_LEVEL
 }

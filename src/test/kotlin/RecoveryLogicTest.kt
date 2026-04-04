@@ -27,7 +27,7 @@ class RecoveryLogicTest {
         transaction {
             SchemaUtils.createMissingTablesAndColumns(PlayersTable)
             val maxHp = 100
-            val cooldown = RpgConfig.calculateRecoveryCooldown(maxHp, 0) // 10s
+            val cooldown = RpgConfig.Recovery.calculateCooldown(maxHp, 0) // 10s
             
             // CASE 1: HP > 0 -> Not recovering
             val healthyPlayer = website.woodendoor.rpg.Player(

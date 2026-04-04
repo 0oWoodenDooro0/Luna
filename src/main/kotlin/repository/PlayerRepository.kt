@@ -35,7 +35,7 @@ object PlayerRepository {
      */
     fun getRemainingRecoveryTime(player: Player): Long {
         if (player.attributes.hp > 0) return 0L
-        val cooldownMs = RpgConfig.calculateRecoveryCooldown(player.attributes.maxHp, player.recoveryLevel) * 1000L
+        val cooldownMs = RpgConfig.Recovery.calculateCooldown(player.attributes.maxHp, player.recoveryLevel) * 1000L
         val elapsedMs = System.currentTimeMillis() - player.recoveryStartAt
         return Math.max(0L, (cooldownMs - elapsedMs + 999) / 1000) // Use ceil-like division for display
     }
@@ -45,7 +45,7 @@ object PlayerRepository {
      */
     fun isRecovering(player: website.woodendoor.rpg.Player): Boolean {
         if (player.attributes.hp > 0) return false
-        val cooldownMs = RpgConfig.calculateRecoveryCooldown(player.attributes.maxHp, player.recoveryLevel) * 1000L
+        val cooldownMs = RpgConfig.Recovery.calculateCooldown(player.attributes.maxHp, player.recoveryLevel) * 1000L
         val elapsedMs = System.currentTimeMillis() - player.recoveryStartAt
         return elapsedMs < cooldownMs
     }
@@ -82,7 +82,7 @@ object PlayerRepository {
 
     fun upgradeEquipment(userId: String, type: String): UpgradeResult {
         val typeKey = type.lowercase()
-        val requirements = RpgConfig.UPGRADE_REQUIREMENTS[typeKey] ?: return UpgradeResult.Error
+        val requirements = RpgConfig.Economy.UPGRADE_REQUIREMENTS[typeKey] ?: return UpgradeResult.Error
 
         return transaction {
             val player = PlayersTable.fetchPlayer(userId) ?: return@transaction UpgradeResult.Error
@@ -124,16 +124,16 @@ object PlayerRepository {
                 when (typeKey) {
                     "weapon" -> {
                         it[PlayersTable.weaponLevel] = currentLevel + 1
-                        it[PlayersTable.atk] = player.attributes.atk + RpgConfig.EQUIPMENT_BONUS_PER_LEVEL
+                        it[PlayersTable.atk] = player.attributes.atk + RpgConfig.Economy.EQUIPMENT_BONUS_PER_LEVEL
                     }
                     "shield" -> {
                         it[PlayersTable.shieldLevel] = currentLevel + 1
-                        it[PlayersTable.def] = player.attributes.def + RpgConfig.EQUIPMENT_BONUS_PER_LEVEL
+                        it[PlayersTable.def] = player.attributes.def + RpgConfig.Economy.EQUIPMENT_BONUS_PER_LEVEL
                     }
                     "armor" -> {
                         it[PlayersTable.armorLevel] = currentLevel + 1
-                        it[PlayersTable.maxHp] = player.attributes.maxHp + RpgConfig.EQUIPMENT_BONUS_PER_LEVEL
-                        it[PlayersTable.hp] = player.attributes.hp + RpgConfig.EQUIPMENT_BONUS_PER_LEVEL // Heal as well
+                        it[PlayersTable.maxHp] = player.attributes.maxHp + RpgConfig.Economy.EQUIPMENT_BONUS_PER_LEVEL
+                        it[PlayersTable.hp] = player.attributes.hp + RpgConfig.Economy.EQUIPMENT_BONUS_PER_LEVEL // Heal as well
                     }
                     "recovery" -> {
                         it[PlayersTable.recoveryLevel] = currentLevel + 1

@@ -55,10 +55,10 @@ class ExploreCommand : Command {
 
         val eventRoll = Random.nextInt(100)
         
-        if (eventRoll < 50) {
-            val resources = listOf("🪵 木頭", "🪨 石頭", "🔗 金屬")
+        if (eventRoll < RpgConfig.Exploration.EVENT_ROLL_RESOURCE_THRESHOLD) {
+            val resources = RpgConfig.Exploration.RESOURCE_NAMES
             val foundResource = resources.random()
-            val amount = Random.nextInt(1, 6)
+            val amount = Random.nextInt(RpgConfig.Exploration.RESOURCE_MIN_AMOUNT, RpgConfig.Exploration.RESOURCE_MAX_AMOUNT + 1)
 
             val (newRoomCount, floorMsg) = updateProgression(userId, floorInfo)
 
@@ -86,23 +86,23 @@ class ExploreCommand : Command {
                     description = """
                         $username 在第 ${floorInfo.first} 層探索中發現了 $foundResource x $amount！
                         
-                        進度：$newRoomCount / ${RpgConfig.FLOOR_SIZE} 房間
+                        進度：$newRoomCount / ${RpgConfig.Exploration.FLOOR_SIZE} 房間
                         $floorMsg
                     """.trimIndent()
                     color = dev.kord.common.Color(0x00FF00)
                 }
             }
         } else {
-            val monsterNames = listOf("史萊姆", "哥布林", "小蝙蝠")
+            val monsterNames = RpgConfig.Exploration.MONSTER_NAMES
             val monsterName = monsterNames.random()
             val floor = floorInfo.first
             
             val monsterAttr = RpgAttributes(
-                hp = 20 + (floor * 5),
-                maxHp = 20 + (floor * 5),
-                atk = 5 + (floor * 2),
-                def = 2 + floor,
-                spd = 3 + floor
+                hp = RpgConfig.Monster.BASE_HP + (floor * RpgConfig.Monster.HP_PER_FLOOR),
+                maxHp = RpgConfig.Monster.BASE_HP + (floor * RpgConfig.Monster.HP_PER_FLOOR),
+                atk = RpgConfig.Monster.BASE_ATK + (floor * RpgConfig.Monster.ATK_PER_FLOOR),
+                def = RpgConfig.Monster.BASE_DEF + (floor * RpgConfig.Monster.DEF_PER_FLOOR),
+                spd = RpgConfig.Monster.BASE_SPD + (floor * RpgConfig.Monster.SPD_PER_FLOOR)
             )
             val monster = Monster(monsterName, monsterAttr)
             
@@ -144,7 +144,7 @@ class ExploreCommand : Command {
                     
                     ${if (won) "✨ 你擊敗了 ${monster.name}！" else "💀 你被打敗了... 但你設法在同一個房間裡甦醒。"}
                     
-                    進度：$newRoomCount / ${RpgConfig.FLOOR_SIZE} 房間
+                    進度：$newRoomCount / ${RpgConfig.Exploration.FLOOR_SIZE} 房間
                     $floorMsg
                 """.trimIndent()
                 color = if (won) dev.kord.common.Color(0x00FF00) else dev.kord.common.Color(0xFF0000)
@@ -155,7 +155,7 @@ class ExploreCommand : Command {
     private fun updateProgression(userId: String, floorInfo: Pair<Int, Int>): Pair<Int, String> {
         val currentFloor = floorInfo.first
         val roomsExplored = floorInfo.second
-        val floorSize = RpgConfig.FLOOR_SIZE
+        val floorSize = RpgConfig.Exploration.FLOOR_SIZE
 
         val nextRoomCount = roomsExplored + 1
         var message = ""

@@ -64,7 +64,7 @@ class StatusCommand : Command {
                     name = "目前進度"
                     value = """
                         層數：第 ${extraInfo.first} 層
-                        房間：${extraInfo.second} / ${RpgConfig.FLOOR_SIZE}
+                        房間：${extraInfo.second} / ${RpgConfig.Exploration.FLOOR_SIZE}
                     """.trimIndent()
                     inline = true
                 }
