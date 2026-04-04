@@ -18,7 +18,7 @@
 - [x] Task: Remove all Exposed-related imports (`org.jetbrains.exposed.*`, `PlayersTable`, etc.) from the command files. bc00d2c
 - [x] Task: Conductor - User Manual Verification 'Phase 2: Refactoring Commands' (Protocol in workflow.md) c09c946
 
-**Phase 3: Verification & Cleanup**
-- [x] Task: Run the full test suite (`./gradlew test`) to ensure zero regressions in game logic.
-- [x] Task: Verify that no `transaction` blocks or table references remain in the target commands.
-- [ ] Task: Conductor - User Manual Verification 'Phase 3: Final Verification' (Protocol in workflow.md)
+**Phase 3: Verification & Cleanup [checkpoint: cbbfe8d]**
+- [x] Task: Run the full test suite (`./gradlew test`) to ensure zero regressions in game logic. e9a8b4c
+- [x] Task: Verify that no `transaction` blocks or table references remain in the target commands. 554c87f
+- [x] Task: Conductor - User Manual Verification 'Phase 3: Final Verification' (Protocol in workflow.md) cbbfe8d
