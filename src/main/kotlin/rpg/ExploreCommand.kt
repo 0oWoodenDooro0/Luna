@@ -26,8 +26,8 @@ class ExploreCommand : Command {
         val userId = interaction.user.id.toString()
         val username = interaction.user.username
 
-        PlayerRepository.restoreHpIfRecovered(userId)
-        val player = PlayerRepository.getOrCreatePlayer(userId)
+        // Use the returned player from restoreHpIfRecovered to ensure we have the latest state
+        val player = PlayerRepository.restoreHpIfRecovered(userId) ?: PlayerRepository.getOrCreatePlayer(userId)
         
         val remaining = PlayerRepository.getRemainingRecoveryTime(player)
         if (remaining > 0) {

@@ -35,16 +35,19 @@ object PlayerRepository {
      */
     fun getRemainingRecoveryTime(player: Player): Long {
         if (player.attributes.hp > 0) return 0L
-        val cooldown = RpgConfig.calculateRecoveryCooldown(player.attributes.maxHp, player.recoveryLevel)
-        val elapsed = (System.currentTimeMillis() - player.recoveryStartAt) / 1000
-        return Math.max(0L, cooldown - elapsed)
+        val cooldownMs = RpgConfig.calculateRecoveryCooldown(player.attributes.maxHp, player.recoveryLevel) * 1000L
+        val elapsedMs = System.currentTimeMillis() - player.recoveryStartAt
+        return Math.max(0L, (cooldownMs - elapsedMs + 999) / 1000) // Use ceil-like division for display
     }
 
     /**
-     * 是否正在康復中
+     * 是否正在康復中 (精確到毫秒)
      */
     fun isRecovering(player: website.woodendoor.rpg.Player): Boolean {
-        return getRemainingRecoveryTime(player) > 0L
+        if (player.attributes.hp > 0) return false
+        val cooldownMs = RpgConfig.calculateRecoveryCooldown(player.attributes.maxHp, player.recoveryLevel) * 1000L
+        val elapsedMs = System.currentTimeMillis() - player.recoveryStartAt
+        return elapsedMs < cooldownMs
     }
 
     /**
@@ -53,7 +56,7 @@ object PlayerRepository {
     fun restoreHpIfRecovered(userId: String): Player? {
         return transaction {
             val player = PlayersTable.fetchPlayer(userId) ?: return@transaction null
-            if (player.attributes.hp == 0 && getRemainingRecoveryTime(player) == 0L) {
+            if (player.attributes.hp == 0 && !isRecovering(player)) {
                 PlayersTable.update({ PlayersTable.id eq userId }) {
                     it[hp] = player.attributes.maxHp
                 }
