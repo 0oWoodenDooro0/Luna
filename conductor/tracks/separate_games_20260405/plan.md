@@ -23,3 +23,6 @@
     - [x] Modify `conductor/product-guidelines.md` to document the new package architecture (`luna.rpg`, `luna.undercover`, `luna.core`).
     - [x] Explicitly state the rules for where new features for each game should be placed.
 - [x] Task: Conductor - User Manual Verification 'Phase 2: Documentation Update' (Protocol in workflow.md) 63aff9c
+
+## Phase: Review Fixes
+- [x] Task: Apply review suggestions 3381d66
