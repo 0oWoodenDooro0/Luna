@@ -1,7 +1,7 @@
 # Implementation Plan: Separation of RPG and Undercover
 
 ## Phase 1: File Structure Reorganization
-- [ ] Task: Reorganize Main Codebase
+- [~] Task: Reorganize Main Codebase
     - [ ] Create base packages `luna.rpg`, `luna.undercover`, and `luna.core` in `src/main/kotlin/`.
     - [ ] Move Undercover-related files (`UndercoverManager.kt`, `UndercoverCommand.kt`, etc.) to the `luna.undercover` package.
     - [ ] Move RPG-related files (`rpg/`, etc.) to the `luna.rpg` package.
