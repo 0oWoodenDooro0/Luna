@@ -7,6 +7,8 @@ import org.jetbrains.exposed.v1.jdbc.selectAll
 import org.jetbrains.exposed.v1.jdbc.SchemaUtils
 import website.woodendoor.rpg.Player
 import website.woodendoor.rpg.RpgConfig
+import website.woodendoor.rpg.PlayerProgression
+import website.woodendoor.rpg.UpdateProgressionResult
 
 object PlayerRepository {
     fun getOrCreatePlayer(userId: String): Player {
@@ -26,6 +28,69 @@ object PlayerRepository {
                     floor = 1
                 )
                 PlayersTable.fetchPlayer(userId)!!
+            }
+        }
+    }
+
+    fun getProgression(userId: String): PlayerProgression {
+        return transaction {
+            val player = getOrCreatePlayer(userId)
+            player.progression
+        }
+    }
+
+    fun addResources(userId: String, resourceName: String, amount: Int) {
+        transaction {
+            val current = PlayersTable.selectAll().where { PlayersTable.id eq userId }.single()
+            PlayersTable.update({ PlayersTable.id eq userId }) {
+                when (resourceName) {
+                    "🪵 木頭" -> it[wood] = current[PlayersTable.wood] + amount
+                    "🪨 石頭" -> it[stone] = current[PlayersTable.stone] + amount
+                    "🔗 金屬" -> it[metal] = current[PlayersTable.metal] + amount
+                }
+            }
+        }
+    }
+
+    fun updateProgression(userId: String, currentFloor: Int, roomsExplored: Int): UpdateProgressionResult {
+        val floorSize = RpgConfig.Exploration.FLOOR_SIZE
+
+        val nextRoomCount = roomsExplored + 1
+        var message = ""
+        var finalRoomCount = nextRoomCount
+
+        return transaction {
+            val player = getOrCreatePlayer(userId)
+            val autoAdvance = player.autoAdvance
+            
+            if (nextRoomCount >= floorSize) {
+                if (autoAdvance) {
+                    PlayersTable.update({ PlayersTable.id eq userId }) {
+                        it[PlayersTable.currentFloor] = currentFloor + 1
+                        it[this.roomsExplored] = 0
+                    }
+                    message = "✨ 此層已探索完成！自動前往第 ${currentFloor + 1} 層。"
+                    finalRoomCount = 0
+                } else {
+                    PlayersTable.update({ PlayersTable.id eq userId }) {
+                        it[this.roomsExplored] = 0
+                    }
+                    message = "📍 此層已探索完成！保留在第 $currentFloor 層農資源。"
+                    finalRoomCount = 0
+                }
+            } else {
+                PlayersTable.update({ PlayersTable.id eq userId }) {
+                    it[this.roomsExplored] = nextRoomCount
+                }
+            }
+            UpdateProgressionResult(finalRoomCount, message)
+        }
+    }
+
+    fun updateAutoAdvance(userId: String, autoAdvance: Boolean) {
+        transaction {
+            PlayersTable.update({ PlayersTable.id eq userId }) {
+                it[this.autoAdvance] = autoAdvance
             }
         }
     }

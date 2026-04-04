@@ -36,14 +36,36 @@ data class Player(
     val armorLevel: Int = 0,
     val recoveryLevel: Int = 0,
     val recoveryStartAt: Long = 0L,
-    val currentMonster: Monster? = null
+    val currentMonster: Monster? = null,
+    val progression: PlayerProgression = PlayerProgression(1, 0, true)
 ) {
     /**
      * 計算加成後的最終屬性 (目前直接從資料庫讀取已加成的數值)
      */
     val effectiveAttributes: RpgAttributes
         get() = attributes
+
+    val currentFloor: Int get() = progression.currentFloor
+    val roomsExplored: Int get() = progression.roomsExplored
+    val autoAdvance: Boolean get() = progression.autoAdvance
 }
+
+/**
+ * Represents the progression of a player.
+ */
+data class PlayerProgression(
+    val currentFloor: Int,
+    val roomsExplored: Int,
+    val autoAdvance: Boolean
+)
+
+/**
+ * Result of updating player progression.
+ */
+data class UpdateProgressionResult(
+    val finalRoomCount: Int,
+    val message: String
+)
 
 /**
  * Represents a monster in the RPG.

@@ -8,6 +8,7 @@ import org.jetbrains.exposed.v1.core.eq
 import website.woodendoor.rpg.Player
 import website.woodendoor.rpg.RpgAttributes
 import website.woodendoor.rpg.Monster
+import website.woodendoor.rpg.PlayerProgression
 
 object PlayersTable : Table("players") {
     val id = varchar("id", 64)
@@ -114,7 +115,12 @@ object PlayersTable : Table("players") {
             armorLevel = this[armorLevel],
             recoveryLevel = this[recoveryLevel],
             recoveryStartAt = this[recoveryStartAt],
-            currentMonster = monster
+            currentMonster = monster,
+            progression = PlayerProgression(
+                currentFloor = this[currentFloor],
+                roomsExplored = this[roomsExplored],
+                autoAdvance = this[autoAdvance]
+            )
         )
     }
 }
