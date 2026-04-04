@@ -6,6 +6,8 @@ object RpgConfig {
     object Exploration {
         const val FLOOR_SIZE = 5
         const val EVENT_ROLL_RESOURCE_THRESHOLD = 50
+        const val RESOURCE_MIN_AMOUNT = 1
+        const val RESOURCE_MAX_AMOUNT = 5
         val RESOURCE_NAMES = listOf("🪵 木頭", "🪨 石頭", "🔗 金屬")
         val MONSTER_NAMES = listOf("史萊姆", "哥布林", "小蝙蝠")
     }
