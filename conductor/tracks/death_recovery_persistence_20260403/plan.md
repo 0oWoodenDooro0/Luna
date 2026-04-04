@@ -24,9 +24,9 @@
     - [x] Add unit tests for fight resumption in `RpgCoreTest`.
 - [x] Task: Conductor - User Manual Verification 'Phase 3: Resumption Logic' (Protocol in workflow.md) 29c0747
 
-## Phase 4: Final Verification
-- [ ] Task: End-to-end manual testing.
-    - [ ] Verify death does not end exploration.
-    - [ ] Verify monster state is persisted.
-    - [ ] Verify `explore` works correctly during revival and after full health.
-- [ ] Task: Conductor - User Manual Verification 'Phase 4: Final Verification' (Protocol in workflow.md)
+## Phase 4: Final Verification [checkpoint: e7f4c65]
+- [x] Task: End-to-end manual testing. e7f4c65
+    - [x] Verify death does not end exploration.
+    - [x] Verify monster state is persisted.
+    - [x] Verify `explore` works correctly during revival and after full health.
+- [x] Task: Conductor - User Manual Verification 'Phase 4: Final Verification' (Protocol in workflow.md) e7f4c65
