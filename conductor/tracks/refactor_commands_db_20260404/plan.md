@@ -10,12 +10,12 @@
 - [x] Task: Conductor - User Manual Verification 'Phase 1: Repository Expansion' (Protocol in workflow.md) e6e80ce
 
 **Phase 2: Refactoring Commands**
-- [ ] Task: Refactor `StatusCommand.kt` to use `PlayerRepository.getProgression`.
-- [ ] Task: Refactor `SettingsCommand.kt` to use `PlayerRepository.updateAutoAdvance`.
-- [ ] Task: Refactor `ExploreCommand.kt`:
-    - [ ] Replace direct `transaction` blocks with calls to `PlayerRepository.getProgression`, `PlayerRepository.addResources`, and `PlayerRepository.updateProgression`.
-    - [ ] Ensure all logic previously in `updateProgression` (private function in command) is moved to the repository.
-- [ ] Task: Remove all Exposed-related imports (`org.jetbrains.exposed.*`, `PlayersTable`, etc.) from the command files.
+- [x] Task: Refactor `StatusCommand.kt` to use `PlayerRepository.getProgression`. bc00d2c
+- [x] Task: Refactor `SettingsCommand.kt` to use `PlayerRepository.updateAutoAdvance`. bc00d2c
+- [x] Task: Refactor `ExploreCommand.kt`:
+    - [x] Replace direct `transaction` blocks with calls to `PlayerRepository.getProgression`, `PlayerRepository.addResources`, and `PlayerRepository.updateProgression`. bc00d2c
+    - [x] Ensure all logic previously in `updateProgression` (private function in command) is moved to the repository. bc00d2c
+- [x] Task: Remove all Exposed-related imports (`org.jetbrains.exposed.*`, `PlayersTable`, etc.) from the command files. bc00d2c
 - [ ] Task: Conductor - User Manual Verification 'Phase 2: Refactoring Commands' (Protocol in workflow.md)
 
 **Phase 3: Verification & Cleanup**
