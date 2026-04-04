@@ -145,25 +145,29 @@ object PlayerRepository {
         }
     }
 
+    private fun saveMonsterStateInternal(userId: String, monster: website.woodendoor.rpg.Monster?) {
+        PlayersTable.update({ PlayersTable.id eq userId }) {
+            if (monster != null) {
+                it[PlayersTable.monsterName] = monster.name
+                it[PlayersTable.monsterHp] = monster.attributes.hp
+                it[PlayersTable.monsterMaxHp] = monster.attributes.maxHp
+                it[PlayersTable.monsterAtk] = monster.attributes.atk
+                it[PlayersTable.monsterDef] = monster.attributes.def
+                it[PlayersTable.monsterSpd] = monster.attributes.spd
+            } else {
+                it[PlayersTable.monsterName] = null
+                it[PlayersTable.monsterHp] = 0
+                it[PlayersTable.monsterMaxHp] = 0
+                it[PlayersTable.monsterAtk] = 0
+                it[PlayersTable.monsterDef] = 0
+                it[PlayersTable.monsterSpd] = 0
+            }
+        }
+    }
+
     fun saveMonsterState(userId: String, monster: website.woodendoor.rpg.Monster?) {
         transaction {
-            PlayersTable.update({ PlayersTable.id eq userId }) {
-                if (monster != null) {
-                    it[PlayersTable.monsterName] = monster.name
-                    it[PlayersTable.monsterHp] = monster.attributes.hp
-                    it[PlayersTable.monsterMaxHp] = monster.attributes.maxHp
-                    it[PlayersTable.monsterAtk] = monster.attributes.atk
-                    it[PlayersTable.monsterDef] = monster.attributes.def
-                    it[PlayersTable.monsterSpd] = monster.attributes.spd
-                } else {
-                    it[PlayersTable.monsterName] = null
-                    it[PlayersTable.monsterHp] = 0
-                    it[PlayersTable.monsterMaxHp] = 0
-                    it[PlayersTable.monsterAtk] = 0
-                    it[PlayersTable.monsterDef] = 0
-                    it[PlayersTable.monsterSpd] = 0
-                }
-            }
+            saveMonsterStateInternal(userId, monster)
         }
     }
 
@@ -184,10 +188,10 @@ object PlayerRepository {
             }
             if (!won) {
                 // Save monster state with REMAINING hp
-                saveMonsterState(userId, monster.copy(attributes = monster.attributes.copy(hp = monsterHP)))
+                saveMonsterStateInternal(userId, monster.copy(attributes = monster.attributes.copy(hp = monsterHP)))
             } else {
                 // Clear monster state on victory
-                saveMonsterState(userId, null)
+                saveMonsterStateInternal(userId, null)
             }
         }
     }

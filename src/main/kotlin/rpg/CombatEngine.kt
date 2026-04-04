@@ -10,7 +10,7 @@ object CombatEngine {
         val combatLog: List<String>
     )
 
-    fun simulate(player: Player, monster: Monster): CombatResult {
+    fun simulate(player: Player, monster: Monster, playerName: String = "玩家"): CombatResult {
         val combatLog = mutableListOf<String>()
         val effective = player.effectiveAttributes
         var playerHP = effective.hp
@@ -30,12 +30,12 @@ object CombatEngine {
                 if (entity == "Player") {
                     val dmg = max(1, effective.atk - monster.attributes.def)
                     monsterHP -= dmg
-                    combatLog.add("回合 $turn: 玩家攻擊 ${monster.name}，造成 $dmg 傷害！(${monster.name} HP: ${max(0, monsterHP)})")
+                    combatLog.add("回合 $turn: $playerName 攻擊 ${monster.name}，造成 $dmg 傷害！(${monster.name} HP: ${max(0, monsterHP)})")
                     if (monsterHP <= 0) break
                 } else {
                     val dmg = max(1, monster.attributes.atk - effective.def)
                     playerHP -= dmg
-                    combatLog.add("回合 $turn: ${monster.name} 攻擊玩家，造成 $dmg 傷害！(玩家 HP: ${max(0, playerHP)})")
+                    combatLog.add("回合 $turn: ${monster.name} 攻擊 $playerName，造成 $dmg 傷害！($playerName HP: ${max(0, playerHP)})")
                     if (playerHP <= 0) break
                 }
             }

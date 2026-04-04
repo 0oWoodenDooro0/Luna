@@ -120,7 +120,7 @@ class ExploreCommand : Command {
         val userId = player.id
         val username = interaction.user.username
         
-        val result = CombatEngine.simulate(player, monster)
+        val result = CombatEngine.simulate(player, monster, username)
         val won = result.won
         
         val (newRoomCount, floorMsg) = if (won) {
@@ -140,7 +140,7 @@ class ExploreCommand : Command {
                 }
                 description = """
                     ${if (isResumption) "🔄 繼續與 ${monster.name} 的戰鬥！" else ""}
-                    ${result.combatLog.joinToString("\n").replace("玩家", username)}
+                    ${result.combatLog.joinToString("\n")}
                     
                     ${if (won) "✨ 你擊敗了 ${monster.name}！" else "💀 你被打敗了... 但你設法在同一個房間裡甦醒。"}
                     
