@@ -1,0 +1,35 @@
+# Implementation Plan: Death Recovery & Monster Persistence
+
+## Phase 1: Database & Model Preparation [checkpoint: 5a6a41b]
+- [x] Task: Update `PlayersTable` and `PlayerRepository` to include monster persistence fields. a24a52b
+    - [x] Add columns for monster's current state (HP, ATK, DEF, etc.) to the database.
+    - [x] Create a `MonsterState` model or embed fields into the player's exploration state.
+- [x] Task: Implement monster state saving/loading logic in `PlayerRepository`. a24a52b
+    - [x] Add `saveMonsterState(playerId, monster)` method.
+    - [x] Add `loadMonsterState(playerId)` method.
+- [x] Task: Conductor - User Manual Verification 'Phase 1: Database' (Protocol in workflow.md) 5a6a41b
+
+## Phase 2: Death Logic Refinement [checkpoint: 3d6d6e0]
+- [x] Task: Modify the death handling in `ExploreCommand` (or relevant logic). 41258cc
+    - [x] When player dies, save the monster's current state instead of clearing the room.
+    - [x] Ensure the player remains in the current room.
+    - [x] Add unit tests for death state saving in `RecoveryLogicTest`.
+- [x] Task: Conductor - User Manual Verification 'Phase 2: Death Logic' (Protocol in workflow.md) 3d6d6e0
+
+## Phase 3: Fight Resumption Logic [checkpoint: 29c0747]
+- [x] Task: Update `ExploreCommand` to handle fight resumption. 02a0a4d
+    - [x] Add a check at the beginning of `ExploreCommand` to see if a monster state is saved.
+    - [x] Implement the "Reviving" check: if player is not at full health, block `explore` and show message.
+    - [x] If player is at full health and a monster is saved, resume the fight using the loaded monster state.
+    - [x] Add unit tests for fight resumption in `RpgCoreTest`.
+- [x] Task: Conductor - User Manual Verification 'Phase 3: Resumption Logic' (Protocol in workflow.md) 29c0747
+
+## Phase 4: Final Verification [checkpoint: e7f4c65]
+- [x] Task: End-to-end manual testing. e7f4c65
+    - [x] Verify death does not end exploration.
+    - [x] Verify monster state is persisted.
+    - [x] Verify `explore` works correctly during revival and after full health.
+- [x] Task: Conductor - User Manual Verification 'Phase 4: Final Verification' (Protocol in workflow.md) e7f4c65
+
+## Phase: Review Fixes
+- [x] Task: Apply review suggestions 0c23ce6
