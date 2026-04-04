@@ -19,6 +19,6 @@
 - [x] Task: Conductor - User Manual Verification 'Phase 2: Refactoring Commands' (Protocol in workflow.md) c09c946
 
 **Phase 3: Verification & Cleanup**
-- [ ] Task: Run the full test suite (`./gradlew test`) to ensure zero regressions in game logic.
-- [ ] Task: Verify that no `transaction` blocks or table references remain in the target commands.
+- [x] Task: Run the full test suite (`./gradlew test`) to ensure zero regressions in game logic.
+- [x] Task: Verify that no `transaction` blocks or table references remain in the target commands.
 - [ ] Task: Conductor - User Manual Verification 'Phase 3: Final Verification' (Protocol in workflow.md)
