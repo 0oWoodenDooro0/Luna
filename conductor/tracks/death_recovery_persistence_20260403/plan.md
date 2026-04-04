@@ -1,12 +1,12 @@
 # Implementation Plan: Death Recovery & Monster Persistence
 
 ## Phase 1: Database & Model Preparation
-- [ ] Task: Update `PlayersTable` and `PlayerRepository` to include monster persistence fields.
-    - [ ] Add columns for monster's current state (HP, ATK, DEF, etc.) to the database.
-    - [ ] Create a `MonsterState` model or embed fields into the player's exploration state.
-- [ ] Task: Implement monster state saving/loading logic in `PlayerRepository`.
-    - [ ] Add `saveMonsterState(playerId, monster)` method.
-    - [ ] Add `loadMonsterState(playerId)` method.
+- [x] Task: Update `PlayersTable` and `PlayerRepository` to include monster persistence fields. a24a52b
+    - [x] Add columns for monster's current state (HP, ATK, DEF, etc.) to the database.
+    - [x] Create a `MonsterState` model or embed fields into the player's exploration state.
+- [x] Task: Implement monster state saving/loading logic in `PlayerRepository`. a24a52b
+    - [x] Add `saveMonsterState(playerId, monster)` method.
+    - [x] Add `loadMonsterState(playerId)` method.
 - [ ] Task: Conductor - User Manual Verification 'Phase 1: Database' (Protocol in workflow.md)
 
 ## Phase 2: Death Logic Refinement
