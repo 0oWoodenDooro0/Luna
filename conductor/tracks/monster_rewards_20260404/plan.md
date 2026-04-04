@@ -17,9 +17,9 @@
     - [x] Call the reward calculation upon victory.
     - [x] Update player's inventory in the database.
     - [x] Update the victory embed message to include reward information.
-- [ ] Task: Add unit tests for the reward system in `RpgCoreTest.kt` or a new test file.
-    - [ ] Test reward scaling based on floor level.
-    - [ ] Test that resources are correctly added to the database.
+- [x] Task: Add unit tests for the reward system in `RpgCoreTest.kt` or a new test file. 0db28df
+    - [x] Test reward scaling based on floor level.
+    - [x] Test that resources are correctly added to the database.
 - [ ] Task: Conductor - User Manual Verification 'Phase 2: Rewards' (Protocol in workflow.md)
 
 ## Phase 3: Final Integration & Verification
