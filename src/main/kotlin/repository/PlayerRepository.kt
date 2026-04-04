@@ -189,8 +189,6 @@ object PlayerRepository {
     fun recordCombatResult(userId: String, playerHP: Int, monsterHP: Int, monster: website.woodendoor.rpg.Monster, reward: Pair<String, Int>? = null) {
         val won = monsterHP <= 0
         transaction {
-            val current = PlayersTable.selectAll().where { PlayersTable.id eq userId }.single()
-            
             PlayersTable.update({ PlayersTable.id eq userId }) {
                 it[hp] = playerHP
                 if (!won) {
@@ -198,6 +196,7 @@ object PlayerRepository {
                 }
                 
                 if (won && reward != null) {
+                    val current = PlayersTable.selectAll().where { PlayersTable.id eq userId }.single()
                     val (resourceName, amount) = reward
                     when (resourceName) {
                         "🪵 木頭" -> it[wood] = current[PlayersTable.wood] + amount
