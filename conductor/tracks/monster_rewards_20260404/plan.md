@@ -27,3 +27,6 @@
     - [x] Change a few values in `RpgConfig` (e.g., turn limit, floor size) and ensure they reflect in gameplay/tests.
 - [x] Task: End-to-end manual testing of the exploration and combat reward flow. c6ae74f
 - [x] Task: Conductor - User Manual Verification 'Phase 3: Final Verification' (Protocol in workflow.md) c6ae74f
+
+## Phase: Review Fixes
+- [x] Task: Apply review suggestions 350b833
