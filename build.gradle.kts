@@ -3,11 +3,11 @@ plugins {
     application
 }
 
-group = "website.woodendoor"
+group = "luna"
 version = "1.0-SNAPSHOT"
 
 application {
-    mainClass.set("website.woodendoor.MainKt")
+    mainClass.set("luna.core.MainKt")
 }
 
 repositories {
@@ -35,7 +35,7 @@ tasks.test {
 
 tasks.jar {
     manifest {
-        attributes["Main-Class"] = "website.woodendoor.MainKt"
+        attributes["Main-Class"] = "luna.core.MainKt"
     }
 
     duplicatesStrategy = DuplicatesStrategy.EXCLUDE
