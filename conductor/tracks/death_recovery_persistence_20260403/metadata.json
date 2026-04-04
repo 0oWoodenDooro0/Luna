@@ -1,8 +1,0 @@
-{
-  "track_id": "death_recovery_persistence_20260403",
-  "type": "feature",
-  "status": "new",
-  "created_at": "2026-04-03T10:00:00Z",
-  "updated_at": "2026-04-03T10:00:00Z",
-  "description": "當玩家在explore死亡 不會算做完成這個房間 所以會待在這關復活 滿血後會繼續挑戰同一個怪物數值包含血量會是剛剛死前打到一半的 等到怪死亡後才可以進入下一個房間或是下一層"
-}
