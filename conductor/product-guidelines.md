@@ -1,5 +1,11 @@
 # Product Guidelines: Luna Discord RPG
 
+## Architecture & Code Organization
+The project codebase is explicitly separated into distinct packages to maintain modularity between different features/games:
+- `luna.core`: Contains common application infrastructure, shared repositories (e.g., database connection), and base command interfaces.
+- `luna.rpg`: Houses all logic, models, repositories, and commands specific to the RPG game. Any new RPG feature or command MUST be placed here.
+- `luna.undercover`: Houses all logic and commands specific to the Undercover game. Any new Undercover feature MUST be placed here.
+
 ## Language & Locale
 - **Primary Language:** Traditional Chinese (正體中文).
 - **Implementation:** All bot messages, monster names, material names, and interface elements will be in Traditional Chinese.
