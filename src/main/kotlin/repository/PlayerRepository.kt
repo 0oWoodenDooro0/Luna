@@ -74,6 +74,15 @@ object PlayerRepository {
         return (currentLevel + 1) * baseAmount
     }
 
+    /**
+     * 計算擊敗怪物後的獎勵
+     */
+    fun calculateMonsterReward(floor: Int): Pair<String, Int> {
+        val resourceName = RpgConfig.Exploration.RESOURCE_NAMES.random()
+        val amount = RpgConfig.Economy.MONSTER_REWARD_BASE_AMOUNT + (floor - 1) * RpgConfig.Economy.MONSTER_REWARD_SCALE_PER_FLOOR
+        return resourceName to amount
+    }
+
     sealed class UpgradeResult {
         data class Success(val player: Player) : UpgradeResult()
         data class InsufficientResources(val missingResource: String, val required: Int, val current: Int) : UpgradeResult()

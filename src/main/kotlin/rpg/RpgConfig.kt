@@ -34,6 +34,8 @@ object RpgConfig {
             "armor" to mapOf("wood" to 5, "stone" to 10),
             "recovery" to mapOf("wood" to 10, "stone" to 10, "metal" to 10)
         )
+        const val MONSTER_REWARD_BASE_AMOUNT = 2
+        const val MONSTER_REWARD_SCALE_PER_FLOOR = 1
     }
 
     object Upgrade {
