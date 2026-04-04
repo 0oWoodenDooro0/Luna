@@ -48,13 +48,6 @@ object PlayerRepository {
     }
 
     /**
-     * 是否準備好可以探索 (血量必須全滿)
-     */
-    fun isReadyToExplore(player: website.woodendoor.rpg.Player): Boolean {
-        return player.attributes.hp >= player.attributes.maxHp
-    }
-
-    /**
      * 如果康復時間已到且血量為 0，則恢復滿血
      */
     fun restoreHpIfRecovered(userId: String): Player? {

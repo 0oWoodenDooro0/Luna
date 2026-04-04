@@ -29,16 +29,12 @@ class ExploreCommand : Command {
         PlayerRepository.restoreHpIfRecovered(userId)
         val player = PlayerRepository.getOrCreatePlayer(userId)
         
-        if (!PlayerRepository.isReadyToExplore(player)) {
-            val remaining = PlayerRepository.getRemainingRecoveryTime(player)
+        val remaining = PlayerRepository.getRemainingRecoveryTime(player)
+        if (remaining > 0) {
             interaction.deferPublicResponse().respond {
                 embed {
                     title = "探索失敗"
-                    description = if (remaining > 0) {
-                        "❤️ 你正在康復中... 剩餘時間: $remaining 秒。"
-                    } else {
-                        "❤️ 你需要完全康復 (HP 全滿) 才能繼續探索。"
-                    }
+                    description = "❤️ 你正在康復中... 剩餘時間: $remaining 秒。"
                     color = dev.kord.common.Color(0xFF0000)
                 }
             }
