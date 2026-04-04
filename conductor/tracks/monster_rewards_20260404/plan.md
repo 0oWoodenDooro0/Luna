@@ -6,8 +6,8 @@
     - [x] Create `Monster` object for base stats and scaling formulas.
     - [x] Create `Economy` object for resource rewards and upgrade costs.
     - [x] Create `Combat` object for turn limits and other combat parameters.
-- [ ] Task: Move all hardcoded numeric constants from `ExploreCommand.kt` and `CombatEngine.kt` to `RpgConfig.kt`.
-- [ ] Task: Update `ExploreCommand.kt` and `CombatEngine.kt` to use the new `RpgConfig` constants.
+- [x] Task: Move all hardcoded numeric constants from `ExploreCommand.kt` and `CombatEngine.kt` to `RpgConfig.kt`. 2a0f322
+- [x] Task: Update `ExploreCommand.kt` and `CombatEngine.kt` to use the new `RpgConfig` constants. b0fe3ac
 - [ ] Task: Conductor - User Manual Verification 'Phase 1: Configuration' (Protocol in workflow.md)
 
 ## Phase 2: Implement Monster Defeat Rewards
