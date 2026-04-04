@@ -4,11 +4,8 @@ import dev.kord.core.Kord
 import dev.kord.core.behavior.interaction.response.respond
 import dev.kord.core.entity.interaction.ChatInputCommandInteraction
 import dev.kord.rest.builder.interaction.boolean
-import org.jetbrains.exposed.v1.core.eq
-import org.jetbrains.exposed.v1.jdbc.update
-import org.jetbrains.exposed.v1.jdbc.transactions.transaction
 import website.woodendoor.Command
-import website.woodendoor.repository.PlayersTable
+import website.woodendoor.repository.PlayerRepository
 
 class SettingsCommand : Command {
     override val name = "settings"
@@ -26,11 +23,7 @@ class SettingsCommand : Command {
         val userId = interaction.user.id.toString()
         val autoAdvance = interaction.command.booleans["auto_advance"] ?: true
 
-        transaction {
-            PlayersTable.update({ PlayersTable.id eq userId }) {
-                it[this.autoAdvance] = autoAdvance
-            }
-        }
+        PlayerRepository.updateAutoAdvance(userId, autoAdvance)
 
         val response = interaction.deferEphemeralResponse()
         response.respond { 

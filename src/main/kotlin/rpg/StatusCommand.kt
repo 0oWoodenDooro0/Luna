@@ -4,12 +4,8 @@ import dev.kord.core.Kord
 import dev.kord.core.behavior.interaction.response.respond
 import dev.kord.core.entity.interaction.ChatInputCommandInteraction
 import dev.kord.rest.builder.message.embed
-import org.jetbrains.exposed.v1.core.eq
-import org.jetbrains.exposed.v1.jdbc.selectAll
-import org.jetbrains.exposed.v1.jdbc.transactions.transaction
 import website.woodendoor.Command
 import website.woodendoor.repository.PlayerRepository
-import website.woodendoor.repository.PlayersTable
 
 class StatusCommand : Command {
     override val name = "status"
@@ -23,16 +19,7 @@ class StatusCommand : Command {
         val userId = interaction.user.id.toString()
         val username = interaction.user.username
 
-        PlayerRepository.restoreHpIfRecovered(userId)
-        val player = PlayerRepository.getOrCreatePlayer(userId)
-
-        val extraInfo = transaction {
-            val row = PlayersTable.selectAll().where { PlayersTable.id eq userId }.single()
-            Pair(
-                row[PlayersTable.currentFloor],
-                row[PlayersTable.roomsExplored]
-            )
-        }
+        val player = PlayerRepository.restoreHpIfRecovered(userId) ?: PlayerRepository.getOrCreatePlayer(userId)
 
         val effective = player.effectiveAttributes
 
@@ -63,8 +50,8 @@ class StatusCommand : Command {
                 field {
                     name = "目前進度"
                     value = """
-                        層數：第 ${extraInfo.first} 層
-                        房間：${extraInfo.second} / ${RpgConfig.Exploration.FLOOR_SIZE}
+                        層數：第 ${player.currentFloor} 層
+                        房間：${player.roomsExplored} / ${RpgConfig.Exploration.FLOOR_SIZE}
                     """.trimIndent()
                     inline = true
                 }
