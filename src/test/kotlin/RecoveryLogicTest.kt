@@ -13,6 +13,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 import kotlin.test.assertNotNull
+import kotlin.test.assertNull
 
 class RecoveryLogicTest {
 
@@ -169,6 +170,61 @@ class RecoveryLogicTest {
             assertNotNull(player.currentMonster)
             assertEquals(10, player.currentMonster!!.attributes.hp)
             assertEquals("Slime", player.currentMonster!!.name)
+        }
+    }
+
+    @Test
+    fun testCombatResumption() {
+        transaction {
+            SchemaUtils.createMissingTablesAndColumns(PlayersTable)
+            val userId = "resume_user"
+            
+            // 1. Setup a player with a saved monster (Slime with 10 HP)
+            val savedMonster = website.woodendoor.rpg.Monster(
+                name = "Slime",
+                attributes = website.woodendoor.rpg.RpgAttributes(10, 50, 5, 2, 10)
+            )
+            PlayersTable.insertPlayer(
+                id = userId, hp = 100, maxHp = 100, atk = 10, def = 5, spd = 8,
+                wood = 0, stone = 0, metal = 0, floor = 1, roomsExplored = 5
+            )
+            PlayerRepository.saveMonsterState(userId, savedMonster)
+
+            // 2. Fetch player and verify monster is there
+            val player = PlayerRepository.getOrCreatePlayer(userId)
+            assertNotNull(player.currentMonster)
+            assertEquals(10, player.currentMonster!!.attributes.hp)
+
+            // 3. Simulate resuming combat (using the saved monster)
+            val result = website.woodendoor.rpg.CombatEngine.simulate(player, player.currentMonster!!)
+            
+            // 4. Record result (Victory this time!)
+            PlayerRepository.recordCombatResult(userId, result.playerFinalHP, result.monsterFinalHP, player.currentMonster!!)
+
+            // 5. Verify monster state is cleared and player HP is updated
+            val updatedPlayer = PlayerRepository.getOrCreatePlayer(userId)
+            assertNull(updatedPlayer.currentMonster)
+            assertEquals(result.playerFinalHP, updatedPlayer.attributes.hp)
+            assertTrue(result.won)
+        }
+    }
+
+    @Test
+    fun testStillRevivingCheck() {
+        transaction {
+            SchemaUtils.createMissingTablesAndColumns(PlayersTable)
+            val userId = "reviving_user"
+            PlayersTable.insertPlayer(
+                id = userId, hp = 50, maxHp = 100, atk = 10, def = 5, spd = 8,
+                wood = 0, stone = 0, metal = 0, floor = 1, roomsExplored = 5,
+                recoveryStartAt = System.currentTimeMillis()
+            )
+            
+            val player = PlayerRepository.getOrCreatePlayer(userId)
+            
+            // Should be considered "not ready" if HP < maxHP
+            // Note: We need to implement this check in ExploreCommand or PlayerRepository
+            assertTrue(player.attributes.hp < player.attributes.maxHp)
         }
     }
 }

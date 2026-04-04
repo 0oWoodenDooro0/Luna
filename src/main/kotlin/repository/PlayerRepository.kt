@@ -43,8 +43,15 @@ object PlayerRepository {
     /**
      * 是否正在康復中
      */
-    fun isRecovering(player: Player): Boolean {
+    fun isRecovering(player: website.woodendoor.rpg.Player): Boolean {
         return getRemainingRecoveryTime(player) > 0L
+    }
+
+    /**
+     * 是否準備好可以探索 (血量必須全滿)
+     */
+    fun isReadyToExplore(player: website.woodendoor.rpg.Player): Boolean {
+        return player.attributes.hp >= player.attributes.maxHp
     }
 
     /**

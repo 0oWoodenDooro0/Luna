@@ -29,12 +29,16 @@ class ExploreCommand : Command {
         PlayerRepository.restoreHpIfRecovered(userId)
         val player = PlayerRepository.getOrCreatePlayer(userId)
         
-        val remaining = PlayerRepository.getRemainingRecoveryTime(player)
-        if (remaining > 0) {
+        if (!PlayerRepository.isReadyToExplore(player)) {
+            val remaining = PlayerRepository.getRemainingRecoveryTime(player)
             interaction.deferPublicResponse().respond {
                 embed {
                     title = "探索失敗"
-                    description = "❤️ 你正在康復中... 剩餘時間: $remaining 秒。"
+                    description = if (remaining > 0) {
+                        "❤️ 你正在康復中... 剩餘時間: $remaining 秒。"
+                    } else {
+                        "❤️ 你需要完全康復 (HP 全滿) 才能繼續探索。"
+                    }
                     color = dev.kord.common.Color(0xFF0000)
                 }
             }
@@ -44,6 +48,13 @@ class ExploreCommand : Command {
         val floorInfo = transaction {
             val row = PlayersTable.selectAll().where { PlayersTable.id eq userId }.single()
             Pair(row[PlayersTable.currentFloor], row[PlayersTable.roomsExplored])
+        }
+
+        // Check for saved monster first
+        val savedMonster = player.currentMonster
+        if (savedMonster != null) {
+            handleCombat(interaction, player, savedMonster, floorInfo, isResumption = true)
+            return
         }
 
         val eventRoll = Random.nextInt(100)
@@ -86,7 +97,8 @@ class ExploreCommand : Command {
                 }
             }
         } else {
-            val monsterName = listOf("史萊姆", "哥布林", "小蝙蝠").random()
+            val monsterNames = listOf("史萊姆", "哥布林", "小蝙蝠")
+            val monsterName = monsterNames.random()
             val floor = floorInfo.first
             
             val monsterAttr = RpgAttributes(
@@ -97,60 +109,49 @@ class ExploreCommand : Command {
                 spd = 3 + floor
             )
             val monster = Monster(monsterName, monsterAttr)
+            
+            handleCombat(interaction, player, monster, floorInfo, isResumption = false)
+        }
+    }
 
-            val combatLog = mutableListOf<String>()
-            val effective = player.effectiveAttributes
-            var playerHP = effective.hp
-            var monsterHP = monster.attributes.hp
+    private suspend fun handleCombat(
+        interaction: ChatInputCommandInteraction,
+        player: Player,
+        monster: Monster,
+        floorInfo: Pair<Int, Int>,
+        isResumption: Boolean
+    ) {
+        val userId = player.id
+        val username = interaction.user.username
+        
+        val result = CombatEngine.simulate(player, monster)
+        val won = result.won
+        
+        val (newRoomCount, floorMsg) = if (won) {
+            updateProgression(userId, floorInfo)
+        } else {
+            floorInfo.second to ""
+        }
 
-            combatLog.add("⚔️ 遭遇了 $monsterName (HP: $monsterHP)！")
+        PlayerRepository.recordCombatResult(userId, result.playerFinalHP, result.monsterFinalHP, monster)
 
-            val entities = if (effective.spd >= monster.attributes.spd) {
-                listOf("Player", "Monster")
-            } else {
-                listOf("Monster", "Player")
-            }
-
-            var turn = 1
-            while (playerHP > 0 && monsterHP > 0 && turn <= 20) {
-                for (entity in entities) {
-                    if (entity == "Player") {
-                        val dmg = max(1, effective.atk - monster.attributes.def)
-                        monsterHP -= dmg
-                        combatLog.add("回合 $turn: $username 攻擊 $monsterName，造成 $dmg 傷害！($monsterName HP: ${max(0, monsterHP)})")
-                        if (monsterHP <= 0) break
-                    } else {
-                        val dmg = max(1, monster.attributes.atk - effective.def)
-                        playerHP -= dmg
-                        combatLog.add("回合 $turn: $monsterName 攻擊 $username，造成 $dmg 傷害！($username HP: ${max(0, playerHP)})")
-                        if (playerHP <= 0) break
-                    }
+        interaction.deferPublicResponse().respond {
+            embed {
+                title = if (won) {
+                    if (isResumption) "探索結果：戰鬥勝利 (續戰)！" else "探索結果：戰鬥勝利！"
+                } else {
+                    if (isResumption) "探索結果：戰鬥失敗 (續戰)" else "探索結果：戰鬥失敗"
                 }
-                turn++
-            }
-
-            val won = monsterHP <= 0
-            val (newRoomCount, floorMsg) = if (won) {
-                updateProgression(userId, floorInfo)
-            } else {
-                floorInfo.second to ""
-            }
-
-            PlayerRepository.recordCombatResult(userId, if (won) playerHP else 0, max(0, monsterHP), monster)
-
-            interaction.deferPublicResponse().respond {
-                embed {
-                    title = if (won) "探索結果：戰鬥勝利！" else "探索結果：戰鬥失敗"
-                    description = """
-                        ${combatLog.joinToString("\n")}
-                        
-                        ${if (won) "✨ 你擊敗了 $monsterName！" else "💀 你被打敗了... 但你設法在同一個房間裡甦醒。"}
-                        
-                        進度：$newRoomCount / ${RpgConfig.FLOOR_SIZE} 房間
-                        $floorMsg
-                    """.trimIndent()
-                    color = if (won) dev.kord.common.Color(0x00FF00) else dev.kord.common.Color(0xFF0000)
-                }
+                description = """
+                    ${if (isResumption) "🔄 繼續與 ${monster.name} 的戰鬥！" else ""}
+                    ${result.combatLog.joinToString("\n").replace("玩家", username)}
+                    
+                    ${if (won) "✨ 你擊敗了 ${monster.name}！" else "💀 你被打敗了... 但你設法在同一個房間裡甦醒。"}
+                    
+                    進度：$newRoomCount / ${RpgConfig.FLOOR_SIZE} 房間
+                    $floorMsg
+                """.trimIndent()
+                color = if (won) dev.kord.common.Color(0x00FF00) else dev.kord.common.Color(0xFF0000)
             }
         }
     }
