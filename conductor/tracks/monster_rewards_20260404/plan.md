@@ -8,11 +8,11 @@
     - [x] Create `Combat` object for turn limits and other combat parameters.
 - [x] Task: Move all hardcoded numeric constants from `ExploreCommand.kt` and `CombatEngine.kt` to `RpgConfig.kt`. 2a0f322
 - [x] Task: Update `ExploreCommand.kt` and `CombatEngine.kt` to use the new `RpgConfig` constants. b0fe3ac
-- [~] Task: Conductor - User Manual Verification 'Phase 1: Configuration' (Protocol in workflow.md)
+- [x] Task: Conductor - User Manual Verification 'Phase 1: Configuration' (Protocol in workflow.md) e4be318
 
 ## Phase 2: Implement Monster Defeat Rewards
-- [ ] Task: Implement reward calculation logic in `PlayerRepository.kt` or a new utility.
-    - [ ] Add `calculateMonsterReward(floor: Int): Pair<String, Int>` that returns resource name and amount based on floor scaling in `RpgConfig`.
+- [x] Task: Implement reward calculation logic in `PlayerRepository.kt` or a new utility. d069cdf
+    - [x] Add `calculateMonsterReward(floor: Int): Pair<String, Int>` that returns resource name and amount based on floor scaling in `RpgConfig`.
 - [ ] Task: Update `ExploreCommand.handleCombat` to give rewards on victory.
     - [ ] Call the reward calculation upon victory.
     - [ ] Update player's inventory in the database.
