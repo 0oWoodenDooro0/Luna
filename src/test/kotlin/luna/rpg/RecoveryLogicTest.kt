@@ -14,8 +14,8 @@ import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
-import luna.core.repository.PlayersTable
-import luna.core.repository.PlayerRepository
+import luna.rpg.repository.PlayersTable
+import luna.rpg.repository.PlayerRepository
 
 class RecoveryLogicTest {
 

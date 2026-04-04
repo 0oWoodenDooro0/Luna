@@ -10,8 +10,8 @@ import luna.rpg.RpgConfig
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
-import luna.core.repository.PlayersTable
-import luna.core.repository.PlayerRepository
+import luna.rpg.repository.PlayersTable
+import luna.rpg.repository.PlayerRepository
 
 class PlayerRepositoryProgressionTest {
 

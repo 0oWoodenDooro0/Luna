@@ -10,11 +10,11 @@ import luna.undercover.command.RevealCommand
 import luna.undercover.command.UndercoverCommand
 import luna.undercover.UndercoverManager
 import luna.undercover.UndercoverGame
-import luna.core.repository.DatabaseManager
-import luna.rpg.ExploreCommand
-import luna.rpg.SettingsCommand
-import luna.rpg.StatusCommand
-import luna.rpg.UpgradeCommand
+import luna.rpg.repository.DatabaseManager
+import luna.rpg.command.ExploreCommand
+import luna.rpg.command.SettingsCommand
+import luna.rpg.command.StatusCommand
+import luna.rpg.command.UpgradeCommand
 
 suspend fun main() {
     DatabaseManager.init()

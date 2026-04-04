@@ -1,4 +1,4 @@
-package luna.core.repository
+package luna.rpg.repository
 
 import org.jetbrains.exposed.v1.core.Table
 import org.jetbrains.exposed.v1.core.ResultRow

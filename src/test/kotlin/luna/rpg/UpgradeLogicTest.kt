@@ -9,8 +9,8 @@ import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
-import luna.core.repository.PlayersTable
-import luna.core.repository.PlayerRepository
+import luna.rpg.repository.PlayersTable
+import luna.rpg.repository.PlayerRepository
 
 class UpgradeLogicTest {
 

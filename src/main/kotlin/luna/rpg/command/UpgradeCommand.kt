@@ -1,11 +1,12 @@
-package luna.rpg
+package luna.rpg.command
 
 import dev.kord.core.Kord
 import dev.kord.core.behavior.interaction.response.respond
 import dev.kord.core.entity.interaction.ChatInputCommandInteraction
 import dev.kord.rest.builder.interaction.string
 import luna.core.Command
-import luna.core.repository.PlayerRepository
+import luna.rpg.*
+import luna.rpg.repository.PlayerRepository
 
 class UpgradeCommand : Command {
     override val name = "upgrade"

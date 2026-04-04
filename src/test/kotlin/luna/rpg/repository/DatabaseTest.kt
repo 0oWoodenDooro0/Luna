@@ -1,4 +1,4 @@
-package luna.core.repository
+package luna.rpg.repository
 
 import org.jetbrains.exposed.v1.core.Table
 import org.jetbrains.exposed.v1.jdbc.Database
@@ -9,7 +9,7 @@ import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
-import luna.core.repository.PlayersTable
+import luna.rpg.repository.PlayersTable
 
 class DatabaseTest {
 

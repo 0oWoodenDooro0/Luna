@@ -8,7 +8,7 @@ import org.jetbrains.exposed.v1.core.eq
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import kotlin.test.assertEquals
-import luna.core.repository.PlayersTable
+import luna.rpg.repository.PlayersTable
 
 class RecoveryDatabaseTest {
 

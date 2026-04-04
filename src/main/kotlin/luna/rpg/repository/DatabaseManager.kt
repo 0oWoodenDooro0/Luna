@@ -1,4 +1,4 @@
-package luna.core.repository
+package luna.rpg.repository
 
 import org.jetbrains.exposed.v1.jdbc.Database
 import org.jetbrains.exposed.v1.jdbc.SchemaUtils
