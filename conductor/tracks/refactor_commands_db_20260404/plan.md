@@ -9,14 +9,14 @@
 - [x] Task: Write unit tests for these new methods in `PlayerRepositoryTest.kt` (or a new test file if appropriate). a4583bf
 - [x] Task: Conductor - User Manual Verification 'Phase 1: Repository Expansion' (Protocol in workflow.md) e6e80ce
 
-**Phase 2: Refactoring Commands**
+**Phase 2: Refactoring Commands [checkpoint: c09c946]**
 - [x] Task: Refactor `StatusCommand.kt` to use `PlayerRepository.getProgression`. bc00d2c
 - [x] Task: Refactor `SettingsCommand.kt` to use `PlayerRepository.updateAutoAdvance`. bc00d2c
 - [x] Task: Refactor `ExploreCommand.kt`:
     - [x] Replace direct `transaction` blocks with calls to `PlayerRepository.getProgression`, `PlayerRepository.addResources`, and `PlayerRepository.updateProgression`. bc00d2c
     - [x] Ensure all logic previously in `updateProgression` (private function in command) is moved to the repository. bc00d2c
 - [x] Task: Remove all Exposed-related imports (`org.jetbrains.exposed.*`, `PlayersTable`, etc.) from the command files. bc00d2c
-- [ ] Task: Conductor - User Manual Verification 'Phase 2: Refactoring Commands' (Protocol in workflow.md)
+- [x] Task: Conductor - User Manual Verification 'Phase 2: Refactoring Commands' (Protocol in workflow.md) c09c946
 
 **Phase 3: Verification & Cleanup**
 - [ ] Task: Run the full test suite (`./gradlew test`) to ensure zero regressions in game logic.
