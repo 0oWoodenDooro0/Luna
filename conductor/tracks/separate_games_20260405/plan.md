@@ -19,7 +19,7 @@
 - [x] Task: Conductor - User Manual Verification 'Phase 1: File Structure Reorganization' (Protocol in workflow.md) c6bd416
 
 ## Phase 2: Documentation Update
-- [ ] Task: Update Product Guidelines
-    - [ ] Modify `conductor/product-guidelines.md` to document the new package architecture (`luna.rpg`, `luna.undercover`, `luna.core`).
-    - [ ] Explicitly state the rules for where new features for each game should be placed.
+- [x] Task: Update Product Guidelines d38d3cf
+    - [x] Modify `conductor/product-guidelines.md` to document the new package architecture (`luna.rpg`, `luna.undercover`, `luna.core`).
+    - [x] Explicitly state the rules for where new features for each game should be placed.
 - [ ] Task: Conductor - User Manual Verification 'Phase 2: Documentation Update' (Protocol in workflow.md)
