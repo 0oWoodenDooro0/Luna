@@ -7,6 +7,7 @@ import org.jetbrains.exposed.v1.jdbc.selectAll
 import org.jetbrains.exposed.v1.core.eq
 import website.woodendoor.rpg.Player
 import website.woodendoor.rpg.RpgAttributes
+import website.woodendoor.rpg.Monster
 
 object PlayersTable : Table("players") {
     val id = varchar("id", 64)
@@ -26,6 +27,12 @@ object PlayersTable : Table("players") {
     val armorLevel = integer("armor_level").default(0)
     val recoveryLevel = integer("recovery_level").default(0)
     val recoveryStartAt = long("recovery_start_at").default(0L)
+    val monsterName = varchar("monster_name", 64).nullable()
+    val monsterHp = integer("monster_hp").default(0)
+    val monsterMaxHp = integer("monster_max_hp").default(0)
+    val monsterAtk = integer("monster_atk").default(0)
+    val monsterDef = integer("monster_def").default(0)
+    val monsterSpd = integer("monster_spd").default(0)
 
     override val primaryKey = PrimaryKey(id)
 
@@ -83,6 +90,18 @@ object PlayersTable : Table("players") {
             def = this[def],
             spd = this[spd]
         )
+        val monster = this[monsterName]?.let { name ->
+            Monster(
+                name = name,
+                attributes = RpgAttributes(
+                    hp = this[monsterHp],
+                    maxHp = this[monsterMaxHp],
+                    atk = this[monsterAtk],
+                    def = this[monsterDef],
+                    spd = this[monsterSpd]
+                )
+            )
+        }
         return Player(
             id = this[id],
             name = "Player",
@@ -94,7 +113,8 @@ object PlayersTable : Table("players") {
             shieldLevel = this[shieldLevel],
             armorLevel = this[armorLevel],
             recoveryLevel = this[recoveryLevel],
-            recoveryStartAt = this[recoveryStartAt]
+            recoveryStartAt = this[recoveryStartAt],
+            currentMonster = monster
         )
     }
 }
