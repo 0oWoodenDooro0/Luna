@@ -1,0 +1,8 @@
+{
+  "track_id": "monster_rewards_20260404",
+  "type": "feature",
+  "status": "new",
+  "created_at": "2026-04-04T12:00:00Z",
+  "updated_at": "2026-04-04T12:00:00Z",
+  "description": "新增打敗怪物的物資獎勵 要能夠在rpgconfig中修改 並且將所有在這個rpg遊戲中的參數都新增到rpgconfig中 以便之後做調整 最好分個類"
+}
