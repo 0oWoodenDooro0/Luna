@@ -10,10 +10,10 @@
 - [x] Task: Conductor - User Manual Verification 'Phase 1: Database' (Protocol in workflow.md) 5a6a41b
 
 ## Phase 2: Death Logic Refinement
-- [ ] Task: Modify the death handling in `ExploreCommand` (or relevant logic).
-    - [ ] When player dies, save the monster's current state instead of clearing the room.
-    - [ ] Ensure the player remains in the current room.
-    - [ ] Add unit tests for death state saving in `RecoveryLogicTest`.
+- [x] Task: Modify the death handling in `ExploreCommand` (or relevant logic). 41258cc
+    - [x] When player dies, save the monster's current state instead of clearing the room.
+    - [x] Ensure the player remains in the current room.
+    - [x] Add unit tests for death state saving in `RecoveryLogicTest`.
 - [ ] Task: Conductor - User Manual Verification 'Phase 2: Death Logic' (Protocol in workflow.md)
 
 ## Phase 3: Fight Resumption Logic
