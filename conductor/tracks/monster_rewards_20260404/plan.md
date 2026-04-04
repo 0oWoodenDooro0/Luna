@@ -1,11 +1,11 @@
 # Implementation Plan: Monster Rewards & Configuration Centralization
 
 ## Phase 1: Centralize Configuration in `RpgConfig`
-- [ ] Task: Reorganize `RpgConfig.kt` into categorized data structures.
-    - [ ] Create `Exploration` object for event rates and room logic.
-    - [ ] Create `Monster` object for base stats and scaling formulas.
-    - [ ] Create `Economy` object for resource rewards and upgrade costs.
-    - [ ] Create `Combat` object for turn limits and other combat parameters.
+- [x] Task: Reorganize `RpgConfig.kt` into categorized data structures. 66e7b57
+    - [x] Create `Exploration` object for event rates and room logic.
+    - [x] Create `Monster` object for base stats and scaling formulas.
+    - [x] Create `Economy` object for resource rewards and upgrade costs.
+    - [x] Create `Combat` object for turn limits and other combat parameters.
 - [ ] Task: Move all hardcoded numeric constants from `ExploreCommand.kt` and `CombatEngine.kt` to `RpgConfig.kt`.
 - [ ] Task: Update `ExploreCommand.kt` and `CombatEngine.kt` to use the new `RpgConfig` constants.
 - [ ] Task: Conductor - User Manual Verification 'Phase 1: Configuration' (Protocol in workflow.md)
