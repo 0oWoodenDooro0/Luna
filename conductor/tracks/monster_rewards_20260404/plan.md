@@ -13,10 +13,10 @@
 ## Phase 2: Implement Monster Defeat Rewards
 - [x] Task: Implement reward calculation logic in `PlayerRepository.kt` or a new utility. d069cdf
     - [x] Add `calculateMonsterReward(floor: Int): Pair<String, Int>` that returns resource name and amount based on floor scaling in `RpgConfig`.
-- [ ] Task: Update `ExploreCommand.handleCombat` to give rewards on victory.
-    - [ ] Call the reward calculation upon victory.
-    - [ ] Update player's inventory in the database.
-    - [ ] Update the victory embed message to include reward information.
+- [x] Task: Update `ExploreCommand.handleCombat` to give rewards on victory. ea0400b
+    - [x] Call the reward calculation upon victory.
+    - [x] Update player's inventory in the database.
+    - [x] Update the victory embed message to include reward information.
 - [ ] Task: Add unit tests for the reward system in `RpgCoreTest.kt` or a new test file.
     - [ ] Test reward scaling based on floor level.
     - [ ] Test that resources are correctly added to the database.
