@@ -10,7 +10,7 @@
 - [x] Task: Update `ExploreCommand.kt` and `CombatEngine.kt` to use the new `RpgConfig` constants. b0fe3ac
 - [x] Task: Conductor - User Manual Verification 'Phase 1: Configuration' (Protocol in workflow.md) e4be318
 
-## Phase 2: Implement Monster Defeat Rewards
+## Phase 2: Implement Monster Defeat Rewards [checkpoint: 33c9d40]
 - [x] Task: Implement reward calculation logic in `PlayerRepository.kt` or a new utility. d069cdf
     - [x] Add `calculateMonsterReward(floor: Int): Pair<String, Int>` that returns resource name and amount based on floor scaling in `RpgConfig`.
 - [x] Task: Update `ExploreCommand.handleCombat` to give rewards on victory. ea0400b
@@ -20,7 +20,7 @@
 - [x] Task: Add unit tests for the reward system in `RpgCoreTest.kt` or a new test file. 0db28df
     - [x] Test reward scaling based on floor level.
     - [x] Test that resources are correctly added to the database.
-- [ ] Task: Conductor - User Manual Verification 'Phase 2: Rewards' (Protocol in workflow.md)
+- [x] Task: Conductor - User Manual Verification 'Phase 2: Rewards' (Protocol in workflow.md) 33c9d40
 
 ## Phase 3: Final Integration & Verification
 - [ ] Task: Verify all configuration parameters are correctly applied in the game.
