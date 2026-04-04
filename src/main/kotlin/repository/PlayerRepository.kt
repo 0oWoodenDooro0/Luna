@@ -124,16 +124,16 @@ object PlayerRepository {
                 when (typeKey) {
                     "weapon" -> {
                         it[PlayersTable.weaponLevel] = currentLevel + 1
-                        it[PlayersTable.atk] = player.attributes.atk + RpgConfig.Economy.EQUIPMENT_BONUS_PER_LEVEL
+                        it[PlayersTable.atk] = player.attributes.atk + RpgConfig.Upgrade.WEAPON_ATK_BONUS
                     }
                     "shield" -> {
                         it[PlayersTable.shieldLevel] = currentLevel + 1
-                        it[PlayersTable.def] = player.attributes.def + RpgConfig.Economy.EQUIPMENT_BONUS_PER_LEVEL
+                        it[PlayersTable.def] = player.attributes.def + RpgConfig.Upgrade.SHIELD_DEF_BONUS
                     }
                     "armor" -> {
                         it[PlayersTable.armorLevel] = currentLevel + 1
-                        it[PlayersTable.maxHp] = player.attributes.maxHp + RpgConfig.Economy.EQUIPMENT_BONUS_PER_LEVEL
-                        it[PlayersTable.hp] = player.attributes.hp + RpgConfig.Economy.EQUIPMENT_BONUS_PER_LEVEL // Heal as well
+                        it[PlayersTable.maxHp] = player.attributes.maxHp + RpgConfig.Upgrade.ARMOR_HP_BONUS
+                        it[PlayersTable.hp] = player.attributes.hp + RpgConfig.Upgrade.ARMOR_HP_BONUS // Heal as well
                     }
                     "recovery" -> {
                         it[PlayersTable.recoveryLevel] = currentLevel + 1

@@ -34,7 +34,13 @@ object RpgConfig {
             "armor" to mapOf("wood" to 5, "stone" to 10),
             "recovery" to mapOf("wood" to 10, "stone" to 10, "metal" to 10)
         )
-        const val EQUIPMENT_BONUS_PER_LEVEL = 5
+    }
+
+    object Upgrade {
+        const val WEAPON_ATK_BONUS = 5
+        const val SHIELD_DEF_BONUS = 5
+        const val ARMOR_HP_BONUS = 5
+        const val RECOVERY_REDUCTION_SECONDS = 5.0
     }
 
     object Recovery {
@@ -42,11 +48,6 @@ object RpgConfig {
          * 康復基礎冷卻時間 (每 HP 秒數)
          */
         const val BASE_SECONDS_PER_HP = 0.1
-
-        /**
-         * 康復速度升級每次減少的冷卻時間 (秒)
-         */
-        const val UPGRADE_REDUCTION_SECONDS = 5.0
 
         /**
          * 最小康復時間 (秒)
@@ -58,7 +59,7 @@ object RpgConfig {
          */
         fun calculateCooldown(maxHp: Int, recoveryLevel: Int): Long {
             val base = maxHp * BASE_SECONDS_PER_HP
-            val reduction = recoveryLevel * UPGRADE_REDUCTION_SECONDS
+            val reduction = recoveryLevel * Upgrade.RECOVERY_REDUCTION_SECONDS
             return max(MIN_SECONDS, base - reduction).toLong()
         }
     }
