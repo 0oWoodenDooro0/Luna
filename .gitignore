@@ -54,3 +54,5 @@ bin/
 
 # RPG Database
 data/
+config.yml
+config_test.yml
