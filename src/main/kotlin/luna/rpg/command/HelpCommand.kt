@@ -37,6 +37,11 @@ class HelpCommand : Command {
                     inline = false
                 }
                 field {
+                    name = "/upgrade_list"
+                    value = "查看所有裝備升級所需的資源、目前的等級與下一級的效果。"
+                    inline = false
+                }
+                field {
                     name = "/rebirth"
                     value = "達到指定層數後可以重生，重置進度並獲得重生點數。"
                     inline = false
@@ -44,6 +49,11 @@ class HelpCommand : Command {
                 field {
                     name = "/rebirth_upgrade"
                     value = "消耗重生點數獲得永久的百分比屬性加成。"
+                    inline = false
+                }
+                field {
+                    name = "/rebirth_list"
+                    value = "查看所有重生強化項目的點數成本與效果。"
                     inline = false
                 }
                 field {
