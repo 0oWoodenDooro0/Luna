@@ -16,12 +16,12 @@
 - [x] Task: Ensure the Rebirth logic correctly updates the player model and persists it via `PlayerRepository`. 3cd7045
 - [x] Task: Conductor - User Manual Verification 'Core Rebirth Logic' (Protocol in workflow.md)
 
-## Phase 3: Stat Upgrade Mechanics
+## Phase 3: Stat Upgrade Mechanics [checkpoint: f699601]
 - [x] Task: Write tests for stat upgrade logic (verifying progressive costs, checking max caps, point deduction). 426ea40
 - [x] Task: Write tests for applying upgraded stat percentage bonuses during combat calculations and status display. 426ea40
 - [x] Task: Implement stat upgrade logic (handling point spending and caps). 426ea40
 - [x] Task: Integrate percentage bonuses into `CombatEngine` and `RpgModels` (effective stat calculation). 426ea40
-- [~] Task: Conductor - User Manual Verification 'Stat Upgrade Mechanics' (Protocol in workflow.md)
+- [x] Task: Conductor - User Manual Verification 'Stat Upgrade Mechanics' (Protocol in workflow.md)
 
 ## Phase 4: Discord Commands Integration
 - [ ] Task: Create tests for `/rebirth` command handling.
