@@ -75,6 +75,24 @@ class StatusCommand : Command {
                     """.trimIndent()
                     inline = false
                 }
+
+                if (player.rebirthCount > 0 || player.rebirthPoints > 0) {
+                    field {
+                        name = "✨ 重生狀態 (Rebirth)"
+                        value = """
+                            重生次數：${player.rebirthCount}
+                            重生點數：${player.rebirthPoints}
+                            
+                            永久強化：
+                            ⚔️ ATK: +${(player.rebirthAtkLevel * RpgConfig.Rebirth.STAT_BONUS_PER_LEVEL * 100).toInt()}% (Lv.${player.rebirthAtkLevel})
+                            🛡️ DEF: +${(player.rebirthDefLevel * RpgConfig.Rebirth.STAT_BONUS_PER_LEVEL * 100).toInt()}% (Lv.${player.rebirthDefLevel})
+                            ⚡ SPD: +${(player.rebirthSpdLevel * RpgConfig.Rebirth.STAT_BONUS_PER_LEVEL * 100).toInt()}% (Lv.${player.rebirthSpdLevel})
+                            ❤️ REC: +${(player.rebirthRecoveryLevel * RpgConfig.Rebirth.STAT_BONUS_PER_LEVEL * 100).toInt()}% (Lv.${player.rebirthRecoveryLevel})
+                            HP: +${(player.rebirthHpLevel * RpgConfig.Rebirth.STAT_BONUS_PER_LEVEL * 100).toInt()}% (Lv.${player.rebirthHpLevel})
+                        """.trimIndent()
+                        inline = false
+                    }
+                }
             }
         }
     }

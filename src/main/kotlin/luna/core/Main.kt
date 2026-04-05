@@ -15,6 +15,8 @@ import luna.rpg.command.ExploreCommand
 import luna.rpg.command.SettingsCommand
 import luna.rpg.command.StatusCommand
 import luna.rpg.command.UpgradeCommand
+import luna.rpg.command.RebirthCommand
+import luna.rpg.command.RebirthUpgradeCommand
 
 suspend fun main() {
     DatabaseManager.init()
@@ -26,7 +28,9 @@ suspend fun main() {
         StatusCommand(),
         ExploreCommand(),
         SettingsCommand(),
-        UpgradeCommand()
+        UpgradeCommand(),
+        RebirthCommand(),
+        RebirthUpgradeCommand()
     )
     commands.forEach { it.register(kord) }
 
