@@ -55,6 +55,48 @@ data class Player(
     val currentFloor: Int get() = progression.currentFloor
     val roomsExplored: Int get() = progression.roomsExplored
     val autoAdvance: Boolean get() = progression.autoAdvance
+
+    /**
+     * 檢查是否可以重生
+     */
+    fun canRebirth(): Boolean {
+        return currentFloor >= RpgConfig.Rebirth.MIN_FLOOR
+    }
+
+    /**
+     * 計算重生可獲得的點數
+     */
+    fun calculateEarnedPoints(): Int {
+        if (!canRebirth()) return 0
+        return (currentFloor - RpgConfig.Rebirth.MIN_FLOOR) / RpgConfig.Rebirth.MILESTONE_INTERVAL * RpgConfig.Rebirth.POINTS_PER_MILESTONE
+    }
+
+    /**
+     * 執行重生重置
+     */
+    fun rebirthReset(earnedPoints: Int): Player {
+        return this.copy(
+            attributes = RpgAttributes(
+                hp = 100,
+                maxHp = 100,
+                atk = 10,
+                def = 5,
+                spd = 8
+            ),
+            wood = 0,
+            stone = 0,
+            metal = 0,
+            weaponLevel = 0,
+            shieldLevel = 0,
+            armorLevel = 0,
+            recoveryLevel = 0,
+            recoveryStartAt = 0L,
+            rebirthCount = rebirthCount + 1,
+            rebirthPoints = rebirthPoints + earnedPoints,
+            progression = PlayerProgression(1, 0, autoAdvance),
+            currentMonster = null
+        )
+    }
 }
 
 /**

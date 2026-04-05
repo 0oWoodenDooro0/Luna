@@ -251,6 +251,44 @@ object PlayerRepository {
         }
     }
 
+    /**
+     * Performs a rebirth for the player.
+     * Resets level, equipment, and resources, and grants rebirth points.
+     */
+    fun rebirthPlayer(userId: String): Player? {
+        return transaction {
+            val player = PlayersTable.fetchPlayer(userId) ?: return@transaction null
+            if (!player.canRebirth()) return@transaction player
+            
+            val earnedPoints = player.calculateEarnedPoints()
+            val resetPlayer = player.rebirthReset(earnedPoints)
+            
+            PlayersTable.update({ PlayersTable.id eq userId }) {
+                it[hp] = resetPlayer.attributes.hp
+                it[maxHp] = resetPlayer.attributes.maxHp
+                it[atk] = resetPlayer.attributes.atk
+                it[def] = resetPlayer.attributes.def
+                it[spd] = resetPlayer.attributes.spd
+                it[wood] = resetPlayer.wood
+                it[stone] = resetPlayer.stone
+                it[metal] = resetPlayer.metal
+                it[currentFloor] = resetPlayer.currentFloor
+                it[roomsExplored] = resetPlayer.roomsExplored
+                it[weaponLevel] = resetPlayer.weaponLevel
+                it[shieldLevel] = resetPlayer.shieldLevel
+                it[armorLevel] = resetPlayer.armorLevel
+                it[recoveryLevel] = resetPlayer.recoveryLevel
+                it[recoveryStartAt] = resetPlayer.recoveryStartAt
+                it[rebirthCount] = resetPlayer.rebirthCount
+                it[rebirthPoints] = resetPlayer.rebirthPoints
+                it[monsterName] = null
+                it[monsterHp] = 0
+            }
+            
+            PlayersTable.fetchPlayer(userId)
+        }
+    }
+
     fun recordCombatResult(userId: String, playerHP: Int, monsterHP: Int, monster: luna.rpg.Monster, reward: Pair<String, Int>? = null) {
         val won = monsterHP <= 0
         transaction {

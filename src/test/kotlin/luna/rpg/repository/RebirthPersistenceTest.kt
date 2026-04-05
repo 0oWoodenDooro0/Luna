@@ -52,4 +52,46 @@ class RebirthPersistenceTest {
             assertEquals(5, player.rebirthHpLevel)
         }
     }
+
+    @Test
+    fun testRebirthPlayerIntegration() {
+        transaction {
+            SchemaUtils.createMissingTablesAndColumns(PlayersTable)
+            
+            // 1. Create a high-level player
+            PlayersTable.insertPlayer(
+                id = "rebirth_user",
+                hp = 50,
+                maxHp = 150,
+                atk = 20,
+                def = 15,
+                spd = 12,
+                wood = 100,
+                stone = 100,
+                metal = 100,
+                floor = 60, // Eligible for rebirth (MIN_FLOOR=50)
+                roomsExplored = 2,
+                weaponLevel = 5,
+                shieldLevel = 5,
+                armorLevel = 5,
+                recoveryLevel = 5
+            )
+
+            // 2. Perform rebirth
+            // This will be implemented in PlayerRepository
+            PlayerRepository.rebirthPlayer("rebirth_user")
+
+            // 3. Verify reset state
+            val player = PlayersTable.fetchPlayer("rebirth_user")
+            assertNotNull(player)
+            assertEquals(1, player.rebirthCount)
+            assertEquals(1, player.rebirthPoints) // (60-50)/10 = 1 point
+            assertEquals(1, player.currentFloor)
+            assertEquals(0, player.roomsExplored)
+            assertEquals(0, player.wood)
+            assertEquals(100, player.attributes.hp)
+            assertEquals(100, player.attributes.maxHp)
+            assertEquals(0, player.weaponLevel)
+        }
+    }
 }
