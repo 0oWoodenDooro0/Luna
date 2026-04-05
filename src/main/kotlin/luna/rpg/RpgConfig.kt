@@ -65,4 +65,30 @@ object RpgConfig {
             return max(MIN_SECONDS, base - reduction).toLong()
         }
     }
+
+    data class RebirthConfig(
+        val minFloor: Int = 50,
+        val milestoneInterval: Int = 10,
+        val pointsPerMilestone: Int = 1,
+        val baseUpgradeCost: Int = 1,
+        val costIncreasePerLevel: Int = 1,
+        val maxStatLevel: Int = 10,
+        val statBonusPerLevel: Double = 0.05
+    ) {
+        companion object {
+            fun fromMap(data: Map<String, String>): RebirthConfig {
+                return RebirthConfig(
+                    minFloor = data["minFloor"]?.toInt() ?: 50,
+                    milestoneInterval = data["milestoneInterval"]?.toInt() ?: 10,
+                    pointsPerMilestone = data["pointsPerMilestone"]?.toInt() ?: 1,
+                    baseUpgradeCost = data["baseUpgradeCost"]?.toInt() ?: 1,
+                    costIncreasePerLevel = data["costIncreasePerLevel"]?.toInt() ?: 1,
+                    maxStatLevel = data["maxStatLevel"]?.toInt() ?: 10,
+                    statBonusPerLevel = data["statBonusPerLevel"]?.toDouble() ?: 0.05
+                )
+            }
+        }
+    }
+
+    val Rebirth = RebirthConfig()
 }
