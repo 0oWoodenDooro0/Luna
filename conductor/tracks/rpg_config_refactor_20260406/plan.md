@@ -1,9 +1,9 @@
 # Implementation Plan: RPG Config Refactor
 
-## Phase 1: Preparation and Environment (準備階段)
-- [x] Task: 分析現有的 `RpgConfig.kt` 結構，確定哪些屬性需要外部化。
-- [x] Task: 選擇或添加 YAML 處理庫（如 SnakeYAML 或 Kotlin-specific libraries）。
-- [~] Task: Conductor - User Manual Verification 'Phase 1' (Protocol in workflow.md)
+## Phase 1: Preparation and Environment (準備階段) [checkpoint: 98af24d]
+- [x] Task: 分析現有的 `RpgConfig.kt` 結構，確定哪些屬性需要外部化。 (2aa2c27)
+- [x] Task: 選擇或添加 YAML 處理庫（如 SnakeYAML 或 Kotlin-specific libraries）。 (2aa2c27)
+- [x] Task: Conductor - User Manual Verification 'Phase 1' (Protocol in workflow.md) (98af24d)
 
 ## Phase 2: Configuration Loader Implementation (實作配置讀取)
 - [ ] Task: 建立 `RpgConfigLoader` 類別，負責讀取並解析 `config.yml`。
