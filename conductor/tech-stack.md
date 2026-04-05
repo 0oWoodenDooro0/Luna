@@ -11,6 +11,9 @@
 - **Exposed (JetBrains):** An ORM framework for Kotlin that provides a type-safe API for working with SQL databases.
 - **SQLite (JDBC):** A lightweight, file-based SQL database for local persistence of player data, equipment, and resources.
 
+## Configuration
+- **SnakeYAML:** A YAML processor for the JVM. It is used to handle external configuration files (`config.yml`), allowing for runtime adjustments to game balance without re-compilation.
+
 ## Development & Testing
 - **SLF4J (Simple):** Simple logging facade for basic output and debugging.
 - **Kotlin Test:** Standard library for unit and integration testing.
