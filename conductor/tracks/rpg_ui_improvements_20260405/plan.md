@@ -25,17 +25,17 @@
     - [x] Implement Embed display showing all rebirth upgrades and current point usage
 - [x] Task: Conductor - User Manual Verification 'Phase 2' (Protocol in workflow.md) 058b323
 
-## Phase 3: Enhanced Status and Command UI
-- [x] Task: Write Tests for updated Status and Upgrade commands ae0e344
+## Phase 3: Enhanced Status and Command UI [checkpoint: 49d3d2a]
+- [x] Task: Write Tests for updated Status and Upgrade commands ae0e344/c343cb9
     - [x] Update `StatusCommandTest.kt` or create a new test for enhanced info
     - [x] Verify that resource totals and rebirth progress are correctly displayed
 - [x] Task: Update `StatusCommand` ae0e344
     - [x] Add display for current Wood, Stone, and Metal amounts
     - [x] Add display for rebirth milestone progress (Floor level check)
-- [x] Task: Update `UpgradeCommand` and `RebirthUpgradeCommand` ae0e344
+- [x] Task: Update `UpgradeCommand` and `RebirthUpgradeCommand` ae0e344/c343cb9
     - [x] Refactor success/failure messages to use Discord Embeds
     - [x] Add "Next Level Stats" (e.g., ATK +5) information in success messages
-- [ ] Task: Conductor - User Manual Verification 'Phase 3' (Protocol in workflow.md)
+- [x] Task: Conductor - User Manual Verification 'Phase 3' (Protocol in workflow.md) 49d3d2a
 
 ## Phase 4: Final Polishing and Verification
 - [ ] Task: UI Polish and Consistency Check
