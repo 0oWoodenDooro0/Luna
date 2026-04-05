@@ -12,11 +12,11 @@
 - [x] Task: 寫測試案例：驗證當 `config.yml` 存在且包含自定義數值時，Loader 會讀取自定義值。 (6bbdb12)
 - [x] Task: Conductor - User Manual Verification 'Phase 2' (Protocol in workflow.md) (2db905e)
 
-## Phase 3: Integration and Reload Logic (整合與重載邏輯)
-- [~] Task: 修改 `RpgConfig` 以便它使用 `RpgConfigLoader` 的實例。
-- [ ] Task: 實作 `/reload` 指令，調用 `RpgConfigLoader` 的 reload 方法。
-- [ ] Task: 寫測試案例：驗證執行 `/reload` 後，內存中的配置已成功更新。
-- [ ] Task: Conductor - User Manual Verification 'Phase 3' (Protocol in workflow.md)
+## Phase 3: Integration and Reload Logic (整合與重載邏輯) [checkpoint: ce4e581]
+- [x] Task: 修改 `RpgConfig` 以便它使用 `RpgConfigLoader` 的實例。 (eb01958)
+- [x] Task: 實作 `/reload` 指令，調用 `RpgConfigLoader` 的 reload 方法。 (eb01958)
+- [x] Task: 寫測試案例：驗證執行 `/reload` 後，內存中的配置已成功更新。 (eb01958)
+- [x] Task: Conductor - User Manual Verification 'Phase 3' (Protocol in workflow.md) (ce4e581)
 
 ## Phase 4: Final Verification and Cleanup (最終驗證與清理)
 - [ ] Task: 在開發環境中模擬 JAR 打包，手動測試 `config.yml` 的生成、修改與重載。
