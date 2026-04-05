@@ -24,9 +24,9 @@
 - [x] Task: Conductor - User Manual Verification 'Stat Upgrade Mechanics' (Protocol in workflow.md)
 
 ## Phase 4: Discord Commands Integration
-- [ ] Task: Create tests for `/rebirth` command handling.
-- [ ] Task: Create tests for `/rebirth_upgrade` command handling.
-- [ ] Task: Implement `/rebirth` Discord command (showing rebirth info, confirming, and executing rebirth).
-- [ ] Task: Implement `/rebirth_upgrade` Discord command (showing available points, upgrade costs, current levels, and allowing selection of stat to upgrade).
-- [ ] Task: Update `/status` command to display rebirth count, current points, and upgraded stat bonuses.
+- [x] Task: Create tests for `/rebirth` command handling. 0f3cc4e
+- [x] Task: Create tests for `/rebirth_upgrade` command handling. 0f3cc4e
+- [x] Task: Implement `/rebirth` Discord command (showing rebirth info, confirming, and executing rebirth). 0f3cc4e
+- [x] Task: Implement `/rebirth_upgrade` Discord command (showing available points, upgrade costs, current levels, and allowing selection of stat to upgrade). 0f3cc4e
+- [x] Task: Update `/status` command to display rebirth count, current points, and upgraded stat bonuses. 0f3cc4e
 - [ ] Task: Conductor - User Manual Verification 'Discord Commands Integration' (Protocol in workflow.md)
