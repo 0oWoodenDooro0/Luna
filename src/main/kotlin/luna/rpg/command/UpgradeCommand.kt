@@ -4,6 +4,7 @@ import dev.kord.core.Kord
 import dev.kord.core.behavior.interaction.response.respond
 import dev.kord.core.entity.interaction.ChatInputCommandInteraction
 import dev.kord.rest.builder.interaction.string
+import dev.kord.rest.builder.message.embed
 import luna.core.Command
 import luna.rpg.*
 import luna.rpg.repository.PlayerRepository
@@ -31,6 +32,14 @@ class UpgradeCommand : Command {
         val result = PlayerRepository.upgradeEquipment(userId, type)
         val response = interaction.deferPublicResponse()
         
+        val typeName = when (type) {
+            "weapon" -> "武器"
+            "shield" -> "盾牌"
+            "armor" -> "護甲"
+            "recovery" -> "康復速度"
+            else -> "裝備"
+        }
+
         when (result) {
             is PlayerRepository.UpgradeResult.Success -> {
                 val player = result.player
@@ -41,25 +50,43 @@ class UpgradeCommand : Command {
                     "recovery" -> player.recoveryLevel
                     else -> 0
                 }
-                val typeName = when (type) {
-                    "weapon" -> "武器"
-                    "shield" -> "盾牌"
-                    "armor" -> "護甲"
-                    "recovery" -> "康復速度"
-                    else -> "裝備"
+                
+                val statBonus = when (type) {
+                    "weapon" -> "⚔️ ATK +${RpgConfig.Upgrade.WEAPON_ATK_BONUS}"
+                    "shield" -> "🛡️ DEF +${RpgConfig.Upgrade.SHIELD_DEF_BONUS}"
+                    "armor" -> "👕 HP +${RpgConfig.Upgrade.ARMOR_HP_BONUS}"
+                    "recovery" -> "❤️ 康復速度 -${RpgConfig.Upgrade.RECOVERY_REDUCTION_SECONDS.toInt()}s"
+                    else -> ""
                 }
+
                 response.respond {
-                    content = "✅ 升級成功！你的 **$typeName** 已提升至 **Lv.$newLevel**！"
+                    embed {
+                        title = "✅ 升級成功！"
+                        description = "你的 **$typeName** 已提升至 **Lv.$newLevel**！"
+                        color = dev.kord.common.Color(0x2ECC71)
+                        field {
+                            name = "屬性變化"
+                            value = statBonus
+                        }
+                    }
                 }
             }
             is PlayerRepository.UpgradeResult.InsufficientResources -> {
                 response.respond {
-                    content = "❌ 資源不足！升級需要 **${result.required}** 個 ${result.missingResource}，但你只有 **${result.current}** 個。"
+                    embed {
+                        title = "❌ 資源不足"
+                        description = "升級需要 **${result.required}** 個 ${result.missingResource}，但你只有 **${result.current}** 個。"
+                        color = dev.kord.common.Color(0xE74C3C)
+                    }
                 }
             }
             PlayerRepository.UpgradeResult.Error -> {
                 response.respond {
-                    content = "❌ 發生錯誤，無法進行升級。"
+                    embed {
+                        title = "❌ 發生錯誤"
+                        description = "無法進行升級。"
+                        color = dev.kord.common.Color(0x95A5A6)
+                    }
                 }
             }
         }

@@ -50,9 +50,18 @@ class StatusCommand : Command {
 
                 field {
                     name = "目前進度"
+                    val nextMilestone = if (player.currentFloor < RpgConfig.Rebirth.MIN_FLOOR) {
+                        RpgConfig.Rebirth.MIN_FLOOR
+                    } else {
+                        ((player.currentFloor - RpgConfig.Rebirth.MIN_FLOOR) / RpgConfig.Rebirth.MILESTONE_INTERVAL + 1) * RpgConfig.Rebirth.MILESTONE_INTERVAL + RpgConfig.Rebirth.MIN_FLOOR
+                    }
+                    val floorsLeft = nextMilestone - player.currentFloor
+                    val milestoneType = if (player.currentFloor < RpgConfig.Rebirth.MIN_FLOOR) "解鎖重生" else "下一個重生點數"
+                    
                     value = """
                         層數：第 ${player.currentFloor} 層
                         房間：${player.roomsExplored} / ${RpgConfig.Exploration.FLOOR_SIZE}
+                        進度：距離 $milestoneType 還差 $floorsLeft 層
                     """.trimIndent()
                     inline = true
                 }
