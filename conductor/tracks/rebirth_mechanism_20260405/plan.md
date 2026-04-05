@@ -1,7 +1,7 @@
 # Implementation Plan: Rebirth Mechanism
 
 ## Phase 1: Configuration & Database Models
-- [ ] Task: Write tests for `RebirthConfig` parsing and default values.
+- [x] Task: Write tests for `RebirthConfig` parsing and default values. c639fe4
 - [ ] Task: Update `RpgConfig` with nested `RebirthConfig` (minLevel, milestones, upgrade costs, max caps).
 - [ ] Task: Write tests for `PlayerRepository` to verify saving and loading of rebirth fields.
 - [ ] Task: Update `PlayerRepository` and `PlayersTable` (Exposed ORM) to persist rebirth points and upgraded stats.
