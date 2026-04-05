@@ -22,3 +22,6 @@
 - [x] Task: 在開發環境中模擬 JAR 打包，手動測試 `config.yml` 的生成、修改與重載。 (49f7ccf)
 - [x] Task: 清理無用的硬編碼配置。 (49f7ccf)
 - [x] Task: Conductor - User Manual Verification 'Phase 4' (Protocol in workflow.md) (515a50e)
+
+## Phase: Review Fixes
+- [x] Task: Apply review suggestions (comments in config, permission check, test safety) (4393e6a)
