@@ -7,7 +7,7 @@
 - [x] Task: Update `PlayerRepository` and `PlayersTable` (Exposed ORM) to persist rebirth points and upgraded stats. 073b012
     - [x] Update `PlayersTable` with new columns for rebirth points, and stat levels (ATK, DEF, SPD, Recovery, HP).
     - [x] Update `PlayerRepository` to map new columns.
-- [ ] Task: Conductor - User Manual Verification 'Configuration & Database Models' (Protocol in workflow.md)
+- [~] Task: Conductor - User Manual Verification 'Configuration & Database Models' (Protocol in workflow.md)
 
 ## Phase 2: Core Rebirth Logic
 - [ ] Task: Write tests for Rebirth logic (calculating points based on milestones, validating minimum level).
