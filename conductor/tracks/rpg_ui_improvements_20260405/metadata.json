@@ -1,0 +1,8 @@
+{
+  "track_id": "rpg_ui_improvements_20260405",
+  "type": "feature",
+  "status": "new",
+  "created_at": "2026-04-05T12:00:00Z",
+  "updated_at": "2026-04-05T12:00:00Z",
+  "description": "我要更新rpg的指令顯示 像是upgrade以及rebrith_upgrade 我沒辦法清楚知道哪個升級需要花費什麼物資會有什麼效果 幫我多一個升級列表可以瞭解所有升級的項目 還有其他更多讓玩家可以瞭解的也可以加 還要一個help指令可以列出所有能夠使用的指令說明"
+}
