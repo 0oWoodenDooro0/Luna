@@ -62,7 +62,7 @@ class ExploreCommand : Command {
                         進度：${progressionResult.finalRoomCount} / ${RpgConfig.Exploration.FLOOR_SIZE} 房間
                         ${progressionResult.message}
                     """.trimIndent()
-                    color = dev.kord.common.Color(0x00FF00)
+                    color = dev.kord.common.Color(0x2ECC71)
                 }
             }
         } else {

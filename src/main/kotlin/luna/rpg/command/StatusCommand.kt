@@ -28,6 +28,7 @@ class StatusCommand : Command {
         response.respond {
             embed {
                 title = "$username 的角色狀態"
+                color = dev.kord.common.Color(0x3498DB)
                 field {
                     name = "基礎屬性 (含加成)"
                     value = """
