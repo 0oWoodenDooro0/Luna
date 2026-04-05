@@ -28,6 +28,13 @@ object PlayersTable : Table("players") {
     val armorLevel = integer("armor_level").default(0)
     val recoveryLevel = integer("recovery_level").default(0)
     val recoveryStartAt = long("recovery_start_at").default(0L)
+    val rebirthCount = integer("rebirth_count").default(0)
+    val rebirthPoints = integer("rebirth_points").default(0)
+    val rebirthAtkLevel = integer("rebirth_atk_level").default(0)
+    val rebirthDefLevel = integer("rebirth_def_level").default(0)
+    val rebirthSpdLevel = integer("rebirth_spd_level").default(0)
+    val rebirthRecoveryLevel = integer("rebirth_recovery_level").default(0)
+    val rebirthHpLevel = integer("rebirth_hp_level").default(0)
     val monsterName = varchar("monster_name", 64).nullable()
     val monsterHp = integer("monster_hp").default(0)
     val monsterMaxHp = integer("monster_max_hp").default(0)
@@ -54,7 +61,14 @@ object PlayersTable : Table("players") {
         shieldLevel: Int = 0,
         armorLevel: Int = 0,
         recoveryLevel: Int = 0,
-        recoveryStartAt: Long = 0L
+        recoveryStartAt: Long = 0L,
+        rebirthCount: Int = 0,
+        rebirthPoints: Int = 0,
+        rebirthAtkLevel: Int = 0,
+        rebirthDefLevel: Int = 0,
+        rebirthSpdLevel: Int = 0,
+        rebirthRecoveryLevel: Int = 0,
+        rebirthHpLevel: Int = 0
     ) {
         insert {
             it[this.id] = id
@@ -74,6 +88,13 @@ object PlayersTable : Table("players") {
             it[this.armorLevel] = armorLevel
             it[this.recoveryLevel] = recoveryLevel
             it[this.recoveryStartAt] = recoveryStartAt
+            it[this.rebirthCount] = rebirthCount
+            it[this.rebirthPoints] = rebirthPoints
+            it[this.rebirthAtkLevel] = rebirthAtkLevel
+            it[this.rebirthDefLevel] = rebirthDefLevel
+            it[this.rebirthSpdLevel] = rebirthSpdLevel
+            it[this.rebirthRecoveryLevel] = rebirthRecoveryLevel
+            it[this.rebirthHpLevel] = rebirthHpLevel
         }
     }
 
@@ -115,6 +136,13 @@ object PlayersTable : Table("players") {
             armorLevel = this[armorLevel],
             recoveryLevel = this[recoveryLevel],
             recoveryStartAt = this[recoveryStartAt],
+            rebirthCount = this[rebirthCount],
+            rebirthPoints = this[rebirthPoints],
+            rebirthAtkLevel = this[rebirthAtkLevel],
+            rebirthDefLevel = this[rebirthDefLevel],
+            rebirthSpdLevel = this[rebirthSpdLevel],
+            rebirthRecoveryLevel = this[rebirthRecoveryLevel],
+            rebirthHpLevel = this[rebirthHpLevel],
             currentMonster = monster,
             progression = PlayerProgression(
                 currentFloor = this[currentFloor],

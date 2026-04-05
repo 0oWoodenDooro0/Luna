@@ -36,6 +36,13 @@ data class Player(
     val armorLevel: Int = 0,
     val recoveryLevel: Int = 0,
     val recoveryStartAt: Long = 0L,
+    val rebirthCount: Int = 0,
+    val rebirthPoints: Int = 0,
+    val rebirthAtkLevel: Int = 0,
+    val rebirthDefLevel: Int = 0,
+    val rebirthSpdLevel: Int = 0,
+    val rebirthRecoveryLevel: Int = 0,
+    val rebirthHpLevel: Int = 0,
     val currentMonster: Monster? = null,
     val progression: PlayerProgression = PlayerProgression(1, 0, true)
 ) {
