@@ -3,7 +3,14 @@ package luna.rpg
 import kotlin.math.max
 
 object RpgConfig {
-    private val loader = RpgConfigLoader()
+    var configPath: String = "config.yml"
+        set(value) {
+            field = value
+            loader = RpgConfigLoader(value)
+            reload()
+        }
+
+    private var loader = RpgConfigLoader(configPath)
     private var data = loader.load()
 
     fun reload() {

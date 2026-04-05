@@ -18,6 +18,10 @@ class RpgConfigLoaderTest {
 
         assertTrue(configFile.exists(), "Config file should be generated if not exists")
         
+        val content = configFile.readText()
+        assertTrue(content.contains("# Luna Discord RPG Configuration"), "Config should contain header comment")
+        assertTrue(content.contains("# --- Exploration Settings ---"), "Config should contain section comments")
+        
         // Cleanup
         configFile.delete()
     }

@@ -5,14 +5,16 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 
 class RpgConfigReloadTest {
-    private val configPath = "config.yml"
+    private val configPath = "config_reload_test.yml"
 
     @Test
     fun testReloadConfig() {
         val configFile = File(configPath)
+        if (configFile.exists()) configFile.delete()
+
+        // Set test config path
+        RpgConfig.configPath = configPath
         
-        // Ensure default config exists
-        RpgConfig.reload()
         val originalFloorSize = RpgConfig.Exploration.FLOOR_SIZE
         
         // Modify file
@@ -23,8 +25,8 @@ class RpgConfigReloadTest {
         
         assertEquals(originalFloorSize + 10, RpgConfig.Exploration.FLOOR_SIZE)
         
-        // Reset to original
-        configFile.writeText(configFile.readText().replace("floor_size: ${originalFloorSize + 10}", "floor_size: $originalFloorSize"))
-        RpgConfig.reload()
+        // Cleanup and Reset
+        RpgConfig.configPath = "config.yml"
+        configFile.delete()
     }
 }
