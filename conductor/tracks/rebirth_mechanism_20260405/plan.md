@@ -2,7 +2,7 @@
 
 ## Phase 1: Configuration & Database Models
 - [x] Task: Write tests for `RebirthConfig` parsing and default values. c639fe4
-- [ ] Task: Update `RpgConfig` with nested `RebirthConfig` (minLevel, milestones, upgrade costs, max caps).
+- [x] Task: Update `RpgConfig` with nested `RebirthConfig` (minLevel, milestones, upgrade costs, max caps). 670a10d
 - [ ] Task: Write tests for `PlayerRepository` to verify saving and loading of rebirth fields.
 - [ ] Task: Update `PlayerRepository` and `PlayersTable` (Exposed ORM) to persist rebirth points and upgraded stats.
     - [ ] Update `PlayersTable` with new columns for rebirth points, and stat levels (ATK, DEF, SPD, Recovery, HP).
