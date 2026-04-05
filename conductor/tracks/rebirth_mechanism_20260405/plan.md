@@ -30,3 +30,6 @@
 - [x] Task: Implement `/rebirth_upgrade` Discord command (showing available points, upgrade costs, current levels, and allowing selection of stat to upgrade). 0f3cc4e
 - [x] Task: Update `/status` command to display rebirth count, current points, and upgraded stat bonuses. 0f3cc4e
 - [x] Task: Conductor - User Manual Verification 'Discord Commands Integration' (Protocol in workflow.md)
+
+## Phase: Review Fixes
+- [x] Task: Apply review suggestions e776b89
