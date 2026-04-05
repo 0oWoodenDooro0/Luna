@@ -1,14 +1,14 @@
 # Implementation Plan: RPG UI Improvements
 
-## Phase 1: Help Command and Basic Infrastructure
-- [ ] Task: Write Tests for `HelpCommand`
-    - [ ] Create `HelpCommandTest.kt`
-    - [ ] Verify that the command correctly lists all RPG commands and descriptions
-- [ ] Task: Implement `HelpCommand`
-    - [ ] Create `src/main/kotlin/luna/rpg/command/HelpCommand.kt`
-    - [ ] Register the command in `Main.kt`
-    - [ ] Implement logic to display a list of all RPG commands (Chinese)
-- [ ] Task: Conductor - User Manual Verification 'Phase 1' (Protocol in workflow.md)
+## Phase 1: Help Command and Basic Infrastructure [checkpoint: 244cfd6]
+- [x] Task: Write Tests for `HelpCommand` eef8571
+    - [x] Create `HelpCommandTest.kt`
+    - [x] Verify that the command correctly lists all RPG commands and descriptions
+- [x] Task: Implement `HelpCommand` eef8571
+    - [x] Create `src/main/kotlin/luna/rpg/command/HelpCommand.kt`
+    - [x] Register the command in `Main.kt`
+    - [x] Implement logic to display a list of all RPG commands (Chinese)
+- [x] Task: Conductor - User Manual Verification 'Phase 1' (Protocol in workflow.md) 244cfd6
 
 ## Phase 2: Upgrade and Rebirth List Commands
 - [ ] Task: Write Tests for `UpgradeListCommand` and `RebirthListCommand`
