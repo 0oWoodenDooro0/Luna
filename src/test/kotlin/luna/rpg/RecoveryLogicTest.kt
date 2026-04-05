@@ -29,7 +29,6 @@ class RecoveryLogicTest {
         transaction {
             SchemaUtils.createMissingTablesAndColumns(PlayersTable)
             val maxHp = 100
-            val cooldown = RpgConfig.Recovery.calculateCooldown(maxHp, 0) // 10s
             
             // CASE 1: HP > 0 -> Not recovering
             val healthyPlayer = luna.rpg.Player(
@@ -37,6 +36,7 @@ class RecoveryLogicTest {
                 attributes = luna.rpg.RpgAttributes(100, 100, 10, 5, 8)
             )
             assertFalse(PlayerRepository.isRecovering(healthyPlayer))
+            val cooldown = healthyPlayer.calculateRecoveryCooldown() // 10s
             
             // CASE 2: HP = 0, just started -> Recovering
             val deadPlayer = luna.rpg.Player(
@@ -46,7 +46,7 @@ class RecoveryLogicTest {
             )
             assertTrue(PlayerRepository.isRecovering(deadPlayer))
             val remaining = PlayerRepository.getRemainingRecoveryTime(deadPlayer)
-            assertTrue(remaining in (cooldown - 2)..cooldown)
+            assertTrue(remaining.toDouble() in (cooldown - 2.0)..cooldown.toDouble())
             
             // CASE 3: HP = 0, long ago -> Not recovering
             val recoveredPlayer = luna.rpg.Player(

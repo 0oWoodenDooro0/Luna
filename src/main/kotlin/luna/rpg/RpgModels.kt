@@ -1,5 +1,7 @@
 package luna.rpg
 
+import kotlin.math.max
+
 /**
  * Represents the core attributes of an entity in the RPG.
  *
@@ -47,10 +49,23 @@ data class Player(
     val progression: PlayerProgression = PlayerProgression(1, 0, true)
 ) {
     /**
-     * 計算加成後的最終屬性 (目前直接從資料庫讀取已加成的數值)
+     * 計算加成後的最終屬性
      */
     val effectiveAttributes: RpgAttributes
-        get() = attributes
+        get() {
+            val atkBonus = 1.0 + (rebirthAtkLevel * RpgConfig.Rebirth.STAT_BONUS_PER_LEVEL)
+            val defBonus = 1.0 + (rebirthDefLevel * RpgConfig.Rebirth.STAT_BONUS_PER_LEVEL)
+            val spdBonus = 1.0 + (rebirthSpdLevel * RpgConfig.Rebirth.STAT_BONUS_PER_LEVEL)
+            val hpBonus = 1.0 + (rebirthHpLevel * RpgConfig.Rebirth.STAT_BONUS_PER_LEVEL)
+
+            return RpgAttributes(
+                hp = attributes.hp, // Current HP doesn't get boosted, only maxHp
+                maxHp = (attributes.maxHp * hpBonus).toInt(),
+                atk = (attributes.atk * atkBonus).toInt(),
+                def = (attributes.def * defBonus).toInt(),
+                spd = (attributes.spd * spdBonus).toInt()
+            )
+        }
 
     val currentFloor: Int get() = progression.currentFloor
     val roomsExplored: Int get() = progression.roomsExplored
@@ -96,6 +111,35 @@ data class Player(
             progression = PlayerProgression(1, 0, autoAdvance),
             currentMonster = null
         )
+    }
+
+    /**
+     * 計算康復所需時間 (秒)
+     */
+    fun calculateRecoveryCooldown(): Long {
+        val base = effectiveAttributes.maxHp * RpgConfig.Recovery.BASE_SECONDS_PER_HP
+        val reduction = recoveryLevel * RpgConfig.Upgrade.RECOVERY_REDUCTION_SECONDS
+        val baseCooldown = max(RpgConfig.Recovery.MIN_SECONDS, base - reduction)
+        
+        // Apply rebirth bonus (percentage reduction)
+        val rebirthBonus = 1.0 - (rebirthRecoveryLevel * RpgConfig.Rebirth.STAT_BONUS_PER_LEVEL)
+        return max(RpgConfig.Recovery.MIN_SECONDS, baseCooldown * rebirthBonus).toLong()
+    }
+
+    /**
+     * 計算屬性升級成本
+     */
+    fun calculateStatUpgradeCost(currentLevel: Int): Int {
+        return RpgConfig.Rebirth.BASE_UPGRADE_COST + (currentLevel * RpgConfig.Rebirth.COST_INCREASE_PER_LEVEL)
+    }
+
+    /**
+     * 檢查是否可以升級特定屬性
+     */
+    fun canUpgradeStat(currentLevel: Int): Boolean {
+        if (currentLevel >= RpgConfig.Rebirth.MAX_STAT_LEVEL) return false
+        val cost = calculateStatUpgradeCost(currentLevel)
+        return rebirthPoints >= cost
     }
 }
 

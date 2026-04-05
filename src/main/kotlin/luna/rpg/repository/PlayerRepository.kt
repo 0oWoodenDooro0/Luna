@@ -100,7 +100,7 @@ object PlayerRepository {
      */
     fun getRemainingRecoveryTime(player: Player): Long {
         if (player.attributes.hp > 0) return 0L
-        val cooldownMs = RpgConfig.Recovery.calculateCooldown(player.attributes.maxHp, player.recoveryLevel) * 1000L
+        val cooldownMs = player.calculateRecoveryCooldown() * 1000L
         val elapsedMs = System.currentTimeMillis() - player.recoveryStartAt
         return Math.max(0L, (cooldownMs - elapsedMs + 999) / 1000) // Use ceil-like division for display
     }
@@ -110,7 +110,7 @@ object PlayerRepository {
      */
     fun isRecovering(player: luna.rpg.Player): Boolean {
         if (player.attributes.hp > 0) return false
-        val cooldownMs = RpgConfig.Recovery.calculateCooldown(player.attributes.maxHp, player.recoveryLevel) * 1000L
+        val cooldownMs = player.calculateRecoveryCooldown() * 1000L
         val elapsedMs = System.currentTimeMillis() - player.recoveryStartAt
         return elapsedMs < cooldownMs
     }
@@ -248,6 +248,51 @@ object PlayerRepository {
     fun loadMonsterState(userId: String): luna.rpg.Monster? {
         return transaction {
             PlayersTable.fetchPlayer(userId)?.currentMonster
+        }
+    }
+
+    sealed class RebirthUpgradeResult {
+        data class Success(val player: Player) : RebirthUpgradeResult()
+        data class InsufficientPoints(val required: Int, val current: Int) : RebirthUpgradeResult()
+        object MaxLevelReached : RebirthUpgradeResult()
+        object Error : RebirthUpgradeResult()
+    }
+
+    fun upgradeRebirthStat(userId: String, statType: String): RebirthUpgradeResult {
+        val type = statType.uppercase()
+        return transaction {
+            val player = PlayersTable.fetchPlayer(userId) ?: return@transaction RebirthUpgradeResult.Error
+            
+            val currentLevel = when (type) {
+                "ATK" -> player.rebirthAtkLevel
+                "DEF" -> player.rebirthDefLevel
+                "SPD" -> player.rebirthSpdLevel
+                "RECOVERY" -> player.rebirthRecoveryLevel
+                "HP" -> player.rebirthHpLevel
+                else -> return@transaction RebirthUpgradeResult.Error
+            }
+
+            if (currentLevel >= RpgConfig.Rebirth.MAX_STAT_LEVEL) {
+                return@transaction RebirthUpgradeResult.MaxLevelReached
+            }
+
+            val cost = player.calculateStatUpgradeCost(currentLevel)
+            if (player.rebirthPoints < cost) {
+                return@transaction RebirthUpgradeResult.InsufficientPoints(cost, player.rebirthPoints)
+            }
+
+            PlayersTable.update({ PlayersTable.id eq userId }) {
+                it[rebirthPoints] = player.rebirthPoints - cost
+                when (type) {
+                    "ATK" -> it[rebirthAtkLevel] = currentLevel + 1
+                    "DEF" -> it[rebirthDefLevel] = currentLevel + 1
+                    "SPD" -> it[rebirthSpdLevel] = currentLevel + 1
+                    "RECOVERY" -> it[rebirthRecoveryLevel] = currentLevel + 1
+                    "HP" -> it[rebirthHpLevel] = currentLevel + 1
+                }
+            }
+            
+            RebirthUpgradeResult.Success(PlayersTable.fetchPlayer(userId)!!)
         }
     }
 

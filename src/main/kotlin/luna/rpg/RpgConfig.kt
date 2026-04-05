@@ -55,15 +55,6 @@ object RpgConfig {
          * 最小康復時間 (秒)
          */
         const val MIN_SECONDS = 5.0
-
-        /**
-         * 計算康復所需時間 (秒)
-         */
-        fun calculateCooldown(maxHp: Int, recoveryLevel: Int): Long {
-            val base = maxHp * BASE_SECONDS_PER_HP
-            val reduction = recoveryLevel * Upgrade.RECOVERY_REDUCTION_SECONDS
-            return max(MIN_SECONDS, base - reduction).toLong()
-        }
     }
 
     object Rebirth {
