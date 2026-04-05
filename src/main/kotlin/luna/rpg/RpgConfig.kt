@@ -3,72 +3,80 @@ package luna.rpg
 import kotlin.math.max
 
 object RpgConfig {
+    private val loader = RpgConfigLoader()
+    private var data = loader.load()
+
+    fun reload() {
+        data = loader.load()
+    }
+
     object Exploration {
-        const val FLOOR_SIZE = 5
-        const val EVENT_ROLL_RESOURCE_THRESHOLD = 50
-        const val RESOURCE_MIN_AMOUNT = 1
-        const val RESOURCE_MAX_AMOUNT = 5
-        val RESOURCE_NAMES = listOf("🪵 木頭", "🪨 石頭", "🔗 金屬")
-        val MONSTER_NAMES = listOf("史萊姆", "哥布林", "小蝙蝠")
+        val FLOOR_SIZE get() = data.exploration.floorSize
+        val EVENT_ROLL_RESOURCE_THRESHOLD get() = data.exploration.eventRollResourceThreshold
+        val RESOURCE_MIN_AMOUNT get() = data.exploration.resourceMinAmount
+        val RESOURCE_MAX_AMOUNT get() = data.exploration.resourceMaxAmount
+        val RESOURCE_NAMES get() = data.exploration.resourceNames
+        val MONSTER_NAMES get() = data.exploration.monsterNames
     }
 
     object Monster {
-        const val BASE_HP = 20
-        const val HP_PER_FLOOR = 5
-        const val BASE_ATK = 5
-        const val ATK_PER_FLOOR = 2
-        const val BASE_DEF = 2
-        const val DEF_PER_FLOOR = 1
-        const val BASE_SPD = 3
-        const val SPD_PER_FLOOR = 1
+        val BASE_HP get() = data.monster.baseHp
+        val HP_PER_FLOOR get() = data.monster.hpPerFloor
+        val BASE_ATK get() = data.monster.baseAtk
+        val ATK_PER_FLOOR get() = data.monster.atkPerFloor
+        val BASE_DEF get() = data.monster.baseDef
+        val DEF_PER_FLOOR get() = data.monster.defPerFloor
+        val BASE_SPD get() = data.monster.baseSpd
+        val SPD_PER_FLOOR get() = data.monster.spdPerFloor
     }
 
     object Combat {
-        const val MAX_TURNS = 20
+        val MAX_TURNS get() = data.combat.maxTurns
     }
 
     object Economy {
-        val UPGRADE_REQUIREMENTS = mapOf(
-            "weapon" to mapOf("wood" to 10, "metal" to 5),
-            "shield" to mapOf("stone" to 10, "metal" to 5),
-            "armor" to mapOf("wood" to 5, "stone" to 10),
-            "recovery" to mapOf("wood" to 10, "stone" to 10, "metal" to 10)
-        )
-        const val MONSTER_REWARD_BASE_AMOUNT = 2
-        const val MONSTER_REWARD_SCALE_PER_FLOOR = 1
+        val UPGRADE_REQUIREMENTS get() = data.economy.upgradeRequirements
+        val MONSTER_REWARD_BASE_AMOUNT get() = data.economy.monsterRewardBaseAmount
+        val MONSTER_REWARD_SCALE_PER_FLOOR get() = data.economy.monsterRewardScalePerFloor
     }
 
     object Upgrade {
-        const val WEAPON_ATK_BONUS = 5
-        const val SHIELD_DEF_BONUS = 5
-        const val ARMOR_HP_BONUS = 5
-        const val RECOVERY_REDUCTION_SECONDS = 5.0
+        val WEAPON_ATK_BONUS get() = data.upgrade.weaponAtkBonus
+        val SHIELD_DEF_BONUS get() = data.upgrade.shieldDefBonus
+        val ARMOR_HP_BONUS get() = data.upgrade.armorHpBonus
+        val RECOVERY_REDUCTION_SECONDS get() = data.upgrade.recoveryReductionSeconds
     }
 
     object Recovery {
         /**
          * 康復基礎冷卻時間 (每 HP 秒數)
          */
-        const val BASE_SECONDS_PER_HP = 0.1
+        val BASE_SECONDS_PER_HP get() = data.recovery.baseSecondsPerHp
 
         /**
          * 最小康復時間 (秒)
          */
-        const val MIN_SECONDS = 5.0
+        val MIN_SECONDS get() = data.recovery.minSeconds
     }
 
     object Rebirth {
-        const val MIN_FLOOR = 50
-        const val MILESTONE_INTERVAL = 10
-        const val POINTS_PER_MILESTONE = 1
-        const val BASE_UPGRADE_COST = 1
-        const val COST_INCREASE_PER_LEVEL = 1
-        const val MAX_STAT_LEVEL = 10
-        const val STAT_BONUS_PER_LEVEL = 0.05
+        val MIN_FLOOR get() = data.rebirth.minFloor
+        val MILESTONE_INTERVAL get() = data.rebirth.milestoneInterval
+        val POINTS_PER_MILESTONE get() = data.rebirth.pointsPerMilestone
+        val BASE_UPGRADE_COST get() = data.rebirth.baseUpgradeCost
+        val COST_INCREASE_PER_LEVEL get() = data.rebirth.costIncreasePerLevel
+        val MAX_STAT_LEVEL get() = data.rebirth.maxStatLevel
+        val STAT_BONUS_PER_LEVEL get() = data.rebirth.statBonusPerLevel
     }
 
     object Player {
-        val INITIAL_ATTRIBUTES = RpgAttributes(hp = 100, maxHp = 100, atk = 10, def = 5, spd = 8)
-        const val INITIAL_RESOURCES = 0
+        val INITIAL_ATTRIBUTES get() = RpgAttributes(
+            hp = data.player.initialHp,
+            maxHp = data.player.initialHp,
+            atk = data.player.initialAtk,
+            def = data.player.initialDef,
+            spd = data.player.initialSpd
+        )
+        val INITIAL_RESOURCES get() = data.player.initialResources
     }
 }

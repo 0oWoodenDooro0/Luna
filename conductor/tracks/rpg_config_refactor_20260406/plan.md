@@ -13,7 +13,7 @@
 - [x] Task: Conductor - User Manual Verification 'Phase 2' (Protocol in workflow.md) (2db905e)
 
 ## Phase 3: Integration and Reload Logic (整合與重載邏輯)
-- [ ] Task: 修改 `RpgConfig` 以便它使用 `RpgConfigLoader` 的實例。
+- [~] Task: 修改 `RpgConfig` 以便它使用 `RpgConfigLoader` 的實例。
 - [ ] Task: 實作 `/reload` 指令，調用 `RpgConfigLoader` 的 reload 方法。
 - [ ] Task: 寫測試案例：驗證執行 `/reload` 後，內存中的配置已成功更新。
 - [ ] Task: Conductor - User Manual Verification 'Phase 3' (Protocol in workflow.md)
