@@ -16,6 +16,7 @@ A simple, solo-focused Discord Text RPG where players explore endless dungeons, 
 - **Endless Dungeon Exploration:** A continuous exploration mode where players encounter monsters and find resources (Wood, Stone, Metal) through direct discovery or by defeating monsters.
 - **Automated Turn-Based Combat:** Tactical but fast-paced combat based on HP, ATK, DEF, and SPD stats.
 - **Material & Equipment System:** Collecting Wood, Stone, and Metal (guaranteed drops from monsters) to upgrade weapons and armor for permanent stat boosts.
+- **Upgrade & Rebirth Lists:** Detailed overview of available equipment and rebirth upgrades, including costs and effects.
 - **Recovery System:** After falling in combat, players enter a cooldown based on their Max HP. Exploration progress is preserved, allowing players to revive in the same room and resume the fight with the same monster once they are recovered.
 - **Rebirth (Prestige) System:** Resetting level and equipment for permanent powerful buffs (increased resource gain, base stats, etc.).
 
@@ -23,4 +24,4 @@ A simple, solo-focused Discord Text RPG where players explore endless dungeons, 
 - **Solo Play:** The current focus is a dedicated solo experience without mandatory social or competitive features.
 
 ## Integration
-- **Parallel System:** The RPG system will co-exist with the existing "Undercover" game as a separate set of Discord commands (/explore, /status, /settings, etc.).
+- **Parallel System:** The RPG system will co-exist with the existing "Undercover" game as a separate set of Discord commands (/explore, /status, /settings, /help, etc.).
