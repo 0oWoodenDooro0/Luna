@@ -22,6 +22,7 @@ dependencies {
     implementation("org.xerial:sqlite-jdbc:3.51.3.0")
     implementation("org.jetbrains.exposed:exposed-core:1.1.1")
     implementation("org.jetbrains.exposed:exposed-jdbc:1.1.1")
+    implementation("org.yaml:snakeyaml:2.4")
 }
 
 kotlin {
