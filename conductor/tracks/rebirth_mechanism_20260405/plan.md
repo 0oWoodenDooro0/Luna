@@ -14,7 +14,7 @@
 - [x] Task: Write tests for Hard Reset logic (resetting level, HP, equipment, materials). 3cd7045
 - [x] Task: Implement Rebirth logic in `RpgModels` or a new `RebirthEngine`. 3cd7045
 - [x] Task: Ensure the Rebirth logic correctly updates the player model and persists it via `PlayerRepository`. 3cd7045
-- [ ] Task: Conductor - User Manual Verification 'Core Rebirth Logic' (Protocol in workflow.md)
+- [~] Task: Conductor - User Manual Verification 'Core Rebirth Logic' (Protocol in workflow.md)
 
 ## Phase 3: Stat Upgrade Mechanics
 - [ ] Task: Write tests for stat upgrade logic (verifying progressive costs, checking max caps, point deduction).
