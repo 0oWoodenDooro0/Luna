@@ -75,41 +75,26 @@ object RpgConfig {
         }
     }
 
-    data class RebirthConfig(
-        val minFloor: Int = 50,
-        val milestoneInterval: Int = 10,
-        val pointsPerMilestone: Int = 1,
-        val baseUpgradeCost: Int = 1,
-        val costIncreasePerLevel: Int = 1,
-        val maxStatLevel: Int = 10,
-        val statBonusPerLevel: Double = 0.05
-    ) {
-        companion object {
-            fun fromMap(data: Map<String, String>): RebirthConfig {
-                return RebirthConfig(
-                    minFloor = data["minFloor"]?.toInt() ?: 50,
-                    milestoneInterval = data["milestoneInterval"]?.toInt() ?: 10,
-                    pointsPerMilestone = data["pointsPerMilestone"]?.toInt() ?: 1,
-                    baseUpgradeCost = data["baseUpgradeCost"]?.toInt() ?: 1,
-                    costIncreasePerLevel = data["costIncreasePerLevel"]?.toInt() ?: 1,
-                    maxStatLevel = data["maxStatLevel"]?.toInt() ?: 10,
-                    statBonusPerLevel = data["statBonusPerLevel"]?.toDouble() ?: 0.05
-                )
-            }
+    object Rebirth {
+        val minFloor = props.getProperty("rebirth.minFloor", "50").toInt()
+        val milestoneInterval = props.getProperty("rebirth.milestoneInterval", "10").toInt()
+        val pointsPerMilestone = props.getProperty("rebirth.pointsPerMilestone", "1").toInt()
+        val baseUpgradeCost = props.getProperty("rebirth.baseUpgradeCost", "1").toInt()
+        val costIncreasePerLevel = props.getProperty("rebirth.costIncreasePerLevel", "1").toInt()
+        val maxStatLevel = props.getProperty("rebirth.maxStatLevel", "10").toInt()
+        val statBonusPerLevel = props.getProperty("rebirth.statBonusPerLevel", "0.05").toDouble()
 
-            fun fromProperties(props: Properties): RebirthConfig {
-                return RebirthConfig(
-                    minFloor = props.getProperty("rebirth.minFloor", "50").toInt(),
-                    milestoneInterval = props.getProperty("rebirth.milestoneInterval", "10").toInt(),
-                    pointsPerMilestone = props.getProperty("rebirth.pointsPerMilestone", "1").toInt(),
-                    baseUpgradeCost = props.getProperty("rebirth.baseUpgradeCost", "1").toInt(),
-                    costIncreasePerLevel = props.getProperty("rebirth.costIncreasePerLevel", "1").toInt(),
-                    maxStatLevel = props.getProperty("rebirth.maxStatLevel", "10").toInt(),
-                    statBonusPerLevel = props.getProperty("rebirth.statBonusPerLevel", "0.05").toDouble()
-                )
-            }
+        // Still provide a way to parse from a map for testing if needed
+        fun fromMap(data: Map<String, String>): Map<String, Any> {
+            return mapOf(
+                "minFloor" to (data["minFloor"]?.toInt() ?: 50),
+                "milestoneInterval" to (data["milestoneInterval"]?.toInt() ?: 10),
+                "pointsPerMilestone" to (data["pointsPerMilestone"]?.toInt() ?: 1),
+                "baseUpgradeCost" to (data["baseUpgradeCost"]?.toInt() ?: 1),
+                "costIncreasePerLevel" to (data["costIncreasePerLevel"]?.toInt() ?: 1),
+                "maxStatLevel" to (data["maxStatLevel"]?.toInt() ?: 10),
+                "statBonusPerLevel" to (data["statBonusPerLevel"]?.toDouble() ?: 0.05)
+            )
         }
     }
-
-    val Rebirth = RebirthConfig.fromProperties(props)
 }

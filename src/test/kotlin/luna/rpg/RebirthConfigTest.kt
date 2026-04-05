@@ -27,13 +27,13 @@ class RebirthConfigTest {
             "maxStatLevel" to "50",
             "statBonusPerLevel" to "0.1"
         )
-        val config = RpgConfig.RebirthConfig.fromMap(data)
-        assertEquals(100, config.minFloor)
-        assertEquals(20, config.milestoneInterval)
-        assertEquals(2, config.pointsPerMilestone)
-        assertEquals(5, config.baseUpgradeCost)
-        assertEquals(2, config.costIncreasePerLevel)
-        assertEquals(50, config.maxStatLevel)
-        assertEquals(0.1, config.statBonusPerLevel)
+        val config = RpgConfig.Rebirth.fromMap(data)
+        assertEquals(100, config["minFloor"])
+        assertEquals(20, config["milestoneInterval"])
+        assertEquals(2, config["pointsPerMilestone"])
+        assertEquals(5, config["baseUpgradeCost"])
+        assertEquals(2, config["costIncreasePerLevel"])
+        assertEquals(50, config["maxStatLevel"])
+        assertEquals(0.1, config["statBonusPerLevel"])
     }
 }
