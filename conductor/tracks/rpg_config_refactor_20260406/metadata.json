@@ -1,0 +1,8 @@
+{
+  "track_id": "rpg_config_refactor_20260406",
+  "type": "feature",
+  "status": "new",
+  "created_at": "2026-04-06T12:00:00Z",
+  "updated_at": "2026-04-06T12:00:00Z",
+  "description": "將現在的rpgconfig 弄成config文件 config文件要有example 並且預代數值 可以在我打包成jar檔之後還能修改數值"
+}
