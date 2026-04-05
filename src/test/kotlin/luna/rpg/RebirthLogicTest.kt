@@ -19,12 +19,12 @@ class RebirthLogicTest {
         val playerAt100 = Player("test", "Test", RpgAttributes(100, 100, 10, 5, 8), progression = PlayerProgression(100, 0, true))
         
         assertEquals(0, playerAt49.calculateEarnedPoints())
-        assertEquals(0, playerAt50.calculateEarnedPoints())
-        assertEquals(0, playerAt59.calculateEarnedPoints())
-        assertEquals(1, playerAt60.calculateEarnedPoints())
-        assertEquals(1, playerAt69.calculateEarnedPoints())
-        assertEquals(2, playerAt70.calculateEarnedPoints())
-        assertEquals(5, playerAt100.calculateEarnedPoints())
+        assertEquals(1, playerAt50.calculateEarnedPoints())
+        assertEquals(1, playerAt59.calculateEarnedPoints())
+        assertEquals(2, playerAt60.calculateEarnedPoints())
+        assertEquals(2, playerAt69.calculateEarnedPoints())
+        assertEquals(3, playerAt70.calculateEarnedPoints())
+        assertEquals(6, playerAt100.calculateEarnedPoints())
     }
 
     @Test

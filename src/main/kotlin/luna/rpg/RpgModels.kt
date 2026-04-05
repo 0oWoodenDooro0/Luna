@@ -83,7 +83,7 @@ data class Player(
      */
     fun calculateEarnedPoints(): Int {
         if (!canRebirth()) return 0
-        return (currentFloor - RpgConfig.Rebirth.MIN_FLOOR) / RpgConfig.Rebirth.MILESTONE_INTERVAL * RpgConfig.Rebirth.POINTS_PER_MILESTONE
+        return ((currentFloor - RpgConfig.Rebirth.MIN_FLOOR) / RpgConfig.Rebirth.MILESTONE_INTERVAL + 1) * RpgConfig.Rebirth.POINTS_PER_MILESTONE
     }
 
     /**
@@ -91,16 +91,10 @@ data class Player(
      */
     fun rebirthReset(earnedPoints: Int): Player {
         return this.copy(
-            attributes = RpgAttributes(
-                hp = 100,
-                maxHp = 100,
-                atk = 10,
-                def = 5,
-                spd = 8
-            ),
-            wood = 0,
-            stone = 0,
-            metal = 0,
+            attributes = RpgConfig.Player.INITIAL_ATTRIBUTES,
+            wood = RpgConfig.Player.INITIAL_RESOURCES,
+            stone = RpgConfig.Player.INITIAL_RESOURCES,
+            metal = RpgConfig.Player.INITIAL_RESOURCES,
             weaponLevel = 0,
             shieldLevel = 0,
             armorLevel = 0,

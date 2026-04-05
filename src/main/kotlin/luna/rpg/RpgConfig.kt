@@ -66,4 +66,9 @@ object RpgConfig {
         const val MAX_STAT_LEVEL = 10
         const val STAT_BONUS_PER_LEVEL = 0.05
     }
+
+    object Player {
+        val INITIAL_ATTRIBUTES = RpgAttributes(hp = 100, maxHp = 100, atk = 10, def = 5, spd = 8)
+        const val INITIAL_RESOURCES = 0
+    }
 }

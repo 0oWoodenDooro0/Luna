@@ -86,7 +86,7 @@ class RebirthPersistenceTest {
             val player = PlayersTable.fetchPlayer("rebirth_user")
             assertNotNull(player)
             assertEquals(1, player.rebirthCount)
-            assertEquals(1, player.rebirthPoints) // (60-50)/10 = 1 point
+            assertEquals(2, player.rebirthPoints) // ((60-50)/10 + 1) = 2 points
             assertEquals(1, player.currentFloor)
             assertEquals(0, player.roomsExplored)
             assertEquals(0, player.wood)
