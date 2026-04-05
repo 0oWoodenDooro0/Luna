@@ -10,20 +10,20 @@
     - [x] Implement logic to display a list of all RPG commands (Chinese)
 - [x] Task: Conductor - User Manual Verification 'Phase 1' (Protocol in workflow.md) 244cfd6
 
-## Phase 2: Upgrade and Rebirth List Commands
-- [ ] Task: Write Tests for `UpgradeListCommand` and `RebirthListCommand`
-    - [ ] Create `UpgradeListCommandTest.kt`
-    - [ ] Create `RebirthListCommandTest.kt`
-    - [ ] Verify that the displays correctly show current level, cost, and availability
-- [ ] Task: Implement `UpgradeListCommand`
-    - [ ] Create `src/main/kotlin/luna/rpg/command/UpgradeListCommand.kt`
-    - [ ] Register the command in `Main.kt`
-    - [ ] Implement Embed display showing all equipment upgrades (Weapon, Shield, Armor, Recovery)
-- [ ] Task: Implement `RebirthListCommand`
-    - [ ] Create `src/main/kotlin/luna/rpg/command/RebirthListCommand.kt`
-    - [ ] Register the command in `Main.kt`
-    - [ ] Implement Embed display showing all rebirth upgrades and current point usage
-- [ ] Task: Conductor - User Manual Verification 'Phase 2' (Protocol in workflow.md)
+## Phase 2: Upgrade and Rebirth List Commands [checkpoint: 058b323]
+- [x] Task: Write Tests for `UpgradeListCommand` and `RebirthListCommand` 5cea90a
+    - [x] Create `UpgradeListCommandTest.kt`
+    - [x] Create `RebirthListCommandTest.kt`
+    - [x] Verify that the displays correctly show current level, cost, and availability
+- [x] Task: Implement `UpgradeListCommand` 5cea90a
+    - [x] Create `src/main/kotlin/luna/rpg/command/UpgradeListCommand.kt`
+    - [x] Register the command in `Main.kt`
+    - [x] Implement Embed display showing all equipment upgrades (Weapon, Shield, Armor, Recovery)
+- [x] Task: Implement `RebirthListCommand` 5cea90a
+    - [x] Create `src/main/kotlin/luna/rpg/command/RebirthListCommand.kt`
+    - [x] Register the command in `Main.kt`
+    - [x] Implement Embed display showing all rebirth upgrades and current point usage
+- [x] Task: Conductor - User Manual Verification 'Phase 2' (Protocol in workflow.md) 058b323
 
 ## Phase 3: Enhanced Status and Command UI
 - [ ] Task: Write Tests for updated Status and Upgrade commands
