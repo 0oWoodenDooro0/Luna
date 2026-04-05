@@ -148,9 +148,11 @@ object PlayerRepository {
         return resourceName to amount
     }
 
+    data class MissingResource(val name: String, val required: Int, val current: Int)
+
     sealed class UpgradeResult {
         data class Success(val player: Player) : UpgradeResult()
-        data class InsufficientResources(val missingResource: String, val required: Int, val current: Int) : UpgradeResult()
+        data class InsufficientResources(val missing: List<MissingResource>) : UpgradeResult()
         object Error : UpgradeResult()
     }
 
@@ -169,6 +171,7 @@ object PlayerRepository {
                 else -> return@transaction UpgradeResult.Error
             }
 
+            val missing = mutableListOf<MissingResource>()
             // Check resources dynamically based on config
             for ((resourceName, baseAmount) in requirements) {
                 val cost = getResourceCost(currentLevel, baseAmount)
@@ -180,8 +183,12 @@ object PlayerRepository {
                 }
                 
                 if (currentValue < cost) {
-                    return@transaction UpgradeResult.InsufficientResources(displayName, cost, currentValue)
+                    missing.add(MissingResource(displayName, cost, currentValue))
                 }
+            }
+
+            if (missing.isNotEmpty()) {
+                return@transaction UpgradeResult.InsufficientResources(missing)
             }
 
             // Deduct resources and upgrade

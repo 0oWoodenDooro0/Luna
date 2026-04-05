@@ -72,10 +72,13 @@ class UpgradeCommand : Command {
                 }
             }
             is PlayerRepository.UpgradeResult.InsufficientResources -> {
+                val missingLines = result.missing.joinToString("\n") { 
+                    "❌ **${it.name}**: 需要 **${it.required}**，你只有 **${it.current}**"
+                }
                 response.respond {
                     embed {
                         title = "❌ 資源不足"
-                        description = "升級需要 **${result.required}** 個 ${result.missingResource}，但你只有 **${result.current}** 個。"
+                        description = "升級失敗，缺少以下資源：\n$missingLines"
                         color = dev.kord.common.Color(0xE74C3C)
                     }
                 }

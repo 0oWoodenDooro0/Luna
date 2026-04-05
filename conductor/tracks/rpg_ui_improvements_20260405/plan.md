@@ -26,15 +26,15 @@
 - [x] Task: Conductor - User Manual Verification 'Phase 2' (Protocol in workflow.md) 058b323
 
 ## Phase 3: Enhanced Status and Command UI
-- [ ] Task: Write Tests for updated Status and Upgrade commands
-    - [ ] Update `StatusCommandTest.kt` or create a new test for enhanced info
-    - [ ] Verify that resource totals and rebirth progress are correctly displayed
-- [ ] Task: Update `StatusCommand`
-    - [ ] Add display for current Wood, Stone, and Metal amounts
-    - [ ] Add display for rebirth milestone progress (Floor level check)
-- [ ] Task: Update `UpgradeCommand` and `RebirthUpgradeCommand`
-    - [ ] Refactor success/failure messages to use Discord Embeds
-    - [ ] Add "Next Level Stats" (e.g., ATK +5) information in success messages
+- [x] Task: Write Tests for updated Status and Upgrade commands ae0e344
+    - [x] Update `StatusCommandTest.kt` or create a new test for enhanced info
+    - [x] Verify that resource totals and rebirth progress are correctly displayed
+- [x] Task: Update `StatusCommand` ae0e344
+    - [x] Add display for current Wood, Stone, and Metal amounts
+    - [x] Add display for rebirth milestone progress (Floor level check)
+- [x] Task: Update `UpgradeCommand` and `RebirthUpgradeCommand` ae0e344
+    - [x] Refactor success/failure messages to use Discord Embeds
+    - [x] Add "Next Level Stats" (e.g., ATK +5) information in success messages
 - [ ] Task: Conductor - User Manual Verification 'Phase 3' (Protocol in workflow.md)
 
 ## Phase 4: Final Polishing and Verification

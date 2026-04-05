@@ -68,8 +68,10 @@ class UpgradeLogicTest {
             
             val result = PlayerRepository.upgradeEquipment(userId, "weapon")
             assertTrue(result is PlayerRepository.UpgradeResult.InsufficientResources)
-            assertEquals("木頭", (result as PlayerRepository.UpgradeResult.InsufficientResources).missingResource)
-            assertEquals(10, (result as PlayerRepository.UpgradeResult.InsufficientResources).required)
+            val missing = (result as PlayerRepository.UpgradeResult.InsufficientResources).missing
+            assertEquals(1, missing.size)
+            assertEquals("木頭", missing[0].name)
+            assertEquals(10, missing[0].required)
         }
     }
 }
