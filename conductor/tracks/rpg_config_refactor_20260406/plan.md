@@ -18,7 +18,7 @@
 - [x] Task: 寫測試案例：驗證執行 `/reload` 後，內存中的配置已成功更新。 (eb01958)
 - [x] Task: Conductor - User Manual Verification 'Phase 3' (Protocol in workflow.md) (ce4e581)
 
-## Phase 4: Final Verification and Cleanup (最終驗證與清理)
-- [ ] Task: 在開發環境中模擬 JAR 打包，手動測試 `config.yml` 的生成、修改與重載。
-- [ ] Task: 清理無用的硬編碼配置。
-- [ ] Task: Conductor - User Manual Verification 'Phase 4' (Protocol in workflow.md)
+## Phase 4: Final Verification and Cleanup (最終驗證與清理) [checkpoint: 515a50e]
+- [x] Task: 在開發環境中模擬 JAR 打包，手動測試 `config.yml` 的生成、修改與重載。 (49f7ccf)
+- [x] Task: 清理無用的硬編碼配置。 (49f7ccf)
+- [x] Task: Conductor - User Manual Verification 'Phase 4' (Protocol in workflow.md) (515a50e)
