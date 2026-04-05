@@ -14,7 +14,7 @@ The project codebase is explicitly separated into distinct packages to maintain 
 - **Systemic & Concise:** Communication should be clean and data-driven. The focus is on providing clear information about stats, combat results, and resource gains without unnecessary narrative fluff.
 
 ## User Experience (UX)
-- **Primary Interaction:** Slash Commands (`/explore`, `/status`, `/upgrade`).
+- **Primary Interaction:** Slash Commands (`/explore`, `/status`, `/upgrade`, `/rebirth`, `/rebirth_upgrade`).
 - **Visual Presentation:** Rich Embeds should be used to display character status, combat outcomes, and inventory details. Use consistent colors (e.g., Red for low health, Gold for rare loot, Green for status boosts).
 - **Command Design:** Ensure commands are intuitive and categorized by function (Exploration, Management, System).
 
