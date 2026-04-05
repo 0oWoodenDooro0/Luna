@@ -17,10 +17,10 @@
 - [x] Task: Conductor - User Manual Verification 'Core Rebirth Logic' (Protocol in workflow.md)
 
 ## Phase 3: Stat Upgrade Mechanics
-- [ ] Task: Write tests for stat upgrade logic (verifying progressive costs, checking max caps, point deduction).
-- [ ] Task: Write tests for applying upgraded stat percentage bonuses during combat calculations and status display.
-- [ ] Task: Implement stat upgrade logic (handling point spending and caps).
-- [ ] Task: Integrate percentage bonuses into `CombatEngine` and `RpgModels` (effective stat calculation).
+- [x] Task: Write tests for stat upgrade logic (verifying progressive costs, checking max caps, point deduction). 426ea40
+- [x] Task: Write tests for applying upgraded stat percentage bonuses during combat calculations and status display. 426ea40
+- [x] Task: Implement stat upgrade logic (handling point spending and caps). 426ea40
+- [x] Task: Integrate percentage bonuses into `CombatEngine` and `RpgModels` (effective stat calculation). 426ea40
 - [ ] Task: Conductor - User Manual Verification 'Stat Upgrade Mechanics' (Protocol in workflow.md)
 
 ## Phase 4: Discord Commands Integration
