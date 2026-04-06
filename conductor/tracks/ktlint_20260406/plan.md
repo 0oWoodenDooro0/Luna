@@ -13,9 +13,9 @@ This plan outlines the steps to integrate `ktlint` for linting and formatting th
 - [x] Manually fix any issues that `formatKotlin` cannot handle [ba8aa26].
 
 ## Phase 3: Final Verification
-- [ ] Run `./gradlew build` to ensure all checks (tests, linting) pass.
-- [ ] Run existing tests to ensure no regressions were introduced by formatting.
+- [x] Run `./gradlew build` to ensure all checks (tests, linting) pass [b18dede].
+- [x] Run existing tests to ensure no regressions were introduced by formatting [b18dede].
 
 ## Verification & Testing
-- **Automated Verification:** `./gradlew ktlintCheck` must pass.
+- **Automated Verification:** `./gradlew lintKotlin` must pass.
 - **Regression Testing:** `./gradlew test` must pass.
