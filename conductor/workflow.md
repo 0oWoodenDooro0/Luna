@@ -143,7 +143,7 @@ Before marking any task complete, verify:
 - [ ] Code follows project's code style guidelines (as defined in `code_styleguides/`)
 - [ ] All public functions/methods are documented (e.g., docstrings, JSDoc, GoDoc)
 - [ ] Type safety is enforced (e.g., type hints, TypeScript types, Go types)
-- [ ] No linting or static analysis errors (using `./gradlew ktlintCheck`)
+- [ ] No linting or static analysis errors (using `./gradlew lintKotlin`)
 - [ ] Works correctly on mobile (if applicable)
 - [ ] Documentation updated if needed
 - [ ] No security vulnerabilities introduced
@@ -164,13 +164,13 @@ Before marking any task complete, verify:
 ./gradlew run
 
 # Format code
-./gradlew ktlintFormat
+./gradlew formatKotlin
 ```
 
 ### Before Committing
 ```bash
 # Format code
-./gradlew ktlintFormat
+./gradlew formatKotlin
 
 # Run all checks (tests, linting, etc.)
 ./gradlew check
