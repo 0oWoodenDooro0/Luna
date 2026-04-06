@@ -1,6 +1,7 @@
 plugins {
     kotlin("jvm") version "2.3.10"
     application
+    id("org.jmailen.kotlinter") version "5.4.2"
 }
 
 group = "luna"
