@@ -18,3 +18,4 @@
 - **SLF4J (Simple):** Simple logging facade for basic output and debugging.
 - **Kotlin Test:** Standard library for unit and integration testing.
 - **MockK:** A powerful mocking library for Kotlin, used to simulate Discord events and database interactions in tests.
+- **ktlint (org.jmailen.kotlinter):** A no-configuration Kotlin linter and formatter that adheres to the official Kotlin Style Guide and Android Kotlin Style Guide.
