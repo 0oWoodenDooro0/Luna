@@ -5,7 +5,6 @@ import dev.kord.core.behavior.interaction.response.respond
 import dev.kord.core.entity.interaction.ChatInputCommandInteraction
 import dev.kord.rest.builder.interaction.boolean
 import luna.core.Command
-import luna.rpg.*
 import luna.rpg.repository.PlayerRepository
 
 class SettingsCommand : Command {
@@ -27,7 +26,7 @@ class SettingsCommand : Command {
         PlayerRepository.updateAutoAdvance(userId, autoAdvance)
 
         val response = interaction.deferEphemeralResponse()
-        response.respond { 
+        response.respond {
             content = "設定已更新：自動進階：${if (autoAdvance) "開啟" else "關閉"}"
         }
     }

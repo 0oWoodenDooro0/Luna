@@ -5,7 +5,8 @@ import dev.kord.core.behavior.interaction.response.respond
 import dev.kord.core.entity.interaction.ChatInputCommandInteraction
 import dev.kord.rest.builder.message.embed
 import luna.core.Command
-import luna.rpg.*
+import luna.rpg.Player
+import luna.rpg.RpgConfig
 import luna.rpg.repository.PlayerRepository
 
 class StatusCommand : Command {
@@ -31,15 +32,16 @@ class StatusCommand : Command {
                 color = dev.kord.common.Color(0x3498DB)
                 field {
                     name = "基礎屬性 (含加成)"
-                    value = """
+                    value =
+                        """
                         ❤️ 血量 (HP): ${effective.hp} / ${effective.maxHp}
                         ⚔️ 攻擊 (ATK): ${effective.atk}
                         🛡️ 防禦 (DEF): ${effective.def}
                         ⚡ 速度 (SPD): ${effective.spd}
-                    """.trimIndent()
+                        """.trimIndent()
                     inline = true
                 }
-                
+
                 val remaining = PlayerRepository.getRemainingRecoveryTime(player)
                 if (remaining > 0) {
                     field {
@@ -51,45 +53,52 @@ class StatusCommand : Command {
 
                 field {
                     name = "目前進度"
-                    val nextMilestone = if (player.currentFloor < RpgConfig.Rebirth.MIN_FLOOR) {
-                        RpgConfig.Rebirth.MIN_FLOOR
-                    } else {
-                        ((player.currentFloor - RpgConfig.Rebirth.MIN_FLOOR) / RpgConfig.Rebirth.MILESTONE_INTERVAL + 1) * RpgConfig.Rebirth.MILESTONE_INTERVAL + RpgConfig.Rebirth.MIN_FLOOR
-                    }
+                    val nextMilestone =
+                        if (player.currentFloor < RpgConfig.Rebirth.MIN_FLOOR) {
+                            RpgConfig.Rebirth.MIN_FLOOR
+                        } else {
+                            ((player.currentFloor - RpgConfig.Rebirth.MIN_FLOOR) / RpgConfig.Rebirth.MILESTONE_INTERVAL + 1) *
+                                RpgConfig.Rebirth.MILESTONE_INTERVAL +
+                                RpgConfig.Rebirth.MIN_FLOOR
+                        }
                     val floorsLeft = nextMilestone - player.currentFloor
                     val milestoneType = if (player.currentFloor < RpgConfig.Rebirth.MIN_FLOOR) "解鎖重生" else "下一個重生點數"
-                    
-                    value = """
+
+                    value =
+                        """
                         層數：第 ${player.currentFloor} 層
                         房間：${player.roomsExplored} / ${RpgConfig.Exploration.FLOOR_SIZE}
                         進度：距離 $milestoneType 還差 $floorsLeft 層
-                    """.trimIndent()
+                        """.trimIndent()
                     inline = true
                 }
                 field {
                     name = "擁有資源"
-                    value = """
+                    value =
+                        """
                         🪵 木頭: ${player.wood}
                         🪨 石頭: ${player.stone}
                         🔗 金屬: ${player.metal}
-                    """.trimIndent()
+                        """.trimIndent()
                     inline = false
                 }
                 field {
                     name = "裝備等級"
-                    value = """
+                    value =
+                        """
                         ⚔️ 武器 (Weapon): Lv.${player.weaponLevel}
                         🛡️ 盾牌 (Shield): Lv.${player.shieldLevel}
                         👕 護甲 (Armor): Lv.${player.armorLevel}
                         ❤️ 康復速度 (Recovery): Lv.${player.recoveryLevel}
-                    """.trimIndent()
+                        """.trimIndent()
                     inline = false
                 }
 
                 if (player.rebirthCount > 0 || player.rebirthPoints > 0) {
                     field {
                         name = "✨ 重生狀態 (Rebirth)"
-                        value = """
+                        value =
+                            """
                             重生次數：${player.rebirthCount}
                             重生點數：${player.rebirthPoints}
                             
@@ -99,7 +108,7 @@ class StatusCommand : Command {
                             ⚡ SPD: +${(player.rebirthSpdLevel * RpgConfig.Rebirth.STAT_BONUS_PER_LEVEL * 100).toInt()}% (Lv.${player.rebirthSpdLevel})
                             ❤️ REC: +${(player.rebirthRecoveryLevel * RpgConfig.Rebirth.STAT_BONUS_PER_LEVEL * 100).toInt()}% (Lv.${player.rebirthRecoveryLevel})
                             HP: +${(player.rebirthHpLevel * RpgConfig.Rebirth.STAT_BONUS_PER_LEVEL * 100).toInt()}% (Lv.${player.rebirthHpLevel})
-                        """.trimIndent()
+                            """.trimIndent()
                         inline = false
                     }
                 }

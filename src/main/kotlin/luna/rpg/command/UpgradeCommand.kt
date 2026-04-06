@@ -6,7 +6,7 @@ import dev.kord.core.entity.interaction.ChatInputCommandInteraction
 import dev.kord.rest.builder.interaction.string
 import dev.kord.rest.builder.message.embed
 import luna.core.Command
-import luna.rpg.*
+import luna.rpg.RpgConfig
 import luna.rpg.repository.PlayerRepository
 
 class UpgradeCommand : Command {
@@ -28,36 +28,39 @@ class UpgradeCommand : Command {
     override suspend fun handle(interaction: ChatInputCommandInteraction) {
         val userId = interaction.user.id.toString()
         val type = interaction.command.strings["type"] ?: return
-        
+
         val result = PlayerRepository.upgradeEquipment(userId, type)
         val response = interaction.deferPublicResponse()
-        
-        val typeName = when (type) {
-            "weapon" -> "武器"
-            "shield" -> "盾牌"
-            "armor" -> "護甲"
-            "recovery" -> "康復速度"
-            else -> "裝備"
-        }
+
+        val typeName =
+            when (type) {
+                "weapon" -> "武器"
+                "shield" -> "盾牌"
+                "armor" -> "護甲"
+                "recovery" -> "康復速度"
+                else -> "裝備"
+            }
 
         when (result) {
             is PlayerRepository.UpgradeResult.Success -> {
                 val player = result.player
-                val newLevel = when (type) {
-                    "weapon" -> player.weaponLevel
-                    "shield" -> player.shieldLevel
-                    "armor" -> player.armorLevel
-                    "recovery" -> player.recoveryLevel
-                    else -> 0
-                }
-                
-                val statBonus = when (type) {
-                    "weapon" -> "⚔️ ATK +${RpgConfig.Upgrade.WEAPON_ATK_BONUS}"
-                    "shield" -> "🛡️ DEF +${RpgConfig.Upgrade.SHIELD_DEF_BONUS}"
-                    "armor" -> "👕 HP +${RpgConfig.Upgrade.ARMOR_HP_BONUS}"
-                    "recovery" -> "❤️ 康復速度 -${RpgConfig.Upgrade.RECOVERY_REDUCTION_SECONDS.toInt()}s"
-                    else -> ""
-                }
+                val newLevel =
+                    when (type) {
+                        "weapon" -> player.weaponLevel
+                        "shield" -> player.shieldLevel
+                        "armor" -> player.armorLevel
+                        "recovery" -> player.recoveryLevel
+                        else -> 0
+                    }
+
+                val statBonus =
+                    when (type) {
+                        "weapon" -> "⚔️ ATK +${RpgConfig.Upgrade.WEAPON_ATK_BONUS}"
+                        "shield" -> "🛡️ DEF +${RpgConfig.Upgrade.SHIELD_DEF_BONUS}"
+                        "armor" -> "👕 HP +${RpgConfig.Upgrade.ARMOR_HP_BONUS}"
+                        "recovery" -> "❤️ 康復速度 -${RpgConfig.Upgrade.RECOVERY_REDUCTION_SECONDS.toInt()}s"
+                        else -> ""
+                    }
 
                 response.respond {
                     embed {
@@ -71,10 +74,12 @@ class UpgradeCommand : Command {
                     }
                 }
             }
+
             is PlayerRepository.UpgradeResult.InsufficientResources -> {
-                val missingLines = result.missing.joinToString("\n") { 
-                    "❌ **${it.name}**: 需要 **${it.required}**，你只有 **${it.current}**"
-                }
+                val missingLines =
+                    result.missing.joinToString("\n") {
+                        "❌ **${it.name}**: 需要 **${it.required}**，你只有 **${it.current}**"
+                    }
                 response.respond {
                     embed {
                         title = "❌ 資源不足"
@@ -83,6 +88,7 @@ class UpgradeCommand : Command {
                     }
                 }
             }
+
             PlayerRepository.UpgradeResult.Error -> {
                 response.respond {
                     embed {
