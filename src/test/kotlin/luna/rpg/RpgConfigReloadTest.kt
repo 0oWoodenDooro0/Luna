@@ -14,17 +14,17 @@ class RpgConfigReloadTest {
 
         // Set test config path
         RpgConfig.configPath = configPath
-        
+
         val originalFloorSize = RpgConfig.Exploration.FLOOR_SIZE
-        
+
         // Modify file
         configFile.writeText(configFile.readText().replace("floor_size: $originalFloorSize", "floor_size: ${originalFloorSize + 10}"))
-        
+
         // Reload
         RpgConfig.reload()
-        
+
         assertEquals(originalFloorSize + 10, RpgConfig.Exploration.FLOOR_SIZE)
-        
+
         // Cleanup and Reset
         RpgConfig.configPath = "config.yml"
         configFile.delete()

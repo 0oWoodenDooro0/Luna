@@ -17,9 +17,9 @@ class RebirthCommand : Command {
     override suspend fun handle(interaction: ChatInputCommandInteraction) {
         val userId = interaction.user.id.toString()
         val player = PlayerRepository.getOrCreatePlayer(userId)
-        
+
         val response = interaction.deferPublicResponse()
-        
+
         if (!player.canRebirth()) {
             response.respond {
                 content = "❌ 你還不能重生！需要到達第 **${luna.rpg.RpgConfig.Rebirth.MIN_FLOOR}** 層（目前第 ${player.currentFloor} 層）。"
@@ -29,10 +29,11 @@ class RebirthCommand : Command {
 
         val earnedPoints = player.calculateEarnedPoints()
         val result = PlayerRepository.rebirthPlayer(userId)
-        
+
         if (result != null) {
             response.respond {
-                content = "✨ **重生成功！** ✨\n你已重置進度，並獲得了 **$earnedPoints** 點重生點數！\n目前的重生點數：**${result.rebirthPoints}**\n可以使用 `/rebirth_upgrade` 來強化你的能力。"
+                content =
+                    "✨ **重生成功！** ✨\n你已重置進度，並獲得了 **$earnedPoints** 點重生點數！\n目前的重生點數：**${result.rebirthPoints}**\n可以使用 `/rebirth_upgrade` 來強化你的能力。"
             }
         } else {
             response.respond {

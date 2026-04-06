@@ -6,11 +6,10 @@ import org.jetbrains.exposed.v1.jdbc.transactions.transaction
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import kotlin.test.assertEquals
-import kotlin.test.assertNotNull
 import kotlin.test.assertIs
+import kotlin.test.assertNotNull
 
 class RebirthPersistenceTest {
-
     @BeforeEach
     fun setup() {
         Database.connect("jdbc:sqlite::memory:", driver = "org.sqlite.JDBC")
@@ -20,7 +19,7 @@ class RebirthPersistenceTest {
     fun testRebirthFieldsPersistence() {
         transaction {
             SchemaUtils.createMissingTablesAndColumns(PlayersTable)
-            
+
             // This will fail to compile until PlayersTable and Player are updated
             PlayersTable.insertPlayer(
                 id = "user_rebirth",
@@ -39,7 +38,7 @@ class RebirthPersistenceTest {
                 rebirthDefLevel = 2,
                 rebirthSpdLevel = 3,
                 rebirthRecoveryLevel = 4,
-                rebirthHpLevel = 5
+                rebirthHpLevel = 5,
             )
 
             val player = PlayersTable.fetchPlayer("user_rebirth")
@@ -58,7 +57,7 @@ class RebirthPersistenceTest {
     fun testRebirthPlayerIntegration() {
         transaction {
             SchemaUtils.createMissingTablesAndColumns(PlayersTable)
-            
+
             // 1. Create a high-level player
             PlayersTable.insertPlayer(
                 id = "rebirth_user",
@@ -75,7 +74,7 @@ class RebirthPersistenceTest {
                 weaponLevel = 5,
                 shieldLevel = 5,
                 armorLevel = 5,
-                recoveryLevel = 5
+                recoveryLevel = 5,
             )
 
             // 2. Perform rebirth
@@ -100,7 +99,7 @@ class RebirthPersistenceTest {
     fun testUpgradeRebirthStatIntegration() {
         transaction {
             SchemaUtils.createMissingTablesAndColumns(PlayersTable)
-            
+
             // 1. Create a player with rebirth points
             PlayersTable.insertPlayer(
                 id = "upgrade_user",
@@ -113,7 +112,7 @@ class RebirthPersistenceTest {
                 stone = 0,
                 metal = 0,
                 floor = 1,
-                rebirthPoints = 10
+                rebirthPoints = 10,
             )
 
             // 2. Upgrade ATK (Level 0 -> 1, cost 1)

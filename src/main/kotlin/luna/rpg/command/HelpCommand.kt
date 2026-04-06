@@ -20,7 +20,7 @@ class HelpCommand : Command {
             embed {
                 title = "📖 Luna RPG 指令幫助"
                 description = "以下是目前可用的 RPG 指令列表："
-                
+
                 field {
                     name = "/explore"
                     value = "在目前的樓層進行探索，可能遇到怪物或發現資源。"
@@ -66,7 +66,7 @@ class HelpCommand : Command {
                     value = "顯示此幫助訊息。"
                     inline = false
                 }
-                
+
                 footer {
                     text = "祝你在 Luna 的冒險愉快！"
                 }

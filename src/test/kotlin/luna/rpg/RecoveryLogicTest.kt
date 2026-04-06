@@ -1,24 +1,23 @@
 package luna.rpg
 
+import luna.rpg.RpgAttributes
+import luna.rpg.RpgConfig
+import luna.rpg.repository.PlayerRepository
+import luna.rpg.repository.PlayersTable
+import org.jetbrains.exposed.v1.core.eq
 import org.jetbrains.exposed.v1.jdbc.Database
 import org.jetbrains.exposed.v1.jdbc.SchemaUtils
+import org.jetbrains.exposed.v1.jdbc.selectAll
 import org.jetbrains.exposed.v1.jdbc.transactions.transaction
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
-import luna.rpg.RpgConfig
-import luna.rpg.RpgAttributes
-import org.jetbrains.exposed.v1.jdbc.selectAll
-import org.jetbrains.exposed.v1.core.eq
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
-import kotlin.test.assertTrue
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
-import luna.rpg.repository.PlayersTable
-import luna.rpg.repository.PlayerRepository
+import kotlin.test.assertTrue
 
 class RecoveryLogicTest {
-
     @BeforeEach
     fun setup() {
         Database.connect("jdbc:sqlite::memory:", driver = "org.sqlite.JDBC")
@@ -29,31 +28,37 @@ class RecoveryLogicTest {
         transaction {
             SchemaUtils.createMissingTablesAndColumns(PlayersTable)
             val maxHp = 100
-            
+
             // CASE 1: HP > 0 -> Not recovering
-            val healthyPlayer = luna.rpg.Player(
-                id = "healthy", name = "Healthy",
-                attributes = luna.rpg.RpgAttributes(100, 100, 10, 5, 8)
-            )
+            val healthyPlayer =
+                luna.rpg.Player(
+                    id = "healthy",
+                    name = "Healthy",
+                    attributes = luna.rpg.RpgAttributes(100, 100, 10, 5, 8),
+                )
             assertFalse(PlayerRepository.isRecovering(healthyPlayer))
             val cooldown = healthyPlayer.calculateRecoveryCooldown() // 10s
-            
+
             // CASE 2: HP = 0, just started -> Recovering
-            val deadPlayer = luna.rpg.Player(
-                id = "dead", name = "Dead",
-                attributes = luna.rpg.RpgAttributes(0, 100, 10, 5, 8),
-                recoveryStartAt = System.currentTimeMillis()
-            )
+            val deadPlayer =
+                luna.rpg.Player(
+                    id = "dead",
+                    name = "Dead",
+                    attributes = luna.rpg.RpgAttributes(0, 100, 10, 5, 8),
+                    recoveryStartAt = System.currentTimeMillis(),
+                )
             assertTrue(PlayerRepository.isRecovering(deadPlayer))
             val remaining = PlayerRepository.getRemainingRecoveryTime(deadPlayer)
             assertTrue(remaining.toDouble() in (cooldown - 2.0)..cooldown.toDouble())
-            
+
             // CASE 3: HP = 0, long ago -> Not recovering
-            val recoveredPlayer = luna.rpg.Player(
-                id = "recovered", name = "Recovered",
-                attributes = luna.rpg.RpgAttributes(0, 100, 10, 5, 8),
-                recoveryStartAt = System.currentTimeMillis() - 20000 // 20s ago
-            )
+            val recoveredPlayer =
+                luna.rpg.Player(
+                    id = "recovered",
+                    name = "Recovered",
+                    attributes = luna.rpg.RpgAttributes(0, 100, 10, 5, 8),
+                    recoveryStartAt = System.currentTimeMillis() - 20000, // 20s ago
+                )
             assertFalse(PlayerRepository.isRecovering(recoveredPlayer))
             assertEquals(0L, PlayerRepository.getRemainingRecoveryTime(recoveredPlayer))
         }
@@ -65,15 +70,23 @@ class RecoveryLogicTest {
             SchemaUtils.createMissingTablesAndColumns(PlayersTable)
             val userId = "test_user"
             PlayersTable.insertPlayer(
-                id = userId, hp = 0, maxHp = 100, atk = 10, def = 5, spd = 8,
-                wood = 0, stone = 0, metal = 0, floor = 1,
-                recoveryStartAt = System.currentTimeMillis() - 20000 // 20s ago (cooldown is 10s)
+                id = userId,
+                hp = 0,
+                maxHp = 100,
+                atk = 10,
+                def = 5,
+                spd = 8,
+                wood = 0,
+                stone = 0,
+                metal = 0,
+                floor = 1,
+                recoveryStartAt = System.currentTimeMillis() - 20000, // 20s ago (cooldown is 10s)
             )
-            
+
             val player = PlayerRepository.restoreHpIfRecovered(userId)
             assertTrue(player != null)
             assertEquals(100, player!!.attributes.hp)
-            
+
             // Verify in DB
             val dbPlayer = PlayerRepository.getOrCreatePlayer(userId)
             assertEquals(100, dbPlayer.attributes.hp)
@@ -86,11 +99,19 @@ class RecoveryLogicTest {
             SchemaUtils.createMissingTablesAndColumns(PlayersTable)
             val userId = "still_dead"
             PlayersTable.insertPlayer(
-                id = userId, hp = 0, maxHp = 100, atk = 10, def = 5, spd = 8,
-                wood = 0, stone = 0, metal = 0, floor = 1,
-                recoveryStartAt = System.currentTimeMillis() // just now
+                id = userId,
+                hp = 0,
+                maxHp = 100,
+                atk = 10,
+                def = 5,
+                spd = 8,
+                wood = 0,
+                stone = 0,
+                metal = 0,
+                floor = 1,
+                recoveryStartAt = System.currentTimeMillis(), // just now
             )
-            
+
             val player = PlayerRepository.restoreHpIfRecovered(userId)
             assertTrue(player != null)
             assertEquals(0, player!!.attributes.hp)
@@ -103,10 +124,18 @@ class RecoveryLogicTest {
             SchemaUtils.createMissingTablesAndColumns(PlayersTable)
             val userId = "upgrade_user"
             PlayersTable.insertPlayer(
-                id = userId, hp = 100, maxHp = 100, atk = 10, def = 5, spd = 8,
-                wood = 100, stone = 100, metal = 100, floor = 1
+                id = userId,
+                hp = 100,
+                maxHp = 100,
+                atk = 10,
+                def = 5,
+                spd = 8,
+                wood = 100,
+                stone = 100,
+                metal = 100,
+                floor = 1,
             )
-            
+
             val result = PlayerRepository.upgradeEquipment(userId, "recovery")
             assertTrue(result is PlayerRepository.UpgradeResult.Success)
             val player = (result as PlayerRepository.UpgradeResult.Success).player
@@ -122,22 +151,26 @@ class RecoveryLogicTest {
     @Test
     fun testCooldownReductionAfterUpgrade() {
         val maxHp = 100 // Base cooldown 10s
-        
-        val playerLvl0 = luna.rpg.Player(
-            id = "lvl0", name = "Lvl0",
-            attributes = luna.rpg.RpgAttributes(0, maxHp, 10, 5, 8),
-            recoveryLevel = 0,
-            recoveryStartAt = System.currentTimeMillis()
-        )
+
+        val playerLvl0 =
+            luna.rpg.Player(
+                id = "lvl0",
+                name = "Lvl0",
+                attributes = luna.rpg.RpgAttributes(0, maxHp, 10, 5, 8),
+                recoveryLevel = 0,
+                recoveryStartAt = System.currentTimeMillis(),
+            )
         val cooldownLvl0 = PlayerRepository.getRemainingRecoveryTime(playerLvl0)
         assertTrue(cooldownLvl0 in 9..10)
-        
-        val playerLvl1 = luna.rpg.Player(
-            id = "lvl1", name = "Lvl1",
-            attributes = luna.rpg.RpgAttributes(0, maxHp, 10, 5, 8),
-            recoveryLevel = 1,
-            recoveryStartAt = System.currentTimeMillis()
-        )
+
+        val playerLvl1 =
+            luna.rpg.Player(
+                id = "lvl1",
+                name = "Lvl1",
+                attributes = luna.rpg.RpgAttributes(0, maxHp, 10, 5, 8),
+                recoveryLevel = 1,
+                recoveryStartAt = System.currentTimeMillis(),
+            )
         val cooldownLvl1 = PlayerRepository.getRemainingRecoveryTime(playerLvl1)
         // Lvl 1 should reduce by 5s. 10 - 5 = 5s.
         assertTrue(cooldownLvl1 in 4..5)
@@ -149,14 +182,24 @@ class RecoveryLogicTest {
             SchemaUtils.createMissingTablesAndColumns(PlayersTable)
             val userId = "death_user"
             PlayersTable.insertPlayer(
-                id = userId, hp = 100, maxHp = 100, atk = 10, def = 5, spd = 8,
-                wood = 0, stone = 0, metal = 0, floor = 1, roomsExplored = 5
+                id = userId,
+                hp = 100,
+                maxHp = 100,
+                atk = 10,
+                def = 5,
+                spd = 8,
+                wood = 0,
+                stone = 0,
+                metal = 0,
+                floor = 1,
+                roomsExplored = 5,
             )
 
-            val monster = luna.rpg.Monster(
-                name = "Slime",
-                attributes = luna.rpg.RpgAttributes(10, 50, 5, 2, 10)
-            )
+            val monster =
+                luna.rpg.Monster(
+                    name = "Slime",
+                    attributes = luna.rpg.RpgAttributes(10, 50, 5, 2, 10),
+                )
 
             // When player dies (playerHP = 0, monsterHP = 10)
             PlayerRepository.recordCombatResult(userId, playerHP = 0, monsterHP = 10, monster = monster)
@@ -164,9 +207,12 @@ class RecoveryLogicTest {
             val player = PlayerRepository.getOrCreatePlayer(userId)
             assertEquals(0, player.attributes.hp)
             assertTrue(player.recoveryStartAt > 0)
-            
+
             // Progress should NOT be incremented
-            assertEquals(5, transaction { PlayersTable.selectAll().where { PlayersTable.id eq userId }.single()[PlayersTable.roomsExplored] })
+            assertEquals(
+                5,
+                transaction { PlayersTable.selectAll().where { PlayersTable.id eq userId }.single()[PlayersTable.roomsExplored] },
+            )
 
             // Monster state SHOULD be saved
             assertNotNull(player.currentMonster)
@@ -180,15 +226,25 @@ class RecoveryLogicTest {
         transaction {
             SchemaUtils.createMissingTablesAndColumns(PlayersTable)
             val userId = "resume_user"
-            
+
             // 1. Setup a player with a saved monster (Slime with 10 HP)
-            val savedMonster = luna.rpg.Monster(
-                name = "Slime",
-                attributes = luna.rpg.RpgAttributes(10, 50, 5, 2, 10)
-            )
+            val savedMonster =
+                luna.rpg.Monster(
+                    name = "Slime",
+                    attributes = luna.rpg.RpgAttributes(10, 50, 5, 2, 10),
+                )
             PlayersTable.insertPlayer(
-                id = userId, hp = 100, maxHp = 100, atk = 10, def = 5, spd = 8,
-                wood = 0, stone = 0, metal = 0, floor = 1, roomsExplored = 5
+                id = userId,
+                hp = 100,
+                maxHp = 100,
+                atk = 10,
+                def = 5,
+                spd = 8,
+                wood = 0,
+                stone = 0,
+                metal = 0,
+                floor = 1,
+                roomsExplored = 5,
             )
             PlayerRepository.saveMonsterState(userId, savedMonster)
 
@@ -199,7 +255,7 @@ class RecoveryLogicTest {
 
             // 3. Simulate resuming combat (using the saved monster)
             val result = luna.rpg.CombatEngine.simulate(player, player.currentMonster!!)
-            
+
             // 4. Record result (Victory this time!)
             PlayerRepository.recordCombatResult(userId, result.playerFinalHP, result.monsterFinalHP, player.currentMonster!!)
 
@@ -217,13 +273,22 @@ class RecoveryLogicTest {
             SchemaUtils.createMissingTablesAndColumns(PlayersTable)
             val userId = "reviving_user"
             PlayersTable.insertPlayer(
-                id = userId, hp = 50, maxHp = 100, atk = 10, def = 5, spd = 8,
-                wood = 0, stone = 0, metal = 0, floor = 1, roomsExplored = 5,
-                recoveryStartAt = System.currentTimeMillis()
+                id = userId,
+                hp = 50,
+                maxHp = 100,
+                atk = 10,
+                def = 5,
+                spd = 8,
+                wood = 0,
+                stone = 0,
+                metal = 0,
+                floor = 1,
+                roomsExplored = 5,
+                recoveryStartAt = System.currentTimeMillis(),
             )
-            
+
             val player = PlayerRepository.getOrCreatePlayer(userId)
-            
+
             // Should be considered "not ready" if HP < maxHP
             // Note: We need to implement this check in ExploreCommand or PlayerRepository
             assertTrue(player.attributes.hp < player.attributes.maxHp)

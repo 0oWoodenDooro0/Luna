@@ -58,11 +58,12 @@ class UndercoverCommand : Command {
         val playersList = playerMap.keys.toList()
         val spy = playersList.random()
 
-        UndercoverManager.activeGames[guildId] = UndercoverGame(
-            players = playerMap,
-            spy = spy,
-            votes = mutableMapOf()
-        )
+        UndercoverManager.activeGames[guildId] =
+            UndercoverGame(
+                players = playerMap,
+                spy = spy,
+                votes = mutableMapOf(),
+            )
 
         for (id in playersList) {
             val member = guild.getMemberOrNull(id) ?: continue

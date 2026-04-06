@@ -1,18 +1,18 @@
 package luna.rpg.repository
 
-import org.jetbrains.exposed.v1.jdbc.transactions.transaction
-import org.jetbrains.exposed.v1.core.eq
-import org.jetbrains.exposed.v1.jdbc.update
-import org.jetbrains.exposed.v1.jdbc.selectAll
-import org.jetbrains.exposed.v1.jdbc.SchemaUtils
 import luna.rpg.Player
-import luna.rpg.RpgConfig
 import luna.rpg.PlayerProgression
+import luna.rpg.RpgConfig
 import luna.rpg.UpdateProgressionResult
+import org.jetbrains.exposed.v1.core.eq
+import org.jetbrains.exposed.v1.jdbc.SchemaUtils
+import org.jetbrains.exposed.v1.jdbc.selectAll
+import org.jetbrains.exposed.v1.jdbc.transactions.transaction
+import org.jetbrains.exposed.v1.jdbc.update
 
 object PlayerRepository {
-    fun getOrCreatePlayer(userId: String): Player {
-        return transaction {
+    fun getOrCreatePlayer(userId: String): Player =
+        transaction {
             SchemaUtils.createMissingTablesAndColumns(PlayersTable)
             PlayersTable.fetchPlayer(userId) ?: run {
                 PlayersTable.insertPlayer(
@@ -25,21 +25,23 @@ object PlayerRepository {
                     wood = 0,
                     stone = 0,
                     metal = 0,
-                    floor = 1
+                    floor = 1,
                 )
                 PlayersTable.fetchPlayer(userId)!!
             }
         }
-    }
 
-    fun getProgression(userId: String): PlayerProgression {
-        return transaction {
+    fun getProgression(userId: String): PlayerProgression =
+        transaction {
             val player = getOrCreatePlayer(userId)
             player.progression
         }
-    }
 
-    fun addResources(userId: String, resourceName: String, amount: Int) {
+    fun addResources(
+        userId: String,
+        resourceName: String,
+        amount: Int,
+    ) {
         transaction {
             val current = PlayersTable.selectAll().where { PlayersTable.id eq userId }.single()
             PlayersTable.update({ PlayersTable.id eq userId }) {
@@ -52,7 +54,11 @@ object PlayerRepository {
         }
     }
 
-    fun updateProgression(userId: String, currentFloor: Int, roomsExplored: Int): UpdateProgressionResult {
+    fun updateProgression(
+        userId: String,
+        currentFloor: Int,
+        roomsExplored: Int,
+    ): UpdateProgressionResult {
         val floorSize = RpgConfig.Exploration.FLOOR_SIZE
 
         val nextRoomCount = roomsExplored + 1
@@ -62,7 +68,7 @@ object PlayerRepository {
         return transaction {
             val player = getOrCreatePlayer(userId)
             val autoAdvance = player.autoAdvance
-            
+
             if (nextRoomCount >= floorSize) {
                 if (autoAdvance) {
                     PlayersTable.update({ PlayersTable.id eq userId }) {
@@ -87,7 +93,10 @@ object PlayerRepository {
         }
     }
 
-    fun updateAutoAdvance(userId: String, autoAdvance: Boolean) {
+    fun updateAutoAdvance(
+        userId: String,
+        autoAdvance: Boolean,
+    ) {
         transaction {
             PlayersTable.update({ PlayersTable.id eq userId }) {
                 it[this.autoAdvance] = autoAdvance
@@ -135,9 +144,10 @@ object PlayerRepository {
     /**
      * Calculates the cost of a specific resource for an upgrade.
      */
-    fun getResourceCost(currentLevel: Int, baseAmount: Int): Int {
-        return (currentLevel + 1) * baseAmount
-    }
+    fun getResourceCost(
+        currentLevel: Int,
+        baseAmount: Int,
+    ): Int = (currentLevel + 1) * baseAmount
 
     /**
      * 計算擊敗怪物後的獎勵
@@ -148,40 +158,55 @@ object PlayerRepository {
         return resourceName to amount
     }
 
-    data class MissingResource(val name: String, val required: Int, val current: Int)
+    data class MissingResource(
+        val name: String,
+        val required: Int,
+        val current: Int,
+    )
 
     sealed class UpgradeResult {
-        data class Success(val player: Player) : UpgradeResult()
-        data class InsufficientResources(val missing: List<MissingResource>) : UpgradeResult()
+        data class Success(
+            val player: Player,
+        ) : UpgradeResult()
+
+        data class InsufficientResources(
+            val missing: List<MissingResource>,
+        ) : UpgradeResult()
+
         object Error : UpgradeResult()
     }
 
-    fun upgradeEquipment(userId: String, type: String): UpgradeResult {
+    fun upgradeEquipment(
+        userId: String,
+        type: String,
+    ): UpgradeResult {
         val typeKey = type.lowercase()
         val requirements = RpgConfig.Economy.UPGRADE_REQUIREMENTS[typeKey] ?: return UpgradeResult.Error
 
         return transaction {
             val player = PlayersTable.fetchPlayer(userId) ?: return@transaction UpgradeResult.Error
-            
-            val currentLevel = when (typeKey) {
-                "weapon" -> player.weaponLevel
-                "shield" -> player.shieldLevel
-                "armor" -> player.armorLevel
-                "recovery" -> player.recoveryLevel
-                else -> return@transaction UpgradeResult.Error
-            }
+
+            val currentLevel =
+                when (typeKey) {
+                    "weapon" -> player.weaponLevel
+                    "shield" -> player.shieldLevel
+                    "armor" -> player.armorLevel
+                    "recovery" -> player.recoveryLevel
+                    else -> return@transaction UpgradeResult.Error
+                }
 
             val missing = mutableListOf<MissingResource>()
             // Check resources dynamically based on config
             for ((resourceName, baseAmount) in requirements) {
                 val cost = getResourceCost(currentLevel, baseAmount)
-                val (currentValue, displayName) = when (resourceName) {
-                    "wood" -> player.wood to "木頭"
-                    "stone" -> player.stone to "石頭"
-                    "metal" -> player.metal to "金屬"
-                    else -> 0 to "未知資源"
-                }
-                
+                val (currentValue, displayName) =
+                    when (resourceName) {
+                        "wood" -> player.wood to "木頭"
+                        "stone" -> player.stone to "石頭"
+                        "metal" -> player.metal to "金屬"
+                        else -> 0 to "未知資源"
+                    }
+
                 if (currentValue < cost) {
                     missing.add(MissingResource(displayName, cost, currentValue))
                 }
@@ -201,32 +226,38 @@ object PlayerRepository {
                         "metal" -> it[PlayersTable.metal] = player.metal - cost
                     }
                 }
-                
+
                 when (typeKey) {
                     "weapon" -> {
                         it[PlayersTable.weaponLevel] = currentLevel + 1
                         it[PlayersTable.atk] = player.attributes.atk + RpgConfig.Upgrade.WEAPON_ATK_BONUS
                     }
+
                     "shield" -> {
                         it[PlayersTable.shieldLevel] = currentLevel + 1
                         it[PlayersTable.def] = player.attributes.def + RpgConfig.Upgrade.SHIELD_DEF_BONUS
                     }
+
                     "armor" -> {
                         it[PlayersTable.armorLevel] = currentLevel + 1
                         it[PlayersTable.maxHp] = player.attributes.maxHp + RpgConfig.Upgrade.ARMOR_HP_BONUS
                         it[PlayersTable.hp] = player.attributes.hp + RpgConfig.Upgrade.ARMOR_HP_BONUS // Heal as well
                     }
+
                     "recovery" -> {
                         it[PlayersTable.recoveryLevel] = currentLevel + 1
                     }
                 }
             }
-            
+
             UpgradeResult.Success(PlayersTable.fetchPlayer(userId)!!)
         }
     }
 
-    private fun saveMonsterStateInternal(userId: String, monster: luna.rpg.Monster?) {
+    private fun saveMonsterStateInternal(
+        userId: String,
+        monster: luna.rpg.Monster?,
+    ) {
         PlayersTable.update({ PlayersTable.id eq userId }) {
             if (monster != null) {
                 it[PlayersTable.monsterName] = monster.name
@@ -246,38 +277,52 @@ object PlayerRepository {
         }
     }
 
-    fun saveMonsterState(userId: String, monster: luna.rpg.Monster?) {
+    fun saveMonsterState(
+        userId: String,
+        monster: luna.rpg.Monster?,
+    ) {
         transaction {
             saveMonsterStateInternal(userId, monster)
         }
     }
 
-    fun loadMonsterState(userId: String): luna.rpg.Monster? {
-        return transaction {
+    fun loadMonsterState(userId: String): luna.rpg.Monster? =
+        transaction {
             PlayersTable.fetchPlayer(userId)?.currentMonster
         }
-    }
 
     sealed class RebirthUpgradeResult {
-        data class Success(val player: Player) : RebirthUpgradeResult()
-        data class InsufficientPoints(val required: Int, val current: Int) : RebirthUpgradeResult()
+        data class Success(
+            val player: Player,
+        ) : RebirthUpgradeResult()
+
+        data class InsufficientPoints(
+            val required: Int,
+            val current: Int,
+        ) : RebirthUpgradeResult()
+
         object MaxLevelReached : RebirthUpgradeResult()
+
         object Error : RebirthUpgradeResult()
     }
 
-    fun upgradeRebirthStat(userId: String, statType: String): RebirthUpgradeResult {
+    fun upgradeRebirthStat(
+        userId: String,
+        statType: String,
+    ): RebirthUpgradeResult {
         val type = statType.uppercase()
         return transaction {
             val player = PlayersTable.fetchPlayer(userId) ?: return@transaction RebirthUpgradeResult.Error
-            
-            val currentLevel = when (type) {
-                "ATK" -> player.rebirthAtkLevel
-                "DEF" -> player.rebirthDefLevel
-                "SPD" -> player.rebirthSpdLevel
-                "RECOVERY" -> player.rebirthRecoveryLevel
-                "HP" -> player.rebirthHpLevel
-                else -> return@transaction RebirthUpgradeResult.Error
-            }
+
+            val currentLevel =
+                when (type) {
+                    "ATK" -> player.rebirthAtkLevel
+                    "DEF" -> player.rebirthDefLevel
+                    "SPD" -> player.rebirthSpdLevel
+                    "RECOVERY" -> player.rebirthRecoveryLevel
+                    "HP" -> player.rebirthHpLevel
+                    else -> return@transaction RebirthUpgradeResult.Error
+                }
 
             if (currentLevel >= RpgConfig.Rebirth.MAX_STAT_LEVEL) {
                 return@transaction RebirthUpgradeResult.MaxLevelReached
@@ -298,7 +343,7 @@ object PlayerRepository {
                     "HP" -> it[rebirthHpLevel] = currentLevel + 1
                 }
             }
-            
+
             RebirthUpgradeResult.Success(PlayersTable.fetchPlayer(userId)!!)
         }
     }
@@ -311,10 +356,10 @@ object PlayerRepository {
         return transaction {
             val player = PlayersTable.fetchPlayer(userId) ?: return@transaction null
             if (!player.canRebirth()) return@transaction player
-            
+
             val earnedPoints = player.calculateEarnedPoints()
             val resetPlayer = player.rebirthReset(earnedPoints)
-            
+
             PlayersTable.update({ PlayersTable.id eq userId }) {
                 it[hp] = resetPlayer.attributes.hp
                 it[maxHp] = resetPlayer.attributes.maxHp
@@ -336,12 +381,18 @@ object PlayerRepository {
                 it[monsterName] = null
                 it[monsterHp] = 0
             }
-            
+
             PlayersTable.fetchPlayer(userId)
         }
     }
 
-    fun recordCombatResult(userId: String, playerHP: Int, monsterHP: Int, monster: luna.rpg.Monster, reward: Pair<String, Int>? = null) {
+    fun recordCombatResult(
+        userId: String,
+        playerHP: Int,
+        monsterHP: Int,
+        monster: luna.rpg.Monster,
+        reward: Pair<String, Int>? = null,
+    ) {
         val won = monsterHP <= 0
         transaction {
             PlayersTable.update({ PlayersTable.id eq userId }) {
@@ -349,7 +400,7 @@ object PlayerRepository {
                 if (!won) {
                     it[recoveryStartAt] = System.currentTimeMillis()
                 }
-                
+
                 if (won && reward != null) {
                     val current = PlayersTable.selectAll().where { PlayersTable.id eq userId }.single()
                     val (resourceName, amount) = reward

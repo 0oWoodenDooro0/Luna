@@ -1,20 +1,19 @@
 package luna.rpg
 
+import luna.rpg.Monster
+import luna.rpg.RpgAttributes
+import luna.rpg.RpgConfig
+import luna.rpg.repository.PlayerRepository
+import luna.rpg.repository.PlayersTable
 import org.jetbrains.exposed.v1.jdbc.Database
 import org.jetbrains.exposed.v1.jdbc.SchemaUtils
 import org.jetbrains.exposed.v1.jdbc.transactions.transaction
 import org.junit.jupiter.api.BeforeEach
-import luna.rpg.repository.PlayerRepository
-import luna.rpg.repository.PlayersTable
-import luna.rpg.Monster
-import luna.rpg.RpgAttributes
-import luna.rpg.RpgConfig
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
 class RewardLogicTest {
-
     @BeforeEach
     fun setup() {
         Database.connect("jdbc:sqlite::memory:", driver = "org.sqlite.JDBC")
@@ -37,12 +36,19 @@ class RewardLogicTest {
     fun testRecordCombatResult_WithReward() {
         transaction {
             SchemaUtils.createMissingTablesAndColumns(PlayersTable)
-            
+
             val userId = "user_reward"
             PlayersTable.insertPlayer(
                 id = userId,
-                hp = 100, maxHp = 100, atk = 10, def = 5, spd = 8,
-                wood = 10, stone = 10, metal = 10, floor = 1
+                hp = 100,
+                maxHp = 100,
+                atk = 10,
+                def = 5,
+                spd = 8,
+                wood = 10,
+                stone = 10,
+                metal = 10,
+                floor = 1,
             )
 
             val monster = Monster("Slime", RpgAttributes(20, 20, 5, 2, 3))

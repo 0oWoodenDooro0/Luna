@@ -1,5 +1,6 @@
 package luna.rpg
 
+import luna.rpg.repository.PlayersTable
 import org.jetbrains.exposed.v1.jdbc.Database
 import org.jetbrains.exposed.v1.jdbc.SchemaUtils
 import org.jetbrains.exposed.v1.jdbc.transactions.transaction
@@ -8,10 +9,8 @@ import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
-import luna.rpg.repository.PlayersTable
 
 class EquipmentDatabaseTest {
-
     @BeforeEach
     fun setup() {
         Database.connect("jdbc:sqlite::memory:", driver = "org.sqlite.JDBC")
@@ -21,7 +20,7 @@ class EquipmentDatabaseTest {
     fun testEquipmentColumnsExist() {
         transaction {
             SchemaUtils.createMissingTablesAndColumns(PlayersTable)
-            
+
             PlayersTable.insertPlayer(
                 id = "tester",
                 hp = 100,
@@ -35,7 +34,7 @@ class EquipmentDatabaseTest {
                 floor = 1,
                 weaponLevel = 1,
                 shieldLevel = 2,
-                armorLevel = 3
+                armorLevel = 3,
             )
 
             val player = PlayersTable.fetchPlayer("tester")

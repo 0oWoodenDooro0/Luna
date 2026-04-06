@@ -7,10 +7,14 @@ object CombatEngine {
         val won: Boolean,
         val playerFinalHP: Int,
         val monsterFinalHP: Int,
-        val combatLog: List<String>
+        val combatLog: List<String>,
     )
 
-    fun simulate(player: Player, monster: Monster, playerName: String = "玩家"): CombatResult {
+    fun simulate(
+        player: Player,
+        monster: Monster,
+        playerName: String = "玩家",
+    ): CombatResult {
         val combatLog = mutableListOf<String>()
         val effective = player.effectiveAttributes
         var playerHP = effective.hp
@@ -18,11 +22,12 @@ object CombatEngine {
 
         combatLog.add("⚔️ 遭遇了 ${monster.name} (HP: $monsterHP)！")
 
-        val entities = if (effective.spd >= monster.attributes.spd) {
-            listOf("Player", "Monster")
-        } else {
-            listOf("Monster", "Player")
-        }
+        val entities =
+            if (effective.spd >= monster.attributes.spd) {
+                listOf("Player", "Monster")
+            } else {
+                listOf("Monster", "Player")
+            }
 
         var turn = 1
         while (playerHP > 0 && monsterHP > 0 && turn <= RpgConfig.Combat.MAX_TURNS) {
@@ -46,7 +51,7 @@ object CombatEngine {
             won = monsterHP <= 0,
             playerFinalHP = max(0, playerHP),
             monsterFinalHP = max(0, monsterHP),
-            combatLog = combatLog
+            combatLog = combatLog,
         )
     }
 }

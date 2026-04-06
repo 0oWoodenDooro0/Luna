@@ -29,32 +29,34 @@ class RebirthUpgradeCommand : Command {
     override suspend fun handle(interaction: ChatInputCommandInteraction) {
         val userId = interaction.user.id.toString()
         val stat = interaction.command.strings["stat"] ?: return
-        
+
         val response = interaction.deferPublicResponse()
-        
+
         val result = PlayerRepository.upgradeRebirthStat(userId, stat)
-        
-        val statName = when (stat) {
-            "atk" -> "攻擊力"
-            "def" -> "防禦力"
-            "spd" -> "速度"
-            "recovery" -> "康復速度"
-            "hp" -> "最大血量"
-            else -> "屬性"
-        }
+
+        val statName =
+            when (stat) {
+                "atk" -> "攻擊力"
+                "def" -> "防禦力"
+                "spd" -> "速度"
+                "recovery" -> "康復速度"
+                "hp" -> "最大血量"
+                else -> "屬性"
+            }
 
         when (result) {
             is PlayerRepository.RebirthUpgradeResult.Success -> {
                 val player = result.player
-                val newLevel = when (stat) {
-                    "atk" -> player.rebirthAtkLevel
-                    "def" -> player.rebirthDefLevel
-                    "spd" -> player.rebirthSpdLevel
-                    "recovery" -> player.rebirthRecoveryLevel
-                    "hp" -> player.rebirthHpLevel
-                    else -> 0
-                }
-                
+                val newLevel =
+                    when (stat) {
+                        "atk" -> player.rebirthAtkLevel
+                        "def" -> player.rebirthDefLevel
+                        "spd" -> player.rebirthSpdLevel
+                        "recovery" -> player.rebirthRecoveryLevel
+                        "hp" -> player.rebirthHpLevel
+                        else -> 0
+                    }
+
                 val bonusPerLevel = (RpgConfig.Rebirth.STAT_BONUS_PER_LEVEL * 100).toInt()
                 val totalBonus = newLevel * bonusPerLevel
 
@@ -73,6 +75,7 @@ class RebirthUpgradeCommand : Command {
                     }
                 }
             }
+
             is PlayerRepository.RebirthUpgradeResult.InsufficientPoints -> {
                 response.respond {
                     embed {
@@ -82,6 +85,7 @@ class RebirthUpgradeCommand : Command {
                     }
                 }
             }
+
             is PlayerRepository.RebirthUpgradeResult.MaxLevelReached -> {
                 response.respond {
                     embed {
@@ -91,6 +95,7 @@ class RebirthUpgradeCommand : Command {
                     }
                 }
             }
+
             PlayerRepository.RebirthUpgradeResult.Error -> {
                 response.respond {
                     embed {

@@ -16,7 +16,7 @@ data class RpgAttributes(
     val maxHp: Int,
     val atk: Int,
     val def: Int,
-    val spd: Int
+    val spd: Int,
 )
 
 /**
@@ -46,7 +46,7 @@ data class Player(
     val rebirthRecoveryLevel: Int = 0,
     val rebirthHpLevel: Int = 0,
     val currentMonster: Monster? = null,
-    val progression: PlayerProgression = PlayerProgression(1, 0, true)
+    val progression: PlayerProgression = PlayerProgression(1, 0, true),
 ) {
     /**
      * 計算加成後的最終屬性
@@ -63,7 +63,7 @@ data class Player(
                 maxHp = (attributes.maxHp * hpBonus).toInt(),
                 atk = (attributes.atk * atkBonus).toInt(),
                 def = (attributes.def * defBonus).toInt(),
-                spd = (attributes.spd * spdBonus).toInt()
+                spd = (attributes.spd * spdBonus).toInt(),
             )
         }
 
@@ -74,23 +74,22 @@ data class Player(
     /**
      * 檢查是否可以重生
      */
-    fun canRebirth(): Boolean {
-        return currentFloor >= RpgConfig.Rebirth.MIN_FLOOR
-    }
+    fun canRebirth(): Boolean = currentFloor >= RpgConfig.Rebirth.MIN_FLOOR
 
     /**
      * 計算重生可獲得的點數
      */
     fun calculateEarnedPoints(): Int {
         if (!canRebirth()) return 0
-        return ((currentFloor - RpgConfig.Rebirth.MIN_FLOOR) / RpgConfig.Rebirth.MILESTONE_INTERVAL + 1) * RpgConfig.Rebirth.POINTS_PER_MILESTONE
+        return ((currentFloor - RpgConfig.Rebirth.MIN_FLOOR) / RpgConfig.Rebirth.MILESTONE_INTERVAL + 1) *
+            RpgConfig.Rebirth.POINTS_PER_MILESTONE
     }
 
     /**
      * 執行重生重置
      */
-    fun rebirthReset(earnedPoints: Int): Player {
-        return this.copy(
+    fun rebirthReset(earnedPoints: Int): Player =
+        this.copy(
             attributes = RpgConfig.Player.INITIAL_ATTRIBUTES,
             wood = RpgConfig.Player.INITIAL_RESOURCES,
             stone = RpgConfig.Player.INITIAL_RESOURCES,
@@ -103,9 +102,8 @@ data class Player(
             rebirthCount = rebirthCount + 1,
             rebirthPoints = rebirthPoints + earnedPoints,
             progression = PlayerProgression(1, 0, autoAdvance),
-            currentMonster = null
+            currentMonster = null,
         )
-    }
 
     /**
      * 計算康復所需時間 (秒)
@@ -114,7 +112,7 @@ data class Player(
         val base = effectiveAttributes.maxHp * RpgConfig.Recovery.BASE_SECONDS_PER_HP
         val reduction = recoveryLevel * RpgConfig.Upgrade.RECOVERY_REDUCTION_SECONDS
         val baseCooldown = max(RpgConfig.Recovery.MIN_SECONDS, base - reduction)
-        
+
         // Apply rebirth bonus (percentage reduction)
         val rebirthBonus = 1.0 - (rebirthRecoveryLevel * RpgConfig.Rebirth.STAT_BONUS_PER_LEVEL)
         return max(RpgConfig.Recovery.MIN_SECONDS, baseCooldown * rebirthBonus).toLong()
@@ -123,9 +121,8 @@ data class Player(
     /**
      * 計算屬性升級成本
      */
-    fun calculateStatUpgradeCost(currentLevel: Int): Int {
-        return RpgConfig.Rebirth.BASE_UPGRADE_COST + (currentLevel * RpgConfig.Rebirth.COST_INCREASE_PER_LEVEL)
-    }
+    fun calculateStatUpgradeCost(currentLevel: Int): Int =
+        RpgConfig.Rebirth.BASE_UPGRADE_COST + (currentLevel * RpgConfig.Rebirth.COST_INCREASE_PER_LEVEL)
 
     /**
      * 檢查是否可以升級特定屬性
@@ -143,7 +140,7 @@ data class Player(
 data class PlayerProgression(
     val currentFloor: Int,
     val roomsExplored: Int,
-    val autoAdvance: Boolean
+    val autoAdvance: Boolean,
 )
 
 /**
@@ -151,7 +148,7 @@ data class PlayerProgression(
  */
 data class UpdateProgressionResult(
     val finalRoomCount: Int,
-    val message: String
+    val message: String,
 )
 
 /**
@@ -162,5 +159,5 @@ data class UpdateProgressionResult(
  */
 data class Monster(
     val name: String,
-    val attributes: RpgAttributes
+    val attributes: RpgAttributes,
 )

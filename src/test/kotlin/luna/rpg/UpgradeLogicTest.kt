@@ -1,19 +1,18 @@
 package luna.rpg
 
+import luna.rpg.repository.PlayerRepository
+import luna.rpg.repository.PlayersTable
+import org.jetbrains.exposed.v1.core.eq
 import org.jetbrains.exposed.v1.jdbc.Database
 import org.jetbrains.exposed.v1.jdbc.SchemaUtils
 import org.jetbrains.exposed.v1.jdbc.transactions.transaction
-import org.jetbrains.exposed.v1.core.eq
 import org.jetbrains.exposed.v1.jdbc.update
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
-import luna.rpg.repository.PlayersTable
-import luna.rpg.repository.PlayerRepository
 
 class UpgradeLogicTest {
-
     @BeforeEach
     fun setup() {
         // Shared in-memory DB
@@ -28,7 +27,7 @@ class UpgradeLogicTest {
         // Base amount 10
         assertEquals(10, PlayerRepository.getResourceCost(0, 10))
         assertEquals(20, PlayerRepository.getResourceCost(1, 10))
-        
+
         // Base amount 5
         assertEquals(5, PlayerRepository.getResourceCost(0, 5))
         assertEquals(10, PlayerRepository.getResourceCost(1, 5))
@@ -43,13 +42,13 @@ class UpgradeLogicTest {
                 it[wood] = 20
                 it[metal] = 20
             }
-            
+
             val result = PlayerRepository.upgradeEquipment(userId, "weapon")
             assertTrue(result is PlayerRepository.UpgradeResult.Success)
             val updatedPlayer = (result as PlayerRepository.UpgradeResult.Success).player
             assertEquals(1, updatedPlayer.weaponLevel)
             assertEquals(15, updatedPlayer.attributes.atk) // Base 10 + 5
-            
+
             // Weapon costs (0+1)*10 wood and (0+1)*5 metal
             assertEquals(10, updatedPlayer.wood)
             assertEquals(15, updatedPlayer.metal)
@@ -65,7 +64,7 @@ class UpgradeLogicTest {
                 it[wood] = 5
                 it[metal] = 20
             }
-            
+
             val result = PlayerRepository.upgradeEquipment(userId, "weapon")
             assertTrue(result is PlayerRepository.UpgradeResult.InsufficientResources)
             val missing = (result as PlayerRepository.UpgradeResult.InsufficientResources).missing

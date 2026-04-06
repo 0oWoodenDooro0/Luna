@@ -1,20 +1,19 @@
 package luna.rpg
 
+import luna.rpg.Monster
+import luna.rpg.RpgAttributes
+import luna.rpg.repository.PlayerRepository
+import luna.rpg.repository.PlayersTable
 import org.jetbrains.exposed.v1.jdbc.Database
 import org.jetbrains.exposed.v1.jdbc.SchemaUtils
 import org.jetbrains.exposed.v1.jdbc.transactions.transaction
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
-import luna.rpg.Monster
-import luna.rpg.RpgAttributes
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
-import luna.rpg.repository.PlayersTable
-import luna.rpg.repository.PlayerRepository
 
 class MonsterPersistenceTest {
-
     @BeforeEach
     fun setup() {
         Database.connect("jdbc:sqlite::memory:", driver = "org.sqlite.JDBC")
@@ -24,7 +23,7 @@ class MonsterPersistenceTest {
     fun testSaveAndLoadMonsterState() {
         transaction {
             SchemaUtils.createMissingTablesAndColumns(PlayersTable)
-            
+
             val userId = "user123"
             PlayersTable.insertPlayer(
                 id = userId,
@@ -36,13 +35,14 @@ class MonsterPersistenceTest {
                 wood = 0,
                 stone = 0,
                 metal = 0,
-                floor = 1
+                floor = 1,
             )
 
-            val monster = Monster(
-                name = "Slime",
-                attributes = RpgAttributes(hp = 20, maxHp = 50, atk = 5, def = 2, spd = 10)
-            )
+            val monster =
+                Monster(
+                    name = "Slime",
+                    attributes = RpgAttributes(hp = 20, maxHp = 50, atk = 5, def = 2, spd = 10),
+                )
 
             // Step 1: Save monster state (we'll implement this method in PlayerRepository)
             PlayerRepository.saveMonsterState(userId, monster)
@@ -64,21 +64,29 @@ class MonsterPersistenceTest {
     fun testClearMonsterState() {
         transaction {
             SchemaUtils.createMissingTablesAndColumns(PlayersTable)
-            
+
             val userId = "user123"
             PlayersTable.insertPlayer(
                 id = userId,
-                hp = 100, maxHp = 100, atk = 10, def = 5, spd = 8,
-                wood = 0, stone = 0, metal = 0, floor = 1
+                hp = 100,
+                maxHp = 100,
+                atk = 10,
+                def = 5,
+                spd = 8,
+                wood = 0,
+                stone = 0,
+                metal = 0,
+                floor = 1,
             )
 
-            val monster = Monster(
-                name = "Slime",
-                attributes = RpgAttributes(hp = 20, maxHp = 50, atk = 5, def = 2, spd = 10)
-            )
+            val monster =
+                Monster(
+                    name = "Slime",
+                    attributes = RpgAttributes(hp = 20, maxHp = 50, atk = 5, def = 2, spd = 10),
+                )
 
             PlayerRepository.saveMonsterState(userId, monster)
-            
+
             // Clear monster state
             PlayerRepository.saveMonsterState(userId, null)
 

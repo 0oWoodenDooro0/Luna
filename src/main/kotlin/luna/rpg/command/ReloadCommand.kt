@@ -17,7 +17,7 @@ class ReloadCommand : Command {
 
     override suspend fun handle(interaction: ChatInputCommandInteraction) {
         val response = interaction.deferEphemeralResponse()
-        
+
         val guildId = interaction.data.guildId.value
         if (guildId == null) {
             response.respond { content = "此指令只能在伺服器中使用。" }
@@ -26,16 +26,16 @@ class ReloadCommand : Command {
 
         val member = interaction.kord.getGuild(guildId).getMemberOrNull(interaction.user.id)
         val permissions = member?.getPermissions()
-        
+
         if (permissions == null || !permissions.contains(Permission.Administrator)) {
-            response.respond { 
+            response.respond {
                 content = "抱歉，只有伺服器管理員才能執行此指令。"
             }
             return
         }
 
         RpgConfig.reload()
-        response.respond { 
+        response.respond {
             content = "RPG 配置文件已重新讀取！"
         }
     }

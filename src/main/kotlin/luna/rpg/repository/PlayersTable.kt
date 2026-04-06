@@ -1,14 +1,14 @@
 package luna.rpg.repository
 
-import org.jetbrains.exposed.v1.core.Table
+import luna.rpg.Monster
+import luna.rpg.Player
+import luna.rpg.PlayerProgression
+import luna.rpg.RpgAttributes
 import org.jetbrains.exposed.v1.core.ResultRow
+import org.jetbrains.exposed.v1.core.Table
+import org.jetbrains.exposed.v1.core.eq
 import org.jetbrains.exposed.v1.jdbc.insert
 import org.jetbrains.exposed.v1.jdbc.selectAll
-import org.jetbrains.exposed.v1.core.eq
-import luna.rpg.Player
-import luna.rpg.RpgAttributes
-import luna.rpg.Monster
-import luna.rpg.PlayerProgression
 
 object PlayersTable : Table("players") {
     val id = varchar("id", 64)
@@ -68,7 +68,7 @@ object PlayersTable : Table("players") {
         rebirthDefLevel: Int = 0,
         rebirthSpdLevel: Int = 0,
         rebirthRecoveryLevel: Int = 0,
-        rebirthHpLevel: Int = 0
+        rebirthHpLevel: Int = 0,
     ) {
         insert {
             it[this.id] = id
@@ -98,32 +98,35 @@ object PlayersTable : Table("players") {
         }
     }
 
-    fun fetchPlayer(id: String): Player? {
-        return selectAll().where { PlayersTable.id eq id }
+    fun fetchPlayer(id: String): Player? =
+        selectAll()
+            .where { PlayersTable.id eq id }
             .map { it.toPlayer() }
             .singleOrNull()
-    }
 
     private fun ResultRow.toPlayer(): Player {
-        val attributes = RpgAttributes(
-            hp = this[hp],
-            maxHp = this[maxHp],
-            atk = this[atk],
-            def = this[def],
-            spd = this[spd]
-        )
-        val monster = this[monsterName]?.let { name ->
-            Monster(
-                name = name,
-                attributes = RpgAttributes(
-                    hp = this[monsterHp],
-                    maxHp = this[monsterMaxHp],
-                    atk = this[monsterAtk],
-                    def = this[monsterDef],
-                    spd = this[monsterSpd]
-                )
+        val attributes =
+            RpgAttributes(
+                hp = this[hp],
+                maxHp = this[maxHp],
+                atk = this[atk],
+                def = this[def],
+                spd = this[spd],
             )
-        }
+        val monster =
+            this[monsterName]?.let { name ->
+                Monster(
+                    name = name,
+                    attributes =
+                        RpgAttributes(
+                            hp = this[monsterHp],
+                            maxHp = this[monsterMaxHp],
+                            atk = this[monsterAtk],
+                            def = this[monsterDef],
+                            spd = this[monsterSpd],
+                        ),
+                )
+            }
         return Player(
             id = this[id],
             name = "Player",
@@ -144,11 +147,12 @@ object PlayersTable : Table("players") {
             rebirthRecoveryLevel = this[rebirthRecoveryLevel],
             rebirthHpLevel = this[rebirthHpLevel],
             currentMonster = monster,
-            progression = PlayerProgression(
-                currentFloor = this[currentFloor],
-                roomsExplored = this[roomsExplored],
-                autoAdvance = this[autoAdvance]
-            )
+            progression =
+                PlayerProgression(
+                    currentFloor = this[currentFloor],
+                    roomsExplored = this[roomsExplored],
+                    autoAdvance = this[autoAdvance],
+                ),
         )
     }
 }

@@ -6,40 +6,41 @@ import dev.kord.core.behavior.interaction.response.respond
 import dev.kord.core.event.interaction.ChatInputCommandInteractionCreateEvent
 import dev.kord.core.event.interaction.SelectMenuInteractionCreateEvent
 import dev.kord.core.on
-import luna.undercover.command.RevealCommand
-import luna.undercover.command.UndercoverCommand
-import luna.undercover.UndercoverManager
-import luna.undercover.UndercoverGame
-import luna.rpg.repository.DatabaseManager
 import luna.rpg.command.ExploreCommand
+import luna.rpg.command.HelpCommand
+import luna.rpg.command.RebirthCommand
+import luna.rpg.command.RebirthListCommand
+import luna.rpg.command.RebirthUpgradeCommand
+import luna.rpg.command.ReloadCommand
 import luna.rpg.command.SettingsCommand
 import luna.rpg.command.StatusCommand
 import luna.rpg.command.UpgradeCommand
-import luna.rpg.command.RebirthCommand
-import luna.rpg.command.RebirthUpgradeCommand
-import luna.rpg.command.HelpCommand
 import luna.rpg.command.UpgradeListCommand
-import luna.rpg.command.RebirthListCommand
-import luna.rpg.command.ReloadCommand
+import luna.rpg.repository.DatabaseManager
+import luna.undercover.UndercoverGame
+import luna.undercover.UndercoverManager
+import luna.undercover.command.RevealCommand
+import luna.undercover.command.UndercoverCommand
 
 suspend fun main() {
     DatabaseManager.init()
     val kord = Kord(System.getenv("DISCORD_TOKEN") ?: error("Missing discord token"))
 
-    val commands = listOf(
-        UndercoverCommand(),
-        RevealCommand(),
-        StatusCommand(),
-        ExploreCommand(),
-        SettingsCommand(),
-        UpgradeCommand(),
-        RebirthCommand(),
-        RebirthUpgradeCommand(),
-        HelpCommand(),
-        UpgradeListCommand(),
-        RebirthListCommand(),
-        ReloadCommand()
-    )
+    val commands =
+        listOf(
+            UndercoverCommand(),
+            RevealCommand(),
+            StatusCommand(),
+            ExploreCommand(),
+            SettingsCommand(),
+            UpgradeCommand(),
+            RebirthCommand(),
+            RebirthUpgradeCommand(),
+            HelpCommand(),
+            UpgradeListCommand(),
+            RebirthListCommand(),
+            ReloadCommand(),
+        )
     commands.forEach { it.register(kord) }
 
     kord.on<ChatInputCommandInteractionCreateEvent> {

@@ -77,13 +77,14 @@ object RpgConfig {
     }
 
     object Player {
-        val INITIAL_ATTRIBUTES get() = RpgAttributes(
-            hp = data.player.initialHp,
-            maxHp = data.player.initialHp,
-            atk = data.player.initialAtk,
-            def = data.player.initialDef,
-            spd = data.player.initialSpd
-        )
+        val INITIAL_ATTRIBUTES get() =
+            RpgAttributes(
+                hp = data.player.initialHp,
+                maxHp = data.player.initialHp,
+                atk = data.player.initialAtk,
+                def = data.player.initialDef,
+                spd = data.player.initialSpd,
+            )
         val INITIAL_RESOURCES get() = data.player.initialResources
     }
 }

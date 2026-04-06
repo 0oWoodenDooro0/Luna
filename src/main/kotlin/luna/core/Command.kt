@@ -8,5 +8,6 @@ interface Command {
     val description: String
 
     suspend fun register(kord: Kord)
+
     suspend fun handle(interaction: ChatInputCommandInteraction)
 }

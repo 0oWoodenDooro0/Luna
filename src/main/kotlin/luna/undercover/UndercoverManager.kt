@@ -6,7 +6,7 @@ import dev.kord.common.entity.Snowflake
 data class UndercoverGame(
     val players: Map<Snowflake, String>,
     val spy: Snowflake,
-    val votes: MutableMap<Snowflake, Snowflake>
+    val votes: MutableMap<Snowflake, Snowflake>,
 )
 
 object UndercoverManager {
