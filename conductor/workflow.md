@@ -143,7 +143,7 @@ Before marking any task complete, verify:
 - [ ] Code follows project's code style guidelines (as defined in `code_styleguides/`)
 - [ ] All public functions/methods are documented (e.g., docstrings, JSDoc, GoDoc)
 - [ ] Type safety is enforced (e.g., type hints, TypeScript types, Go types)
-- [ ] No linting or static analysis errors (using the project's configured tools)
+- [ ] No linting or static analysis errors (using `./gradlew ktlintCheck`)
 - [ ] Works correctly on mobile (if applicable)
 - [ ] Documentation updated if needed
 - [ ] No security vulnerabilities introduced
@@ -163,12 +163,15 @@ Before marking any task complete, verify:
 # Run the bot (ensure DISCORD_TOKEN is set)
 ./gradlew run
 
-# Format code (if using a formatting plugin like ktlint)
-# ./gradlew ktlintFormat
+# Format code
+./gradlew ktlintFormat
 ```
 
 ### Before Committing
 ```bash
+# Format code
+./gradlew ktlintFormat
+
 # Run all checks (tests, linting, etc.)
 ./gradlew check
 ```
