@@ -8,9 +8,9 @@ This plan outlines the steps to integrate `ktlint` for linting and formatting th
 - [x] Update `conductor/workflow.md` "Quality Gates" section [e66eaf1].
 
 ## Phase 2: Initial Linting and Formatting
-- [~] Run `./gradlew formatKotlin` to fix existing issues automatically.
-- [ ] Run `./gradlew lintKotlin` to identify any remaining issues.
-- [ ] Manually fix any issues that `formatKotlin` cannot handle.
+- [x] Run `./gradlew formatKotlin` to fix existing issues automatically [b18dede].
+- [x] Run `./gradlew lintKotlin` to identify any remaining issues [ba8aa26].
+- [x] Manually fix any issues that `formatKotlin` cannot handle [ba8aa26].
 
 ## Phase 3: Final Verification
 - [ ] Run `./gradlew build` to ensure all checks (tests, linting) pass.
