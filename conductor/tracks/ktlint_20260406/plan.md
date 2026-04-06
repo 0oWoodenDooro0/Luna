@@ -4,8 +4,8 @@ This plan outlines the steps to integrate `ktlint` for linting and formatting th
 
 ## Phase 1: Setup and Configuration
 - [x] Add `org.jmailen.kotlinter` version 5.4.2 to `build.gradle.kts` [3b41ed1].
-- [ ] Update `conductor/workflow.md` "Before Committing" section.
-- [ ] Update `conductor/workflow.md` "Quality Gates" section.
+- [x] Update `conductor/workflow.md` "Before Committing" section [691d33e].
+- [x] Update `conductor/workflow.md` "Quality Gates" section [691d33e].
 
 ## Phase 2: Initial Linting and Formatting
 - [ ] Run `./gradlew ktlintFormat` to fix existing issues automatically.
