@@ -6,12 +6,12 @@
 - [x] Task: Update `Player` data class in `RpgModels.kt` to include `rebirthResourceLevel` and `rebirthEfficientLevel`. eb71cd5
 - [x] Task: Conductor - User Manual Verification 'Phase 1: Configuration & Models' (Protocol in workflow.md) 491c363
 
-## Phase 2: Database Persistence
+## Phase 2: Database Persistence [checkpoint: 3e6554a]
 - [x] Task: Update `PlayersTable` in `repository/PlayersTable.kt` with new columns. 860c5cb
 - [x] Task: Update `PlayerRepository.kt` to handle loading and saving new rebirth stats. cbe012e
 - [x] Task: Update `rebirthUpgrade` method in `PlayerRepository.kt` to handle the new upgrades. cbe012e
 - [x] Task: Write tests in `RebirthPersistenceTest.kt` for new database fields. 5a1f611
-- [ ] Task: Conductor - User Manual Verification 'Phase 2: Database Persistence' (Protocol in workflow.md)
+- [x] Task: Conductor - User Manual Verification 'Phase 2: Database Persistence' (Protocol in workflow.md) 3e6554a
 
 ## Phase 3: Core Logic (Bonuses)
 - [ ] Task: Update `CombatEngine.kt` to apply "Resourceful" bonus to monster rewards.
