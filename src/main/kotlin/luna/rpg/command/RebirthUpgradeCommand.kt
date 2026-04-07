@@ -41,6 +41,8 @@ class RebirthUpgradeCommand : Command {
                 "spd" -> "速度"
                 "recovery" -> "康復速度"
                 "hp" -> "最大血量"
+                "resource" -> "物資豐富"
+                "efficient" -> "升級效率"
                 else -> "屬性"
             }
 
@@ -54,11 +56,24 @@ class RebirthUpgradeCommand : Command {
                         "spd" -> player.rebirthSpdLevel
                         "recovery" -> player.rebirthRecoveryLevel
                         "hp" -> player.rebirthHpLevel
+                        "resource" -> player.rebirthResourceLevel
+                        "efficient" -> player.rebirthEfficientLevel
                         else -> 0
                     }
 
-                val bonusPerLevel = (RpgConfig.Rebirth.STAT_BONUS_PER_LEVEL * 100).toInt()
-                val totalBonus = newLevel * bonusPerLevel
+                val bonusPerLevelPct =
+                    when (stat) {
+                        "resource" -> (RpgConfig.Rebirth.RESOURCE_BONUS_PER_LEVEL * 100).toInt()
+                        "efficient" -> (RpgConfig.Rebirth.EFFICIENT_BONUS_PER_LEVEL * 100).toInt()
+                        else -> (RpgConfig.Rebirth.STAT_BONUS_PER_LEVEL * 100).toInt()
+                    }
+                val totalBonus = newLevel * bonusPerLevelPct
+
+                val bonusDesc =
+                    when (stat) {
+                        "efficient" -> "✨ 永久成本減少：**-$totalBonus%**"
+                        else -> "✨ 永久加成：**+$totalBonus%**"
+                    }
 
                 response.respond {
                     embed {
@@ -67,7 +82,7 @@ class RebirthUpgradeCommand : Command {
                         color = dev.kord.common.Color(0x2ECC71)
                         field {
                             name = "屬性變化"
-                            value = "✨ 永久加成：**+$totalBonus%**"
+                            value = bonusDesc
                         }
                         footer {
                             text = "剩餘重生點數：${player.rebirthPoints}"
@@ -87,10 +102,16 @@ class RebirthUpgradeCommand : Command {
             }
 
             is PlayerRepository.RebirthUpgradeResult.MaxLevelReached -> {
+                val maxLevel =
+                    when (stat) {
+                        "resource" -> RpgConfig.Rebirth.MAX_RESOURCE_LEVEL
+                        "efficient" -> RpgConfig.Rebirth.MAX_EFFICIENT_LEVEL
+                        else -> RpgConfig.Rebirth.MAX_STAT_LEVEL
+                    }
                 response.respond {
                     embed {
                         title = "❌ 已達最高等級"
-                        description = "該屬性已達到最高等級 (**Lv.${RpgConfig.Rebirth.MAX_STAT_LEVEL}**)！"
+                        description = "該屬性已達到最高等級 (**Lv.$maxLevel**)！"
                         color = dev.kord.common.Color(0xF1C40F)
                     }
                 }
