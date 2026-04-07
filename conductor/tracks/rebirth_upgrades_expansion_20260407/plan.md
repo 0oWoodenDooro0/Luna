@@ -1,7 +1,7 @@
 # Implementation Plan: rebirth_upgrades_expansion_20260407
 
 ## Phase 1: Configuration & Models
-- [ ] Task: Update `RpgConfigData` and `RpgConfigLoader` to include new rebirth settings.
+- [x] Task: Update `RpgConfigData` and `RpgConfigLoader` to include new rebirth settings. 24bec6a
 - [ ] Task: Update `RpgConfig` object to provide access to new settings.
 - [ ] Task: Update `Player` data class in `RpgModels.kt` to include `rebirthResourceLevel` and `rebirthEfficientLevel`.
 - [ ] Task: Conductor - User Manual Verification 'Phase 1: Configuration & Models' (Protocol in workflow.md)
