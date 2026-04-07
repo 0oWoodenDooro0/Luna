@@ -15,7 +15,7 @@
 
 ## Phase 3: Core Logic (Bonuses)
 - [x] Task: Update `CombatEngine.kt` to apply "Resourceful" bonus to monster rewards. f88f8ae
-- [ ] Task: Update `ExploreCommand.kt` to apply "Resourceful" bonus to found resources.
+- [x] Task: Update `ExploreCommand.kt` to apply "Resourceful" bonus to found resources. 93eed69
 - [ ] Task: Update `UpgradeCommand.kt` to apply "Efficient" bonus to upgrade costs.
 - [ ] Task: Write unit tests for rebirth bonus logic in `RpgCoreTest.kt` or new `RebirthBonusTest.kt`.
 - [ ] Task: Conductor - User Manual Verification 'Phase 3: Core Logic (Bonuses)' (Protocol in workflow.md)
