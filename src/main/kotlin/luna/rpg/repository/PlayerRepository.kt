@@ -321,10 +321,19 @@ object PlayerRepository {
                     "SPD" -> player.rebirthSpdLevel
                     "RECOVERY" -> player.rebirthRecoveryLevel
                     "HP" -> player.rebirthHpLevel
+                    "RESOURCE" -> player.rebirthResourceLevel
+                    "EFFICIENT" -> player.rebirthEfficientLevel
                     else -> return@transaction RebirthUpgradeResult.Error
                 }
 
-            if (currentLevel >= RpgConfig.Rebirth.MAX_STAT_LEVEL) {
+            val maxLevel =
+                when (type) {
+                    "RESOURCE" -> RpgConfig.Rebirth.MAX_RESOURCE_LEVEL
+                    "EFFICIENT" -> RpgConfig.Rebirth.MAX_EFFICIENT_LEVEL
+                    else -> RpgConfig.Rebirth.MAX_STAT_LEVEL
+                }
+
+            if (currentLevel >= maxLevel) {
                 return@transaction RebirthUpgradeResult.MaxLevelReached
             }
 
@@ -341,6 +350,8 @@ object PlayerRepository {
                     "SPD" -> it[rebirthSpdLevel] = currentLevel + 1
                     "RECOVERY" -> it[rebirthRecoveryLevel] = currentLevel + 1
                     "HP" -> it[rebirthHpLevel] = currentLevel + 1
+                    "RESOURCE" -> it[rebirthResourceLevel] = currentLevel + 1
+                    "EFFICIENT" -> it[rebirthEfficientLevel] = currentLevel + 1
                 }
             }
 
@@ -378,6 +389,13 @@ object PlayerRepository {
                 it[recoveryStartAt] = resetPlayer.recoveryStartAt
                 it[rebirthCount] = resetPlayer.rebirthCount
                 it[rebirthPoints] = resetPlayer.rebirthPoints
+                it[rebirthAtkLevel] = resetPlayer.rebirthAtkLevel
+                it[rebirthDefLevel] = resetPlayer.rebirthDefLevel
+                it[rebirthSpdLevel] = resetPlayer.rebirthSpdLevel
+                it[rebirthRecoveryLevel] = resetPlayer.rebirthRecoveryLevel
+                it[rebirthHpLevel] = resetPlayer.rebirthHpLevel
+                it[rebirthResourceLevel] = resetPlayer.rebirthResourceLevel
+                it[rebirthEfficientLevel] = resetPlayer.rebirthEfficientLevel
                 it[monsterName] = null
                 it[monsterHp] = 0
             }
