@@ -53,17 +53,19 @@ class ExploreCommand : Command {
         if (eventRoll < RpgConfig.Exploration.EVENT_ROLL_RESOURCE_THRESHOLD) {
             val resources = RpgConfig.Exploration.RESOURCE_NAMES
             val foundResource = resources.random()
-            val amount = Random.nextInt(RpgConfig.Exploration.RESOURCE_MIN_AMOUNT, RpgConfig.Exploration.RESOURCE_MAX_AMOUNT + 1)
+            val baseAmount = Random.nextInt(RpgConfig.Exploration.RESOURCE_MIN_AMOUNT, RpgConfig.Exploration.RESOURCE_MAX_AMOUNT + 1)
+            val bonus = player.calculateResourceBonus()
+            val finalAmount = (baseAmount * bonus).toInt()
 
             val progressionResult = PlayerRepository.updateProgression(userId, player.currentFloor, player.roomsExplored)
-            PlayerRepository.addResources(userId, foundResource, amount)
+            PlayerRepository.addResources(userId, foundResource, finalAmount)
 
             interaction.deferPublicResponse().respond {
                 embed {
                     title = "探索結果：發現資源！"
                     description =
                         """
-                        $username 在第 ${player.currentFloor} 層探索中發現了 $foundResource x $amount！
+                        $username 在第 ${player.currentFloor} 層探索中發現了 $foundResource x $finalAmount！
                         
                         進度：${progressionResult.finalRoomCount} / ${RpgConfig.Exploration.FLOOR_SIZE} 房間
                         ${progressionResult.message}
