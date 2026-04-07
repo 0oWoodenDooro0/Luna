@@ -27,6 +27,6 @@
 - [x] Task: Conductor - User Manual Verification 'Phase 4: User Interface (Commands)' (Protocol in workflow.md) e9f9eeb
 
 ## Phase 5: Final Review & Integration
-- [~] Task: Run full test suite and linting.
-- [ ] Task: Verify everything works together as expected.
+- [x] Task: Run full test suite and linting. d66cf66
+- [x] Task: Verify everything works together as expected. d66cf66
 - [ ] Task: Conductor - User Manual Verification 'Phase 5: Final Review & Integration' (Protocol in workflow.md)
