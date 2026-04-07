@@ -8,7 +8,7 @@
 
 ## Phase 2: Database Persistence
 - [x] Task: Update `PlayersTable` in `repository/PlayersTable.kt` with new columns. 860c5cb
-- [ ] Task: Update `PlayerRepository.kt` to handle loading and saving new rebirth stats.
+- [x] Task: Update `PlayerRepository.kt` to handle loading and saving new rebirth stats. cbe012e
 - [ ] Task: Update `rebirthUpgrade` method in `PlayerRepository.kt` to handle the new upgrades.
 - [ ] Task: Write tests in `RebirthPersistenceTest.kt` for new database fields.
 - [ ] Task: Conductor - User Manual Verification 'Phase 2: Database Persistence' (Protocol in workflow.md)
