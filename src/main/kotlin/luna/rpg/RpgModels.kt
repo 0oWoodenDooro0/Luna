@@ -81,14 +81,12 @@ data class Player(
     /**
      * 計算物資獲得加成
      */
-    fun calculateResourceBonus(): Double =
-        1.0 + (rebirthResourceLevel * RpgConfig.Rebirth.RESOURCE_BONUS_PER_LEVEL)
+    fun calculateResourceBonus(): Double = 1.0 + (rebirthResourceLevel * RpgConfig.Rebirth.RESOURCE_BONUS_PER_LEVEL)
 
     /**
      * 計算升級效率加成 (成本減少)
      */
-    fun calculateEfficiencyBonus(): Double =
-        1.0 - (rebirthEfficientLevel * RpgConfig.Rebirth.EFFICIENT_BONUS_PER_LEVEL)
+    fun calculateEfficiencyBonus(): Double = 1.0 - (rebirthEfficientLevel * RpgConfig.Rebirth.EFFICIENT_BONUS_PER_LEVEL)
 
     /**
      * 計算重生可獲得的點數

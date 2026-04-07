@@ -185,7 +185,7 @@ class RebirthPersistenceTest {
             val res1 = PlayerRepository.upgradeRebirthStat("expansion_upgrade_user", "RESOURCE")
             assertIs<PlayerRepository.RebirthUpgradeResult.Success>(res1)
             assertEquals(1, res1.player.rebirthResourceLevel)
-            
+
             // Upgrade EFFICIENT
             val res2 = PlayerRepository.upgradeRebirthStat("expansion_upgrade_user", "EFFICIENT")
             assertIs<PlayerRepository.RebirthUpgradeResult.Success>(res2)
