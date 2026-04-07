@@ -22,7 +22,7 @@
 
 ## Phase 4: User Interface (Commands)
 - [x] Task: Update `RebirthListCommand.kt` to display new upgrades and their current levels/effects. 1ca1d89
-- [ ] Task: Update `RebirthUpgradeCommand.kt` to support upgrading "Resourceful" and "Efficient".
+- [x] Task: Update `RebirthUpgradeCommand.kt` to support upgrading "Resourceful" and "Efficient". 5879729
 - [ ] Task: Update `StatusCommand.kt` to reflect adjusted stats if necessary.
 - [ ] Task: Conductor - User Manual Verification 'Phase 4: User Interface (Commands)' (Protocol in workflow.md)
 
