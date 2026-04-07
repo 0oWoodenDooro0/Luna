@@ -20,7 +20,6 @@ class RebirthPersistenceTest {
         transaction {
             SchemaUtils.createMissingTablesAndColumns(PlayersTable)
 
-            // This will fail to compile until PlayersTable and Player are updated
             PlayersTable.insertPlayer(
                 id = "user_rebirth",
                 hp = 100,
@@ -78,7 +77,6 @@ class RebirthPersistenceTest {
             )
 
             // 2. Perform rebirth
-            // This will be implemented in PlayerRepository
             PlayerRepository.rebirthPlayer("rebirth_user")
 
             // 3. Verify reset state
@@ -134,6 +132,69 @@ class RebirthPersistenceTest {
             assertNotNull(player)
             assertEquals(2, player.rebirthAtkLevel)
             assertEquals(7, player.rebirthPoints)
+        }
+    }
+
+    @Test
+    fun testRebirthExpansionFieldsPersistence() {
+        transaction {
+            SchemaUtils.createMissingTablesAndColumns(PlayersTable)
+
+            PlayersTable.insertPlayer(
+                id = "expansion_user",
+                hp = 100,
+                maxHp = 100,
+                atk = 10,
+                def = 5,
+                spd = 8,
+                wood = 0,
+                stone = 0,
+                metal = 0,
+                floor = 1,
+                rebirthResourceLevel = 6,
+                rebirthEfficientLevel = 9,
+            )
+
+            val player = PlayersTable.fetchPlayer("expansion_user")
+            assertNotNull(player)
+            assertEquals(6, player.rebirthResourceLevel)
+            assertEquals(9, player.rebirthEfficientLevel)
+        }
+    }
+
+    @Test
+    fun testRebirthExpansionUpgradeIntegration() {
+        transaction {
+            SchemaUtils.createMissingTablesAndColumns(PlayersTable)
+
+            PlayersTable.insertPlayer(
+                id = "expansion_upgrade_user",
+                hp = 100,
+                maxHp = 100,
+                atk = 10,
+                def = 5,
+                spd = 8,
+                wood = 0,
+                stone = 0,
+                metal = 0,
+                floor = 1,
+                rebirthPoints = 10,
+            )
+
+            // Upgrade RESOURCE
+            val res1 = PlayerRepository.upgradeRebirthStat("expansion_upgrade_user", "RESOURCE")
+            assertIs<PlayerRepository.RebirthUpgradeResult.Success>(res1)
+            assertEquals(1, res1.player.rebirthResourceLevel)
+            
+            // Upgrade EFFICIENT
+            val res2 = PlayerRepository.upgradeRebirthStat("expansion_upgrade_user", "EFFICIENT")
+            assertIs<PlayerRepository.RebirthUpgradeResult.Success>(res2)
+            assertEquals(1, res2.player.rebirthEfficientLevel)
+
+            val player = PlayersTable.fetchPlayer("expansion_upgrade_user")
+            assertNotNull(player)
+            assertEquals(1, player.rebirthResourceLevel)
+            assertEquals(1, player.rebirthEfficientLevel)
         }
     }
 }
