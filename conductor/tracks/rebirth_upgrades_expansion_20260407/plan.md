@@ -10,7 +10,7 @@
 - [x] Task: Update `PlayersTable` in `repository/PlayersTable.kt` with new columns. 860c5cb
 - [x] Task: Update `PlayerRepository.kt` to handle loading and saving new rebirth stats. cbe012e
 - [x] Task: Update `rebirthUpgrade` method in `PlayerRepository.kt` to handle the new upgrades. cbe012e
-- [ ] Task: Write tests in `RebirthPersistenceTest.kt` for new database fields.
+- [x] Task: Write tests in `RebirthPersistenceTest.kt` for new database fields. 5a1f611
 - [ ] Task: Conductor - User Manual Verification 'Phase 2: Database Persistence' (Protocol in workflow.md)
 
 ## Phase 3: Core Logic (Bonuses)
