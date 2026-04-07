@@ -107,7 +107,9 @@ class StatusCommand : Command {
                             🛡️ DEF: +${(player.rebirthDefLevel * RpgConfig.Rebirth.STAT_BONUS_PER_LEVEL * 100).toInt()}% (Lv.${player.rebirthDefLevel})
                             ⚡ SPD: +${(player.rebirthSpdLevel * RpgConfig.Rebirth.STAT_BONUS_PER_LEVEL * 100).toInt()}% (Lv.${player.rebirthSpdLevel})
                             ❤️ REC: +${(player.rebirthRecoveryLevel * RpgConfig.Rebirth.STAT_BONUS_PER_LEVEL * 100).toInt()}% (Lv.${player.rebirthRecoveryLevel})
-                            HP: +${(player.rebirthHpLevel * RpgConfig.Rebirth.STAT_BONUS_PER_LEVEL * 100).toInt()}% (Lv.${player.rebirthHpLevel})
+                            ❤️ HP: +${(player.rebirthHpLevel * RpgConfig.Rebirth.STAT_BONUS_PER_LEVEL * 100).toInt()}% (Lv.${player.rebirthHpLevel})
+                            🪵 物資: +${(player.rebirthResourceLevel * RpgConfig.Rebirth.RESOURCE_BONUS_PER_LEVEL * 100).toInt()}% (Lv.${player.rebirthResourceLevel})
+                            🛠️ 效率: -${(player.rebirthEfficientLevel * RpgConfig.Rebirth.EFFICIENT_BONUS_PER_LEVEL * 100).toInt()}% (Lv.${player.rebirthEfficientLevel})
                             """.trimIndent()
                         inline = false
                     }
