@@ -22,6 +22,8 @@ class RebirthUpgradeCommand : Command {
                 choice("速度 (SPD%)", "spd")
                 choice("康復速度 (Recovery%)", "recovery")
                 choice("最大血量 (HP%)", "hp")
+                choice("物資豐富 (Resourceful%)", "resource")
+                choice("升級效率 (Efficient%)", "efficient")
             }
         }
     }
