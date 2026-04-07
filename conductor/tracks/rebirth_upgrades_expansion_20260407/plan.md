@@ -7,7 +7,7 @@
 - [x] Task: Conductor - User Manual Verification 'Phase 1: Configuration & Models' (Protocol in workflow.md) 491c363
 
 ## Phase 2: Database Persistence
-- [ ] Task: Update `PlayersTable` in `repository/PlayersTable.kt` with new columns.
+- [x] Task: Update `PlayersTable` in `repository/PlayersTable.kt` with new columns. 860c5cb
 - [ ] Task: Update `PlayerRepository.kt` to handle loading and saving new rebirth stats.
 - [ ] Task: Update `rebirthUpgrade` method in `PlayerRepository.kt` to handle the new upgrades.
 - [ ] Task: Write tests in `RebirthPersistenceTest.kt` for new database fields.
