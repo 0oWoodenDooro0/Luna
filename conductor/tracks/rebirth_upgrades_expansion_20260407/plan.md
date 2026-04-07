@@ -1,10 +1,10 @@
 # Implementation Plan: rebirth_upgrades_expansion_20260407
 
-## Phase 1: Configuration & Models
+## Phase 1: Configuration & Models [checkpoint: 491c363]
 - [x] Task: Update `RpgConfigData` and `RpgConfigLoader` to include new rebirth settings. 24bec6a
 - [x] Task: Update `RpgConfig` object to provide access to new settings. c4af28d
 - [x] Task: Update `Player` data class in `RpgModels.kt` to include `rebirthResourceLevel` and `rebirthEfficientLevel`. eb71cd5
-- [ ] Task: Conductor - User Manual Verification 'Phase 1: Configuration & Models' (Protocol in workflow.md)
+- [x] Task: Conductor - User Manual Verification 'Phase 1: Configuration & Models' (Protocol in workflow.md) 491c363
 
 ## Phase 2: Database Persistence
 - [ ] Task: Update `PlayersTable` in `repository/PlayersTable.kt` with new columns.
