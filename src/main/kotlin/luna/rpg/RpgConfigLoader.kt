@@ -119,6 +119,14 @@ class RpgConfigLoader(
         writer.println("  max_stat_level: ${config.rebirth.maxStatLevel}")
         writer.println("  # Percentage bonus per rebirth level (e.g., 0.05 = +5%)")
         writer.println("  stat_bonus_per_level: ${config.rebirth.statBonusPerLevel}")
+        writer.println("  # Maximum level for resource gain upgrade")
+        writer.println("  max_resource_level: ${config.rebirth.maxResourceLevel}")
+        writer.println("  # Bonus per resource gain level")
+        writer.println("  resource_bonus_per_level: ${config.rebirth.resourceBonusPerLevel}")
+        writer.println("  # Maximum level for efficiency upgrade")
+        writer.println("  max_efficient_level: ${config.rebirth.maxEfficientLevel}")
+        writer.println("  # Bonus per efficiency level")
+        writer.println("  efficient_bonus_per_level: ${config.rebirth.efficientBonusPerLevel}")
         writer.println()
 
         writer.println("# --- Player Initial Attributes ---")
@@ -200,6 +208,10 @@ class RpgConfigLoader(
                     costIncreasePerLevel = rebirth?.get("cost_increase_per_level") as? Int ?: 1,
                     maxStatLevel = rebirth?.get("max_stat_level") as? Int ?: 10,
                     statBonusPerLevel = (rebirth?.get("stat_bonus_per_level") as? Number)?.toDouble() ?: 0.05,
+                    maxResourceLevel = rebirth?.get("max_resource_level") as? Int ?: 10,
+                    resourceBonusPerLevel = (rebirth?.get("resource_bonus_per_level") as? Number)?.toDouble() ?: 0.05,
+                    maxEfficientLevel = rebirth?.get("max_efficient_level") as? Int ?: 10,
+                    efficientBonusPerLevel = (rebirth?.get("efficient_bonus_per_level") as? Number)?.toDouble() ?: 0.05,
                 ),
             player =
                 PlayerConfig(
@@ -280,6 +292,10 @@ data class RebirthConfig(
     val costIncreasePerLevel: Int = 1,
     val maxStatLevel: Int = 10,
     val statBonusPerLevel: Double = 0.05,
+    val maxResourceLevel: Int = 10,
+    val resourceBonusPerLevel: Double = 0.05,
+    val maxEfficientLevel: Int = 10,
+    val efficientBonusPerLevel: Double = 0.05,
 )
 
 data class PlayerConfig(
