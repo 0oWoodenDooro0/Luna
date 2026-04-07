@@ -147,7 +147,12 @@ object PlayerRepository {
     fun getResourceCost(
         currentLevel: Int,
         baseAmount: Int,
-    ): Int = (currentLevel + 1) * baseAmount
+        player: Player? = null,
+    ): Int {
+        val baseCost = (currentLevel + 1) * baseAmount
+        val bonus = player?.calculateEfficiencyBonus() ?: 1.0
+        return (baseCost * bonus).toInt()
+    }
 
     /**
      * 計算擊敗怪物後的獎勵

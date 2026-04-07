@@ -35,4 +35,22 @@ class RebirthBonusTest {
         assertEquals(1.10, player.calculateResourceBonus(), 0.001)
         assertEquals(0.85, player.calculateEfficiencyBonus(), 0.001)
     }
+
+    @Test
+    fun `test getResourceCost applies Efficient bonus`() {
+        val playerWithBonus = Player(
+            id = "efficient_user",
+            name = "Efficient",
+            attributes = RpgAttributes(100, 100, 10, 5, 8),
+            rebirthEfficientLevel = 4 // 4 * 0.05 = -20%
+        )
+        
+        // Level 0, base amount 10. Base cost = (0+1)*10 = 10.
+        // 10 * 0.8 = 8.
+        assertEquals(8, PlayerRepository.getResourceCost(0, 10, playerWithBonus))
+        
+        // Level 4, base amount 10. Base cost = (4+1)*10 = 50.
+        // 50 * 0.8 = 40.
+        assertEquals(40, PlayerRepository.getResourceCost(4, 10, playerWithBonus))
+    }
 }
