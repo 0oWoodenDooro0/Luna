@@ -45,6 +45,8 @@ data class Player(
     val rebirthSpdLevel: Int = 0,
     val rebirthRecoveryLevel: Int = 0,
     val rebirthHpLevel: Int = 0,
+    val rebirthResourceLevel: Int = 0,
+    val rebirthEfficientLevel: Int = 0,
     val currentMonster: Monster? = null,
     val progression: PlayerProgression = PlayerProgression(1, 0, true),
 ) {
@@ -75,6 +77,18 @@ data class Player(
      * 檢查是否可以重生
      */
     fun canRebirth(): Boolean = currentFloor >= RpgConfig.Rebirth.MIN_FLOOR
+
+    /**
+     * 計算物資獲得加成
+     */
+    fun calculateResourceBonus(): Double =
+        1.0 + (rebirthResourceLevel * RpgConfig.Rebirth.RESOURCE_BONUS_PER_LEVEL)
+
+    /**
+     * 計算升級效率加成 (成本減少)
+     */
+    fun calculateEfficiencyBonus(): Double =
+        1.0 - (rebirthEfficientLevel * RpgConfig.Rebirth.EFFICIENT_BONUS_PER_LEVEL)
 
     /**
      * 計算重生可獲得的點數
