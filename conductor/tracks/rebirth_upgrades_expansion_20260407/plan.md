@@ -20,11 +20,11 @@
 - [x] Task: Write unit tests for rebirth bonus logic in `RpgCoreTest.kt` or new `RebirthBonusTest.kt`. 0b340cc
 - [x] Task: Conductor - User Manual Verification 'Phase 3: Core Logic (Bonuses)' (Protocol in workflow.md) bab7c1a
 
-## Phase 4: User Interface (Commands)
+## Phase 4: User Interface (Commands) [checkpoint: e9f9eeb]
 - [x] Task: Update `RebirthListCommand.kt` to display new upgrades and their current levels/effects. 1ca1d89
-- [x] Task: Update `RebirthUpgradeCommand.kt` to support upgrading "Resourceful" and "Efficient". 5879729
+- [x] Task: Update `RebirthUpgradeCommand.kt` to support upgrading "Resourceful" and "Efficient". 51ae441
 - [x] Task: Update `StatusCommand.kt` to reflect adjusted stats if necessary. 84ceb62
-- [ ] Task: Conductor - User Manual Verification 'Phase 4: User Interface (Commands)' (Protocol in workflow.md)
+- [x] Task: Conductor - User Manual Verification 'Phase 4: User Interface (Commands)' (Protocol in workflow.md) e9f9eeb
 
 ## Phase 5: Final Review & Integration
 - [ ] Task: Run full test suite and linting.
