@@ -35,6 +35,8 @@ object PlayersTable : Table("players") {
     val rebirthSpdLevel = integer("rebirth_spd_level").default(0)
     val rebirthRecoveryLevel = integer("rebirth_recovery_level").default(0)
     val rebirthHpLevel = integer("rebirth_hp_level").default(0)
+    val rebirthResourceLevel = integer("rebirth_resource_level").default(0)
+    val rebirthEfficientLevel = integer("rebirth_efficient_level").default(0)
     val monsterName = varchar("monster_name", 64).nullable()
     val monsterHp = integer("monster_hp").default(0)
     val monsterMaxHp = integer("monster_max_hp").default(0)
@@ -69,6 +71,8 @@ object PlayersTable : Table("players") {
         rebirthSpdLevel: Int = 0,
         rebirthRecoveryLevel: Int = 0,
         rebirthHpLevel: Int = 0,
+        rebirthResourceLevel: Int = 0,
+        rebirthEfficientLevel: Int = 0,
     ) {
         insert {
             it[this.id] = id
@@ -95,6 +99,8 @@ object PlayersTable : Table("players") {
             it[this.rebirthSpdLevel] = rebirthSpdLevel
             it[this.rebirthRecoveryLevel] = rebirthRecoveryLevel
             it[this.rebirthHpLevel] = rebirthHpLevel
+            it[this.rebirthResourceLevel] = rebirthResourceLevel
+            it[this.rebirthEfficientLevel] = rebirthEfficientLevel
         }
     }
 
@@ -146,6 +152,8 @@ object PlayersTable : Table("players") {
             rebirthSpdLevel = this[rebirthSpdLevel],
             rebirthRecoveryLevel = this[rebirthRecoveryLevel],
             rebirthHpLevel = this[rebirthHpLevel],
+            rebirthResourceLevel = this[rebirthResourceLevel],
+            rebirthEfficientLevel = this[rebirthEfficientLevel],
             currentMonster = monster,
             progression =
                 PlayerProgression(
