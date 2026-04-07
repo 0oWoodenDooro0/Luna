@@ -74,6 +74,10 @@ object RpgConfig {
         val COST_INCREASE_PER_LEVEL get() = data.rebirth.costIncreasePerLevel
         val MAX_STAT_LEVEL get() = data.rebirth.maxStatLevel
         val STAT_BONUS_PER_LEVEL get() = data.rebirth.statBonusPerLevel
+        val MAX_RESOURCE_LEVEL get() = data.rebirth.maxResourceLevel
+        val RESOURCE_BONUS_PER_LEVEL get() = data.rebirth.resourceBonusPerLevel
+        val MAX_EFFICIENT_LEVEL get() = data.rebirth.maxEfficientLevel
+        val EFFICIENT_BONUS_PER_LEVEL get() = data.rebirth.efficientBonusPerLevel
     }
 
     object Player {

@@ -46,4 +46,31 @@ class RebirthConfigExpansionTest {
             tempFile.delete()
         }
     }
+
+    @Test
+    fun `test RpgConfig Rebirth object has new settings`() {
+        val configContent = """
+            rebirth:
+              max_resource_level: 15
+              resource_bonus_per_level: 0.1
+              max_efficient_level: 12
+              efficient_bonus_per_level: 0.08
+        """.trimIndent()
+        
+        val tempFile = File.createTempFile("config_test_rpgconfig", ".yml")
+        tempFile.writeText(configContent)
+        
+        val originalPath = RpgConfig.configPath
+        try {
+            RpgConfig.configPath = tempFile.absolutePath
+            
+            assertEquals(15, RpgConfig.Rebirth.MAX_RESOURCE_LEVEL)
+            assertEquals(0.1, RpgConfig.Rebirth.RESOURCE_BONUS_PER_LEVEL)
+            assertEquals(12, RpgConfig.Rebirth.MAX_EFFICIENT_LEVEL)
+            assertEquals(0.08, RpgConfig.Rebirth.EFFICIENT_BONUS_PER_LEVEL)
+        } finally {
+            RpgConfig.configPath = originalPath
+            tempFile.delete()
+        }
+    }
 }
