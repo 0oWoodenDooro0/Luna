@@ -33,11 +33,20 @@ class RebirthListCommand : Command {
                         Triple("spd", "⚡ 速度 (SPD%)", player.rebirthSpdLevel),
                         Triple("recovery", "❤️ 康復速度 (Recovery%)", player.rebirthRecoveryLevel),
                         Triple("hp", "❤️ 最大血量 (HP%)", player.rebirthHpLevel),
+                        Triple("resource", "🪵 物資豐富 (Resourceful%)", player.rebirthResourceLevel),
+                        Triple("efficient", "🛠️ 升級效率 (Efficient%)", player.rebirthEfficientLevel),
                     )
 
                 for ((key, displayName, level) in types) {
+                    val maxLevel =
+                        when (key) {
+                            "resource" -> RpgConfig.Rebirth.MAX_RESOURCE_LEVEL
+                            "efficient" -> RpgConfig.Rebirth.MAX_EFFICIENT_LEVEL
+                            else -> RpgConfig.Rebirth.MAX_STAT_LEVEL
+                        }
+
                     val cost =
-                        if (level >= RpgConfig.Rebirth.MAX_STAT_LEVEL) {
+                        if (level >= maxLevel) {
                             -1
                         } else {
                             player.calculateStatUpgradeCost(level)
@@ -59,15 +68,27 @@ class RebirthListCommand : Command {
                             "**$cost** 重生點數"
                         }
 
-                    val bonusPerLevel = (RpgConfig.Rebirth.STAT_BONUS_PER_LEVEL * 100).toInt()
-                    val currentBonus = level * bonusPerLevel
-                    val nextBonus = currentBonus + bonusPerLevel
+                    val bonusPerLevelPct =
+                        when (key) {
+                            "resource" -> (RpgConfig.Rebirth.RESOURCE_BONUS_PER_LEVEL * 100).toInt()
+                            "efficient" -> (RpgConfig.Rebirth.EFFICIENT_BONUS_PER_LEVEL * 100).toInt()
+                            else -> (RpgConfig.Rebirth.STAT_BONUS_PER_LEVEL * 100).toInt()
+                        }
+
+                    val currentBonus = level * bonusPerLevelPct
+                    val nextBonus = currentBonus + bonusPerLevelPct
+
+                    val effectDesc =
+                        when (key) {
+                            "efficient" -> "成本減少：-$currentBonus% -> **-$nextBonus%**"
+                            else -> "效果：+$currentBonus% -> **+$nextBonus%**"
+                        }
 
                     field {
                         name = "$displayName (Lv.$level -> Lv.${if (cost == -1) level else level + 1})"
                         value =
                             """
-                            效果：+$currentBonus% -> **+$nextBonus%**
+                            $effectDesc
                             成本：$statusIcon $costText
                             """.trimIndent()
                         inline = false
