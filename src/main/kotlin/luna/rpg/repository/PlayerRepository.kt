@@ -152,10 +152,15 @@ object PlayerRepository {
     /**
      * 計算擊敗怪物後的獎勵
      */
-    fun calculateMonsterReward(floor: Int): Pair<String, Int> {
+    fun calculateMonsterReward(
+        floor: Int,
+        player: Player? = null,
+    ): Pair<String, Int> {
         val resourceName = RpgConfig.Exploration.RESOURCE_NAMES.random()
-        val amount = RpgConfig.Economy.MONSTER_REWARD_BASE_AMOUNT + (floor - 1) * RpgConfig.Economy.MONSTER_REWARD_SCALE_PER_FLOOR
-        return resourceName to amount
+        val baseAmount = RpgConfig.Economy.MONSTER_REWARD_BASE_AMOUNT + (floor - 1) * RpgConfig.Economy.MONSTER_REWARD_SCALE_PER_FLOOR
+        val bonus = player?.calculateResourceBonus() ?: 1.0
+        val finalAmount = (baseAmount * bonus).toInt()
+        return resourceName to finalAmount
     }
 
     data class MissingResource(

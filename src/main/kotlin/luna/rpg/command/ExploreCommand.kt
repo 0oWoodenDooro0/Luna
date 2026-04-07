@@ -105,7 +105,7 @@ class ExploreCommand : Command {
 
         val reward =
             if (won) {
-                PlayerRepository.calculateMonsterReward(currentFloor)
+                PlayerRepository.calculateMonsterReward(currentFloor, player)
             } else {
                 null
             }
