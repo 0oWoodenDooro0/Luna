@@ -14,7 +14,7 @@
 - [x] Task: Conductor - User Manual Verification 'Phase 2: Database Persistence' (Protocol in workflow.md) 3e6554a
 
 ## Phase 3: Core Logic (Bonuses)
-- [ ] Task: Update `CombatEngine.kt` to apply "Resourceful" bonus to monster rewards.
+- [x] Task: Update `CombatEngine.kt` to apply "Resourceful" bonus to monster rewards. f88f8ae
 - [ ] Task: Update `ExploreCommand.kt` to apply "Resourceful" bonus to found resources.
 - [ ] Task: Update `UpgradeCommand.kt` to apply "Efficient" bonus to upgrade costs.
 - [ ] Task: Write unit tests for rebirth bonus logic in `RpgCoreTest.kt` or new `RebirthBonusTest.kt`.
