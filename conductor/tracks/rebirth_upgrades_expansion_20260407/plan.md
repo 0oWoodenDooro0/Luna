@@ -21,7 +21,7 @@
 - [x] Task: Conductor - User Manual Verification 'Phase 3: Core Logic (Bonuses)' (Protocol in workflow.md) bab7c1a
 
 ## Phase 4: User Interface (Commands)
-- [ ] Task: Update `RebirthListCommand.kt` to display new upgrades and their current levels/effects.
+- [x] Task: Update `RebirthListCommand.kt` to display new upgrades and their current levels/effects. 1ca1d89
 - [ ] Task: Update `RebirthUpgradeCommand.kt` to support upgrading "Resourceful" and "Efficient".
 - [ ] Task: Update `StatusCommand.kt` to reflect adjusted stats if necessary.
 - [ ] Task: Conductor - User Manual Verification 'Phase 4: User Interface (Commands)' (Protocol in workflow.md)
