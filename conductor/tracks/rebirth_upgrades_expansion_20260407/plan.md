@@ -13,12 +13,12 @@
 - [x] Task: Write tests in `RebirthPersistenceTest.kt` for new database fields. 5a1f611
 - [x] Task: Conductor - User Manual Verification 'Phase 2: Database Persistence' (Protocol in workflow.md) 3e6554a
 
-## Phase 3: Core Logic (Bonuses)
+## Phase 3: Core Logic (Bonuses) [checkpoint: bab7c1a]
 - [x] Task: Update `CombatEngine.kt` to apply "Resourceful" bonus to monster rewards. f88f8ae
 - [x] Task: Update `ExploreCommand.kt` to apply "Resourceful" bonus to found resources. 93eed69
 - [x] Task: Update `UpgradeCommand.kt` to apply "Efficient" bonus to upgrade costs. 0b340cc
 - [x] Task: Write unit tests for rebirth bonus logic in `RpgCoreTest.kt` or new `RebirthBonusTest.kt`. 0b340cc
-- [ ] Task: Conductor - User Manual Verification 'Phase 3: Core Logic (Bonuses)' (Protocol in workflow.md)
+- [x] Task: Conductor - User Manual Verification 'Phase 3: Core Logic (Bonuses)' (Protocol in workflow.md) bab7c1a
 
 ## Phase 4: User Interface (Commands)
 - [ ] Task: Update `RebirthListCommand.kt` to display new upgrades and their current levels/effects.
