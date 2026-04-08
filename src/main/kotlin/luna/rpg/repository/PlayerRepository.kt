@@ -208,7 +208,7 @@ object PlayerRepository {
             val missing = mutableListOf<MissingResource>()
             // Check resources dynamically based on config
             for ((resourceName, baseAmount) in requirements) {
-                val cost = getResourceCost(currentLevel, baseAmount)
+                val cost = getResourceCost(currentLevel, baseAmount, player)
                 val (currentValue, displayName) =
                     when (resourceName) {
                         "wood" -> player.wood to "木頭"
@@ -229,7 +229,7 @@ object PlayerRepository {
             // Deduct resources and upgrade
             PlayersTable.update({ PlayersTable.id eq userId }) {
                 for ((resourceName, baseAmount) in requirements) {
-                    val cost = getResourceCost(currentLevel, baseAmount)
+                    val cost = getResourceCost(currentLevel, baseAmount, player)
                     when (resourceName) {
                         "wood" -> it[PlayersTable.wood] = player.wood - cost
                         "stone" -> it[PlayersTable.stone] = player.stone - cost
