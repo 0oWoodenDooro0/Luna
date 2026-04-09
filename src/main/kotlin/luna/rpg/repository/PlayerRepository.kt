@@ -66,24 +66,13 @@ object PlayerRepository {
         var finalRoomCount = nextRoomCount
 
         return transaction {
-            val player = getOrCreatePlayer(userId)
-            val autoAdvance = player.autoAdvance
-
             if (nextRoomCount >= floorSize) {
-                if (autoAdvance) {
-                    PlayersTable.update({ PlayersTable.id eq userId }) {
-                        it[PlayersTable.currentFloor] = currentFloor + 1
-                        it[this.roomsExplored] = 0
-                    }
-                    message = "✨ 此層已探索完成！自動前往第 ${currentFloor + 1} 層。"
-                    finalRoomCount = 0
-                } else {
-                    PlayersTable.update({ PlayersTable.id eq userId }) {
-                        it[this.roomsExplored] = 0
-                    }
-                    message = "📍 此層已探索完成！保留在第 $currentFloor 層農資源。"
-                    finalRoomCount = 0
+                PlayersTable.update({ PlayersTable.id eq userId }) {
+                    it[this.currentFloor] = currentFloor + 1
+                    it[this.roomsExplored] = 0
                 }
+                message = "✨ 此層已探索完成！自動前往第 ${currentFloor + 1} 層。"
+                finalRoomCount = 0
             } else {
                 PlayersTable.update({ PlayersTable.id eq userId }) {
                     it[this.roomsExplored] = nextRoomCount

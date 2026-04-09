@@ -84,17 +84,17 @@ class PlayerRepositoryProgressionTest {
     }
 
     @Test
-    fun testUpdateProgressionFloorCompleteNoAutoAdvance() {
+    fun testUpdateProgressionFloorCompleteEvenIfNoAutoAdvanceSet() {
         val userId = "test-user"
         PlayerRepository.getOrCreatePlayer(userId)
         PlayerRepository.updateAutoAdvance(userId, false)
 
         val result = PlayerRepository.updateProgression(userId, 1, 9)
         assertEquals(0, result.finalRoomCount)
-        assertTrue(result.message.contains("保留在第 1 層"))
+        assertTrue(result.message.contains("自動前往第 2 層"))
 
         val player = PlayerRepository.getOrCreatePlayer(userId)
-        assertEquals(1, player.currentFloor)
+        assertEquals(2, player.currentFloor)
         assertEquals(0, player.roomsExplored)
     }
 
