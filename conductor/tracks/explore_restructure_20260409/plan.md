@@ -35,7 +35,7 @@
 - [x] Task: Conductor - User Manual Verification 'Phase 5: Final Verification' (Protocol in workflow.md) 168f09d
 
 ## Phase 6: Review Fixes
-- [x] Task: Implement Combat Context Separation (Main vs Map).
+- [x] Task: Implement Combat Context Separation (Main vs Map). d7807a1
     - [x] Update `PlayerMapsTable` and `PlayerMap` model to store monster info.
     - [x] Update `PlayerMapRepository` with map-specific combat result handling.
     - [x] Refactor `DungeonCommand` to use map-specific monster state.
