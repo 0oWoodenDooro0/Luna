@@ -8,6 +8,7 @@ import dev.kord.core.event.interaction.SelectMenuInteractionCreateEvent
 import dev.kord.core.on
 import luna.rpg.command.ExploreCommand
 import luna.rpg.command.HelpCommand
+import luna.rpg.command.MapCommand
 import luna.rpg.command.RebirthCommand
 import luna.rpg.command.RebirthListCommand
 import luna.rpg.command.RebirthUpgradeCommand
@@ -36,6 +37,7 @@ suspend fun main() {
             UpgradeCommand(),
             RebirthCommand(),
             RebirthUpgradeCommand(),
+            MapCommand(),
             HelpCommand(),
             UpgradeListCommand(),
             RebirthListCommand(),

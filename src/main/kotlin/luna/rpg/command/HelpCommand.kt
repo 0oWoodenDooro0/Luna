@@ -57,6 +57,11 @@ class HelpCommand : Command {
                     inline = false
                 }
                 field {
+                    name = "/map"
+                    value = "地圖系統：\n- `create`: 創建一張自定義樓層與掉落率的地圖。\n- `list`: 列出你擁有的所有地圖與 ID。\n- `select`: 選擇一張地圖作為目前的探索對象。\n- `delete`: 刪除一張地圖。"
+                    inline = false
+                }
+                field {
                     name = "/settings"
                     value = "調整冒險設定，例如是否自動進入下一層。"
                     inline = false
