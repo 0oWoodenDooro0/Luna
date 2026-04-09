@@ -174,6 +174,7 @@ data class PlayerMap(
     val rooms: Int = 20,
     val currentRoom: Int = 0,
     val isActive: Boolean = false,
+    val currentMonster: Monster? = null,
 )
 
 /**

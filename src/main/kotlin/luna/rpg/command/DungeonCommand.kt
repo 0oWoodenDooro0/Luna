@@ -40,11 +40,11 @@ class DungeonCommand : Command {
                 }
             }
             return
-        }
+            }
 
-        // Check for active map
-        val activeMap = PlayerMapRepository.getActiveMap(userId)
-        if (activeMap == null) {
+            // Check for active map
+            val activeMap = PlayerMapRepository.getActiveMap(userId)
+            if (activeMap == null) {
             interaction.deferPublicResponse().respond {
                 embed {
                     title = "探索失敗"
@@ -53,16 +53,17 @@ class DungeonCommand : Command {
                 }
             }
             return
-        }
+            }
 
-        // Check for saved monster first
-        val savedMonster = player.currentMonster
-        if (savedMonster != null) {
+            // Check for map's saved monster first
+            val savedMonster = activeMap.currentMonster
+            if (savedMonster != null) {
             handleCombat(interaction, player, savedMonster, isResumption = true, activeMap = activeMap)
             return
-        }
+            }
 
-        val eventRoll = Random.nextInt(100)
+            val eventRoll = Random.nextInt(100)
+
         val currentFloor = activeMap.layer
         val dropRateMultiplier = activeMap.dropRate
 
@@ -153,7 +154,7 @@ class DungeonCommand : Command {
                 UpdateProgressionResult(activeMap.currentRoom, "")
             }
 
-        PlayerRepository.recordCombatResult(userId, result.playerFinalHP, result.monsterFinalHP, monster, reward)
+        PlayerMapRepository.recordCombatResult(userId, activeMap.id, result.playerFinalHP, result.monsterFinalHP, monster, reward)
 
         interaction.deferPublicResponse().respond {
             embed {

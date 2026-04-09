@@ -90,4 +90,73 @@ object PlayerMapRepository {
             PlayerMapsTable.deleteWhere { (PlayerMapsTable.playerId eq playerId) and (PlayerMapsTable.id eq mapId) }
         }
     }
+
+    private fun saveMonsterStateInternal(
+        mapId: Int,
+        monster: luna.rpg.Monster?,
+    ) {
+        PlayerMapsTable.update({ PlayerMapsTable.id eq mapId }) {
+            if (monster != null) {
+                it[PlayerMapsTable.monsterName] = monster.name
+                it[PlayerMapsTable.monsterHp] = monster.attributes.hp
+                it[PlayerMapsTable.monsterMaxHp] = monster.attributes.maxHp
+                it[PlayerMapsTable.monsterAtk] = monster.attributes.atk
+                it[PlayerMapsTable.monsterDef] = monster.attributes.def
+                it[PlayerMapsTable.monsterSpd] = monster.attributes.spd
+            } else {
+                it[PlayerMapsTable.monsterName] = null
+                it[PlayerMapsTable.monsterHp] = 0
+                it[PlayerMapsTable.monsterMaxHp] = 0
+                it[PlayerMapsTable.monsterAtk] = 0
+                it[PlayerMapsTable.monsterDef] = 0
+                it[PlayerMapsTable.monsterSpd] = 0
+            }
+        }
+    }
+
+    fun saveMonsterState(
+        mapId: Int,
+        monster: luna.rpg.Monster?,
+    ) {
+        transaction {
+            saveMonsterStateInternal(mapId, monster)
+        }
+    }
+
+    fun recordCombatResult(
+        playerId: String,
+        mapId: Int,
+        playerHP: Int,
+        monsterHP: Int,
+        monster: luna.rpg.Monster,
+        reward: Pair<String, Int>? = null,
+    ) {
+        val won = monsterHP <= 0
+        transaction {
+            // Update player HP and recovery
+            PlayersTable.update({ PlayersTable.id eq playerId }) {
+                it[PlayersTable.hp] = playerHP
+                if (!won) {
+                    it[PlayersTable.recoveryStartAt] = System.currentTimeMillis()
+                }
+
+                if (won && reward != null) {
+                    val current = PlayersTable.selectAll().where { PlayersTable.id eq playerId }.single()
+                    val (resourceName, amount) = reward
+                    when (resourceName) {
+                        "🪵 木頭" -> it[PlayersTable.wood] = current[PlayersTable.wood] + amount
+                        "🪨 石頭" -> it[PlayersTable.stone] = current[PlayersTable.stone] + amount
+                        "🔗 金屬" -> it[PlayersTable.metal] = current[PlayersTable.metal] + amount
+                    }
+                }
+            }
+
+            // Update map monster state
+            if (!won) {
+                saveMonsterStateInternal(mapId, monster.copy(attributes = monster.attributes.copy(hp = monsterHP)))
+            } else {
+                saveMonsterStateInternal(mapId, null)
+            }
+        }
+    }
 }

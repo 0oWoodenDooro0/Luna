@@ -16,6 +16,12 @@ object PlayerMapsTable : Table("player_maps") {
     val rooms = integer("rooms").default(20)
     val currentRoom = integer("current_room").default(0)
     val isActive = bool("is_active").default(false)
+    val monsterName = varchar("monster_name", 64).nullable()
+    val monsterHp = integer("monster_hp").default(0)
+    val monsterMaxHp = integer("monster_max_hp").default(0)
+    val monsterAtk = integer("monster_atk").default(0)
+    val monsterDef = integer("monster_def").default(0)
+    val monsterSpd = integer("monster_spd").default(0)
 
     override val primaryKey = PrimaryKey(id)
 
@@ -47,8 +53,22 @@ object PlayerMapsTable : Table("player_maps") {
             .map { it.toPlayerMap() }
             .singleOrNull()
 
-    private fun ResultRow.toPlayerMap(): PlayerMap =
-        PlayerMap(
+    private fun ResultRow.toPlayerMap(): PlayerMap {
+        val monster =
+            this[monsterName]?.let { name ->
+                luna.rpg.Monster(
+                    name = name,
+                    attributes =
+                        luna.rpg.RpgAttributes(
+                            hp = this[monsterHp],
+                            maxHp = this[monsterMaxHp],
+                            atk = this[monsterAtk],
+                            def = this[monsterDef],
+                            spd = this[monsterSpd],
+                        ),
+                )
+            }
+        return PlayerMap(
             id = this[id],
             playerId = this[playerId],
             layer = this[layer],
@@ -56,5 +76,7 @@ object PlayerMapsTable : Table("player_maps") {
             rooms = this[rooms],
             currentRoom = this[currentRoom],
             isActive = this[isActive],
+            currentMonster = monster,
         )
+    }
 }
