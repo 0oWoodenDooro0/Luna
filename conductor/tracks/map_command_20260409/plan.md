@@ -34,11 +34,11 @@
 - [x] Task: Write tests for `ExploreCommand` map integration (e924622)
 - [x] Task: Conductor - User Manual Verification 'Phase 3: Integration with /explore Command' (Protocol in workflow.md)
 
-## Phase 4: /map Discord Commands
+## Phase 4: /map Discord Commands [checkpoint: b86f344]
 - [x] Task: Implement `/map create` command (ccea44c)
 - [x] Task: Implement `/map list` command (ccea44c)
 - [x] Task: Implement `/map select` command (ccea44c)
 - [x] Task: Implement `/map delete` command (ccea44c)
 - [x] Task: Register new commands in `Main.kt` (ccea44c)
 - [x] Task: Write integration tests for new commands (ccea44c)
-- [ ] Task: Conductor - User Manual Verification 'Phase 4: /map Discord Commands' (Protocol in workflow.md)
+- [x] Task: Conductor - User Manual Verification 'Phase 4: /map Discord Commands' (Protocol in workflow.md)
