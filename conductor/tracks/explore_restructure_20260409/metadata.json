@@ -1,0 +1,8 @@
+{
+  "track_id": "explore_restructure_20260409",
+  "type": "feature",
+  "status": "new",
+  "created_at": "2026-04-09T00:00:00Z",
+  "updated_at": "2026-04-09T00:00:00Z",
+  "description": "我的/explore 要能夠只有切換map 跟主要地層 並且移除setttingscommand"
+}
