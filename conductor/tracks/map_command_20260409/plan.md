@@ -25,13 +25,13 @@
 - [x] Task: Conductor - User Manual Verification 'Phase 2: Core Logic and Cost Calculation' (Protocol in workflow.md)
 
 ## Phase 3: Integration with /explore Command
-- [ ] Task: Modify `CombatEngine` and `ExploreCommand` to use active maps
-    - [ ] Check for active map when `/explore` is called.
-    - [ ] If map active: use map's `layer` and `dropRate`.
-    - [ ] If map active: progress through map's 20 rooms.
-    - [ ] If map active: handle map completion (restart or reset).
-- [ ] Task: Disable standard auto-advance when a map is active
-- [ ] Task: Write tests for `ExploreCommand` map integration
+- [x] Task: Modify `CombatEngine` and `ExploreCommand` to use active maps (e924622)
+    - [x] Check for active map when `/explore` is called.
+    - [x] If map active: use map's `layer` and `dropRate`.
+    - [x] If map active: progress through map's 20 rooms.
+    - [x] If map active: handle map completion (restart or reset).
+- [x] Task: Disable standard auto-advance when a map is active (e924622)
+- [x] Task: Write tests for `ExploreCommand` map integration (e924622)
 - [ ] Task: Conductor - User Manual Verification 'Phase 3: Integration with /explore Command' (Protocol in workflow.md)
 
 ## Phase 4: /map Discord Commands
