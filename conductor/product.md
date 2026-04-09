@@ -14,6 +14,7 @@ A simple, solo-focused Discord Text RPG where players explore endless dungeons, 
 
 ## Key Features
 - **Endless Dungeon Exploration:** A continuous exploration mode where players encounter monsters and find resources (Wood, Stone, Metal) through direct discovery or by defeating monsters.
+- **Custom Dungeon Maps:** A map system allowing players to create specialized maps with custom drop rates and difficulty levels (layers). Maps have a fixed size (20 rooms) and provide a focused progression path with increased rewards.
 - **Automated Turn-Based Combat:** Tactical but fast-paced combat based on HP, ATK, DEF, and SPD stats.
 - **Material & Equipment System:** Collecting Wood, Stone, and Metal (guaranteed drops from monsters) to upgrade weapons and armor for permanent stat boosts.
 - **Upgrade & Rebirth Lists:** Detailed overview of available equipment and rebirth upgrades, including costs and effects.
