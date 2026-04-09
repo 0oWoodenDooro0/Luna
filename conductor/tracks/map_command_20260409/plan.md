@@ -4,7 +4,7 @@
 - [x] Task: Create `PlayerMap` model and `PlayerMapsTable` in `DatabaseManager.kt` (6f9309a)
     - [ ] Define `PlayerMapsTable` with fields: `id`, `playerId`, `layer`, `dropRate`, `rooms` (fixed 20), `currentRoom`, `isActive`.
     - [ ] Create `PlayerMap` data class.
-- [ ] Task: Implement `PlayerMapRepository` for database operations
+- [x] Task: Implement `PlayerMapRepository` for database operations (7d2a429)
     - [ ] `createMap(playerId, layer, dropRate)`: Insert new map and deduct resources.
     - [ ] `getMaps(playerId)`: Retrieve all maps for a player.
     - [ ] `getActiveMap(playerId)`: Retrieve the active map for a player.
