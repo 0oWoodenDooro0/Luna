@@ -2,25 +2,25 @@
 
 ## Phase 1: Database and Model Foundation [checkpoint: 19c009c]
 - [x] Task: Create `PlayerMap` model and `PlayerMapsTable` in `DatabaseManager.kt` (6f9309a)
-    - [ ] Define `PlayerMapsTable` with fields: `id`, `playerId`, `layer`, `dropRate`, `rooms` (fixed 20), `currentRoom`, `isActive`.
-    - [ ] Create `PlayerMap` data class.
+    - [x] Define `PlayerMapsTable` with fields: `id`, `playerId`, `layer`, `dropRate`, `rooms` (fixed 20), `currentRoom`, `isActive`.
+    - [x] Create `PlayerMap` data class.
 - [x] Task: Implement `PlayerMapRepository` for database operations (7d2a429)
-    - [ ] `createMap(playerId, layer, dropRate)`: Insert new map and deduct resources.
-    - [ ] `getMaps(playerId)`: Retrieve all maps for a player.
-    - [ ] `getActiveMap(playerId)`: Retrieve the active map for a player.
-    - [ ] `setActiveMap(playerId, mapId)`: Set a map as active (and deactivate others).
-    - [ ] `updateProgress(mapId, currentRoom)`: Update the current room in a map.
-    - [ ] `deleteMap(playerId, mapId)`: Delete a specific map.
+    - [x] `createMap(playerId, layer, dropRate)`: Insert new map and deduct resources.
+    - [x] `getMaps(playerId)`: Retrieve all maps for a player.
+    - [x] `getActiveMap(playerId)`: Retrieve the active map for a player.
+    - [x] `setActiveMap(playerId, mapId)`: Set a map as active (and deactivate others).
+    - [x] `updateProgress(mapId, currentRoom)`: Update the current room in a map.
+    - [x] `deleteMap(playerId, mapId)`: Delete a specific map.
 - [x] Task: Write tests for `PlayerMapRepository` and `PlayerMapsTable` (7d2a429)
-- [ ] Task: Conductor - User Manual Verification 'Phase 1: Database and Model Foundation' (Protocol in workflow.md)
+- [x] Task: Conductor - User Manual Verification 'Phase 1: Database and Model Foundation' (Protocol in workflow.md)
 
 ## Phase 2: Core Logic and Cost Calculation
 - [x] Task: Implement map creation cost calculation in `RpgConfig` (00e139f)
-    - [ ] Define cost formula based on `dropRate` and `layer`.
-    - [ ] Add configuration for base costs in `config.yml`.
+    - [x] Define cost formula based on `dropRate` and `layer`.
+    - [x] Add configuration for base costs in `config.yml`.
 - [x] Task: Implement `MapService` for business logic (9bcea85)
-    - [ ] Handle map creation validation (resources, drop rate).
-    - [ ] Handle resource deduction.
+    - [x] Handle map creation validation (resources, drop rate).
+    - [x] Handle resource deduction.
 - [x] Task: Write tests for cost calculation and `MapService` logic (9bcea85)
 - [ ] Task: Conductor - User Manual Verification 'Phase 2: Core Logic and Cost Calculation' (Protocol in workflow.md)
 
