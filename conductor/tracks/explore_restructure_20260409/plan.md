@@ -20,13 +20,13 @@
     - [x] Update `src/test/kotlin/luna/rpg/command/ExploreCommandMapTest.kt` to reflect the new behavior.
 - [x] Task: Conductor - User Manual Verification 'Phase 3: Repurpose ExploreCommand' (Protocol in workflow.md) 31f0589
 
-## Phase 4: Implement DungeonCommand (Map Exploration Only)
+## Phase 4: Implement DungeonCommand (Map Exploration Only) [checkpoint: 3e95332]
 - [x] Task: Create and register the `DungeonCommand`. 8f277e9
     - [x] Create `src/main/kotlin/luna/rpg/command/DungeonCommand.kt` with logic for exploring the `activeMap`.
     - [x] Add error handling for when no map is active.
     - [x] Register `DungeonCommand` in `src/main/kotlin/luna/core/Main.kt`.
     - [x] Create `src/test/kotlin/luna/rpg/command/DungeonCommandTest.kt` with success and "no active map" cases.
-- [ ] Task: Conductor - User Manual Verification 'Phase 4: Implement DungeonCommand' (Protocol in workflow.md)
+- [x] Task: Conductor - User Manual Verification 'Phase 4: Implement DungeonCommand' (Protocol in workflow.md) 3e95332
 
 ## Phase 5: Final Verification & Integration
 - [ ] Task: Run all project tests and quality checks.
