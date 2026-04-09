@@ -15,7 +15,7 @@
 - [ ] Task: Conductor - User Manual Verification 'Phase 1: Database and Model Foundation' (Protocol in workflow.md)
 
 ## Phase 2: Core Logic and Cost Calculation
-- [ ] Task: Implement map creation cost calculation in `RpgConfig`
+- [x] Task: Implement map creation cost calculation in `RpgConfig` (00e139f)
     - [ ] Define cost formula based on `dropRate` and `layer`.
     - [ ] Add configuration for base costs in `config.yml`.
 - [ ] Task: Implement `MapService` for business logic
