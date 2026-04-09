@@ -82,20 +82,6 @@ object PlayerRepository {
         }
     }
 
-    fun updateAutoAdvance(
-        userId: String,
-        autoAdvance: Boolean,
-    ) {
-        transaction {
-            PlayersTable.update({ PlayersTable.id eq userId }) {
-                it[this.autoAdvance] = autoAdvance
-            }
-        }
-    }
-
-    /**
-     * 計算剩餘康復時間 (秒)
-     */
     fun getRemainingRecoveryTime(player: Player): Long {
         if (player.attributes.hp > 0) return 0L
         val cooldownMs = player.calculateRecoveryCooldown() * 1000L

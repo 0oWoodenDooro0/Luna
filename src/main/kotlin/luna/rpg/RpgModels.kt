@@ -113,7 +113,7 @@ data class Player(
             recoveryStartAt = 0L,
             rebirthCount = rebirthCount + 1,
             rebirthPoints = rebirthPoints + earnedPoints,
-            progression = PlayerProgression(1, 0, autoAdvance),
+            progression = PlayerProgression(1, 0, true),
             currentMonster = null,
         )
 

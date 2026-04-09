@@ -13,7 +13,6 @@ import luna.rpg.command.RebirthCommand
 import luna.rpg.command.RebirthListCommand
 import luna.rpg.command.RebirthUpgradeCommand
 import luna.rpg.command.ReloadCommand
-import luna.rpg.command.SettingsCommand
 import luna.rpg.command.StatusCommand
 import luna.rpg.command.UpgradeCommand
 import luna.rpg.command.UpgradeListCommand
@@ -33,7 +32,6 @@ suspend fun main() {
             RevealCommand(),
             StatusCommand(),
             ExploreCommand(),
-            SettingsCommand(),
             UpgradeCommand(),
             RebirthCommand(),
             RebirthUpgradeCommand(),

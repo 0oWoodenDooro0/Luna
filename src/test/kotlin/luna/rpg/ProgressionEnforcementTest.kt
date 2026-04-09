@@ -2,9 +2,11 @@ package luna.rpg
 
 import luna.rpg.repository.PlayerRepository
 import luna.rpg.repository.PlayersTable
+import org.jetbrains.exposed.v1.core.eq
 import org.jetbrains.exposed.v1.jdbc.Database
 import org.jetbrains.exposed.v1.jdbc.SchemaUtils
 import org.jetbrains.exposed.v1.jdbc.transactions.transaction
+import org.jetbrains.exposed.v1.jdbc.update
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
@@ -32,8 +34,12 @@ class ProgressionEnforcementTest {
         val userId = "test-user"
         PlayerRepository.getOrCreatePlayer(userId)
         
-        // Manually set autoAdvance to false
-        PlayerRepository.updateAutoAdvance(userId, false)
+        // Manually set autoAdvance to false in the database
+        transaction {
+            PlayersTable.update({ PlayersTable.id eq userId }) {
+                it[autoAdvance] = false
+            }
+        }
         
         // Mock progression to the end of floor 1 (floor size is 10)
         // Current floor 1, roomsExplored 9. Next exploration should trigger floor completion.

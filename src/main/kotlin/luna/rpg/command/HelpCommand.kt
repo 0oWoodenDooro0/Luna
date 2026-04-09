@@ -62,11 +62,6 @@ class HelpCommand : Command {
                     inline = false
                 }
                 field {
-                    name = "/settings"
-                    value = "調整冒險設定，例如是否自動進入下一層。"
-                    inline = false
-                }
-                field {
                     name = "/help"
                     value = "顯示此幫助訊息。"
                     inline = false

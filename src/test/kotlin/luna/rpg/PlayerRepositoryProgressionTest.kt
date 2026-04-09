@@ -3,9 +3,11 @@ package luna.rpg
 import luna.rpg.RpgConfig
 import luna.rpg.repository.PlayerRepository
 import luna.rpg.repository.PlayersTable
+import org.jetbrains.exposed.v1.core.eq
 import org.jetbrains.exposed.v1.jdbc.Database
 import org.jetbrains.exposed.v1.jdbc.SchemaUtils
 import org.jetbrains.exposed.v1.jdbc.transactions.transaction
+import org.jetbrains.exposed.v1.jdbc.update
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
@@ -87,7 +89,12 @@ class PlayerRepositoryProgressionTest {
     fun testUpdateProgressionFloorCompleteEvenIfNoAutoAdvanceSet() {
         val userId = "test-user"
         PlayerRepository.getOrCreatePlayer(userId)
-        PlayerRepository.updateAutoAdvance(userId, false)
+        
+        transaction {
+            PlayersTable.update({ PlayersTable.id eq userId }) {
+                it[autoAdvance] = false
+            }
+        }
 
         val result = PlayerRepository.updateProgression(userId, 1, 9)
         assertEquals(0, result.finalRoomCount)
@@ -96,19 +103,5 @@ class PlayerRepositoryProgressionTest {
         val player = PlayerRepository.getOrCreatePlayer(userId)
         assertEquals(2, player.currentFloor)
         assertEquals(0, player.roomsExplored)
-    }
-
-    @Test
-    fun testUpdateAutoAdvance() {
-        val userId = "test-user"
-        PlayerRepository.getOrCreatePlayer(userId)
-
-        PlayerRepository.updateAutoAdvance(userId, false)
-        var player = PlayerRepository.getOrCreatePlayer(userId)
-        assertFalse(player.autoAdvance)
-
-        PlayerRepository.updateAutoAdvance(userId, true)
-        player = PlayerRepository.getOrCreatePlayer(userId)
-        assertTrue(player.autoAdvance)
     }
 }
