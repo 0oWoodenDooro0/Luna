@@ -11,7 +11,6 @@ import luna.rpg.Player
 import luna.rpg.RpgAttributes
 import luna.rpg.RpgConfig
 import luna.rpg.UpdateProgressionResult
-import luna.rpg.repository.PlayerMapRepository
 import luna.rpg.repository.PlayerRepository
 import kotlin.random.Random
 
@@ -42,43 +41,35 @@ class ExploreCommand : Command {
             return
         }
 
-        // Check for active map
-        val activeMap = PlayerMapRepository.getActiveMap(userId)
-
         // Check for saved monster first
         val savedMonster = player.currentMonster
         if (savedMonster != null) {
-            handleCombat(interaction, player, savedMonster, isResumption = true, activeMap = activeMap)
+            handleCombat(interaction, player, savedMonster, isResumption = true)
             return
         }
 
         val eventRoll = Random.nextInt(100)
-        val currentFloor = activeMap?.layer ?: player.currentFloor
-        val dropRateMultiplier = activeMap?.dropRate ?: 1.0
+        val currentFloor = player.currentFloor
 
         if (eventRoll < RpgConfig.Exploration.EVENT_ROLL_RESOURCE_THRESHOLD) {
             val resources = RpgConfig.Exploration.RESOURCE_NAMES
             val foundResource = resources.random()
             val baseAmount = Random.nextInt(RpgConfig.Exploration.RESOURCE_MIN_AMOUNT, RpgConfig.Exploration.RESOURCE_MAX_AMOUNT + 1)
             val playerBonus = player.calculateResourceBonus()
-            val finalAmount = (baseAmount * playerBonus * dropRateMultiplier).toInt()
+            val finalAmount = (baseAmount * playerBonus).toInt()
 
-            val progressionResult = if (activeMap != null) {
-                updateMapProgression(userId, activeMap)
-            } else {
-                PlayerRepository.updateProgression(userId, player.currentFloor, player.roomsExplored)
-            }
+            val progressionResult = PlayerRepository.updateProgression(userId, player.currentFloor, player.roomsExplored)
             
             PlayerRepository.addResources(userId, foundResource, finalAmount)
 
             interaction.deferPublicResponse().respond {
                 embed {
-                    title = if (activeMap != null) "探索結果：地圖發現資源！" else "探索結果：發現資源！"
+                    title = "探索結果：發現資源！"
                     description =
                         """
-                        $username 在第 $currentFloor 層探索中發現了 $foundResource x $finalAmount！
+                        $username 在主要地層 第 $currentFloor 層探索中發現了 $foundResource x $finalAmount！
                         
-                        進度：${progressionResult.finalRoomCount} / ${if (activeMap != null) 20 else RpgConfig.Exploration.FLOOR_SIZE} 房間
+                        進度：${progressionResult.finalRoomCount} / ${RpgConfig.Exploration.FLOOR_SIZE} 房間
                         ${progressionResult.message}
                         """.trimIndent()
                     color = dev.kord.common.Color(0x2ECC71)
@@ -99,18 +90,7 @@ class ExploreCommand : Command {
                 )
             val monster = Monster(monsterName, monsterAttr)
 
-            handleCombat(interaction, player, monster, isResumption = false, activeMap = activeMap)
-        }
-    }
-
-    private fun updateMapProgression(userId: String, map: luna.rpg.PlayerMap): UpdateProgressionResult {
-        val nextRoom = map.currentRoom + 1
-        return if (nextRoom >= 20) {
-            PlayerMapRepository.updateProgress(map.id, 0)
-            UpdateProgressionResult(0, "✨ 地圖探索完成！回到起點。")
-        } else {
-            PlayerMapRepository.updateProgress(map.id, nextRoom)
-            UpdateProgressionResult(nextRoom, "")
+            handleCombat(interaction, player, monster, isResumption = false)
         }
     }
 
@@ -118,34 +98,28 @@ class ExploreCommand : Command {
         interaction: ChatInputCommandInteraction,
         player: Player,
         monster: Monster,
-        isResumption: Boolean,
-        activeMap: luna.rpg.PlayerMap? = null
+        isResumption: Boolean
     ) {
         val userId = player.id
         val username = interaction.user.username
 
         val result = CombatEngine.simulate(player, monster, username)
         val won = result.won
-        val currentFloor = activeMap?.layer ?: player.currentFloor
-        val dropRateMultiplier = activeMap?.dropRate ?: 1.0
+        val currentFloor = player.currentFloor
 
         val reward =
             if (won) {
                 val baseReward = PlayerRepository.calculateMonsterReward(currentFloor, player)
-                baseReward.first to (baseReward.second * dropRateMultiplier).toInt()
+                baseReward.first to baseReward.second
             } else {
                 null
             }
 
         val progressionResult =
             if (won) {
-                if (activeMap != null) {
-                    updateMapProgression(userId, activeMap)
-                } else {
-                    PlayerRepository.updateProgression(userId, currentFloor, player.roomsExplored)
-                }
+                PlayerRepository.updateProgression(userId, currentFloor, player.roomsExplored)
             } else {
-                UpdateProgressionResult(activeMap?.currentRoom ?: player.roomsExplored, "")
+                UpdateProgressionResult(player.roomsExplored, "")
             }
 
         PlayerRepository.recordCombatResult(userId, result.playerFinalHP, result.monsterFinalHP, monster, reward)
@@ -165,7 +139,7 @@ class ExploreCommand : Command {
                     
                     ${if (won) "✨ 你擊敗了 ${monster.name}！並獲得了 **${reward?.first} x ${reward?.second}**！" else "💀 你被打敗了... 但你設法在同一個房間裡甦醒。"}
                     
-                    進度：${progressionResult.finalRoomCount} / ${if (activeMap != null) 20 else RpgConfig.Exploration.FLOOR_SIZE} 房間
+                    進度：${progressionResult.finalRoomCount} / ${RpgConfig.Exploration.FLOOR_SIZE} 房間
                     ${progressionResult.message}
                     """.trimIndent()
                 color = if (won) dev.kord.common.Color(0x00FF00) else dev.kord.common.Color(0xFF0000)
