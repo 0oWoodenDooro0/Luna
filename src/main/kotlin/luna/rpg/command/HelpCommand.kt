@@ -23,7 +23,12 @@ class HelpCommand : Command {
 
                 field {
                     name = "/explore"
-                    value = "在目前的樓層進行探索，可能遇到怪物或發現資源。"
+                    value = "在主要地層進行探索，可能遇到怪物或發現資源。"
+                    inline = false
+                }
+                field {
+                    name = "/dungeon"
+                    value = "探索你目前選中的自定義地圖（地下城）。"
                     inline = false
                 }
                 field {

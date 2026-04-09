@@ -6,6 +6,7 @@ import dev.kord.core.behavior.interaction.response.respond
 import dev.kord.core.event.interaction.ChatInputCommandInteractionCreateEvent
 import dev.kord.core.event.interaction.SelectMenuInteractionCreateEvent
 import dev.kord.core.on
+import luna.rpg.command.DungeonCommand
 import luna.rpg.command.ExploreCommand
 import luna.rpg.command.HelpCommand
 import luna.rpg.command.MapCommand
@@ -32,6 +33,7 @@ suspend fun main() {
             RevealCommand(),
             StatusCommand(),
             ExploreCommand(),
+            DungeonCommand(),
             UpgradeCommand(),
             RebirthCommand(),
             RebirthUpgradeCommand(),
