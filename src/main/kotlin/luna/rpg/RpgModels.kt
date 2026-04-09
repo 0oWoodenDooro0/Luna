@@ -164,6 +164,19 @@ data class UpdateProgressionResult(
 )
 
 /**
+ * Represents a custom map owned by a player.
+ */
+data class PlayerMap(
+    val id: Int,
+    val playerId: String,
+    val layer: Int,
+    val dropRate: Double,
+    val rooms: Int = 20,
+    val currentRoom: Int = 0,
+    val isActive: Boolean = false
+)
+
+/**
  * Represents a monster in the RPG.
  *
  * @property name The name of the monster.

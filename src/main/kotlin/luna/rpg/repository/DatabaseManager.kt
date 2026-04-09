@@ -18,7 +18,7 @@ object DatabaseManager {
         Database.connect(url, driver = "org.sqlite.JDBC")
 
         transaction {
-            SchemaUtils.createMissingTablesAndColumns(PlayersTable)
+            SchemaUtils.createMissingTablesAndColumns(PlayersTable, PlayerMapsTable)
         }
     }
 }
