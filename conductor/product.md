@@ -25,4 +25,5 @@ A simple, solo-focused Discord Text RPG where players explore endless dungeons, 
 - **Solo Play:** The current focus is a dedicated solo experience without mandatory social or competitive features.
 
 ## Integration
-- **Parallel System:** The RPG system will co-exist with the existing "Undercover" game as a separate set of Discord commands (/explore, /status, /settings, /help, etc.).
+- **Parallel System:** The RPG system will co-exist with the existing "Undercover" game as a separate set of Discord commands (/explore, /dungeon, /status, /help, etc.).
+- **Automatic Progression:** Floor progression is permanently automated; players always advance to the next floor upon completion.
