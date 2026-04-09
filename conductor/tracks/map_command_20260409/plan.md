@@ -1,6 +1,6 @@
 # Implementation Plan: /map Command & Dungeon Map System
 
-## Phase 1: Database and Model Foundation
+## Phase 1: Database and Model Foundation [checkpoint: 19c009c]
 - [x] Task: Create `PlayerMap` model and `PlayerMapsTable` in `DatabaseManager.kt` (6f9309a)
     - [ ] Define `PlayerMapsTable` with fields: `id`, `playerId`, `layer`, `dropRate`, `rooms` (fixed 20), `currentRoom`, `isActive`.
     - [ ] Create `PlayerMap` data class.
@@ -11,7 +11,7 @@
     - [ ] `setActiveMap(playerId, mapId)`: Set a map as active (and deactivate others).
     - [ ] `updateProgress(mapId, currentRoom)`: Update the current room in a map.
     - [ ] `deleteMap(playerId, mapId)`: Delete a specific map.
-- [ ] Task: Write tests for `PlayerMapRepository` and `PlayerMapsTable`
+- [x] Task: Write tests for `PlayerMapRepository` and `PlayerMapsTable` (7d2a429)
 - [ ] Task: Conductor - User Manual Verification 'Phase 1: Database and Model Foundation' (Protocol in workflow.md)
 
 ## Phase 2: Core Logic and Cost Calculation
