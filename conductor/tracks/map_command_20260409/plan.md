@@ -1,7 +1,7 @@
 # Implementation Plan: /map Command & Dungeon Map System
 
 ## Phase 1: Database and Model Foundation
-- [ ] Task: Create `PlayerMap` model and `PlayerMapsTable` in `DatabaseManager.kt`
+- [x] Task: Create `PlayerMap` model and `PlayerMapsTable` in `DatabaseManager.kt` (6f9309a)
     - [ ] Define `PlayerMapsTable` with fields: `id`, `playerId`, `layer`, `dropRate`, `rooms` (fixed 20), `currentRoom`, `isActive`.
     - [ ] Create `PlayerMap` data class.
 - [ ] Task: Implement `PlayerMapRepository` for database operations
