@@ -45,7 +45,7 @@ class ExploreCommandMapTest {
     @Test
     fun `test explore with active map updates map progression`() {
         // 1. Create and activate a map
-        val mapId = PlayerMapRepository.createMap("user_map_test", 5, 1.5)
+        val mapId = PlayerMapRepository.createMap("user_map_test", 5, 1.5)!!
         PlayerMapRepository.setActiveMap("user_map_test", mapId)
 
         // 2. Since we can't easily run the full Kord command in a unit test without complex mocks,
@@ -60,7 +60,7 @@ class ExploreCommandMapTest {
     @Test
     fun `test map progression logic`() {
         // We can test the repository's updateProgress which is used by ExploreCommand
-        val mapId = PlayerMapRepository.createMap("user_map_test", 1, 1.0)
+        val mapId = PlayerMapRepository.createMap("user_map_test", 1, 1.0)!!
         PlayerMapRepository.updateProgress(mapId, 5)
         
         val maps = PlayerMapRepository.getMaps("user_map_test")

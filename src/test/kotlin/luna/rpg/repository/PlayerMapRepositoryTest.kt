@@ -32,7 +32,7 @@ class PlayerMapRepositoryTest {
     @Test
     fun testCreateAndGetMaps() {
         val mapId = PlayerMapRepository.createMap("user123", 1, 1.2)
-        assertTrue(mapId > 0)
+        assertTrue(mapId != null && mapId > 0)
 
         val maps = PlayerMapRepository.getMaps("user123")
         assertEquals(1, maps.size)
@@ -43,7 +43,7 @@ class PlayerMapRepositoryTest {
     @Test
     fun testCreateMapWithResourceDeduction() {
         val mapId = PlayerMapRepository.createMap("user123", 1, 1.2, woodCost = 50, stoneCost = 30, metalCost = 10)
-        assertTrue(mapId > 0)
+        assertTrue(mapId != null && mapId > 0)
 
         val player = transaction { PlayersTable.fetchPlayer("user123") }
         assertTrue(player != null)
@@ -54,8 +54,8 @@ class PlayerMapRepositoryTest {
 
     @Test
     fun testSetActiveMap() {
-        val mapId1 = PlayerMapRepository.createMap("user123", 1, 1.0)
-        val mapId2 = PlayerMapRepository.createMap("user123", 2, 1.5)
+        val mapId1 = PlayerMapRepository.createMap("user123", 1, 1.0)!!
+        val mapId2 = PlayerMapRepository.createMap("user123", 2, 1.5)!!
 
         PlayerMapRepository.setActiveMap("user123", mapId2)
 
@@ -72,7 +72,7 @@ class PlayerMapRepositoryTest {
 
     @Test
     fun testUpdateProgress() {
-        val mapId = PlayerMapRepository.createMap("user123", 1, 1.0)
+        val mapId = PlayerMapRepository.createMap("user123", 1, 1.0)!!
         
         PlayerMapRepository.updateProgress(mapId, 10)
         
@@ -82,11 +82,20 @@ class PlayerMapRepositoryTest {
 
     @Test
     fun testDeleteMap() {
-        val mapId = PlayerMapRepository.createMap("user123", 1, 1.0)
+        val mapId = PlayerMapRepository.createMap("user123", 1, 1.0)!!
         
         PlayerMapRepository.deleteMap("user123", mapId)
         
         val maps = PlayerMapRepository.getMaps("user123")
         assertTrue(maps.isEmpty())
+    }
+
+    @Test
+    fun testCreateMapWithInsufficientResources() {
+        val mapId = PlayerMapRepository.createMap("user123", 1, 1.2, woodCost = 200) // User has 100
+        assertNull(mapId)
+
+        val player = transaction { PlayersTable.fetchPlayer("user123") }
+        assertEquals(100, player!!.wood) // No deduction
     }
 }

@@ -42,6 +42,17 @@ object MapService {
 
         // Deduct resources and create map via repository
         val mapId = PlayerMapRepository.createMap(playerId, layer, dropRate, woodCost, stoneCost, metalCost)
-        return CreateMapResult.Success(mapId)
+        
+        return if (mapId != null) {
+            CreateMapResult.Success(mapId)
+        } else {
+            // This case handles rare race conditions where resources were spent between check and deduction
+            val updatedPlayer = PlayerRepository.getOrCreatePlayer(playerId)
+            val updatedMissing = mutableListOf<ResourceCost>()
+            if (updatedPlayer.wood < woodCost) updatedMissing.add(ResourceCost("木頭", woodCost, updatedPlayer.wood))
+            if (updatedPlayer.stone < stoneCost) updatedMissing.add(ResourceCost("石頭", stoneCost, updatedPlayer.stone))
+            if (updatedPlayer.metal < metalCost) updatedMissing.add(ResourceCost("金屬", metalCost, updatedPlayer.metal))
+            CreateMapResult.InsufficientResources(updatedMissing)
+        }
     }
 }

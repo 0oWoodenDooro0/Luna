@@ -44,7 +44,6 @@ class ExploreCommand : Command {
 
         // Check for active map
         val activeMap = PlayerMapRepository.getActiveMap(userId)
-        val isMapActive = activeMap != null
 
         // Check for saved monster first
         val savedMonster = player.currentMonster
@@ -54,8 +53,8 @@ class ExploreCommand : Command {
         }
 
         val eventRoll = Random.nextInt(100)
-        val currentFloor = if (isMapActive) activeMap!!.layer else player.currentFloor
-        val dropRateMultiplier = if (isMapActive) activeMap!!.dropRate else 1.0
+        val currentFloor = activeMap?.layer ?: player.currentFloor
+        val dropRateMultiplier = activeMap?.dropRate ?: 1.0
 
         if (eventRoll < RpgConfig.Exploration.EVENT_ROLL_RESOURCE_THRESHOLD) {
             val resources = RpgConfig.Exploration.RESOURCE_NAMES
@@ -64,8 +63,8 @@ class ExploreCommand : Command {
             val playerBonus = player.calculateResourceBonus()
             val finalAmount = (baseAmount * playerBonus * dropRateMultiplier).toInt()
 
-            val progressionResult = if (isMapActive) {
-                updateMapProgression(userId, activeMap!!)
+            val progressionResult = if (activeMap != null) {
+                updateMapProgression(userId, activeMap)
             } else {
                 PlayerRepository.updateProgression(userId, player.currentFloor, player.roomsExplored)
             }
@@ -74,12 +73,12 @@ class ExploreCommand : Command {
 
             interaction.deferPublicResponse().respond {
                 embed {
-                    title = if (isMapActive) "探索結果：地圖發現資源！" else "探索結果：發現資源！"
+                    title = if (activeMap != null) "探索結果：地圖發現資源！" else "探索結果：發現資源！"
                     description =
                         """
                         $username 在第 $currentFloor 層探索中發現了 $foundResource x $finalAmount！
                         
-                        進度：${progressionResult.finalRoomCount} / ${if (isMapActive) 20 else RpgConfig.Exploration.FLOOR_SIZE} 房間
+                        進度：${progressionResult.finalRoomCount} / ${if (activeMap != null) 20 else RpgConfig.Exploration.FLOOR_SIZE} 房間
                         ${progressionResult.message}
                         """.trimIndent()
                     color = dev.kord.common.Color(0x2ECC71)
@@ -124,12 +123,11 @@ class ExploreCommand : Command {
     ) {
         val userId = player.id
         val username = interaction.user.username
-        val isMapActive = activeMap != null
 
         val result = CombatEngine.simulate(player, monster, username)
         val won = result.won
-        val currentFloor = if (isMapActive) activeMap!!.layer else player.currentFloor
-        val dropRateMultiplier = if (isMapActive) activeMap!!.dropRate else 1.0
+        val currentFloor = activeMap?.layer ?: player.currentFloor
+        val dropRateMultiplier = activeMap?.dropRate ?: 1.0
 
         val reward =
             if (won) {
@@ -141,13 +139,13 @@ class ExploreCommand : Command {
 
         val progressionResult =
             if (won) {
-                if (isMapActive) {
-                    updateMapProgression(userId, activeMap!!)
+                if (activeMap != null) {
+                    updateMapProgression(userId, activeMap)
                 } else {
                     PlayerRepository.updateProgression(userId, currentFloor, player.roomsExplored)
                 }
             } else {
-                UpdateProgressionResult(if (isMapActive) activeMap!!.currentRoom else player.roomsExplored, "")
+                UpdateProgressionResult(activeMap?.currentRoom ?: player.roomsExplored, "")
             }
 
         PlayerRepository.recordCombatResult(userId, result.playerFinalHP, result.monsterFinalHP, monster, reward)
@@ -167,7 +165,7 @@ class ExploreCommand : Command {
                     
                     ${if (won) "✨ 你擊敗了 ${monster.name}！並獲得了 **${reward?.first} x ${reward?.second}**！" else "💀 你被打敗了... 但你設法在同一個房間裡甦醒。"}
                     
-                    進度：${progressionResult.finalRoomCount} / ${if (isMapActive) 20 else RpgConfig.Exploration.FLOOR_SIZE} 房間
+                    進度：${progressionResult.finalRoomCount} / ${if (activeMap != null) 20 else RpgConfig.Exploration.FLOOR_SIZE} 房間
                     ${progressionResult.message}
                     """.trimIndent()
                 color = if (won) dev.kord.common.Color(0x00FF00) else dev.kord.common.Color(0xFF0000)

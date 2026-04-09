@@ -16,19 +16,27 @@ object PlayerMapRepository {
         woodCost: Int = 0,
         stoneCost: Int = 0,
         metalCost: Int = 0
-    ): Int {
+    ): Int? {
         return transaction {
             // Deduct resources from player
             val currentResources = PlayersTable.selectAll()
                 .where { PlayersTable.id eq playerId }
                 .singleOrNull()
 
-            if (currentResources != null) {
-                PlayersTable.update({ PlayersTable.id eq playerId }) {
-                    it[wood] = currentResources[PlayersTable.wood] - woodCost
-                    it[stone] = currentResources[PlayersTable.stone] - stoneCost
-                    it[metal] = currentResources[PlayersTable.metal] - metalCost
-                }
+            if (currentResources == null) return@transaction null
+
+            val currentWood = currentResources[PlayersTable.wood]
+            val currentStone = currentResources[PlayersTable.stone]
+            val currentMetal = currentResources[PlayersTable.metal]
+
+            if (currentWood < woodCost || currentStone < stoneCost || currentMetal < metalCost) {
+                return@transaction null
+            }
+
+            PlayersTable.update({ PlayersTable.id eq playerId }) {
+                it[wood] = currentWood - woodCost
+                it[stone] = currentStone - stoneCost
+                it[metal] = currentMetal - metalCost
             }
 
             PlayerMapsTable.insertMap(playerId, layer, dropRate)
