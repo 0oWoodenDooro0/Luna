@@ -91,4 +91,26 @@ object RpgConfig {
             )
         val INITIAL_RESOURCES get() = data.player.initialResources
     }
+
+    object Map {
+        val BASE_WOOD_COST get() = data.map.baseWoodCost
+        val BASE_STONE_COST get() = data.map.baseStoneCost
+        val BASE_METAL_COST get() = data.map.baseMetalCost
+        val COST_SCALE_PER_LAYER get() = data.map.costScalePerLayer
+        val MIN_DROP_RATE get() = data.map.minDropRate
+        val MAX_DROP_RATE get() = data.map.maxDropRate
+
+        /**
+         * Calculate the resource cost for creating a map.
+         * Formula: cost = base_cost * layer * dropRate
+         */
+        fun calculateCost(layer: Int, dropRate: Double): Triple<Int, Int, Int> {
+            val scale = layer * COST_SCALE_PER_LAYER * dropRate
+            return Triple(
+                (BASE_WOOD_COST * scale).toInt(),
+                (BASE_STONE_COST * scale).toInt(),
+                (BASE_METAL_COST * scale).toInt()
+            )
+        }
+    }
 }

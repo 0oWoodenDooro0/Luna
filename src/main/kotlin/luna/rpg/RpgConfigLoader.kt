@@ -136,6 +136,16 @@ class RpgConfigLoader(
         writer.println("  initial_def: ${config.player.initialDef}")
         writer.println("  initial_spd: ${config.player.initialSpd}")
         writer.println("  initial_resources: ${config.player.initialResources}")
+        writer.println()
+
+        writer.println("# --- Map Settings ---")
+        writer.println("map:")
+        writer.println("  base_wood_cost: ${config.map.baseWoodCost}")
+        writer.println("  base_stone_cost: ${config.map.baseStoneCost}")
+        writer.println("  base_metal_cost: ${config.map.baseMetalCost}")
+        writer.println("  cost_scale_per_layer: ${config.map.costScalePerLayer}")
+        writer.println("  min_drop_rate: ${config.map.minDropRate}")
+        writer.println("  max_drop_rate: ${config.map.maxDropRate}")
 
         writer.close()
     }
@@ -149,6 +159,7 @@ class RpgConfigLoader(
         val recovery = data["recovery"] as? Map<String, Any>
         val rebirth = data["rebirth"] as? Map<String, Any>
         val player = data["player"] as? Map<String, Any>
+        val map = data["map"] as? Map<String, Any>
 
         return RpgConfigData(
             exploration =
@@ -221,6 +232,15 @@ class RpgConfigLoader(
                     initialSpd = player?.get("initial_spd") as? Int ?: 8,
                     initialResources = player?.get("initial_resources") as? Int ?: 0,
                 ),
+            map =
+                MapConfig(
+                    baseWoodCost = map?.get("base_wood_cost") as? Int ?: 100,
+                    baseStoneCost = map?.get("base_stone_cost") as? Int ?: 100,
+                    baseMetalCost = map?.get("base_metal_cost") as? Int ?: 50,
+                    costScalePerLayer = (map?.get("cost_scale_per_layer") as? Number)?.toDouble() ?: 1.0,
+                    minDropRate = (map?.get("min_drop_rate") as? Number)?.toDouble() ?: 0.6,
+                    maxDropRate = (map?.get("max_drop_rate") as? Number)?.toDouble() ?: 1.5,
+                ),
         )
     }
 }
@@ -234,6 +254,7 @@ data class RpgConfigData(
     val recovery: RecoveryConfig = RecoveryConfig(),
     val rebirth: RebirthConfig = RebirthConfig(),
     val player: PlayerConfig = PlayerConfig(),
+    val map: MapConfig = MapConfig(),
 )
 
 data class ExplorationConfig(
@@ -304,4 +325,13 @@ data class PlayerConfig(
     val initialDef: Int = 5,
     val initialSpd: Int = 8,
     val initialResources: Int = 0,
+)
+
+data class MapConfig(
+    val baseWoodCost: Int = 100,
+    val baseStoneCost: Int = 100,
+    val baseMetalCost: Int = 50,
+    val costScalePerLayer: Double = 1.0,
+    val minDropRate: Double = 0.6,
+    val maxDropRate: Double = 1.5,
 )
