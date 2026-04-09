@@ -173,7 +173,7 @@ data class PlayerMap(
     val dropRate: Double,
     val rooms: Int = 20,
     val currentRoom: Int = 0,
-    val isActive: Boolean = false
+    val isActive: Boolean = false,
 )
 
 /**

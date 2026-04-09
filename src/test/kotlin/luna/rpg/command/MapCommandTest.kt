@@ -1,12 +1,12 @@
 package luna.rpg.command
 
 import luna.rpg.repository.PlayerMapRepository
+import luna.rpg.repository.PlayerMapsTable
 import luna.rpg.repository.PlayerRepository
 import luna.rpg.repository.PlayersTable
-import luna.rpg.repository.PlayerMapsTable
+import org.jetbrains.exposed.v1.jdbc.Database
 import org.jetbrains.exposed.v1.jdbc.SchemaUtils
 import org.jetbrains.exposed.v1.jdbc.transactions.transaction
-import org.jetbrains.exposed.v1.jdbc.Database
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test

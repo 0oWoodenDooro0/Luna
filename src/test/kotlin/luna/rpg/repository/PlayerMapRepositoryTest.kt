@@ -1,14 +1,14 @@
 package luna.rpg.repository
 
+import org.jetbrains.exposed.v1.jdbc.Database
 import org.jetbrains.exposed.v1.jdbc.SchemaUtils
 import org.jetbrains.exposed.v1.jdbc.transactions.transaction
-import org.jetbrains.exposed.v1.jdbc.Database
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import kotlin.test.assertEquals
-import kotlin.test.assertTrue
 import kotlin.test.assertNull
+import kotlin.test.assertTrue
 
 class PlayerMapRepositoryTest {
     @BeforeEach
@@ -73,9 +73,9 @@ class PlayerMapRepositoryTest {
     @Test
     fun testUpdateProgress() {
         val mapId = PlayerMapRepository.createMap("user123", 1, 1.0)!!
-        
+
         PlayerMapRepository.updateProgress(mapId, 10)
-        
+
         val maps = PlayerMapRepository.getMaps("user123")
         assertEquals(10, maps[0].currentRoom)
     }
@@ -83,9 +83,9 @@ class PlayerMapRepositoryTest {
     @Test
     fun testDeleteMap() {
         val mapId = PlayerMapRepository.createMap("user123", 1, 1.0)!!
-        
+
         PlayerMapRepository.deleteMap("user123", mapId)
-        
+
         val maps = PlayerMapRepository.getMaps("user123")
         assertTrue(maps.isEmpty())
     }

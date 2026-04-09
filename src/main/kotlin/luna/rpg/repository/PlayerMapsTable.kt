@@ -25,9 +25,9 @@ object PlayerMapsTable : Table("player_maps") {
         dropRate: Double,
         rooms: Int = 20,
         currentRoom: Int = 0,
-        isActive: Boolean = false
-    ): Int {
-        return insert {
+        isActive: Boolean = false,
+    ): Int =
+        insert {
             it[this.playerId] = playerId
             it[this.layer] = layer
             it[this.dropRate] = dropRate
@@ -35,7 +35,6 @@ object PlayerMapsTable : Table("player_maps") {
             it[this.currentRoom] = currentRoom
             it[this.isActive] = isActive
         } get id
-    }
 
     fun fetchMaps(playerId: String): List<PlayerMap> =
         selectAll()
@@ -56,6 +55,6 @@ object PlayerMapsTable : Table("player_maps") {
             dropRate = this[dropRate],
             rooms = this[rooms],
             currentRoom = this[currentRoom],
-            isActive = this[isActive]
+            isActive = this[isActive],
         )
 }

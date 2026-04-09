@@ -59,7 +59,7 @@ class ExploreCommand : Command {
             val finalAmount = (baseAmount * playerBonus).toInt()
 
             val progressionResult = PlayerRepository.updateProgression(userId, player.currentFloor, player.roomsExplored)
-            
+
             PlayerRepository.addResources(userId, foundResource, finalAmount)
 
             interaction.deferPublicResponse().respond {
@@ -98,7 +98,7 @@ class ExploreCommand : Command {
         interaction: ChatInputCommandInteraction,
         player: Player,
         monster: Monster,
-        isResumption: Boolean
+        isResumption: Boolean,
     ) {
         val userId = player.id
         val username = interaction.user.username

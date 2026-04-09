@@ -29,7 +29,7 @@
 - [x] Task: Conductor - User Manual Verification 'Phase 4: Implement DungeonCommand' (Protocol in workflow.md) 3e95332
 
 ## Phase 5: Final Verification & Integration
-- [ ] Task: Run all project tests and quality checks.
+- [~] Task: Run all project tests and quality checks.
     - [ ] Run `./gradlew test`.
     - [ ] Run `./gradlew lintKotlin`.
 - [ ] Task: Conductor - User Manual Verification 'Phase 5: Final Verification' (Protocol in workflow.md)

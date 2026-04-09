@@ -1,13 +1,13 @@
 package luna.rpg
 
 import luna.rpg.repository.PlayerMapRepository
+import luna.rpg.repository.PlayerMapsTable
 import luna.rpg.repository.PlayerRepository
 import luna.rpg.repository.PlayersTable
-import luna.rpg.repository.PlayerMapsTable
 import org.jetbrains.exposed.v1.core.eq
+import org.jetbrains.exposed.v1.jdbc.Database
 import org.jetbrains.exposed.v1.jdbc.SchemaUtils
 import org.jetbrains.exposed.v1.jdbc.transactions.transaction
-import org.jetbrains.exposed.v1.jdbc.Database
 import org.jetbrains.exposed.v1.jdbc.update
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeEach
@@ -43,13 +43,13 @@ class MapServiceTest {
                 it[metal] = 1000
             }
         }
-        
+
         val result = MapService.createMap("user123", 1, 1.0)
         assertTrue(result is MapService.CreateMapResult.Success)
-        
+
         val maps = PlayerMapRepository.getMaps("user123")
         assertEquals(1, maps.size)
-        
+
         val player = PlayerRepository.getOrCreatePlayer("user123")
         assertEquals(900, player.wood) // 1000 - 100
     }

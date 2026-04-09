@@ -85,7 +85,7 @@ class RebirthBonusTest {
             // With -20% bonus: 8 wood, 4 metal.
             val result = PlayerRepository.upgradeEquipment(userId, "weapon")
             assertTrue(result is PlayerRepository.UpgradeResult.Success)
-            
+
             val updatedPlayer = (result as PlayerRepository.UpgradeResult.Success).player
             // 10 - 8 = 2
             assertEquals(2, updatedPlayer.wood)

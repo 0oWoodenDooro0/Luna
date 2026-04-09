@@ -104,12 +104,15 @@ object RpgConfig {
          * Calculate the resource cost for creating a map.
          * Formula: cost = base_cost * layer * dropRate
          */
-        fun calculateCost(layer: Int, dropRate: Double): Triple<Int, Int, Int> {
+        fun calculateCost(
+            layer: Int,
+            dropRate: Double,
+        ): Triple<Int, Int, Int> {
             val scale = layer * COST_SCALE_PER_LAYER * dropRate
             return Triple(
                 (BASE_WOOD_COST * scale).toInt(),
                 (BASE_STONE_COST * scale).toInt(),
-                (BASE_METAL_COST * scale).toInt()
+                (BASE_METAL_COST * scale).toInt(),
             )
         }
     }

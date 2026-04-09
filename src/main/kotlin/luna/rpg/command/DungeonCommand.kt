@@ -74,7 +74,7 @@ class DungeonCommand : Command {
             val finalAmount = (baseAmount * playerBonus * dropRateMultiplier).toInt()
 
             val progressionResult = updateMapProgression(userId, activeMap)
-            
+
             PlayerRepository.addResources(userId, foundResource, finalAmount)
 
             interaction.deferPublicResponse().respond {
@@ -109,7 +109,10 @@ class DungeonCommand : Command {
         }
     }
 
-    private fun updateMapProgression(userId: String, map: luna.rpg.PlayerMap): UpdateProgressionResult {
+    private fun updateMapProgression(
+        userId: String,
+        map: luna.rpg.PlayerMap,
+    ): UpdateProgressionResult {
         val nextRoom = map.currentRoom + 1
         return if (nextRoom >= 20) {
             PlayerMapRepository.updateProgress(map.id, 0)
@@ -125,7 +128,7 @@ class DungeonCommand : Command {
         player: Player,
         monster: Monster,
         isResumption: Boolean,
-        activeMap: luna.rpg.PlayerMap
+        activeMap: luna.rpg.PlayerMap,
     ) {
         val userId = player.id
         val username = interaction.user.username

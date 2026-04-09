@@ -33,18 +33,18 @@ class ProgressionEnforcementTest {
     fun `test updateProgression always advances even if autoAdvance is false`() {
         val userId = "test-user"
         PlayerRepository.getOrCreatePlayer(userId)
-        
+
         // Manually set autoAdvance to false in the database
         transaction {
             PlayersTable.update({ PlayersTable.id eq userId }) {
                 it[autoAdvance] = false
             }
         }
-        
+
         // Mock progression to the end of floor 1 (floor size is 10)
         // Current floor 1, roomsExplored 9. Next exploration should trigger floor completion.
         val result = PlayerRepository.updateProgression(userId, 1, 9)
-        
+
         // We EXPECT it to advance to floor 2 regardless of the setting
         assertEquals(0, result.finalRoomCount)
         assertTrue(result.message.contains("自動前往第 2 層"), "Message should indicate automatic advancement: ${result.message}")

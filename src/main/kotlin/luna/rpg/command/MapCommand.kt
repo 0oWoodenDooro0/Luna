@@ -46,10 +46,10 @@ class MapCommand : Command {
 
     override suspend fun handle(interaction: ChatInputCommandInteraction) {
         val userId = interaction.user.id.toString()
-        
+
         // Kord subcommands are accessed via interaction.command
         val command = interaction.command
-        
+
         when (command.rootName) {
             "map" -> {
                 // Determine which subcommand was used
@@ -57,19 +57,34 @@ class MapCommand : Command {
                 // Since we used subCommand directly under root:
                 when {
                     interaction.command.integers.containsKey("layer") || interaction.command.numbers.containsKey("drop_rate") -> {
-                         // This is a bit ambiguous if options overlap, but here they don't
-                         // However, the best way is to check the subcommand name from data
+                        // This is a bit ambiguous if options overlap, but here they don't
+                        // However, the best way is to check the subcommand name from data
                     }
                 }
-                
+
                 // Let's use a safer approach by checking data.options
-                val subCommandName = interaction.data.data.options.value?.firstOrNull()?.name
-                
+                val subCommandName =
+                    interaction.data.data.options.value
+                        ?.firstOrNull()
+                        ?.name
+
                 when (subCommandName) {
-                    "create" -> handleCreate(interaction, userId)
-                    "list" -> handleList(interaction, userId)
-                    "select" -> handleSelect(interaction, userId)
-                    "delete" -> handleDelete(interaction, userId)
+                    "create" -> {
+                        handleCreate(interaction, userId)
+                    }
+
+                    "list" -> {
+                        handleList(interaction, userId)
+                    }
+
+                    "select" -> {
+                        handleSelect(interaction, userId)
+                    }
+
+                    "delete" -> {
+                        handleDelete(interaction, userId)
+                    }
+
                     else -> {
                         interaction.deferPublicResponse().respond { content = "未知指令。" }
                     }
@@ -78,7 +93,10 @@ class MapCommand : Command {
         }
     }
 
-    private suspend fun handleCreate(interaction: ChatInputCommandInteraction, userId: String) {
+    private suspend fun handleCreate(
+        interaction: ChatInputCommandInteraction,
+        userId: String,
+    ) {
         val layer = interaction.command.integers["layer"]?.toInt() ?: 1
         val dropRate = interaction.command.numbers["drop_rate"] ?: 1.0
 
@@ -107,10 +125,12 @@ class MapCommand : Command {
                     }
                 }
             }
+
             is MapService.CreateMapResult.InsufficientResources -> {
-                val missingStr = result.missing.joinToString("\n") { 
-                    "${it.name}: 需要 ${it.required}, 現有 ${it.current}" 
-                }
+                val missingStr =
+                    result.missing.joinToString("\n") {
+                        "${it.name}: 需要 ${it.required}, 現有 ${it.current}"
+                    }
                 response.respond {
                     embed {
                         title = "❌ 資源不足"
@@ -119,6 +139,7 @@ class MapCommand : Command {
                     }
                 }
             }
+
             MapService.CreateMapResult.InvalidParameters -> {
                 response.respond {
                     content = "❌ 無效的參數。掉落率必須在 0.6 到 1.5 之間。"
@@ -127,7 +148,10 @@ class MapCommand : Command {
         }
     }
 
-    private suspend fun handleList(interaction: ChatInputCommandInteraction, userId: String) {
+    private suspend fun handleList(
+        interaction: ChatInputCommandInteraction,
+        userId: String,
+    ) {
         val response = interaction.deferPublicResponse()
         val maps = PlayerMapRepository.getMaps(userId)
 
@@ -143,7 +167,7 @@ class MapCommand : Command {
                 title = "🗺️ 你的地圖庫"
                 description = "以下是你擁有的所有地圖："
                 color = dev.kord.common.Color(0x3498DB)
-                
+
                 maps.forEach { map ->
                     field {
                         name = "ID: ${map.id} ${if (map.isActive) " (目前選中 ✅)" else ""}"
@@ -151,7 +175,7 @@ class MapCommand : Command {
                         inline = false
                     }
                 }
-                
+
                 footer {
                     text = "使用 /map select <id> 來切換地圖"
                 }
@@ -159,9 +183,12 @@ class MapCommand : Command {
         }
     }
 
-    private suspend fun handleSelect(interaction: ChatInputCommandInteraction, userId: String) {
+    private suspend fun handleSelect(
+        interaction: ChatInputCommandInteraction,
+        userId: String,
+    ) {
         val mapId = interaction.command.integers["id"]?.toInt() ?: -1
-        
+
         val response = interaction.deferPublicResponse()
         val maps = PlayerMapRepository.getMaps(userId)
         val targetMap = maps.find { it.id == mapId }
@@ -179,9 +206,12 @@ class MapCommand : Command {
         }
     }
 
-    private suspend fun handleDelete(interaction: ChatInputCommandInteraction, userId: String) {
+    private suspend fun handleDelete(
+        interaction: ChatInputCommandInteraction,
+        userId: String,
+    ) {
         val mapId = interaction.command.integers["id"]?.toInt() ?: -1
-        
+
         val response = interaction.deferPublicResponse()
         val maps = PlayerMapRepository.getMaps(userId)
         val targetMap = maps.find { it.id == mapId }

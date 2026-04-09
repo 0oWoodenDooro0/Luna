@@ -5,18 +5,32 @@ import luna.rpg.repository.PlayerRepository
 
 object MapService {
     sealed class CreateMapResult {
-        data class Success(val mapId: Int) : CreateMapResult()
-        data class InsufficientResources(val missing: List<ResourceCost>) : CreateMapResult()
+        data class Success(
+            val mapId: Int,
+        ) : CreateMapResult()
+
+        data class InsufficientResources(
+            val missing: List<ResourceCost>,
+        ) : CreateMapResult()
+
         object InvalidParameters : CreateMapResult()
     }
 
-    data class ResourceCost(val name: String, val required: Int, val current: Int)
+    data class ResourceCost(
+        val name: String,
+        val required: Int,
+        val current: Int,
+    )
 
     /**
      * Creates a new dungeon map for a player.
      * Validates resources and parameters before creation.
      */
-    fun createMap(playerId: String, layer: Int, dropRate: Double): CreateMapResult {
+    fun createMap(
+        playerId: String,
+        layer: Int,
+        dropRate: Double,
+    ): CreateMapResult {
         // Validation: Drop rate must be within configured range
         if (dropRate < RpgConfig.Map.MIN_DROP_RATE || dropRate > RpgConfig.Map.MAX_DROP_RATE) {
             return CreateMapResult.InvalidParameters
@@ -42,7 +56,7 @@ object MapService {
 
         // Deduct resources and create map via repository
         val mapId = PlayerMapRepository.createMap(playerId, layer, dropRate, woodCost, stoneCost, metalCost)
-        
+
         return if (mapId != null) {
             CreateMapResult.Success(mapId)
         } else {

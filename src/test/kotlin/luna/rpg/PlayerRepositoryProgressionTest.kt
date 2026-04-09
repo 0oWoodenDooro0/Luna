@@ -89,7 +89,7 @@ class PlayerRepositoryProgressionTest {
     fun testUpdateProgressionFloorCompleteEvenIfNoAutoAdvanceSet() {
         val userId = "test-user"
         PlayerRepository.getOrCreatePlayer(userId)
-        
+
         transaction {
             PlayersTable.update({ PlayersTable.id eq userId }) {
                 it[autoAdvance] = false
