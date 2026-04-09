@@ -28,8 +28,8 @@
     - [x] Create `src/test/kotlin/luna/rpg/command/DungeonCommandTest.kt` with success and "no active map" cases.
 - [x] Task: Conductor - User Manual Verification 'Phase 4: Implement DungeonCommand' (Protocol in workflow.md) 3e95332
 
-## Phase 5: Final Verification & Integration
+## Phase 5: Final Verification & Integration [checkpoint: 168f09d]
 - [x] Task: Run all project tests and quality checks. c0d9715
     - [x] Run `./gradlew test`.
     - [x] Run `./gradlew lintKotlin`.
-- [ ] Task: Conductor - User Manual Verification 'Phase 5: Final Verification' (Protocol in workflow.md)
+- [x] Task: Conductor - User Manual Verification 'Phase 5: Final Verification' (Protocol in workflow.md) 168f09d
