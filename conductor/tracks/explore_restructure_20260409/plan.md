@@ -6,12 +6,12 @@
     - [x] Write unit tests to verify that progression always advances to the next floor upon completion.
 - [x] Task: Conductor - User Manual Verification 'Phase 1: Core Logic' (Protocol in workflow.md) afe6fc2
 
-## Phase 2: Command Cleanup (Settings Removal)
+## Phase 2: Command Cleanup (Settings Removal) [checkpoint: 1251c5a]
 - [x] Task: Remove `SettingsCommand` from the project. d260ea2
     - [x] Delete `src/main/kotlin/luna/rpg/command/SettingsCommand.kt`.
     - [x] Remove `SettingsCommand()` registration in `src/main/kotlin/luna/core/Main.kt`.
     - [x] Clean up any related tests or references.
-- [ ] Task: Conductor - User Manual Verification 'Phase 2: Command Cleanup' (Protocol in workflow.md)
+- [x] Task: Conductor - User Manual Verification 'Phase 2: Command Cleanup' (Protocol in workflow.md) 1251c5a
 
 ## Phase 3: Repurpose ExploreCommand (Main Floor Only)
 - [ ] Task: Refactor `ExploreCommand.kt` to focus exclusively on main floor exploration.
