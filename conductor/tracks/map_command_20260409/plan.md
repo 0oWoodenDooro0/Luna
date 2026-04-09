@@ -14,7 +14,7 @@
 - [x] Task: Write tests for `PlayerMapRepository` and `PlayerMapsTable` (7d2a429)
 - [x] Task: Conductor - User Manual Verification 'Phase 1: Database and Model Foundation' (Protocol in workflow.md)
 
-## Phase 2: Core Logic and Cost Calculation
+## Phase 2: Core Logic and Cost Calculation [checkpoint: b16d7d4]
 - [x] Task: Implement map creation cost calculation in `RpgConfig` (00e139f)
     - [x] Define cost formula based on `dropRate` and `layer`.
     - [x] Add configuration for base costs in `config.yml`.
@@ -22,7 +22,7 @@
     - [x] Handle map creation validation (resources, drop rate).
     - [x] Handle resource deduction.
 - [x] Task: Write tests for cost calculation and `MapService` logic (9bcea85)
-- [ ] Task: Conductor - User Manual Verification 'Phase 2: Core Logic and Cost Calculation' (Protocol in workflow.md)
+- [x] Task: Conductor - User Manual Verification 'Phase 2: Core Logic and Cost Calculation' (Protocol in workflow.md)
 
 ## Phase 3: Integration with /explore Command
 - [ ] Task: Modify `CombatEngine` and `ExploreCommand` to use active maps
