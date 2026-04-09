@@ -1,7 +1,7 @@
 # Implementation Plan: Explore Command Restructure & Settings Removal
 
 ## Phase 1: Core Logic & Database Enforcement
-- [ ] Task: Modify `PlayerRepository.updateProgression` to ignore the `auto_advance` setting and always use `true`.
+- [x] Task: Modify `PlayerRepository.updateProgression` to ignore the `auto_advance` setting and always use `true`. 26f4515
     - [ ] Update `PlayerRepository.kt`.
     - [ ] Write unit tests to verify that progression always advances to the next floor upon completion.
 - [ ] Task: Conductor - User Manual Verification 'Phase 1: Core Logic' (Protocol in workflow.md)
