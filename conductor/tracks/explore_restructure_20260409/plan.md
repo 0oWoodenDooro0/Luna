@@ -13,12 +13,12 @@
     - [x] Clean up any related tests or references.
 - [x] Task: Conductor - User Manual Verification 'Phase 2: Command Cleanup' (Protocol in workflow.md) 1251c5a
 
-## Phase 3: Repurpose ExploreCommand (Main Floor Only)
+## Phase 3: Repurpose ExploreCommand (Main Floor Only) [checkpoint: 31f0589]
 - [x] Task: Refactor `ExploreCommand.kt` to focus exclusively on main floor exploration. d880a27
     - [x] Remove `activeMap` logic and its use of `PlayerMapRepository`.
     - [x] Update response messages to indicate "Main Floor" (主要地層) exploration.
     - [x] Update `src/test/kotlin/luna/rpg/command/ExploreCommandMapTest.kt` to reflect the new behavior.
-- [ ] Task: Conductor - User Manual Verification 'Phase 3: Repurpose ExploreCommand' (Protocol in workflow.md)
+- [x] Task: Conductor - User Manual Verification 'Phase 3: Repurpose ExploreCommand' (Protocol in workflow.md) 31f0589
 
 ## Phase 4: Implement DungeonCommand (Map Exploration Only)
 - [ ] Task: Create and register the `DungeonCommand`.
