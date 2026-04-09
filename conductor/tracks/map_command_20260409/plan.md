@@ -18,10 +18,10 @@
 - [x] Task: Implement map creation cost calculation in `RpgConfig` (00e139f)
     - [ ] Define cost formula based on `dropRate` and `layer`.
     - [ ] Add configuration for base costs in `config.yml`.
-- [ ] Task: Implement `MapService` for business logic
+- [x] Task: Implement `MapService` for business logic (9bcea85)
     - [ ] Handle map creation validation (resources, drop rate).
     - [ ] Handle resource deduction.
-- [ ] Task: Write tests for cost calculation and `MapService` logic
+- [x] Task: Write tests for cost calculation and `MapService` logic (9bcea85)
 - [ ] Task: Conductor - User Manual Verification 'Phase 2: Core Logic and Cost Calculation' (Protocol in workflow.md)
 
 ## Phase 3: Integration with /explore Command
