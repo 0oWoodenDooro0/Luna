@@ -42,3 +42,6 @@
 - [x] Task: Register new commands in `Main.kt` (ccea44c)
 - [x] Task: Write integration tests for new commands (ccea44c)
 - [x] Task: Conductor - User Manual Verification 'Phase 4: /map Discord Commands' (Protocol in workflow.md)
+
+## Phase: Review Fixes
+- [x] Task: Apply review suggestions (61f829f)
