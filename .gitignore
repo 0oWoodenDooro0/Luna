@@ -56,3 +56,4 @@ bin/
 data/
 config.yml
 config_test.yml
+/.idea/
