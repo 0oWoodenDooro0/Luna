@@ -13,7 +13,7 @@ A simple, solo-focused Discord Text RPG where players explore endless dungeons, 
 - **Minimalist/Generic Fantasy:** The game focuses on core gameplay mechanics over complex narrative or lore. Simple descriptions of monsters, materials, and dungeon floors are prioritized to keep the experience clean and easy to grasp.
 
 ## Key Features
-- **Endless Dungeon Exploration:** A continuous exploration mode where players encounter monsters and find resources (Wood, Stone, Metal) through direct discovery or by defeating monsters.
+- **Endless Dungeon Exploration:** A continuous exploration mode where players encounter monsters and find resources (Wood, Stone, Metal). Rewards from resource rooms and monsters scale dynamically as players progress to deeper dungeon floors.
 - **Custom Dungeon Maps:** A map system allowing players to create specialized maps with custom drop rates and difficulty levels (layers). Maps have a fixed size (20 rooms) and provide a focused progression path with increased rewards.
 - **Automated Turn-Based Combat:** Tactical but fast-paced combat based on HP, ATK, DEF, and SPD stats.
 - **Material & Equipment System:** Collecting Wood, Stone, and Metal (guaranteed drops from monsters) to upgrade weapons and armor for permanent stat boosts.
