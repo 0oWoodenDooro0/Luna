@@ -18,6 +18,7 @@ object DatabaseManager {
         Database.connect(url, driver = "org.sqlite.JDBC")
 
         transaction {
+            addLogger(SqlJsonLogger())
             SchemaUtils.createMissingTablesAndColumns(PlayersTable, PlayerMapsTable)
         }
     }

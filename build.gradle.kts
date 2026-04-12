@@ -18,6 +18,7 @@ repositories {
 dependencies {
     testImplementation(kotlin("test"))
     testImplementation("io.mockk:mockk:1.14.9")
+    testImplementation("com.h2database:h2:2.3.232")
     implementation("dev.kord:kord-core:0.18.0")
     implementation("ch.qos.logback:logback-classic:1.5.32")
     implementation("net.logstash.logback:logstash-logback-encoder:9.0")
