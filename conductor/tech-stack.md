@@ -15,7 +15,8 @@
 - **SnakeYAML:** A YAML processor for the JVM. It is used to handle external configuration files (`config.yml`), allowing for runtime adjustments to game balance without re-compilation.
 
 ## Development & Testing
-- **SLF4J (Simple):** Simple logging facade for basic output and debugging.
+- **Logback (ch.qos.logback:logback-classic:1.5.32):** A powerful and flexible logging framework, used as the primary logging implementation.
+- **Logstash-Logback-Encoder (net.logstash.logback:logstash-logback-encoder:9.0):** Provides structured JSON logging, enabling consistent log formats across all system layers.
 - **Kotlin Test:** Standard library for unit and integration testing.
 - **MockK:** A powerful mocking library for Kotlin, used to simulate Discord events and database interactions in tests.
 - **ktlint (org.jmailen.kotlinter 5.4.2):** A no-configuration Kotlin linter and formatter that adheres to the official Kotlin Style Guide and Android Kotlin Style Guide.

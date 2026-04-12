@@ -20,6 +20,7 @@ A simple, solo-focused Discord Text RPG where players explore endless dungeons, 
 - **Upgrade & Rebirth Lists:** Detailed overview of available equipment and rebirth upgrades, including costs and effects.
 - **Recovery System:** After falling in combat, players enter a cooldown based on their Max HP. Exploration progress is preserved, allowing players to revive in the same room and resume the fight with the same monster once they are recovered.
 - **Rebirth (Prestige) System:** Resetting level and equipment for permanent powerful buffs (increased resource gain, base stats, etc.).
+- **Comprehensive Audit Logging:** A structured JSON logging system that records all command executions, service-layer activity, and database operations for improved system monitoring and debugging.
 
 ## Player Interaction
 - **Solo Play:** The current focus is a dedicated solo experience without mandatory social or competitive features.
