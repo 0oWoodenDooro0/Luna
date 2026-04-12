@@ -28,25 +28,29 @@ When writing database tests (e.g., using H2), ensure the following are in `build
 
 ## Logback Configuration
 
-### 1. Single File with Strict Size Limit
-To maintain exactly one active log file and at most one backup (compressed) with a strict size limit, use `SizeAndTimeBasedRollingPolicy` for better reliability in Logback 1.5.x:
+### 1. Log Rotation Failure in Logback 1.5.x
+**Problem:** Using `FixedWindowRollingPolicy` combined with `SizeBasedTriggeringPolicy` can sometimes fail to trigger rotation in Logback 1.5.x, causing the log file to grow indefinitely beyond the `maxFileSize`.
+
+**Solution:** Use `SizeAndTimeBasedRollingPolicy` instead. Even if you only care about size, this policy is more robust in recent Logback versions.
 
 ```xml
-<appender name="JSON_FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
-    <file>data/logs/luna-json.log</file>
-    <rollingPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedRollingPolicy">
-        <fileNamePattern>data/logs/luna-json.%d{yyyy-MM-dd}.%i.log.zip</fileNamePattern>
-        <maxFileSize>1MB</maxFileSize>
-        <maxHistory>1</maxHistory>
-        <totalSizeCap>2MB</totalSizeCap>
-    </rollingPolicy>
-    <encoder class="net.logstash.logback.encoder.LogstashEncoder" />
-</appender>
+<rollingPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedRollingPolicy">
+    <fileNamePattern>data/logs/luna-json.%d{yyyy-MM-dd}.%i.log.zip</fileNamePattern>
+    <maxFileSize>1MB</maxFileSize>
+    <maxHistory>1</maxHistory>
+    <totalSizeCap>2MB</totalSizeCap>
+</rollingPolicy>
 ```
 
-**Note:** `SizeAndTimeBasedRollingPolicy` handles both size and time, but by setting `maxHistory` to 1 and `maxFileSize` to 1MB, it effectively acts as a size-based rotation with minimal history.
+**Debugging Tip:** If logs aren't rotating, add a status listener to `logback.xml` to see internal errors:
+`<statusListener class="ch.qos.logback.core.status.OnConsoleStatusListener" />`
 
-### 2. Testing Structured Logging
+### 2. Testing SizeAndTimeBasedRollingPolicy in Kotlin
+**Problem:** In Logback 1.5.x, the `maxFileSize` field in `SizeAndTimeBasedRollingPolicy` is package-private. Attempting to access it directly in Kotlin tests (e.g., `policy.maxFileSize`) will result in a compilation error.
+
+**Solution:** Since there is no public getter like `getMaxFileSize()` in some versions of Logback 1.5, avoid asserting on the internal state of the policy. Instead, rely on **Functional/Integration Testing** (e.g., a stress test that actually writes enough data to trigger rotation and then checks the file system).
+
+### 3. Testing Structured Logging
 Using `ListAppender<ILoggingEvent>` to verify `StructuredArguments` (like `kv("key", value)`) is difficult because they don't appear in the `message` string but in the `argumentArray`.
 
 **Solution:** For critical verification, check the actual log file output or use a more sophisticated log capture utility that understands Logstash markers.
