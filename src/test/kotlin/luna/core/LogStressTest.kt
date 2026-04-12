@@ -9,11 +9,14 @@ class LogStressTest {
     fun `should rotate logs and maintain size limit`() {
         val logDir = File("data/logs")
         if (!logDir.exists()) logDir.mkdirs()
+        
+        // Clean up old logs to start fresh
+        logDir.listFiles()?.forEach { it.delete() }
 
-        // Log a large number of entries to trigger rotation
         // Each entry is roughly 300-400 bytes. 
         // To hit 10MB, we need about 30,000 entries.
-        repeat(40000) { i ->
+        // We do 50,000 to ensure we trigger the 10MB limit.
+        repeat(50000) { i ->
             JsonLogger.log(
                 layer = "STRESS",
                 component = "LogStressTest",
@@ -22,16 +25,18 @@ class LogStressTest {
             )
         }
 
-        val logFiles = logDir.listFiles { _, name -> name.startsWith("luna-json") } ?: emptyArray()
+        val logFiles = logDir.listFiles() ?: emptyArray()
         assertTrue(logFiles.isNotEmpty(), "Log files should exist")
 
-        val totalSize = logFiles.sumOf { it.length() }
-        val tenMbInBytes = 11 * 1024 * 1024 // Give some buffer for the current active file
+        // In FixedWindowRollingPolicy with maxIndex 1, we expect:
+        // 1. luna-json.log (active)
+        // 2. luna-json.1.log.zip (one backup)
         
-        println("Total log size: ${totalSize / 1024 / 1024} MB (${logFiles.size} files)")
+        println("Found log files: ${logFiles.joinToString { it.name + " (" + it.length() / 1024 + " KB)" }}")
         
-        // Note: totalSizeCap in Logback is an asynchronous best-effort limit.
-        // It might exceed slightly before the cleaner runs.
-        assertTrue(totalSize < tenMbInBytes, "Total log size should be around 10MB (actual: $totalSize bytes)")
+        assertTrue(logFiles.size <= 2, "Should have at most 2 files (active + 1 zip backup)")
+        logFiles.forEach {
+            assertTrue(it.length() <= 11 * 1024 * 1024, "File ${it.name} exceeds 10MB limit")
+        }
     }
 }
