@@ -24,13 +24,13 @@
 - [x] Task: Integrate `JsonLogger` into `PlayerRepository` for data persistence events 7adaed7
 - [x] Task: Conductor - User Manual Verification 'Phase 3: Service Layer Logging' (Protocol in workflow.md) 7adaed7
 
-## Phase 4: Command Layer Logging (Global Middleware)
+## Phase 4: Command Layer Logging (Global Middleware) [checkpoint: 1b5ec02]
 **Goal:** Automatically log all command inputs, parameters, and outputs.
 
-- [ ] Task: Modify `Command` base interface or `Main.kt` dispatcher to wrap command execution
-- [ ] Task: Capture command parameters and user context for the JSON log
-- [ ] Task: Capture command responses (messages sent to Discord) as command output
-- [ ] Task: Conductor - User Manual Verification 'Phase 4: Command Layer Logging' (Protocol in workflow.md)
+- [x] Task: Modify `Command` base interface or `Main.kt` dispatcher to wrap command execution 1b5ec02
+- [x] Task: Capture command parameters and user context for the JSON log 1b5ec02
+- [x] Task: Capture command responses (messages sent to Discord) as command output 1b5ec02
+- [x] Task: Conductor - User Manual Verification 'Phase 4: Command Layer Logging' (Protocol in workflow.md) 1b5ec02
 
 ## Phase 5: Final Validation & Cleanup
 **Goal:** Ensure 10MB limit compliance and overall system stability.
