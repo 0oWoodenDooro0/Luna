@@ -1,5 +1,6 @@
 package luna.rpg.repository
 
+import luna.core.JsonLogger
 import luna.rpg.Player
 import luna.rpg.PlayerProgression
 import luna.rpg.RpgConfig
@@ -51,6 +52,17 @@ object PlayerRepository {
                     "🔗 金屬" -> it[metal] = current[PlayersTable.metal] + amount
                 }
             }
+
+            JsonLogger.log(
+                layer = "SERVICE",
+                component = "PlayerRepository",
+                operation = "addResources",
+                data = mapOf(
+                    "userId" to userId,
+                    "resourceName" to resourceName,
+                    "amount" to amount
+                )
+            )
         }
     }
 
@@ -73,10 +85,33 @@ object PlayerRepository {
                 }
                 message = "✨ 此層已探索完成！自動前往第 ${currentFloor + 1} 層。"
                 finalRoomCount = 0
+
+                JsonLogger.log(
+                    layer = "SERVICE",
+                    component = "PlayerRepository",
+                    operation = "updateProgression",
+                    data = mapOf(
+                        "userId" to userId,
+                        "oldFloor" to currentFloor,
+                        "newFloor" to currentFloor + 1,
+                        "action" to "floor_complete"
+                    )
+                )
             } else {
                 PlayersTable.update({ PlayersTable.id eq userId }) {
                     it[this.roomsExplored] = nextRoomCount
                 }
+                JsonLogger.log(
+                    layer = "SERVICE",
+                    component = "PlayerRepository",
+                    operation = "updateProgression",
+                    data = mapOf(
+                        "userId" to userId,
+                        "currentFloor" to currentFloor,
+                        "roomsExplored" to nextRoomCount,
+                        "action" to "room_explored"
+                    )
+                )
             }
             UpdateProgressionResult(finalRoomCount, message)
         }

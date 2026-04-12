@@ -1,5 +1,6 @@
 package luna.rpg
 
+import luna.core.JsonLogger
 import luna.rpg.repository.PlayerMapRepository
 import luna.rpg.repository.PlayerRepository
 
@@ -57,8 +58,20 @@ object MapService {
         // Deduct resources and create map via repository
         val mapId = PlayerMapRepository.createMap(playerId, layer, dropRate, woodCost, stoneCost, metalCost)
 
-        return if (mapId != null) {
-            CreateMapResult.Success(mapId)
+        if (mapId != null) {
+            JsonLogger.log(
+                layer = "SERVICE",
+                component = "MapService",
+                operation = "createMap",
+                data = mapOf(
+                    "playerId" to playerId,
+                    "layer" to layer,
+                    "dropRate" to dropRate,
+                    "mapId" to mapId,
+                    "cost" to mapOf("wood" to woodCost, "stone" to stoneCost, "metal" to metalCost)
+                )
+            )
+            return CreateMapResult.Success(mapId)
         } else {
             // This case handles rare race conditions where resources were spent between check and deduction
             val updatedPlayer = PlayerRepository.getOrCreatePlayer(playerId)
@@ -66,7 +79,15 @@ object MapService {
             if (updatedPlayer.wood < woodCost) updatedMissing.add(ResourceCost("木頭", woodCost, updatedPlayer.wood))
             if (updatedPlayer.stone < stoneCost) updatedMissing.add(ResourceCost("石頭", stoneCost, updatedPlayer.stone))
             if (updatedPlayer.metal < metalCost) updatedMissing.add(ResourceCost("金屬", metalCost, updatedPlayer.metal))
-            CreateMapResult.InsufficientResources(updatedMissing)
+            
+            JsonLogger.error(
+                layer = "SERVICE",
+                component = "MapService",
+                operation = "createMap",
+                data = mapOf("playerId" to playerId, "layer" to layer, "dropRate" to dropRate),
+                errorMessage = "Insufficient resources during creation"
+            )
+            return CreateMapResult.InsufficientResources(updatedMissing)
         }
     }
 }

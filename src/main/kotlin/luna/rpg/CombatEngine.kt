@@ -1,5 +1,6 @@
 package luna.rpg
 
+import luna.core.JsonLogger
 import kotlin.math.max
 
 object CombatEngine {
@@ -47,11 +48,27 @@ object CombatEngine {
             turn++
         }
 
-        return CombatResult(
+        val result = CombatResult(
             won = monsterHP <= 0,
             playerFinalHP = max(0, playerHP),
             monsterFinalHP = max(0, monsterHP),
             combatLog = combatLog,
         )
+
+        JsonLogger.log(
+            layer = "SERVICE",
+            component = "CombatEngine",
+            operation = "simulate",
+            data = mapOf(
+                "playerId" to player.id,
+                "monsterName" to monster.name,
+                "won" to result.won,
+                "playerHP" to result.playerFinalHP,
+                "monsterHP" to result.monsterFinalHP,
+                "turns" to turn - 1
+            )
+        )
+
+        return result
     }
 }
