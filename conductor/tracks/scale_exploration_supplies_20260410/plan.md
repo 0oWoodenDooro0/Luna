@@ -1,9 +1,9 @@
 # Implementation Plan: Scale Exploration Supplies by Floor Level
 
 ## Phase 1: Configuration Updates
-- [ ] Task: Update `RpgConfigLoader.kt` to include `resource_scale_per_floor` in `ExplorationConfig`.
-- [ ] Task: Update `RpgConfig.kt` to expose `RESOURCE_SCALE_PER_FLOOR`.
-- [ ] Task: Update default `config.yml` generation to include the new setting.
+- [x] Task: Update `RpgConfigLoader.kt` to include `resource_scale_per_floor` in `ExplorationConfig`. 33574fe
+- [x] Task: Update `RpgConfig.kt` to expose `RESOURCE_SCALE_PER_FLOOR`. 33574fe
+- [x] Task: Update default `config.yml` generation to include the new setting. 33574fe
 - [ ] Task: Conductor - User Manual Verification 'Configuration Updates' (Protocol in workflow.md)
 
 ## Phase 2: Logic Implementation & Refactoring
