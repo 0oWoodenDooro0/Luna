@@ -6,6 +6,7 @@ import dev.kord.core.behavior.interaction.response.respond
 import dev.kord.core.event.interaction.ChatInputCommandInteractionCreateEvent
 import dev.kord.core.event.interaction.SelectMenuInteractionCreateEvent
 import dev.kord.core.on
+import luna.core.JsonLogger
 import luna.rpg.command.DungeonCommand
 import luna.rpg.command.ExploreCommand
 import luna.rpg.command.HelpCommand
@@ -47,10 +48,39 @@ suspend fun main() {
 
     kord.on<ChatInputCommandInteractionCreateEvent> {
         val commandName = interaction.command.rootName
+        val userId = interaction.user.id.toString()
+        val options = interaction.command.options.mapValues { it.value.toString() }
 
         val matchedCommand = commands.find { it.name == commandName }
 
-        matchedCommand?.handle(interaction)
+        if (matchedCommand != null) {
+            try {
+                matchedCommand.handle(interaction)
+                JsonLogger.log(
+                    layer = "COMMAND",
+                    component = matchedCommand.javaClass.simpleName,
+                    operation = "handle",
+                    data = mapOf(
+                        "userId" to userId,
+                        "command" to commandName,
+                        "options" to options
+                    )
+                )
+            } catch (e: Exception) {
+                JsonLogger.error(
+                    layer = "COMMAND",
+                    component = matchedCommand.javaClass.simpleName,
+                    operation = "handle",
+                    data = mapOf(
+                        "userId" to userId,
+                        "command" to commandName,
+                        "options" to options
+                    ),
+                    errorMessage = e.message
+                )
+                throw e
+            }
+        }
     }
 
     kord.on<SelectMenuInteractionCreateEvent> {
