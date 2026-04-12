@@ -8,13 +8,13 @@
 - [x] Task: Create `JsonLogger` utility class for structured JSON logging across layers 97dab83
 - [x] Task: Conductor - User Manual Verification 'Phase 1: Infrastructure & Foundation' (Protocol in workflow.md) 255c23c
 
-## Phase 2: Database Layer Logging
+## Phase 2: Database Layer Logging [checkpoint: b90cede]
 **Goal:** Integrate JSON logging into Exposed/SQLite queries.
 
-- [ ] Task: Create `SqlLogger` implementation for Exposed `SqlLogger` interface
-- [ ] Task: Register `SqlLogger` in `DatabaseManager` to capture all queries and results
-- [ ] Task: Verify DB logs follow the JSON schema and are persisted to the log file
-- [ ] Task: Conductor - User Manual Verification 'Phase 2: Database Layer Logging' (Protocol in workflow.md)
+- [x] Task: Create `SqlLogger` implementation for Exposed `SqlLogger` interface b90cede
+- [x] Task: Register `SqlLogger` in `DatabaseManager` to capture all queries and results b90cede
+- [x] Task: Verify DB logs follow the JSON schema and are persisted to the log file b90cede
+- [x] Task: Conductor - User Manual Verification 'Phase 2: Database Layer Logging' (Protocol in workflow.md) b90cede
 
 ## Phase 3: Service Layer Logging
 **Goal:** Add manual JSON logging to critical service methods.
