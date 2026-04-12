@@ -76,4 +76,22 @@ class ExplorationScalingTest {
             assertTrue(amount in 91..95, "Floor 10 amount $amount should be in 91..95")
         }
     }
+
+    @Test
+    fun testScalingLogicWithBonus() {
+        // floor 1: min=1, max=5
+        // player bonus 2.0
+        val player =
+            Player(
+                id = "test",
+                name = "test",
+                attributes = RpgConfig.Player.INITIAL_ATTRIBUTES,
+                rebirthResourceLevel = 20, // 1.0 + 20 * 0.05 = 2.0
+            )
+
+        for (i in 1..100) {
+            val amount = PlayerRepository.calculateExplorationReward(1, player)
+            assertTrue(amount in 2..10, "Floor 1 with 2x bonus amount $amount should be in 2..10")
+        }
+    }
 }

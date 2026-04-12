@@ -12,6 +12,6 @@
 - [x] Task: Conductor - User Manual Verification 'Logic Implementation & Refactoring' (Protocol in workflow.md) 3b3b1ab
 
 ## Phase 3: Verification & Testing
-- [ ] Task: Create `ExplorationScalingTest.kt` to verify scaling logic across different floors (Floor 1, Floor 10, etc.).
-- [ ] Task: Run all tests to ensure no regressions.
-- [ ] Task: Conductor - User Manual Verification 'Verification & Testing' (Protocol in workflow.md)
+- [x] Task: Create `ExplorationScalingTest.kt` to verify scaling logic across different floors (Floor 1, Floor 10, etc.). 33574fe
+- [x] Task: Run all tests to ensure no regressions. 3b3b1ab
+- [x] Task: Conductor - User Manual Verification 'Verification & Testing' (Protocol in workflow.md)
