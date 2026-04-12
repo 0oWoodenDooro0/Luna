@@ -8,6 +8,7 @@
 ## Workflow
 - [Workflow](./workflow.md)
 - [Code Style Guides](./code_styleguides/)
+- [Troubleshooting & Lessons Learned](./troubleshooting.md)
 
 ## Management
 - [Tracks Registry](./tracks.md)
