@@ -16,13 +16,13 @@
 - [x] Task: Verify DB logs follow the JSON schema and are persisted to the log file b90cede
 - [x] Task: Conductor - User Manual Verification 'Phase 2: Database Layer Logging' (Protocol in workflow.md) b90cede
 
-## Phase 3: Service Layer Logging
+## Phase 3: Service Layer Logging [checkpoint: 7adaed7]
 **Goal:** Add manual JSON logging to critical service methods.
 
-- [ ] Task: Integrate `JsonLogger` into `MapService` for floor changes and exploration
-- [ ] Task: Integrate `JsonLogger` into `CombatEngine` for turn-based combat events
-- [ ] Task: Integrate `JsonLogger` into `PlayerRepository` for data persistence events
-- [ ] Task: Conductor - User Manual Verification 'Phase 3: Service Layer Logging' (Protocol in workflow.md)
+- [x] Task: Integrate `JsonLogger` into `MapService` for floor changes and exploration 7adaed7
+- [x] Task: Integrate `JsonLogger` into `CombatEngine` for turn-based combat events 7adaed7
+- [x] Task: Integrate `JsonLogger` into `PlayerRepository` for data persistence events 7adaed7
+- [x] Task: Conductor - User Manual Verification 'Phase 3: Service Layer Logging' (Protocol in workflow.md) 7adaed7
 
 ## Phase 4: Command Layer Logging (Global Middleware)
 **Goal:** Automatically log all command inputs, parameters, and outputs.
