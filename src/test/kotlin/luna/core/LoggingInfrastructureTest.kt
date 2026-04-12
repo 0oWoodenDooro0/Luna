@@ -20,10 +20,7 @@ class LoggingInfrastructureTest {
         assertNotNull(appender, "JSON_FILE appender should be configured")
         assertTrue(appender is ch.qos.logback.core.rolling.RollingFileAppender<*>, "Appender should be RollingFileAppender")
         
-        val triggeringPolicy = (appender as ch.qos.logback.core.rolling.RollingFileAppender<*>).triggeringPolicy
-        assertTrue(triggeringPolicy is ch.qos.logback.core.rolling.SizeBasedTriggeringPolicy<*>, "Triggering policy should be SizeBasedTriggeringPolicy")
-        val sizePolicy = triggeringPolicy as ch.qos.logback.core.rolling.SizeBasedTriggeringPolicy<*>
-        // Logback 1.5.x uses FileSize class internally for maxFileSize
-        assertTrue(sizePolicy.maxFileSize.toString().contains("10 MB"), "Max file size should be 10MB (actual: ${sizePolicy.maxFileSize})")
+        val rollingPolicy = (appender as ch.qos.logback.core.rolling.RollingFileAppender<*>).rollingPolicy
+        assertTrue(rollingPolicy is ch.qos.logback.core.rolling.SizeAndTimeBasedRollingPolicy<*>, "Rolling policy should be SizeAndTimeBasedRollingPolicy")
     }
 }

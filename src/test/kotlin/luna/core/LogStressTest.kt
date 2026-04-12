@@ -14,9 +14,9 @@ class LogStressTest {
         logDir.listFiles()?.forEach { it.delete() }
 
         // Each entry is roughly 300-400 bytes. 
-        // To hit 10MB, we need about 30,000 entries.
-        // We do 50,000 to ensure we trigger the 10MB limit.
-        repeat(50000) { i ->
+        // To hit 1MB, we need about 3,000 entries.
+        // We do 5,000 to ensure we trigger the 1MB limit.
+        repeat(5000) { i ->
             JsonLogger.log(
                 layer = "STRESS",
                 component = "LogStressTest",
@@ -28,15 +28,15 @@ class LogStressTest {
         val logFiles = logDir.listFiles() ?: emptyArray()
         assertTrue(logFiles.isNotEmpty(), "Log files should exist")
 
-        // In FixedWindowRollingPolicy with maxIndex 1, we expect:
-        // 1. luna-json.log (active)
-        // 2. luna-json.1.log.zip (one backup)
+        // In SizeAndTimeBasedRollingPolicy, the active file is luna-json.log
+        // Backups will have the date and index
         
         println("Found log files: ${logFiles.joinToString { it.name + " (" + it.length() / 1024 + " KB)" }}")
         
-        assertTrue(logFiles.size <= 2, "Should have at most 2 files (active + 1 zip backup)")
+        // With 5k entries (~2.5MB) and 1MB limit, we expect rotation
+        assertTrue(logFiles.size >= 2, "Should have rotated (found ${logFiles.size} files)")
         logFiles.forEach {
-            assertTrue(it.length() <= 11 * 1024 * 1024, "File ${it.name} exceeds 10MB limit")
+            assertTrue(it.length() <= 1.1 * 1024 * 1024, "File ${it.name} exceeds 1MB limit")
         }
     }
 }

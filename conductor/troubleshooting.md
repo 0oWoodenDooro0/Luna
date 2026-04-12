@@ -29,24 +29,22 @@ When writing database tests (e.g., using H2), ensure the following are in `build
 ## Logback Configuration
 
 ### 1. Single File with Strict Size Limit
-To maintain exactly one active log file and at most one backup (compressed) with a strict size limit:
+To maintain exactly one active log file and at most one backup (compressed) with a strict size limit, use `SizeAndTimeBasedRollingPolicy` for better reliability in Logback 1.5.x:
 
 ```xml
 <appender name="JSON_FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
     <file>data/logs/luna-json.log</file>
-    <rollingPolicy class="ch.qos.logback.core.rolling.FixedWindowRollingPolicy">
-        <fileNamePattern>data/logs/luna-json.%i.log.zip</fileNamePattern>
-        <minIndex>1</minIndex>
-        <maxIndex>1</maxIndex>
+    <rollingPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedRollingPolicy">
+        <fileNamePattern>data/logs/luna-json.%d{yyyy-MM-dd}.%i.log.zip</fileNamePattern>
+        <maxFileSize>1MB</maxFileSize>
+        <maxHistory>1</maxHistory>
+        <totalSizeCap>2MB</totalSizeCap>
     </rollingPolicy>
-    <triggeringPolicy class="ch.qos.logback.core.rolling.SizeBasedTriggeringPolicy">
-        <maxFileSize>10MB</maxFileSize>
-    </triggeringPolicy>
     <encoder class="net.logstash.logback.encoder.LogstashEncoder" />
 </appender>
 ```
 
-**Note:** `FixedWindowRollingPolicy` MUST be paired with `SizeBasedTriggeringPolicy`. The `maxIndex` determines how many backup files are kept.
+**Note:** `SizeAndTimeBasedRollingPolicy` handles both size and time, but by setting `maxHistory` to 1 and `maxFileSize` to 1MB, it effectively acts as a size-based rotation with minimal history.
 
 ### 2. Testing Structured Logging
 Using `ListAppender<ILoggingEvent>` to verify `StructuredArguments` (like `kv("key", value)`) is difficult because they don't appear in the `message` string but in the `argumentArray`.
