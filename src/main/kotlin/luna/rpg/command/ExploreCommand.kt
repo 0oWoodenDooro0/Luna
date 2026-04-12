@@ -54,9 +54,7 @@ class ExploreCommand : Command {
         if (eventRoll < RpgConfig.Exploration.EVENT_ROLL_RESOURCE_THRESHOLD) {
             val resources = RpgConfig.Exploration.RESOURCE_NAMES
             val foundResource = resources.random()
-            val baseAmount = Random.nextInt(RpgConfig.Exploration.RESOURCE_MIN_AMOUNT, RpgConfig.Exploration.RESOURCE_MAX_AMOUNT + 1)
-            val playerBonus = player.calculateResourceBonus()
-            val finalAmount = (baseAmount * playerBonus).toInt()
+            val finalAmount = PlayerRepository.calculateExplorationReward(currentFloor, player)
 
             val progressionResult = PlayerRepository.updateProgression(userId, player.currentFloor, player.roomsExplored)
 

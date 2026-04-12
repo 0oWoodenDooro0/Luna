@@ -143,6 +143,25 @@ object PlayerRepository {
         return resourceName to finalAmount
     }
 
+    /**
+     * 計算探索資源房間的獎勵
+     */
+    fun calculateExplorationReward(
+        floor: Int,
+        player: Player? = null,
+    ): Int {
+        val baseMin = RpgConfig.Exploration.RESOURCE_MIN_AMOUNT
+        val baseMax = RpgConfig.Exploration.RESOURCE_MAX_AMOUNT
+        val scale = (floor - 1) * RpgConfig.Exploration.RESOURCE_SCALE_PER_FLOOR
+
+        val currentMin = baseMin + scale
+        val currentMax = baseMax + scale
+
+        val amount = (currentMin..currentMax).random()
+        val bonus = player?.calculateResourceBonus() ?: 1.0
+        return (amount * bonus).toInt()
+    }
+
     data class MissingResource(
         val name: String,
         val required: Int,
