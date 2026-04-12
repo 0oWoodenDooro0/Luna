@@ -22,6 +22,7 @@ object RpgConfig {
         val EVENT_ROLL_RESOURCE_THRESHOLD get() = data.exploration.eventRollResourceThreshold
         val RESOURCE_MIN_AMOUNT get() = data.exploration.resourceMinAmount
         val RESOURCE_MAX_AMOUNT get() = data.exploration.resourceMaxAmount
+        val RESOURCE_SCALE_PER_FLOOR get() = data.exploration.resourceScalePerFloor
         val RESOURCE_NAMES get() = data.exploration.resourceNames
         val MONSTER_NAMES get() = data.exploration.monsterNames
     }

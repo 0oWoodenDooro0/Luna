@@ -44,6 +44,8 @@ class RpgConfigLoader(
         writer.println("  resource_min_amount: ${config.exploration.resourceMinAmount}")
         writer.println("  # Maximum resource amount per find")
         writer.println("  resource_max_amount: ${config.exploration.resourceMaxAmount}")
+        writer.println("  # Resource scale per floor")
+        writer.println("  resource_scale_per_floor: ${config.exploration.resourceScalePerFloor}")
         writer.println("  # Names of resources")
         writer.println("  resource_names:")
         config.exploration.resourceNames.forEach { writer.println("    - \"$it\"") }
@@ -168,6 +170,7 @@ class RpgConfigLoader(
                     eventRollResourceThreshold = exploration?.get("event_roll_resource_threshold") as? Int ?: 50,
                     resourceMinAmount = exploration?.get("resource_min_amount") as? Int ?: 1,
                     resourceMaxAmount = exploration?.get("resource_max_amount") as? Int ?: 5,
+                    resourceScalePerFloor = exploration?.get("resource_scale_per_floor") as? Int ?: 10,
                     resourceNames = exploration?.get("resource_names") as? List<String> ?: listOf("🪵 木頭", "🪨 石頭", "🔗 金屬"),
                     monsterNames = exploration?.get("monster_names") as? List<String> ?: listOf("史萊姆", "哥布林", "小蝙蝠"),
                 ),
@@ -262,6 +265,7 @@ data class ExplorationConfig(
     val eventRollResourceThreshold: Int = 50,
     val resourceMinAmount: Int = 1,
     val resourceMaxAmount: Int = 5,
+    val resourceScalePerFloor: Int = 10,
     val resourceNames: List<String> = listOf("🪵 木頭", "🪨 石頭", "🔗 金屬"),
     val monsterNames: List<String> = listOf("史萊姆", "哥布林", "小蝙蝠"),
 )
