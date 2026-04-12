@@ -5,7 +5,7 @@
 
 - [x] Task: Update `build.gradle.kts` with Logback and JSON logging dependencies 59843ca
 - [x] Task: Create `src/main/resources/logback.xml` with RollingFileAppender (10MB total limit) 47ded3c
-- [ ] Task: Create `JsonLogger` utility class for structured JSON logging across layers
+- [x] Task: Create `JsonLogger` utility class for structured JSON logging across layers 97dab83
 - [ ] Task: Conductor - User Manual Verification 'Phase 1: Infrastructure & Foundation' (Protocol in workflow.md)
 
 ## Phase 2: Database Layer Logging
