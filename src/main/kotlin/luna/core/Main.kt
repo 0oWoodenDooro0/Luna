@@ -6,6 +6,7 @@ import dev.kord.core.behavior.interaction.response.respond
 import dev.kord.core.event.interaction.ChatInputCommandInteractionCreateEvent
 import dev.kord.core.event.interaction.SelectMenuInteractionCreateEvent
 import dev.kord.core.on
+import luna.core.DrawCommand
 import luna.core.JsonLogger
 import luna.undercover.UndercoverGame
 import luna.undercover.UndercoverManager
@@ -19,6 +20,7 @@ suspend fun main() {
         listOf(
             UndercoverCommand(),
             RevealCommand(),
+            DrawCommand(),
         )
     commands.forEach { it.register(kord) }
 
@@ -36,23 +38,25 @@ suspend fun main() {
                     layer = "COMMAND",
                     component = matchedCommand.javaClass.simpleName,
                     operation = "handle",
-                    data = mapOf(
-                        "userId" to userId,
-                        "command" to commandName,
-                        "options" to options
-                    )
+                    data =
+                        mapOf(
+                            "userId" to userId,
+                            "command" to commandName,
+                            "options" to options,
+                        ),
                 )
             } catch (e: Exception) {
                 JsonLogger.error(
                     layer = "COMMAND",
                     component = matchedCommand.javaClass.simpleName,
                     operation = "handle",
-                    data = mapOf(
-                        "userId" to userId,
-                        "command" to commandName,
-                        "options" to options
-                    ),
-                    errorMessage = e.message
+                    data =
+                        mapOf(
+                            "userId" to userId,
+                            "command" to commandName,
+                            "options" to options,
+                        ),
+                    errorMessage = e.message,
                 )
                 throw e
             }

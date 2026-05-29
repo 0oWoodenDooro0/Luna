@@ -1,7 +1,7 @@
 package luna.core
 
-import org.slf4j.LoggerFactory
 import net.logstash.logback.argument.StructuredArguments.kv
+import org.slf4j.LoggerFactory
 
 /**
  * Utility for centralized JSON logging across all layers.
@@ -24,7 +24,7 @@ object JsonLogger {
         component: String,
         operation: String,
         data: Any?,
-        status: String = "SUCCESS"
+        status: String = "SUCCESS",
     ) {
         // Log at INFO level. The {} placeholder is filled by StructuredArguments.
         // Multiple arguments are appended as JSON fields by LogstashEncoder.
@@ -34,7 +34,7 @@ object JsonLogger {
             kv("component", component),
             kv("operation", operation),
             kv("data", data),
-            kv("status", status)
+            kv("status", status),
         )
     }
 
@@ -46,7 +46,7 @@ object JsonLogger {
         component: String,
         operation: String,
         data: Any?,
-        errorMessage: String? = null
+        errorMessage: String? = null,
     ) {
         logger.error(
             "Layer: {}, Component: {}, Operation: {}, Error: {}",
@@ -55,7 +55,7 @@ object JsonLogger {
             kv("operation", operation),
             kv("data", data),
             kv("status", "FAILURE"),
-            kv("error_message", errorMessage)
+            kv("error_message", errorMessage),
         )
     }
 }

@@ -7,8 +7,8 @@ import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.slf4j.LoggerFactory
-import kotlin.test.assertNotNull
 import kotlin.test.assertEquals
+import kotlin.test.assertNotNull
 
 class JsonLoggerTest {
     private lateinit var listAppender: ListAppender<ILoggingEvent>
@@ -35,12 +35,12 @@ class JsonLoggerTest {
             component = "MapService",
             operation = "move",
             data = mapOf("x" to 1, "y" to 2),
-            status = "SUCCESS"
+            status = "SUCCESS",
         )
 
         val logEntry = listAppender.list.firstOrNull()
         assertNotNull(logEntry, "Log entry should not be null")
-        
+
         // Verification of structured arguments is tricky with ListAppender
         // but we can check the message or MDC if we use it.
         // If we use Logstash's StructuredArguments, they might not be easily visible here
