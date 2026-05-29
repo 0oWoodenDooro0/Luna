@@ -39,13 +39,15 @@ class DrawCommand : Command {
             return
         }
 
-        // Create and shuffle a fresh standard 52-card deck every time
-        val deck = Deck.standard52()
-        deck.shuffle()
+        val pokerUser = luna.poker.User.getOrCreate(userId.toString())
+        val userCards = pokerUser.deck.getCards()
 
-        val drawnCards = deck.draw(countOption)
+        // Create a temporary deck using the user's cards, shuffle it, and draw cards
+        val tempDeck = Deck(userCards)
+        tempDeck.shuffle()
+        val drawnCards = tempDeck.draw(countOption)
 
-                // Calculate score using business logic in poker module
+        // Calculate score using business logic in poker module
         val evaluation = evaluator.evaluate(drawnCards)
 
         val responseText = StringBuilder()
