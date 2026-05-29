@@ -52,21 +52,13 @@ class DrawCommand : Command {
         responseText.append("抽到的手牌 (${drawnCards.size} 張)：${drawnCards.joinToString(" ") { getCardEmojiString(it) }}\n\n")
 
         if (countOption >= 5) {
-            // Heuristic to select at most 15 cards to keep combinations small and fast (max 3003 combinations)
+            // Select top 6 cards of each suit to keep combination size at most 24 (42,504 combinations max), guaranteeing the best possible hand is found.
             val cardsToEvaluate =
-                if (drawnCards.size > 15) {
+                if (drawnCards.size > 24) {
                     val bySuit = drawnCards.groupBy { it.suit }
-                    val flushCandidateSuit = bySuit.maxByOrNull { it.value.size }?.key
                     val bestCards = mutableSetOf<Card>()
-
-                    if (flushCandidateSuit != null) {
-                        bestCards.addAll(bySuit[flushCandidateSuit] ?: emptyList())
-                    }
-
-                    val sortedByRank = drawnCards.sortedWith(compareByDescending<Card> { it.rank.score }.thenByDescending { it.suit.score })
-                    for (card in sortedByRank) {
-                        if (bestCards.size >= 15) break
-                        bestCards.add(card)
+                    for (suitCards in bySuit.values) {
+                        bestCards.addAll(suitCards.sortedByDescending { it.rank.score }.take(6))
                     }
                     bestCards.toList()
                 } else {
