@@ -1,9 +1,0 @@
-{
-  "id": "ktlint_20260406",
-  "name": "Add ktlint (org.jmailen.kotlinter 5.4.2) for linting/formatting",
-  "description": "Integrate ktlint into the project to enforce consistent code style and formatting across all Kotlin source files.",
-  "status": "proposed",
-  "priority": "medium",
-  "created_at": "2026-04-06",
-  "tags": ["linting", "formatting", "kotlin", "ktlint"]
-}
