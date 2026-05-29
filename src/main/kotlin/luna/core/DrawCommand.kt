@@ -49,18 +49,54 @@ class DrawCommand : Command {
         val responseText = StringBuilder()
         responseText.append("♠️ ♥️ ♦️ ♣️ **撲克抽牌結果** ♠️ ♥️ ♦️ ♣️\n\n")
         responseText.append("玩家：<@$userId> ($username)\n")
-        responseText.append("抽到的手牌：${drawnCards.joinToString(" ") { getCardEmojiString(it) }}\n")
+        responseText.append("抽到的手牌 (${drawnCards.size} 張)：${drawnCards.joinToString(" ") { getCardEmojiString(it) }}\n\n")
 
-        if (countOption == 5) {
-            val handType = evaluator.evaluate(drawnCards)
-            val score = evaluator.calculateScore(drawnCards)
-            responseText.append("手牌牌型：**${handType.displayName}** (乘數: x${handType.multiplier})\n")
-            responseText.append("獲得分數：**$score 分** 🏆\n")
+        if (countOption >= 5) {
+            // Heuristic to select at most 15 cards to keep combinations small and fast (max 3003 combinations)
+            val cardsToEvaluate =
+                if (drawnCards.size > 15) {
+                    val bySuit = drawnCards.groupBy { it.suit }
+                    val flushCandidateSuit = bySuit.maxByOrNull { it.value.size }?.key
+                    val bestCards = mutableSetOf<Card>()
+
+                    if (flushCandidateSuit != null) {
+                        bestCards.addAll(bySuit[flushCandidateSuit] ?: emptyList())
+                    }
+
+                    val sortedByRank = drawnCards.sortedWith(compareByDescending<Card> { it.rank.score }.thenByDescending { it.suit.score })
+                    for (card in sortedByRank) {
+                        if (bestCards.size >= 15) break
+                        bestCards.add(card)
+                    }
+                    bestCards.toList()
+                } else {
+                    drawnCards
+                }
+
+            val combinations = getCombinations(cardsToEvaluate, 5)
+            val bestHand =
+                combinations
+                    .map { combo ->
+                        val type = evaluator.evaluate(combo)
+                        val score = evaluator.calculateScore(combo)
+                        BestHandInfo(combo, type, score)
+                    }.maxWithOrNull(
+                        compareBy<BestHandInfo> { it.type.multiplier }
+                            .thenBy { it.score },
+                    )
+
+            if (bestHand != null) {
+                if (countOption > 5) {
+                    responseText.append("🏆 **最佳 5 張組合**：${bestHand.cards.joinToString(" ") { getCardEmojiString(it) }}\n")
+                }
+                responseText.append("手牌牌型：**${bestHand.type.displayName}** (乘數: x${bestHand.type.multiplier})\n")
+                responseText.append("獲得分數：**${bestHand.score} 分** 🏆\n")
+            }
         } else {
-            // Calculate simple score for non-5 cards
+            // Calculate simple score for less than 5 cards
             val baseScore = drawnCards.sumOf { it.rank.score * it.suit.score }
             responseText.append("獲得分數：**$baseScore 分** (非 5 張手牌，以單卡基本分累加)\n")
-            responseText.append("💡 *提示：抽滿 5 張牌即可觸發完整的撲克牌型加成計算喔！*\n")
+            responseText.append("💡 *提示：抽滿 5 張牌以上即可觸發完整的最佳撲克牌型加成計算喔！*\n")
         }
 
         val response = interaction.deferPublicResponse()
@@ -68,6 +104,36 @@ class DrawCommand : Command {
             content = responseText.toString()
         }
     }
+
+    private fun <T> getCombinations(
+        list: List<T>,
+        k: Int,
+    ): List<List<T>> {
+        val result = mutableListOf<List<T>>()
+
+        fun helper(
+            start: Int,
+            current: MutableList<T>,
+        ) {
+            if (current.size == k) {
+                result.add(current.toList())
+                return
+            }
+            for (i in start until list.size) {
+                current.add(list[i])
+                helper(i + 1, current)
+                current.removeAt(current.size - 1)
+            }
+        }
+        helper(0, mutableListOf())
+        return result
+    }
+
+    private data class BestHandInfo(
+        val cards: List<Card>,
+        val type: luna.poker.HandType,
+        val score: Int,
+    )
 
     private fun getCardEmojiString(card: Card): String {
         val suitEmoji =
