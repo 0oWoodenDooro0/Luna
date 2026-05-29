@@ -6,8 +6,8 @@ import dev.kord.core.behavior.interaction.response.respond
 import dev.kord.core.event.interaction.ChatInputCommandInteractionCreateEvent
 import dev.kord.core.event.interaction.SelectMenuInteractionCreateEvent
 import dev.kord.core.on
-import luna.core.DrawCommand
 import luna.core.JsonLogger
+import luna.poker.command.DrawCommand
 import luna.undercover.UndercoverGame
 import luna.undercover.UndercoverManager
 import luna.undercover.command.RevealCommand
