@@ -16,6 +16,7 @@ repositories {
 }
 
 dependencies {
+    implementation(project(":poker"))
     testImplementation(kotlin("test"))
     testImplementation("io.mockk:mockk:1.14.9")
     testImplementation("com.h2database:h2:2.3.232")
