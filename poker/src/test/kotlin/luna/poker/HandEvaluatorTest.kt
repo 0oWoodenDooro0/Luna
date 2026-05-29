@@ -192,4 +192,46 @@ class HandEvaluatorTest {
         // A, 2, 3, 4, 5 forms a straight
         assertEquals(HandType.STRAIGHT, evaluator.evaluate(cards))
     }
+
+    @Test
+    fun testSmallerHandsScoring() {
+        // Test 1 card (High Card)
+        val oneCard = listOf(Card(Suit.SPADES, Rank.ACE))
+        assertEquals(HandType.HIGH_CARD, evaluator.evaluate(oneCard))
+        assertEquals(14 * 4 * 1, evaluator.calculateScore(oneCard))
+
+        // Test 2 cards (One Pair)
+        val pair = listOf(
+            Card(Suit.SPADES, Rank.ACE),
+            Card(Suit.HEARTS, Rank.ACE)
+        )
+        assertEquals(HandType.ONE_PAIR, evaluator.evaluate(pair))
+        assertEquals((14 + 14) * (4 + 3) * 2, evaluator.calculateScore(pair))
+
+        // Test 3 cards (Straight Flush)
+        val straightFlush3 = listOf(
+            Card(Suit.CLUBS, Rank.TWO),
+            Card(Suit.CLUBS, Rank.THREE),
+            Card(Suit.CLUBS, Rank.ACE)
+        )
+        assertEquals(HandType.STRAIGHT_FLUSH, evaluator.evaluate(straightFlush3))
+    }
+
+    @Test
+    fun testEvaluateBestHandLargePool() {
+        // Prepare 7 cards, including a Spades Royal Flush and some smaller cards
+        val pool = listOf(
+            Card(Suit.SPADES, Rank.TEN),
+            Card(Suit.SPADES, Rank.JACK),
+            Card(Suit.SPADES, Rank.QUEEN),
+            Card(Suit.SPADES, Rank.KING),
+            Card(Suit.SPADES, Rank.ACE),
+            Card(Suit.CLUBS, Rank.TWO),
+            Card(Suit.DIAMONDS, Rank.THREE)
+        )
+        val result = evaluator.evaluateBestHand(pool)
+        assertEquals(HandType.ROYAL_FLUSH, result.type)
+        assertEquals(12000, result.score)
+        assertTrue(result.cards.contains(Card(Suit.SPADES, Rank.ACE)))
+    }
 }
