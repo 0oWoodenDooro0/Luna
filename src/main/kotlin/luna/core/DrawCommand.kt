@@ -86,7 +86,7 @@ class DrawCommand : Command {
                     )
 
             if (bestHand != null) {
-                responseText.append("🏆 **最佳 5 張組合**：${bestHand.cards.joinToString(" ") { getCardEmojiString(it) }}\n")
+                responseText.append("🏆 **計分組合**：${bestHand.cards.joinToString(" ") { getCardEmojiString(it) }}\n")
                 responseText.append("手牌牌型：**${bestHand.type.displayName}** (乘數: x${bestHand.type.multiplier})\n")
                 responseText.append("獲得分數：**${bestHand.score} 分** 🏆\n")
             }
