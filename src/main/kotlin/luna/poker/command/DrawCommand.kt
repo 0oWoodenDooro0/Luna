@@ -45,8 +45,8 @@ class DrawCommand : Command {
 
         val drawnCards = deck.draw(countOption)
 
-        // Calculate score using business logic in poker module
-        val evaluation = evaluator.evaluateBestHand(drawnCards)
+                // Calculate score using business logic in poker module
+        val evaluation = evaluator.evaluate(drawnCards)
 
         val responseText = StringBuilder()
         responseText.append("♠️ ♥️ ♦️ ♣️ **撲克抽牌結果** ♠️ ♥️ ♦️ ♣️\n\n")

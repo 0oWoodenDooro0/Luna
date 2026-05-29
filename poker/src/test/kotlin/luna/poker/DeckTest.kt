@@ -117,4 +117,30 @@ class DeckTest {
         // It is highly unlikely for a shuffled 52-card deck to match its original order perfectly
         assertNotEquals(originalCards, shuffledCards)
     }
+
+    @Test
+    fun testAddCard() {
+        val deck = Deck(emptyList())
+        assertEquals(0, deck.remainingCount)
+        
+        val card = Card(Suit.SPADES, Rank.ACE)
+        deck.add(card)
+        
+        assertEquals(1, deck.remainingCount)
+        assertEquals(card, deck.getCards().first())
+    }
+
+    @Test
+    fun testRemoveCard() {
+        val card1 = Card(Suit.SPADES, Rank.ACE)
+        val card2 = Card(Suit.HEARTS, Rank.KING)
+        val deck = Deck(listOf(card1, card2))
+        
+        assertTrue(deck.remove(card1))
+        assertEquals(1, deck.remainingCount)
+        assertFalse(deck.getCards().contains(card1))
+        
+        // Try removing a card not in the deck
+        assertFalse(deck.remove(card1))
+    }
 }

@@ -41,6 +41,25 @@ class Deck(initialCards: Collection<Card>) {
         }
     }
 
+    /**
+     * Adds a card to the deck.
+     */
+    fun add(card: Card) {
+        synchronized(lock) {
+            cardList.add(card)
+        }
+    }
+
+    /**
+     * Removes a single instance of a card from the deck.
+     * @return true if the card was successfully removed, false otherwise.
+     */
+    fun remove(card: Card): Boolean {
+        return synchronized(lock) {
+            cardList.remove(card)
+        }
+    }
+
     companion object {
         /**
          * Creates a standard 52-card deck containing one of each suit and rank combination.

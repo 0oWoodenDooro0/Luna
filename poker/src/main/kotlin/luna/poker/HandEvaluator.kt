@@ -3,45 +3,127 @@ package luna.poker
 class HandEvaluator {
 
     /**
-     * Evaluates a hand of 1 to 5 cards and returns its [HandType].
+     * Evaluates a hand of any size (1 to N) and returns the [HandEvaluationResult] representing
+     * the best possible combination (subset) of cards.
+     * - If N < 5: evaluates the N-card hand directly.
+     * - If N >= 5: evaluates combinations of sizes 5 to N.
      */
-    fun evaluate(cards: List<Card>): HandType {
-        require(cards.size in 1..5) { "A poker hand must consist of 1 to 5 cards, got ${cards.size}" }
+    fun evaluate(cards: List<Card>): HandEvaluationResult {
+        require(cards.isNotEmpty()) { "Cannot evaluate an empty list of cards" }
+
+        val combinations = if (cards.size < 5) {
+            listOf(cards)
+        } else {
+            (5..cards.size).flatMap { k ->
+                getCombinations(cards, k)
+            }
+        }
+
+        val bestHand = combinations.map { combo ->
+            val type = evaluateDirect(combo)
+            val score = calculateScoreDirect(combo, type)
+            HandEvaluationResult(combo, type, score)
+        }.maxWithOrNull(
+            compareBy<HandEvaluationResult> { it.score }
+                .thenBy { it.type.multiplier }
+        ) ?: throw IllegalStateException("Could not find any hand combinations")
+
+        return bestHand
+    }
+
+    /**
+     * Helper to calculate the score of a list of cards.
+     */
+    fun calculateScore(cards: List<Card>): Int {
+        return evaluate(cards).score
+    }
+
+    private fun evaluateDirect(cards: List<Card>): HandType {
+        require(cards.size in 1..7) { "A direct poker hand must consist of 1 to 7 cards, got ${cards.size}" }
 
         val size = cards.size
         if (size == 1) return HandType.HIGH_CARD
 
         val isFlush = cards.map { it.suit }.distinct().size == 1
         val ranks = cards.map { it.rank }.sortedBy { it.value }
-
         val isStraight = isStraight(ranks)
+        val rankGroups = cards.groupBy { it.rank }
 
-        if (isFlush && isStraight) {
-            // Royal Flush check: must contain Ace and the lowest rank of the straight must match the straight size
-            val isRoyal = ranks.contains(Rank.ACE) && ranks.first().value == Rank.ACE.value - size + 1
-            return if (isRoyal) HandType.ROYAL_FLUSH else HandType.STRAIGHT_FLUSH
+        if (size == 7) {
+            val groupSizes = rankGroups.values.map { it.size }.sortedDescending()
+            return when {
+                groupSizes[0] == 7 -> HandType.SEVEN_OF_A_KIND
+                isFlush && isStraight -> HandType.SEVEN_CARD_STRAIGHT_FLUSH
+                groupSizes[0] == 6 -> HandType.SIX_OF_A_KIND
+                groupSizes[0] == 5 && groupSizes[1] == 2 -> HandType.FULLER_HOUSE
+                groupSizes[0] == 5 -> HandType.FIVE_OF_A_KIND
+                groupSizes[0] == 4 && groupSizes[1] == 3 -> HandType.FULLER_HOUSE
+                groupSizes[0] == 4 -> HandType.FOUR_OF_A_KIND
+                isFlush -> HandType.SEVEN_CARD_FLUSH
+                isStraight -> HandType.SEVEN_CARD_STRAIGHT
+                groupSizes[0] == 3 && groupSizes[1] == 3 -> HandType.TWO_THREE_OF_A_KIND
+                groupSizes[0] == 3 && groupSizes[1] == 2 -> HandType.FULL_HOUSE
+                groupSizes[0] == 3 -> HandType.THREE_OF_A_KIND
+                groupSizes[0] == 2 && groupSizes[1] == 2 && groupSizes[2] == 2 -> HandType.THREE_PAIR
+                groupSizes[0] == 2 && groupSizes[1] == 2 -> HandType.TWO_PAIR
+                groupSizes[0] == 2 -> HandType.ONE_PAIR
+                else -> HandType.HIGH_CARD
+            }
         }
 
-        val rankGroups = cards.groupBy { it.rank }
-        val groupSizes = rankGroups.values.map { it.size }.sortedDescending()
+        if (size == 6) {
+            val groupSizes = rankGroups.values.map { it.size }.sortedDescending()
+            return when {
+                groupSizes[0] == 6 -> HandType.SIX_OF_A_KIND
+                isFlush && isStraight -> HandType.SIX_CARD_STRAIGHT_FLUSH
+                groupSizes[0] == 5 -> HandType.FIVE_OF_A_KIND
+                groupSizes[0] == 4 -> HandType.FOUR_OF_A_KIND
+                groupSizes[0] == 3 && groupSizes[1] == 3 -> HandType.TWO_THREE_OF_A_KIND
+                groupSizes[0] == 3 && groupSizes[1] == 2 -> HandType.FULL_HOUSE
+                isFlush -> HandType.SIX_CARD_FLUSH
+                isStraight -> HandType.SIX_CARD_STRAIGHT
+                groupSizes[0] == 3 -> HandType.THREE_OF_A_KIND
+                groupSizes[0] == 2 && groupSizes[1] == 2 && groupSizes[2] == 2 -> HandType.THREE_PAIR
+                groupSizes[0] == 2 && groupSizes[1] == 2 -> HandType.TWO_PAIR
+                groupSizes[0] == 2 -> HandType.ONE_PAIR
+                else -> HandType.HIGH_CARD
+            }
+        }
 
+        if (size == 5) {
+            val groupSizes = rankGroups.values.map { it.size }.sortedDescending()
+            return when {
+                isFlush && isStraight -> {
+                    val isRoyal = ranks.contains(Rank.ACE) && ranks.first().value == Rank.ACE.value - size + 1
+                    if (isRoyal) HandType.ROYAL_FLUSH else HandType.STRAIGHT_FLUSH
+                }
+                groupSizes[0] == 5 -> HandType.FIVE_OF_A_KIND
+                groupSizes[0] == 4 -> HandType.FOUR_OF_A_KIND
+                groupSizes[0] == 3 && groupSizes[1] == 2 -> HandType.FULL_HOUSE
+                isFlush -> HandType.FLUSH
+                isStraight -> HandType.STRAIGHT
+                groupSizes[0] == 3 -> HandType.THREE_OF_A_KIND
+                groupSizes[0] == 2 && groupSizes[1] == 2 -> HandType.TWO_PAIR
+                groupSizes[0] == 2 -> HandType.ONE_PAIR
+                else -> HandType.HIGH_CARD
+            }
+        }
+
+        // For size 2, 3, 4
+        val groupSizes = rankGroups.values.map { it.size }.sortedDescending()
         return when {
+            isFlush && isStraight -> HandType.STRAIGHT_FLUSH
             groupSizes[0] == 4 -> HandType.FOUR_OF_A_KIND
-            groupSizes[0] == 3 && (groupSizes.size > 1 && groupSizes[1] == 2) -> HandType.FULL_HOUSE
+            groupSizes[0] == 3 -> HandType.THREE_OF_A_KIND
             isFlush -> HandType.FLUSH
             isStraight -> HandType.STRAIGHT
-            groupSizes[0] == 3 -> HandType.THREE_OF_A_KIND
             groupSizes[0] == 2 && (groupSizes.size > 1 && groupSizes[1] == 2) -> HandType.TWO_PAIR
             groupSizes[0] == 2 -> HandType.ONE_PAIR
             else -> HandType.HIGH_CARD
         }
     }
 
-    /**
-     * Identifies the HandType and calculates the score based on the target cards.
-     */
-    fun calculateScore(cards: List<Card>): Int {
-        val handType = evaluate(cards)
+    private fun calculateScoreDirect(cards: List<Card>, handType: HandType): Int {
         val targetCards = getTargetCards(cards, handType)
 
         val sumRanks = targetCards.sumOf { it.rank.score }
@@ -49,45 +131,6 @@ class HandEvaluator {
         val baseScore = sumRanks * sumSuits
 
         return baseScore * handType.multiplier
-    }
-
-    /**
-     * Evaluates a hand of any size.
-     * - If N >= 5: finds the best 5-card combination.
-     * - If N < 5: evaluates the N-card combination directly.
-     */
-    fun evaluateBestHand(cards: List<Card>): HandEvaluationResult {
-        require(cards.isNotEmpty()) { "Cannot evaluate an empty list of cards" }
-
-        if (cards.size < 5) {
-            val handType = evaluate(cards)
-            val score = calculateScore(cards)
-            return HandEvaluationResult(cards, handType, score)
-        }
-
-        // Select top 6 cards of each suit to keep combination size at most 24 (42,504 combinations max), guaranteeing the best possible hand is found.
-        val cardsToEvaluate = if (cards.size > 24) {
-            val bySuit = cards.groupBy { it.suit }
-            val bestCards = mutableSetOf<Card>()
-            for (suitCards in bySuit.values) {
-                bestCards.addAll(suitCards.sortedByDescending { it.rank.score }.take(6))
-            }
-            bestCards.toList()
-        } else {
-            cards
-        }
-
-        val combinations = getCombinations(cardsToEvaluate, 5)
-        val bestHand = combinations.map { combo ->
-            val type = evaluate(combo)
-            val score = calculateScore(combo)
-            HandEvaluationResult(combo, type, score)
-        }.maxWithOrNull(
-            compareBy<HandEvaluationResult> { it.type.multiplier }
-                .thenBy { it.score }
-        ) ?: throw IllegalStateException("Could not find any hand combinations")
-
-        return bestHand
     }
 
     private fun <T> getCombinations(list: List<T>, k: Int): List<List<T>> {
@@ -118,6 +161,8 @@ class HandEvaluator {
         if (sortedRanks.contains(Rank.ACE)) {
             val withoutAce = sortedRanks.filter { it != Rank.ACE }
             val expectedRanks = when (size) {
+                7 -> listOf(Rank.TWO, Rank.THREE, Rank.FOUR, Rank.FIVE, Rank.SIX, Rank.SEVEN)
+                6 -> listOf(Rank.TWO, Rank.THREE, Rank.FOUR, Rank.FIVE, Rank.SIX)
                 5 -> listOf(Rank.TWO, Rank.THREE, Rank.FOUR, Rank.FIVE)
                 4 -> listOf(Rank.TWO, Rank.THREE, Rank.FOUR)
                 3 -> listOf(Rank.TWO, Rank.THREE)
@@ -131,13 +176,20 @@ class HandEvaluator {
         return false
     }
 
-    /**
-     * Extracts the relevant target cards used to calculate the score for each hand type.
-     */
     private fun getTargetCards(cards: List<Card>, handType: HandType): List<Card> {
         val rankGroups = cards.groupBy { it.rank }
 
         return when (handType) {
+            HandType.SEVEN_OF_A_KIND,
+            HandType.SEVEN_CARD_STRAIGHT_FLUSH,
+            HandType.SIX_CARD_STRAIGHT_FLUSH,
+            HandType.TWO_THREE_OF_A_KIND,
+            HandType.THREE_PAIR,
+            HandType.SEVEN_CARD_STRAIGHT,
+            HandType.SEVEN_CARD_FLUSH,
+            HandType.FULLER_HOUSE,
+            HandType.SIX_CARD_FLUSH,
+            HandType.SIX_CARD_STRAIGHT,
             HandType.ROYAL_FLUSH,
             HandType.STRAIGHT_FLUSH,
             HandType.FULL_HOUSE,
@@ -146,17 +198,23 @@ class HandEvaluator {
             HandType.HIGH_CARD -> {
                 cards
             }
+            HandType.SIX_OF_A_KIND -> {
+                rankGroups.values.first { it.size >= 6 }.take(6)
+            }
+            HandType.FIVE_OF_A_KIND -> {
+                rankGroups.values.first { it.size >= 5 }.take(5)
+            }
             HandType.FOUR_OF_A_KIND -> {
-                rankGroups.values.first { it.size == 4 }
+                rankGroups.values.first { it.size >= 4 }.take(4)
             }
             HandType.THREE_OF_A_KIND -> {
-                rankGroups.values.first { it.size == 3 }
+                rankGroups.values.first { it.size >= 3 }.take(3)
             }
             HandType.TWO_PAIR -> {
-                rankGroups.values.filter { it.size == 2 }.flatten()
+                rankGroups.values.filter { it.size >= 2 }.flatten()
             }
             HandType.ONE_PAIR -> {
-                rankGroups.values.first { it.size == 2 }
+                rankGroups.values.first { it.size >= 2 }.take(2)
             }
         }
     }
