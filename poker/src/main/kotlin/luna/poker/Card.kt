@@ -1,10 +1,10 @@
 package luna.poker
 
-enum class Suit(val symbol: String, val displayName: String) {
-    SPADES("♠", "黑桃"),
-    HEARTS("♥", "紅心"),
-    DIAMONDS("♦", "方塊"),
-    CLUBS("♣", "梅花");
+enum class Suit(val symbol: String, val displayName: String, val score: Int) {
+    SPADES("♠", "黑桃", 4),
+    HEARTS("♥", "紅心", 3),
+    DIAMONDS("♦", "方塊", 2),
+    CLUBS("♣", "梅花", 1);
 
     override fun toString(): String = symbol
 }
@@ -23,6 +23,9 @@ enum class Rank(val symbol: String, val value: Int, val displayName: String) {
     QUEEN("Q", 12, "Q"),
     KING("K", 13, "K"),
     ACE("A", 14, "A");
+
+    val score: Int
+        get() = value
 
     override fun toString(): String = symbol
 }
