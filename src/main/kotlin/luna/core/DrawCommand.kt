@@ -86,15 +86,14 @@ class DrawCommand : Command {
                     )
 
             if (bestHand != null) {
-                if (countOption > 5) {
-                    responseText.append("🏆 **最佳 5 張組合**：${bestHand.cards.joinToString(" ") { getCardEmojiString(it) }}\n")
-                }
+                responseText.append("🏆 **最佳 5 張組合**：${bestHand.cards.joinToString(" ") { getCardEmojiString(it) }}\n")
                 responseText.append("手牌牌型：**${bestHand.type.displayName}** (乘數: x${bestHand.type.multiplier})\n")
                 responseText.append("獲得分數：**${bestHand.score} 分** 🏆\n")
             }
         } else {
             // Calculate simple score for less than 5 cards
             val baseScore = drawnCards.sumOf { it.rank.score * it.suit.score }
+            responseText.append("🏆 **計分組合**：${drawnCards.joinToString(" ") { getCardEmojiString(it) }}\n")
             responseText.append("獲得分數：**$baseScore 分** (非 5 張手牌，以單卡基本分累加)\n")
             responseText.append("💡 *提示：抽滿 5 張牌以上即可觸發完整的最佳撲克牌型加成計算喔！*\n")
         }
