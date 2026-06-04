@@ -35,10 +35,10 @@ class HandEvaluatorTest {
         // Target: Pair of Threes
         // Rank sum: 3 + 3 = 6
         // Suit sum: 1 + 4 = 5
-        // One Pair multiplier = 2
-        // Score = 6 * 5 * 2 = 60
+        // One Pair multiplier = 2, base score = 1000
+        // Score = (6 * 5 + 1000) * 2 = 2060
         assertEquals(HandType.ONE_PAIR, evaluator.evaluate(cards).type)
-        assertEquals(60, evaluator.calculateScore(cards))
+        assertEquals(2060, evaluator.calculateScore(cards))
     }
 
     @Test
@@ -53,10 +53,10 @@ class HandEvaluatorTest {
         // Target: Two Pairs
         // Rank sum: 4 + 4 + 8 + 8 = 24
         // Suit sum: 2 + 1 + 3 + 4 = 10
-        // Two Pair multiplier = 3
-        // Score = 24 * 10 * 3 = 720
+        // Two Pair multiplier = 3, base score = 2000
+        // Score = (24 * 10 + 2000) * 3 = 6720
         assertEquals(HandType.TWO_PAIR, evaluator.evaluate(cards).type)
-        assertEquals(720, evaluator.calculateScore(cards))
+        assertEquals(6720, evaluator.calculateScore(cards))
     }
 
     @Test
@@ -71,10 +71,10 @@ class HandEvaluatorTest {
         // Target: Three Queens
         // Rank sum: 12 + 12 + 12 = 36
         // Suit sum: 1 + 4 + 2 = 7
-        // Three of a Kind multiplier = 4
-        // Score = 36 * 7 * 4 = 1008
+        // Three of a Kind multiplier = 4, base score = 3000
+        // Score = (36 * 7 + 3000) * 4 = 13008
         assertEquals(HandType.THREE_OF_A_KIND, evaluator.evaluate(cards).type)
-        assertEquals(1008, evaluator.calculateScore(cards))
+        assertEquals(13008, evaluator.calculateScore(cards))
     }
 
     @Test
@@ -88,10 +88,10 @@ class HandEvaluatorTest {
         )
         // Rank sum: 5 + 6 + 7 + 8 + 9 = 35
         // Suit sum: 1 + 2 + 3 + 4 + 4 = 14
-        // Straight multiplier = 7 (updated multiplier!)
-        // Score = 35 * 14 * 7 = 3430
+        // Straight multiplier = 7, base score = 6000
+        // Score = (35 * 14 + 6000) * 7 = 45430
         assertEquals(HandType.STRAIGHT, evaluator.evaluate(cards).type)
-        assertEquals(3430, evaluator.calculateScore(cards))
+        assertEquals(45430, evaluator.calculateScore(cards))
     }
 
     @Test
@@ -105,10 +105,10 @@ class HandEvaluatorTest {
         )
         // Rank sum: 2 + 5 + 7 + 11 + 13 = 38
         // Suit sum: 3 + 3 + 3 + 3 + 3 = 15
-        // Flush multiplier = 6
-        // Score = 38 * 15 * 6 = 3420
+        // Flush multiplier = 6, base score = 5000
+        // Score = (38 * 15 + 5000) * 6 = 33420
         assertEquals(HandType.FLUSH, evaluator.evaluate(cards).type)
-        assertEquals(3420, evaluator.calculateScore(cards))
+        assertEquals(33420, evaluator.calculateScore(cards))
     }
 
     @Test
@@ -122,10 +122,10 @@ class HandEvaluatorTest {
         )
         // Rank sum: 7 + 7 + 7 + 13 + 13 = 47
         // Suit sum: 1 + 2 + 4 + 3 + 4 = 14
-        // Full House multiplier = 5 (updated multiplier!)
-        // Score = 47 * 14 * 5 = 3290
+        // Full House multiplier = 5, base score = 4000
+        // Score = (47 * 14 + 4000) * 5 = 23290
         assertEquals(HandType.FULL_HOUSE, evaluator.evaluate(cards).type)
-        assertEquals(3290, evaluator.calculateScore(cards))
+        assertEquals(23290, evaluator.calculateScore(cards))
     }
 
     @Test
@@ -140,10 +140,10 @@ class HandEvaluatorTest {
         // Target: Four Nines
         // Rank sum: 9 * 4 = 36
         // Suit sum: 1 + 2 + 3 + 4 = 10
-        // Four of a Kind multiplier = 9 (updated multiplier!)
-        // Score = 36 * 10 * 9 = 3240
+        // Four of a Kind multiplier = 9, base score = 8000
+        // Score = (36 * 10 + 8000) * 9 = 75240
         assertEquals(HandType.FOUR_OF_A_KIND, evaluator.evaluate(cards).type)
-        assertEquals(3240, evaluator.calculateScore(cards))
+        assertEquals(75240, evaluator.calculateScore(cards))
     }
 
     @Test
@@ -157,10 +157,10 @@ class HandEvaluatorTest {
         )
         // Rank sum: 4 + 5 + 6 + 7 + 8 = 30
         // Suit sum: 1 * 5 = 5
-        // Straight Flush multiplier = 14 (updated multiplier!)
-        // Score = 30 * 5 * 14 = 2100
+        // Straight Flush multiplier = 14, base score = 13000
+        // Score = (30 * 5 + 13000) * 14 = 184100
         assertEquals(HandType.STRAIGHT_FLUSH, evaluator.evaluate(cards).type)
-        assertEquals(2100, evaluator.calculateScore(cards))
+        assertEquals(184100, evaluator.calculateScore(cards))
     }
 
     @Test
@@ -174,10 +174,10 @@ class HandEvaluatorTest {
         )
         // Rank sum: 10 + 11 + 12 + 13 + 14 = 60
         // Suit sum: 4 * 5 = 20
-        // Royal Flush multiplier = 18 (updated multiplier!)
-        // Score = 60 * 20 * 18 = 21600
+        // Royal Flush multiplier = 18, base score = 17000
+        // Score = (60 * 20 + 17000) * 18 = 327600
         assertEquals(HandType.ROYAL_FLUSH, evaluator.evaluate(cards).type)
-        assertEquals(21600, evaluator.calculateScore(cards))
+        assertEquals(327600, evaluator.calculateScore(cards))
     }
 
     @Test
@@ -206,7 +206,7 @@ class HandEvaluatorTest {
             Card(Suit.HEARTS, Rank.ACE)
         )
         assertEquals(HandType.ONE_PAIR, evaluator.evaluate(pair).type)
-        assertEquals((14 + 14) * (4 + 3) * 2, evaluator.calculateScore(pair))
+        assertEquals(((14 + 14) * (4 + 3) + 1000) * 2, evaluator.calculateScore(pair))
 
         // Test 3 cards (Straight Flush)
         val straightFlush3 = listOf(
@@ -373,8 +373,34 @@ class HandEvaluatorTest {
             Card(Suit.CLUBS, Rank.FOUR)
         )
         val bestHand = evaluator.evaluate(testPool)
-        // Two Pair of Aces and Kings has rank sum = 54, suit sum = 14. Score = 54 * 14 * 3 = 2268.
-        assertEquals(2268, bestHand.score)
+        // Two Pair of Aces and Kings has rank sum = 54, suit sum = 14. Score = (54 * 14 + 2000) * 3 = 8268.
+        assertEquals(8268, bestHand.score)
         assertEquals(HandType.TWO_PAIR, bestHand.type)
     }
+
+    @Test
+    fun testHighCardAlwaysSixCardsForSixCardHands() {
+        val suits = Suit.values()
+        val ranks = Rank.values()
+        val random = java.util.Random(42)
+        val deck = mutableListOf<Card>()
+        for (suit in suits) {
+            for (rank in ranks) {
+                deck.add(Card(suit, rank))
+            }
+        }
+        
+        var count = 0
+        for (i in 1..50000) {
+            deck.shuffle(random)
+            val hand = deck.take(6)
+            val result = evaluator.evaluate(hand)
+            if (result.type == HandType.HIGH_CARD) {
+                count++
+                assertEquals(6, result.cards.size, "Hand was: $hand, evaluated cards: ${result.cards}")
+            }
+        }
+        println("Tested $count 6-card HIGH_CARD hands.")
+    }
 }
+

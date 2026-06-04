@@ -45,6 +45,9 @@ class DrawCommand : Command {
         // Calculate score using business logic in poker module
         val evaluation = evaluator.evaluate(drawnCards)
 
+        // Add score to User's total score
+        pokerUser.score += evaluation.score
+
         val responseText = StringBuilder()
         responseText.append("♠️ ♥️ ♦️ ♣️ **撲克抽牌結果** ♠️ ♥️ ♦️ ♣️\n\n")
         responseText.append("玩家：<@$userId> ($username)\n")
@@ -53,6 +56,7 @@ class DrawCommand : Command {
         responseText.append("🏆 **計分組合**：${evaluation.cards.joinToString(" ") { getCardEmojiString(it) }}\n")
         responseText.append("手牌牌型：**${evaluation.type.displayName}** (乘數: x${evaluation.type.multiplier})\n")
         responseText.append("獲得分數：**${evaluation.score} 分** 🏆\n")
+        responseText.append("目前總分：**${pokerUser.score} 分**\n")
 
         val response = interaction.deferPublicResponse()
         response.respond {

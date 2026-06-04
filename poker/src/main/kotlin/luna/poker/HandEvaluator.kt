@@ -28,7 +28,12 @@ class HandEvaluator {
                 .thenBy { it.type.multiplier }
         ) ?: throw IllegalStateException("Could not find any hand combinations")
 
-        return bestHand
+        return if (bestHand.type == HandType.HIGH_CARD && bestHand.cards.size < cards.size) {
+            val newScore = calculateScoreDirect(cards, HandType.HIGH_CARD)
+            HandEvaluationResult(cards, HandType.HIGH_CARD, newScore)
+        } else {
+            bestHand
+        }
     }
 
     /**
@@ -128,9 +133,9 @@ class HandEvaluator {
 
         val sumRanks = targetCards.sumOf { it.rank.score }
         val sumSuits = targetCards.sumOf { it.suit.score }
-        val baseScore = sumRanks * sumSuits
+        val participatingScore = sumRanks * sumSuits
 
-        return baseScore * handType.multiplier
+        return (participatingScore + handType.baseScore) * handType.multiplier
     }
 
     private fun <T> getCombinations(list: List<T>, k: Int): List<List<T>> {

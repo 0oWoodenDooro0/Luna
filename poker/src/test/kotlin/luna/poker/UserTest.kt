@@ -42,4 +42,58 @@ class UserTest {
         user.resetDeck()
         assertEquals(52, user.deck.remainingCount)
     }
+
+    @Test
+    fun testUserScore() {
+        val user = User.getOrCreate("user-score-test")
+        assertEquals(0, user.score)
+        
+        user.score += 100
+        assertEquals(100, user.score)
+        
+        user.score += 50
+        assertEquals(150, user.score)
+    }
+
+    @Test
+    fun testDrawUpgrade() {
+        val user = User.getOrCreate("user-upgrade-test")
+        assertEquals(1, user.drawCount)
+        assertEquals(100, user.getNextDrawUpgradeCost())
+
+        // Try to upgrade without enough score
+        assertFalse(user.upgradeDrawCount())
+        assertEquals(1, user.drawCount)
+
+        // Add score and upgrade to level 2
+        user.score = 100
+        assertTrue(user.upgradeDrawCount())
+        assertEquals(2, user.drawCount)
+        assertEquals(0, user.score)
+        assertEquals(5000, user.getNextDrawUpgradeCost())
+
+        // Upgrade through all levels up to max (7)
+        user.score = 5000
+        assertTrue(user.upgradeDrawCount()) // 2 -> 3
+        assertEquals(3, user.drawCount)
+
+        user.score = 15000
+        assertTrue(user.upgradeDrawCount()) // 3 -> 4
+        
+        user.score = 50000
+        assertTrue(user.upgradeDrawCount()) // 4 -> 5
+        
+        user.score = 150000
+        assertTrue(user.upgradeDrawCount()) // 5 -> 6
+
+        user.score = 500000
+        assertTrue(user.upgradeDrawCount()) // 6 -> 7
+        assertEquals(7, user.drawCount)
+        assertNull(user.getNextDrawUpgradeCost())
+
+        // Try to upgrade past max (7)
+        user.score = 1000000
+        assertFalse(user.upgradeDrawCount())
+        assertEquals(7, user.drawCount)
+    }
 }
