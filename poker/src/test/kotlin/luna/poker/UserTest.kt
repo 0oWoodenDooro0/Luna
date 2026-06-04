@@ -25,6 +25,7 @@ class UserTest {
     fun testDeckInitialization() {
         val user = User.getOrCreate("user-abc")
         assertEquals(52, user.deck.remainingCount)
+        assertEquals(1, user.drawCount)
 
         // Draw 5 cards and verify count drops
         val drawn = user.deck.draw(5)

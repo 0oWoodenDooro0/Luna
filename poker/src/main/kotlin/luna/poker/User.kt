@@ -11,6 +11,10 @@ class User(val id: String) {
     var deck: Deck = Deck.standard52().apply { shuffle() }
         private set
 
+    @Volatile
+    var drawCount: Int = 1
+
+
     /**
      * Resets the user's personal deck back to a standard 52-card deck and shuffles it.
      */

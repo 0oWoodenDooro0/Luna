@@ -17,19 +17,15 @@ class DrawCommand : Command {
     private val evaluator = HandEvaluator()
 
     override suspend fun register(kord: Kord) {
-        kord.createGlobalChatInputCommand(name, description) {
-            integer("張數", "要抽的卡牌張數 (預設為 5，範圍 1-52)") {
-                required = false
-            }
-        }
+        kord.createGlobalChatInputCommand(name, description)
     }
 
     override suspend fun handle(interaction: ChatInputCommandInteraction) {
         val userId = interaction.user.id
         val username = interaction.user.username
 
-        // Read options
-        val countOption = interaction.command.integers["張數"]?.toInt() ?: 5
+        val pokerUser = luna.poker.User.getOrCreate(userId.toString())
+        val countOption = pokerUser.drawCount
 
         if (countOption < 1 || countOption > 52) {
             val response = interaction.deferEphemeralResponse()
@@ -39,7 +35,6 @@ class DrawCommand : Command {
             return
         }
 
-        val pokerUser = luna.poker.User.getOrCreate(userId.toString())
         val userCards = pokerUser.deck.getCards()
 
         // Create a temporary deck using the user's cards, shuffle it, and draw cards
