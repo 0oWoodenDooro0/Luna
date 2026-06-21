@@ -5,7 +5,7 @@ plugins {
 }
 
 group = "luna"
-version = "1.0-SNAPSHOT"
+version = "1.0"
 
 application {
     mainClass.set("luna.core.MainKt")
@@ -47,7 +47,7 @@ tasks.jar {
 
     duplicatesStrategy = DuplicatesStrategy.EXCLUDE
 
-    configurations["compileClasspath"].forEach { file: File ->
+    configurations["runtimeClasspath"].forEach { file: File ->
         from(zipTree(file.absoluteFile))
     }
 }
