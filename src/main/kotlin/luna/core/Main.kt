@@ -1,24 +1,87 @@
 package luna.core
 
+import com.github._0owoodendooro0.curtly.CurtlyService
+import com.github._0owoodendooro0.curtly.FileUrlStorage
+import com.github._0owoodendooro0.curtly.curtlyRouting
 import dev.kord.common.entity.Snowflake
 import dev.kord.core.Kord
 import dev.kord.core.behavior.interaction.response.respond
 import dev.kord.core.event.interaction.ChatInputCommandInteractionCreateEvent
 import dev.kord.core.event.interaction.SelectMenuInteractionCreateEvent
 import dev.kord.core.on
+import io.ktor.server.engine.embeddedServer
+import io.ktor.server.netty.Netty
+import io.ktor.server.routing.routing
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import luna.core.JsonLogger
 import luna.undercover.UndercoverGame
 import luna.undercover.UndercoverManager
 import luna.undercover.command.RevealCommand
 import luna.undercover.command.UndercoverCommand
+import org.yaml.snakeyaml.Yaml
+import java.io.File
+import java.io.InputStream
 
 suspend fun main() {
+    val storage = FileUrlStorage(File("data/urls.properties"))
+
+    val yamlFile = File("application.yml")
+    val yamlStream: InputStream? =
+        if (yamlFile.exists()) {
+            yamlFile.inputStream()
+        } else {
+            Thread.currentThread().contextClassLoader.getResourceAsStream("application.yml")
+        }
+
+    val yamlBaseUrl =
+        yamlStream?.use { stream ->
+            try {
+                val yaml = Yaml()
+                val config = yaml.load<Map<String, Any>>(stream)
+                val curtlyConfig = config["curtly"] as? Map<*, *>
+                val rawBaseUrl = curtlyConfig?.get("baseUrl") as? String ?: curtlyConfig?.get("baseurl") as? String
+
+                if (rawBaseUrl != null && rawBaseUrl.trim().startsWith("\${") && rawBaseUrl.trim().endsWith("}")) {
+                    val trimmed = rawBaseUrl.trim()
+                    val inner = trimmed.substring(2, trimmed.length - 1).trim()
+                    val cleanInner = if (inner.startsWith("?")) inner.substring(1) else inner
+                    val parts = cleanInner.split(":", limit = 2)
+                    val envVarName = parts[0].trim()
+                    val defaultValue = if (parts.size > 1) parts[1].trim() else ""
+                    System.getenv(envVarName) ?: defaultValue
+                } else {
+                    rawBaseUrl
+                }
+            } catch (e: Exception) {
+                null
+            }
+        }
+
+    val baseUrl = yamlBaseUrl ?: System.getenv("BASE_URL") ?: "http://localhost:8080"
+    val curtlyService = CurtlyService(storage = storage, baseUrl = baseUrl)
+
+    val serverPort = System.getenv("PORT")?.toIntOrNull() ?: 8080
+    val server =
+        embeddedServer(Netty, port = serverPort) {
+            routing {
+                curtlyRouting(curtlyService)
+            }
+        }
+
+    // Start Ktor server in a background coroutine
+    CoroutineScope(Dispatchers.Default).launch {
+        server.start(wait = true)
+    }
+
     val kord = Kord(System.getenv("DISCORD_TOKEN") ?: error("Missing discord token"))
 
     val commands =
         listOf(
             UndercoverCommand(),
             RevealCommand(),
+            ShortenCommand(curtlyService),
         )
     commands.forEach { it.register(kord) }
 

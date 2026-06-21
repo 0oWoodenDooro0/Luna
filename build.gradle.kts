@@ -11,10 +11,6 @@ application {
     mainClass.set("luna.core.MainKt")
 }
 
-repositories {
-    mavenCentral()
-}
-
 dependencies {
     testImplementation(kotlin("test"))
     testImplementation("io.mockk:mockk:1.14.9")
@@ -26,10 +22,17 @@ dependencies {
     implementation("org.jetbrains.exposed:exposed-core:1.1.1")
     implementation("org.jetbrains.exposed:exposed-jdbc:1.1.1")
     implementation("org.yaml:snakeyaml:2.4")
+    
+    // Ktor Server
+    implementation("io.ktor:ktor-server-core-jvm:3.5.0")
+    implementation("io.ktor:ktor-server-netty-jvm:3.5.0")
+
+    // Curtly URL Shortener Library
+    implementation("com.github.0oWoodenDooro0:Curtly:1.0.1")
 }
 
 kotlin {
-    jvmToolchain(17)
+    jvmToolchain(21)
 }
 
 tasks.test {
