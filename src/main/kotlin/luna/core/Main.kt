@@ -64,7 +64,7 @@ suspend fun main() {
 
     val serverPort = System.getenv("PORT")?.toIntOrNull() ?: 8080
     val server =
-        embeddedServer(Netty, port = serverPort) {
+        embeddedServer(Netty, port = serverPort, host = "0.0.0.0") {
             routing {
                 curtlyRouting(curtlyService)
             }
