@@ -28,11 +28,11 @@ dependencies {
     implementation("io.ktor:ktor-server-netty-jvm:3.5.0")
 
     // Curtly URL Shortener Library
-    implementation("com.github.0oWoodenDooro0:Curtly:1.0.1")
+    implementation("com.github.0oWoodenDooro0:Curtly:1.0.2")
 }
 
 kotlin {
-    jvmToolchain(21)
+    jvmToolchain(17)
 }
 
 tasks.test {
