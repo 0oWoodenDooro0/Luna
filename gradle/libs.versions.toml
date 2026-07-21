@@ -1,10 +1,12 @@
 [versions]
 kotlin = "2.3.21"
 kotlinx-serialization = "1.7.3"
+kotlinx-html = "0.11.0"
 logback = "1.5.34"
 
 [libraries]
 kotlinx-serialization-json = { module = "org.jetbrains.kotlinx:kotlinx-serialization-json", version.ref = "kotlinx-serialization" }
+kotlinx-html-jvm = { module = "org.jetbrains.kotlinx:kotlinx-html-jvm", version.ref = "kotlinx-html" }
 logback-classic = { module = "ch.qos.logback:logback-classic", version.ref = "logback" }
 
 [plugins]

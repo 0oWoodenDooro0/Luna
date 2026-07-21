@@ -13,6 +13,7 @@ kotlin {
 
 dependencies {
     implementation(libs.kotlinx.serialization.json)
+    implementation(libs.kotlinx.html.jvm)
     implementation(libs.logback.classic)
 
     testImplementation(kotlin("test"))
