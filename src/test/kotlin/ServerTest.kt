@@ -98,6 +98,32 @@ class ServerTest {
         val responseBody = shortenResponse.bodyAsText()
         assertTrue(responseBody.contains("https://mycustomdomain2.com/$uniqueKey"), "Response body was: $responseBody")
     }
+
+    @Test
+    fun `test shorten with maxClicks and expiration`() = testApplication {
+        configure()
+
+        val testClient = createClient {
+            followRedirects = false
+        }
+
+        val uniqueKey = "limit-" + UUID.randomUUID().toString().take(6)
+
+        val shortenResponse = testClient.post("/shorten") {
+            contentType(ContentType.Application.Json)
+            setBody("""{"url":"https://github.com","key":"$uniqueKey","maxClicks":1}""")
+        }
+
+        assertEquals(HttpStatusCode.Created, shortenResponse.status)
+
+        // 1st click - success redirect
+        val redirectResponse1 = testClient.get("/$uniqueKey")
+        assertEquals(HttpStatusCode.Found, redirectResponse1.status)
+
+        // 2nd click - max clicks reached, return 404
+        val redirectResponse2 = testClient.get("/$uniqueKey")
+        assertEquals(HttpStatusCode.NotFound, redirectResponse2.status)
+    }
 }
 
 

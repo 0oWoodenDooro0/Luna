@@ -12,14 +12,20 @@ import java.io.File
 @Serializable
 data class ShortenRequest(
     val url: String,
-    val key: String? = null
+    val key: String? = null,
+    val expiresInSeconds: Long? = null,
+    val expiresAt: Long? = null,
+    val maxClicks: Int? = null
 )
 
 @Serializable
 data class ShortenResponse(
     val shortUrl: String,
     val key: String,
-    val longUrl: String
+    val longUrl: String,
+    val expiresAt: Long? = null,
+    val maxClicks: Int? = null,
+    val clickCount: Int = 0
 )
 
 val fileStorage = FileUrlStorage(File("data/urls.db"))
@@ -48,21 +54,34 @@ fun Application.configureRouting() {
                 val request = runCatching { call.receive<ShortenRequest>() }.getOrNull()
                 val url = request?.url ?: call.parameters["url"]
                 val customKey = request?.key ?: call.parameters["key"]
+                val expiresInSeconds = request?.expiresInSeconds ?: call.parameters["expiresInSeconds"]?.toLongOrNull()
+                val expiresAt = request?.expiresAt ?: call.parameters["expiresAt"]?.toLongOrNull()
+                val maxClicks = request?.maxClicks ?: call.parameters["maxClicks"]?.toIntOrNull()
 
                 if (url.isNullOrBlank()) {
                     call.respond(HttpStatusCode.BadRequest, mapOf("error" to "Missing or empty 'url' parameter"))
                     return@post
                 }
 
-                val shortUrl = curtlyService.shorten(url, customKey)
+                val shortUrl = curtlyService.shorten(
+                    longUrl = url,
+                    customKey = customKey,
+                    expiresInSeconds = expiresInSeconds,
+                    expiresAt = expiresAt,
+                    maxClicks = maxClicks
+                )
                 val generatedKey = shortUrl.substringAfterLast("/")
+                val entry = curtlyService.getEntry(generatedKey)
 
                 call.respond(
                     HttpStatusCode.Created,
                     ShortenResponse(
                         shortUrl = shortUrl,
                         key = generatedKey,
-                        longUrl = url
+                        longUrl = url,
+                        expiresAt = entry?.expiresAt,
+                        maxClicks = entry?.maxClicks,
+                        clickCount = entry?.clickCount ?: 0
                     )
                 )
             } catch (e: IllegalArgumentException) {

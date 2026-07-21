@@ -11,8 +11,8 @@ class CurtlyServiceTest {
         assertNull(storage.get("key1"))
         
         storage.save("key1", "https://google.com")
-        assertEquals("https://google.com", storage.get("key1"))
-        assertEquals(mapOf("key1" to "https://google.com"), storage.getAll())
+        assertEquals(UrlEntry("https://google.com"), storage.get("key1"))
+        assertEquals(mapOf("key1" to UrlEntry("https://google.com")), storage.getAll())
     }
 
     @Test
@@ -22,16 +22,18 @@ class CurtlyServiceTest {
 
         val storage = FileUrlStorage(tempFile)
         storage.save("keyA", "https://github.com")
-        storage.save("keyB", "https://kotlinlang.org")
+        storage.save("keyB", UrlEntry("https://kotlinlang.org", maxClicks = 5))
 
         // Read from the same file storage instance
-        assertEquals("https://github.com", storage.get("keyA"))
-        assertEquals("https://kotlinlang.org", storage.get("keyB"))
+        assertEquals("https://github.com", storage.get("keyA")?.longUrl)
+        assertEquals("https://kotlinlang.org", storage.get("keyB")?.longUrl)
+        assertEquals(5, storage.get("keyB")?.maxClicks)
 
         // Create a new file storage instance pointing to the same file to verify persistence load
         val storage2 = FileUrlStorage(tempFile)
-        assertEquals("https://github.com", storage2.get("keyA"))
-        assertEquals("https://kotlinlang.org", storage2.get("keyB"))
+        assertEquals("https://github.com", storage2.get("keyA")?.longUrl)
+        assertEquals("https://kotlinlang.org", storage2.get("keyB")?.longUrl)
+        assertEquals(5, storage2.get("keyB")?.maxClicks)
     }
 
     @Test
@@ -68,5 +70,49 @@ class CurtlyServiceTest {
         assertFailsWith<IllegalArgumentException> {
             service.shorten("https://yahoo.com", "invalid/key")
         }
+    }
+
+    @Test
+    fun testExpirationByTimestamp() {
+        val storage = InMemoryUrlStorage()
+        val service = CurtlyService(storage, baseUrl = "http://localhost/")
+
+        val pastTime = System.currentTimeMillis() - 1000L
+        val short = service.shorten("https://example.com", customKey = "expKey", expiresAt = pastTime)
+        assertNull(service.resolve("expKey"))
+    }
+
+    @Test
+    fun testMaxClicksLimit() {
+        val storage = InMemoryUrlStorage()
+        val service = CurtlyService(storage, baseUrl = "http://localhost/")
+
+        val short = service.shorten("https://example.com", customKey = "limitKey", maxClicks = 2)
+
+        // 1st click
+        assertEquals("https://example.com", service.resolve("limitKey"))
+        assertEquals(1, service.getEntry("limitKey")?.clickCount)
+
+        // 2nd click
+        assertEquals("https://example.com", service.resolve("limitKey"))
+        assertEquals(2, service.getEntry("limitKey")?.clickCount)
+
+        // 3rd click (should expire as maxClicks is 2)
+        assertNull(service.resolve("limitKey"))
+    }
+
+    @Test
+    fun testDefaultUnlimited() {
+        val storage = InMemoryUrlStorage()
+        val service = CurtlyService(storage, baseUrl = "http://localhost/")
+
+        val short = service.shorten("https://example.com", customKey = "unlimitedKey")
+        assertNull(service.getEntry("unlimitedKey")?.expiresAt)
+        assertNull(service.getEntry("unlimitedKey")?.maxClicks)
+
+        repeat(10) {
+            assertEquals("https://example.com", service.resolve("unlimitedKey"))
+        }
+        assertEquals(10, service.getEntry("unlimitedKey")?.clickCount)
     }
 }
