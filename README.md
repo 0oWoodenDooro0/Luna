@@ -1,35 +1,51 @@
 # Curtly
 
-This project was created using the [Ktor Project Generator](https://start.ktor.io).
+A lightweight Kotlin library for URL shortening, custom key generation, expiration handling, and click-limit tracking.
 
-Here are some useful links to get you started:
- * [Ktor Documentation](https://ktor.io/docs/home.html)
- * [Ktor GitHub page](https://github.com/ktorio/ktor)
- * [Ktor Slack chat](https://app.slack.com/client/T09229ZC6/C0A974TJ9). [Request an invite](https://surveys.jetbrains.com/s3/kotlin-slack-sign-up).
+## Usage
 
+```kotlin
+import com.github._0owoodendooro0.curtly.*
+import java.io.File
+
+// In-Memory Storage
+val storage = InMemoryUrlStorage()
+
+// Or File Storage
+// val storage = FileUrlStorage(File("data/urls.db"))
+
+val curtly = CurtlyService(
+    storage = storage,
+    baseUrl = "https://short.link/"
+)
+
+// Shorten a URL
+val shortUrl = curtly.shorten(
+    longUrl = "https://example.com/very/long/url",
+    customKey = "my-custom-key",
+    expiresInSeconds = 3600, // Optional expiration
+    maxClicks = 10           // Optional click limit
+)
+
+println(shortUrl) // https://short.link/my-custom-key
+
+// Resolve a key back to the original long URL
+val originalUrl = curtly.resolve("my-custom-key")
+println(originalUrl) // https://example.com/very/long/url
+```
 
 ## Features
-Here's a list of features included in this project:
 
-| Name | Description |
-|------|-------------|
-| [Content Negotiation](https://start.ktor.io/p/io.ktor/server-content-negotiation) | Provides automatic content conversion according to Content-Type and Accept headers |
-| [Call Logging](https://start.ktor.io/p/io.ktor/server-call-logging) | Logs client requests |
-| [Status Pages](https://start.ktor.io/p/io.ktor/server-status-pages) | Provides exception handling for routes |
+- **URL Normalization**: Ensures URLs start with `http://` or `https://`.
+- **Custom Keys**: Supports custom key aliases or auto-generated random keys.
+- **Expiration Support**: Expiration by duration (`expiresInSeconds`) or exact timestamp (`expiresAt`).
+- **Click Limit**: Limit maximum allowed clicks (`maxClicks`).
+- **Flexible Storage**: Pluggable storage system (`InMemoryUrlStorage` and `FileUrlStorage`).
 
-
-## Building & Running
-To build or run the project, use one of the following tasks:
-
+## Building & Testing
 
 | Task | Description |
 |------|-------------|
-| `./gradlew test`    | Run the tests     |
-| `./gradlew build`   | Build the project |
-| `./gradlew run`     | Run the server    |
+| `./gradlew test`  | Run unit tests |
+| `./gradlew build` | Build the library JAR |
 
-If the server starts successfully, you'll see the following output:
-```
-2024-12-04 14:32:45.584 [main] INFO  Application - Application started in 0.303 seconds.
-2024-12-04 14:32:45.682 [main] INFO  Application - Responding at http://0.0.0.0:8080
-```
