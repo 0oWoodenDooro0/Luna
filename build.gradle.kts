@@ -5,7 +5,7 @@ plugins {
 }
 
 group = "luna"
-version = "1.0"
+version = "1.1"
 
 application {
     mainClass.set("luna.core.MainKt")
