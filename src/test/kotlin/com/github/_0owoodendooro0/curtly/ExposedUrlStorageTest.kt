@@ -1,6 +1,6 @@
 package com.github._0owoodendooro0.curtly
 
-import org.jetbrains.exposed.sql.Database
+import org.jetbrains.exposed.v1.jdbc.Database
 import kotlin.test.*
 
 class ExposedUrlStorageTest {

@@ -1,9 +1,8 @@
 package com.github._0owoodendooro0.curtly
 
-import org.jetbrains.exposed.sql.*
-import org.jetbrains.exposed.sql.SqlExpressionBuilder.eq
-import org.jetbrains.exposed.sql.SqlExpressionBuilder.plus
-import org.jetbrains.exposed.sql.transactions.transaction
+import org.jetbrains.exposed.v1.core.*
+import org.jetbrains.exposed.v1.jdbc.*
+import org.jetbrains.exposed.v1.jdbc.transactions.transaction
 
 object UrlEntries : Table("curtly_urls") {
     val key = varchar("key", 255)
@@ -43,7 +42,7 @@ class ExposedUrlStorage(
     override fun get(key: String): UrlEntry? {
         return transaction(db = database) {
             UrlEntries.selectAll()
-                .where { UrlEntries.key eq key }
+                .where { UrlEntries.key.eq(key) }
                 .map { rowToUrlEntry(it) }
                 .singleOrNull()
         }
@@ -51,8 +50,8 @@ class ExposedUrlStorage(
 
     override fun incrementClick(key: String): Boolean {
         return transaction(db = database) {
-            val updatedRows = UrlEntries.update({ UrlEntries.key eq key }) {
-                it.update(UrlEntries.clickCount, UrlEntries.clickCount + 1)
+            val updatedRows = UrlEntries.update({ UrlEntries.key.eq(key) }) {
+                it.update(UrlEntries.clickCount, UrlEntries.clickCount.plus(1))
             }
             updatedRows > 0
         }
