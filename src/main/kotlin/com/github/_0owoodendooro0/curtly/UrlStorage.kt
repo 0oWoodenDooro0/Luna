@@ -1,9 +1,6 @@
 package com.github._0owoodendooro0.curtly
 
 import kotlinx.serialization.Serializable
-import kotlinx.serialization.encodeToString
-import kotlinx.serialization.json.Json
-import java.io.File
 import java.util.concurrent.ConcurrentHashMap
 
 @Serializable
@@ -48,52 +45,3 @@ class InMemoryUrlStorage : UrlStorage {
     override fun getAll(): Map<String, UrlEntry> = map.toMap()
 }
 
-class FileUrlStorage(private val file: File) : UrlStorage {
-    private val map = ConcurrentHashMap<String, UrlEntry>()
-    private val json = Json { ignoreUnknownKeys = true }
-
-    init {
-        load()
-    }
-
-    @Synchronized
-    private fun load() {
-        if (file.exists()) {
-            file.forEachLine { line ->
-                val trimmed = line.trim()
-                if (trimmed.isNotEmpty() && !trimmed.startsWith("#")) {
-                    val parts = trimmed.split("=", limit = 2)
-                    if (parts.size == 2) {
-                        val key = parts[0].trim()
-                        val rawValue = parts[1].trim()
-                        runCatching {
-                            json.decodeFromString<UrlEntry>(rawValue)
-                        }.onSuccess { entry ->
-                            map[key] = entry
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    @Synchronized
-    override fun save(key: String, entry: UrlEntry) {
-        map[key] = entry
-        file.parentFile?.mkdirs()
-        val jsonString = json.encodeToString(entry)
-        file.appendText("$key=$jsonString\n")
-    }
-
-    @Synchronized
-    override fun incrementClick(key: String): Boolean {
-        val current = map[key] ?: return false
-        val updated = current.copy(clickCount = current.clickCount + 1)
-        save(key, updated)
-        return true
-    }
-
-    override fun get(key: String): UrlEntry? = map[key]
-
-    override fun getAll(): Map<String, UrlEntry> = map.toMap()
-}

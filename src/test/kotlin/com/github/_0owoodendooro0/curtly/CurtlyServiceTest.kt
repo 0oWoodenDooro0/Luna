@@ -1,6 +1,5 @@
 package com.github._0owoodendooro0.curtly
 
-import java.io.File
 import kotlin.test.*
 
 class CurtlyServiceTest {
@@ -15,26 +14,6 @@ class CurtlyServiceTest {
         assertEquals(mapOf("key1" to UrlEntry("https://google.com")), storage.getAll())
     }
 
-    @Test
-    fun testFileUrlStorage() {
-        val tempFile = File.createTempFile("curtly_test", ".db")
-        tempFile.deleteOnExit()
-
-        val storage = FileUrlStorage(tempFile)
-        storage.save("keyA", "https://github.com")
-        storage.save("keyB", UrlEntry("https://kotlinlang.org", maxClicks = 5))
-
-        // Read from the same file storage instance
-        assertEquals("https://github.com", storage.get("keyA")?.longUrl)
-        assertEquals("https://kotlinlang.org", storage.get("keyB")?.longUrl)
-        assertEquals(5, storage.get("keyB")?.maxClicks)
-
-        // Create a new file storage instance pointing to the same file to verify persistence load
-        val storage2 = FileUrlStorage(tempFile)
-        assertEquals("https://github.com", storage2.get("keyA")?.longUrl)
-        assertEquals("https://kotlinlang.org", storage2.get("keyB")?.longUrl)
-        assertEquals(5, storage2.get("keyB")?.maxClicks)
-    }
 
     @Test
     fun testCurtlyServiceUrlNormalization() {

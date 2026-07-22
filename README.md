@@ -11,9 +11,6 @@ import java.io.File
 // In-Memory Storage
 val storage = InMemoryUrlStorage()
 
-// Or File Storage
-// val storage = FileUrlStorage(File("data/urls.db"))
-
 // Or Exposed SQL Storage (decoupled database connection)
 // val db = Database.connect("jdbc:h2:mem:curtly;DB_CLOSE_DELAY=-1", driver = "org.h2.Driver")
 // val storage = ExposedUrlStorage(database = db)
@@ -44,7 +41,8 @@ println(originalUrl) // https://example.com/very/long/url
 - **Custom Keys**: Supports custom key aliases or auto-generated random keys.
 - **Expiration Support**: Expiration by duration (`expiresInSeconds`) or exact timestamp (`expiresAt`).
 - **Click Limit**: Limit maximum allowed clicks (`maxClicks`).
-- **Flexible Storage**: Pluggable storage system (`InMemoryUrlStorage`, `FileUrlStorage`, and SQL-backed `ExposedUrlStorage`).
+- **Flexible Storage**: Pluggable storage system (`InMemoryUrlStorage` and SQL-backed `ExposedUrlStorage`).
+
 - **Built-in Web Page**: Lightweight UI generated via Kotlin HTML DSL (`CurtlyWebPage.getHtml()`).
 
 ## Built-in Web Page (Ktor Integration)
