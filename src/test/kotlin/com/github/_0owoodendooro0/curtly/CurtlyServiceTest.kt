@@ -12,6 +12,27 @@ class CurtlyServiceTest {
         storage.save("key1", "https://google.com")
         assertEquals(UrlEntry("https://google.com"), storage.get("key1"))
         assertEquals(mapOf("key1" to UrlEntry("https://google.com")), storage.getAll())
+
+        assertTrue(storage.remove("key1"))
+        assertNull(storage.get("key1"))
+        assertFalse(storage.remove("key1"))
+    }
+
+    @Test
+    fun testRemoveAndDeleteService() {
+        val storage = InMemoryUrlStorage()
+        val service = CurtlyService(storage, baseUrl = "http://localhost/")
+
+        service.shorten("https://google.com", "key1")
+        service.shorten("https://github.com", "key2")
+
+        assertTrue(service.remove("key1"))
+        assertNull(service.getEntry("key1"))
+        assertFalse(service.remove("key1"))
+
+        assertTrue(service.delete("key2"))
+        assertNull(service.getEntry("key2"))
+        assertFalse(service.delete("key2"))
     }
 
 

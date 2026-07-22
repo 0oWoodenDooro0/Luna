@@ -65,6 +65,12 @@ class ExposedUrlStorage(
         }
     }
 
+    override fun remove(key: String): Boolean {
+        return transaction(db = database) {
+            UrlEntries.deleteWhere { UrlEntries.key.eq(key) } > 0
+        }
+    }
+
     private fun rowToUrlEntry(row: ResultRow): UrlEntry {
         return UrlEntry(
             longUrl = row[UrlEntries.longUrl],

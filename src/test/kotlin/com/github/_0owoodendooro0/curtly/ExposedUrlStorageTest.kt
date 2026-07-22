@@ -87,4 +87,19 @@ class ExposedUrlStorageTest {
         // 3rd click -> expired
         assertNull(service.resolve("exposedKey"))
     }
+
+    @Test
+    fun testRemove() {
+        val db = createTestDatabase()
+        val storage = ExposedUrlStorage(database = db)
+
+        assertFalse(storage.remove("non_existent"))
+
+        storage.save("key1", UrlEntry("https://google.com"))
+        assertNotNull(storage.get("key1"))
+
+        assertTrue(storage.remove("key1"))
+        assertNull(storage.get("key1"))
+        assertFalse(storage.remove("key1"))
+    }
 }

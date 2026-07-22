@@ -91,4 +91,19 @@ class CurtlyService(
     fun getAll(): Map<String, UrlEntry> {
         return storage.getAll()
     }
+
+    /**
+     * Removes a stored short URL entry by key.
+     * Returns true if entry existed and was removed, false otherwise.
+     */
+    fun remove(key: String): Boolean {
+        return storage.remove(key)
+    }
+
+    /**
+     * Alias for remove. Removes a stored short URL entry by key.
+     */
+    fun delete(key: String): Boolean {
+        return storage.delete(key)
+    }
 }

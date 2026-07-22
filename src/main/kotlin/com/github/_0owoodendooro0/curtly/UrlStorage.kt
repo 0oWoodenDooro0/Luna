@@ -25,6 +25,8 @@ interface UrlStorage {
     fun get(key: String): UrlEntry?
     fun incrementClick(key: String): Boolean
     fun getAll(): Map<String, UrlEntry>
+    fun remove(key: String): Boolean
+    fun delete(key: String): Boolean = remove(key)
 }
 
 class InMemoryUrlStorage : UrlStorage {
@@ -43,5 +45,7 @@ class InMemoryUrlStorage : UrlStorage {
     }
 
     override fun getAll(): Map<String, UrlEntry> = map.toMap()
+
+    override fun remove(key: String): Boolean = map.remove(key) != null
 }
 
