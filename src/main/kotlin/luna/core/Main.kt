@@ -2,21 +2,18 @@ package luna.core
 
 import com.github._0owoodendooro0.curtly.CurtlyService
 import com.github._0owoodendooro0.curtly.FileUrlStorage
-import com.github._0owoodendooro0.curtly.curtlyRouting
 import dev.kord.common.entity.Snowflake
 import dev.kord.core.Kord
 import dev.kord.core.behavior.interaction.response.respond
 import dev.kord.core.event.interaction.ChatInputCommandInteractionCreateEvent
 import dev.kord.core.event.interaction.SelectMenuInteractionCreateEvent
 import dev.kord.core.on
-import io.ktor.server.engine.embeddedServer
-import io.ktor.server.netty.Netty
-import io.ktor.server.routing.routing
+import io.ktor.server.engine.*
+import io.ktor.server.netty.*
+import io.ktor.server.routing.*
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
-import luna.core.JsonLogger
-import luna.undercover.UndercoverGame
 import luna.undercover.UndercoverManager
 import luna.undercover.command.RevealCommand
 import luna.undercover.command.UndercoverCommand
@@ -43,7 +40,7 @@ suspend fun main() {
                 val curtlyConfig = config["curtly"] as? Map<*, *>
                 val rawBaseUrl = curtlyConfig?.get("baseUrl") as? String ?: curtlyConfig?.get("baseurl") as? String
 
-                if (rawBaseUrl != null && rawBaseUrl.trim().startsWith("\${") && rawBaseUrl.trim().endsWith("}")) {
+                if (rawBaseUrl != null && rawBaseUrl.trim().startsWith($$"${") && rawBaseUrl.trim().endsWith("}")) {
                     val trimmed = rawBaseUrl.trim()
                     val inner = trimmed.substring(2, trimmed.length - 1).trim()
                     val cleanInner = if (inner.startsWith("?")) inner.substring(1) else inner
@@ -54,12 +51,17 @@ suspend fun main() {
                 } else {
                     rawBaseUrl
                 }
-            } catch (e: Exception) {
+            } catch (_: Exception) {
                 null
             }
         }
 
-    val baseUrl = yamlBaseUrl ?: System.getenv("BASE_URL") ?: "http://localhost:8080"
+    val rawBaseUrl = yamlBaseUrl ?: System.getenv("BASE_URL") ?: "http://localhost:8080/s/"
+    val baseUrl = if (!rawBaseUrl.contains("/s")) {
+        if (rawBaseUrl.endsWith("/")) "${rawBaseUrl}s/" else "$rawBaseUrl/s/"
+    } else {
+        rawBaseUrl
+    }
     val curtlyService = CurtlyService(storage = storage, baseUrl = baseUrl)
 
     val serverPort = System.getenv("PORT")?.toIntOrNull() ?: 8080
