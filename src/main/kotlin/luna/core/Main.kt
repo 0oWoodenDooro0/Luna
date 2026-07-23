@@ -1,7 +1,7 @@
 package luna.core
 
 import com.github._0owoodendooro0.curtly.CurtlyService
-import com.github._0owoodendooro0.curtly.FileUrlStorage
+import com.github._0owoodendooro0.curtly.ExposedUrlStorage
 import dev.kord.common.entity.Snowflake
 import dev.kord.core.Kord
 import dev.kord.core.behavior.interaction.response.respond
@@ -17,12 +17,14 @@ import kotlinx.coroutines.launch
 import luna.undercover.UndercoverManager
 import luna.undercover.command.RevealCommand
 import luna.undercover.command.UndercoverCommand
+import org.jetbrains.exposed.v1.jdbc.Database
 import org.yaml.snakeyaml.Yaml
 import java.io.File
 import java.io.InputStream
 
 suspend fun main() {
-    val storage = FileUrlStorage(File("data/urls.properties"))
+    val db = Database.connect("jdbc:sqlite:data/urls.db", driver = "org.sqlite.JDBC")
+    val storage = ExposedUrlStorage(database = db)
 
     val yamlFile = File("application.yml")
     val yamlStream: InputStream? =
@@ -62,7 +64,7 @@ suspend fun main() {
     } else {
         rawBaseUrl
     }
-    val curtlyService = CurtlyService(storage = storage, baseUrl = baseUrl)
+    val curtlyService = CurtlyService(storage = storage, baseUrl = baseUrl, enableAuditMode = true)
 
     val serverPort = System.getenv("PORT")?.toIntOrNull() ?: 8080
     val server =

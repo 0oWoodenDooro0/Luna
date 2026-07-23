@@ -33,7 +33,7 @@ dependencies {
     implementation("io.ktor:ktor-server-netty-jvm:3.5.0")
 
     // Curtly URL Shortener Library
-    implementation("com.github.0oWoodenDooro0:Curtly:2.0.0")
+    implementation("com.github.0oWoodenDooro0:Curtly:3.0.0")
 }
 
 kotlin {

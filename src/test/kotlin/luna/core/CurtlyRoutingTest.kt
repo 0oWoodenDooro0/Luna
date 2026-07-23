@@ -39,7 +39,7 @@ class CurtlyRoutingTest {
     @Test
     fun testShortenAndResolve() = testApplication {
         val storage = InMemoryUrlStorage()
-        val curtlyService = CurtlyService(storage = storage, baseUrl = "http://localhost:8080/s/")
+        val curtlyService = CurtlyService(storage = storage, baseUrl = "http://localhost:8080/s/", enableAuditMode = true)
 
         application {
             routing {
@@ -62,12 +62,15 @@ class CurtlyRoutingTest {
         val getResponse = customClient.get("/s/testkey")
         assertEquals(HttpStatusCode.Found, getResponse.status)
         assertEquals("https://example.com/test", getResponse.headers["Location"])
+
+        val clickLogs = curtlyService.getClickLogs("testkey")
+        assertEquals(1, clickLogs.size)
     }
 
     @Test
     fun testResolveNotFound() = testApplication {
         val storage = InMemoryUrlStorage()
-        val curtlyService = CurtlyService(storage = storage, baseUrl = "http://localhost:8080/s/")
+        val curtlyService = CurtlyService(storage = storage, baseUrl = "http://localhost:8080/s/", enableAuditMode = true)
 
         application {
             routing {

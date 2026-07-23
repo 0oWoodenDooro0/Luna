@@ -3,6 +3,7 @@ package luna.core
 import com.github._0owoodendooro0.curtly.CurtlyService
 import com.github._0owoodendooro0.curtly.CurtlyWebPage
 import io.ktor.http.*
+import io.ktor.server.plugins.origin
 import io.ktor.server.request.*
 import io.ktor.server.response.*
 import io.ktor.server.routing.*
@@ -10,11 +11,11 @@ import kotlinx.serialization.json.*
 
 fun Routing.curtlyRouting(curtlyService: CurtlyService) {
     get("/shorten") {
-        call.respondText(CurtlyWebPage.getHtml(), ContentType.Text.Html)
+        call.respondText(CurtlyWebPage.getHtml(apiEndpoint = "/api/shorten"), ContentType.Text.Html)
     }
 
     get("/s") {
-        call.respondText(CurtlyWebPage.getHtml(), ContentType.Text.Html)
+        call.respondText(CurtlyWebPage.getHtml(apiEndpoint = "/api/shorten"), ContentType.Text.Html)
     }
 
     get("/s/{key}") {
@@ -23,7 +24,11 @@ fun Routing.curtlyRouting(curtlyService: CurtlyService) {
             call.respond(HttpStatusCode.NotFound, "URL not found")
             return@get
         }
-        val longUrl = curtlyService.resolve(key)
+        val ip = call.request.origin.remoteHost
+        val userAgent = call.request.headers["User-Agent"]
+        val referer = call.request.headers["Referer"]
+
+        val longUrl = curtlyService.resolve(key, ip = ip, userAgent = userAgent, referer = referer)
         if (longUrl != null) {
             call.respondRedirect(longUrl)
         } else {
