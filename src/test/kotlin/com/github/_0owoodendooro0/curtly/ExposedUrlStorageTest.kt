@@ -102,4 +102,46 @@ class ExposedUrlStorageTest {
         assertNull(storage.get("key1"))
         assertFalse(storage.remove("key1"))
     }
+
+    @Test
+    fun testExposedUrlStorageOwnerId() {
+        val db = createTestDatabase()
+        val storage = ExposedUrlStorage(database = db)
+
+        val entry1 = UrlEntry("https://google.com", ownerId = "org_1")
+        val entry2 = UrlEntry("https://github.com", ownerId = "org_1")
+        val entry3 = UrlEntry("https://apple.com", ownerId = "org_2")
+        val entry4 = UrlEntry("https://bing.com") // ownerId is null
+
+        storage.save("key1", entry1)
+        storage.save("key2", entry2)
+        storage.save("key3", entry3)
+        storage.save("key4", entry4)
+
+        // Verify retrieval
+        assertEquals("org_1", storage.get("key1")?.ownerId)
+        assertEquals("org_1", storage.get("key2")?.ownerId)
+        assertEquals("org_2", storage.get("key3")?.ownerId)
+        assertNull(storage.get("key4")?.ownerId)
+
+        // Verify getByOwnerId
+        val org1Map = storage.getByOwnerId("org_1")
+        assertEquals(2, org1Map.size)
+        assertTrue(org1Map.containsKey("key1"))
+        assertTrue(org1Map.containsKey("key2"))
+
+        // Verify countByOwnerId
+        assertEquals(2, storage.countByOwnerId("org_1"))
+        assertEquals(1, storage.countByOwnerId("org_2"))
+        assertEquals(0, storage.countByOwnerId("org_3"))
+
+        // Verify removeByOwnerId
+        val removed = storage.removeByOwnerId("org_1")
+        assertEquals(2, removed)
+        assertEquals(0, storage.countByOwnerId("org_1"))
+        assertNull(storage.get("key1"))
+        assertNull(storage.get("key2"))
+        assertNotNull(storage.get("key3"))
+        assertNotNull(storage.get("key4"))
+    }
 }

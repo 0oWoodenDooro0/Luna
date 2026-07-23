@@ -10,6 +10,7 @@ object UrlEntries : Table("curtly_urls") {
     val expiresAt = long("expires_at").nullable()
     val maxClicks = integer("max_clicks").nullable()
     val clickCount = integer("click_count").default(0)
+    val ownerId = varchar("owner_id", 255).nullable()
 
     override val primaryKey = PrimaryKey(key)
 }
@@ -46,6 +47,7 @@ class ExposedUrlStorage(
                 it[expiresAt] = entry.expiresAt
                 it[maxClicks] = entry.maxClicks
                 it[clickCount] = entry.clickCount
+                it[ownerId] = entry.ownerId
             }
         }
     }
@@ -76,10 +78,41 @@ class ExposedUrlStorage(
         }
     }
 
+    override fun getByOwnerId(ownerId: String): Map<String, UrlEntry> {
+        return transaction(db = database) {
+            UrlEntries.selectAll()
+                .where { UrlEntries.ownerId.eq(ownerId) }
+                .associate { row ->
+                    row[UrlEntries.key] to rowToUrlEntry(row)
+                }
+        }
+    }
+
+    override fun countByOwnerId(ownerId: String): Int {
+        return transaction(db = database) {
+            UrlEntries.selectAll()
+                .where { UrlEntries.ownerId.eq(ownerId) }
+                .count()
+                .toInt()
+        }
+    }
+
     override fun remove(key: String): Boolean {
         return transaction(db = database) {
             ClickLogsEntries.deleteWhere { ClickLogsEntries.key.eq(key) }
             UrlEntries.deleteWhere { UrlEntries.key.eq(key) } > 0
+        }
+    }
+
+    override fun removeByOwnerId(ownerId: String): Int {
+        return transaction(db = database) {
+            val keys = UrlEntries.selectAll()
+                .where { UrlEntries.ownerId.eq(ownerId) }
+                .map { it[UrlEntries.key] }
+            if (keys.isNotEmpty()) {
+                ClickLogsEntries.deleteWhere { ClickLogsEntries.key.inList(keys) }
+            }
+            UrlEntries.deleteWhere { UrlEntries.ownerId.eq(ownerId) }
         }
     }
 
@@ -122,7 +155,8 @@ class ExposedUrlStorage(
             longUrl = row[UrlEntries.longUrl],
             expiresAt = row[UrlEntries.expiresAt],
             maxClicks = row[UrlEntries.maxClicks],
-            clickCount = row[UrlEntries.clickCount]
+            clickCount = row[UrlEntries.clickCount],
+            ownerId = row[UrlEntries.ownerId]
         )
     }
 

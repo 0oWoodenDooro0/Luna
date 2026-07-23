@@ -115,4 +115,55 @@ class CurtlyServiceTest {
         }
         assertEquals(10, service.getEntry("unlimitedKey")?.clickCount)
     }
+
+    @Test
+    fun testOwnerIdOperations() {
+        val storage = InMemoryUrlStorage()
+        val service = CurtlyService(storage, baseUrl = "http://localhost/", enableAuditMode = true)
+
+        // Create URLs with ownerId and without ownerId
+        service.shorten("https://google.com", customKey = "user1_k1", ownerId = "user1")
+        service.shorten("https://github.com", customKey = "user1_k2", ownerId = "user1")
+        service.shorten("https://apple.com", customKey = "user2_k1", ownerId = "user2")
+        service.shorten("https://bing.com", customKey = "anon_k1")
+
+        // Verify getEntry ownerId
+        assertEquals("user1", service.getEntry("user1_k1")?.ownerId)
+        assertEquals("user1", service.getEntry("user1_k2")?.ownerId)
+        assertEquals("user2", service.getEntry("user2_k1")?.ownerId)
+        assertNull(service.getEntry("anon_k1")?.ownerId)
+
+        // Verify countByOwnerId
+        assertEquals(2, service.countByOwnerId("user1"))
+        assertEquals(1, service.countByOwnerId("user2"))
+        assertEquals(0, service.countByOwnerId("non_existent_user"))
+
+        // Verify getKeysByOwnerId
+        val user1Keys = service.getKeysByOwnerId("user1")
+        assertEquals(2, user1Keys.size)
+        assertTrue(user1Keys.containsAll(listOf("user1_k1", "user1_k2")))
+
+        // Verify getByOwnerId
+        val user1Entries = service.getByOwnerId("user1")
+        assertEquals(2, user1Entries.size)
+        assertTrue(user1Entries.containsKey("user1_k1"))
+        assertTrue(user1Entries.containsKey("user1_k2"))
+
+        // Verify getAnalyticsByOwnerId
+        service.resolve("user1_k1")
+        val user1Analytics = service.getAnalyticsByOwnerId("user1")
+        assertEquals(2, user1Analytics.size)
+        assertEquals(1, user1Analytics["user1_k1"]?.totalClicks)
+
+        // Verify removeByOwnerId / deleteByOwnerId
+        val removedCount = service.deleteByOwnerId("user1")
+        assertEquals(2, removedCount)
+        assertEquals(0, service.countByOwnerId("user1"))
+        assertNull(service.getEntry("user1_k1"))
+        assertNull(service.getEntry("user1_k2"))
+
+        // Verify user2 and anon entries are untouched
+        assertNotNull(service.getEntry("user2_k1"))
+        assertNotNull(service.getEntry("anon_k1"))
+    }
 }

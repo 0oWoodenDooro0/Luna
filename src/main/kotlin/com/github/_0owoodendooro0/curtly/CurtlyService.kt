@@ -12,14 +12,15 @@ class CurtlyService(
 ) {
     /**
      * Shortens a long URL and returns the full short URL.
-     * Optionally accepts customKey, expiresInSeconds, expiresAt, and maxClicks.
+     * Optionally accepts customKey, expiresInSeconds, expiresAt, maxClicks, and ownerId.
      */
     fun shorten(
         longUrl: String,
         customKey: String? = null,
         expiresInSeconds: Long? = null,
         expiresAt: Long? = null,
-        maxClicks: Int? = null
+        maxClicks: Int? = null,
+        ownerId: String? = null
     ): String {
         require(expiresInSeconds == null || expiresInSeconds > 0) {
             "expiresInSeconds must be positive"
@@ -61,7 +62,8 @@ class CurtlyService(
         val entry = UrlEntry(
             longUrl = normalizedUrl,
             expiresAt = calculatedExpiresAt,
-            maxClicks = maxClicks
+            maxClicks = maxClicks,
+            ownerId = ownerId
         )
 
         storage.save(key, entry)
@@ -134,6 +136,27 @@ class CurtlyService(
     }
 
     /**
+     * Gets all URL entries created by a specific ownerId.
+     */
+    fun getByOwnerId(ownerId: String): Map<String, UrlEntry> {
+        return storage.getByOwnerId(ownerId)
+    }
+
+    /**
+     * Gets all short URL keys created by a specific ownerId.
+     */
+    fun getKeysByOwnerId(ownerId: String): List<String> {
+        return storage.getByOwnerId(ownerId).keys.toList()
+    }
+
+    /**
+     * Counts the total number of short URLs created by a specific ownerId.
+     */
+    fun countByOwnerId(ownerId: String): Int {
+        return storage.countByOwnerId(ownerId)
+    }
+
+    /**
      * Removes a stored short URL entry by key.
      * Returns true if entry existed and was removed, false otherwise.
      */
@@ -146,6 +169,21 @@ class CurtlyService(
      */
     fun delete(key: String): Boolean {
         return storage.delete(key)
+    }
+
+    /**
+     * Removes all short URLs created by a specific ownerId.
+     * Returns the count of entries removed.
+     */
+    fun removeByOwnerId(ownerId: String): Int {
+        return storage.removeByOwnerId(ownerId)
+    }
+
+    /**
+     * Alias for removeByOwnerId. Removes all short URLs created by a specific ownerId.
+     */
+    fun deleteByOwnerId(ownerId: String): Int {
+        return removeByOwnerId(ownerId)
     }
 
     /**
@@ -199,6 +237,16 @@ class CurtlyService(
     fun getAllAnalytics(): Map<String, ClickAnalytics> {
         val allEntries = storage.getAll()
         return allEntries.keys.mapNotNull { key ->
+            getAnalytics(key)?.let { key to it }
+        }.toMap()
+    }
+
+    /**
+     * Generates a map of ClickAnalytics reports for all short URLs owned by a specific ownerId.
+     */
+    fun getAnalyticsByOwnerId(ownerId: String): Map<String, ClickAnalytics> {
+        val ownerEntries = storage.getByOwnerId(ownerId)
+        return ownerEntries.keys.mapNotNull { key ->
             getAnalytics(key)?.let { key to it }
         }.toMap()
     }

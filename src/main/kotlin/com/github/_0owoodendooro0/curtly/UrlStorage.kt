@@ -10,7 +10,8 @@ data class UrlEntry(
     val longUrl: String,
     val expiresAt: Long? = null,
     val maxClicks: Int? = null,
-    val clickCount: Int = 0
+    val clickCount: Int = 0,
+    val ownerId: String? = null
 ) {
     fun isExpired(now: Long = System.currentTimeMillis()): Boolean {
         if (expiresAt != null && now >= expiresAt) return true
@@ -57,8 +58,11 @@ interface UrlStorage {
     fun get(key: String): UrlEntry?
     fun incrementClick(key: String): Boolean
     fun getAll(): Map<String, UrlEntry>
+    fun getByOwnerId(ownerId: String): Map<String, UrlEntry> = emptyMap()
+    fun countByOwnerId(ownerId: String): Int = getByOwnerId(ownerId).size
     fun remove(key: String): Boolean
     fun delete(key: String): Boolean = remove(key)
+    fun removeByOwnerId(ownerId: String): Int = 0
 
     fun recordClickLog(log: ClickLog) {}
     fun getClickLogs(key: String): List<ClickLog> = emptyList()
@@ -84,9 +88,26 @@ class InMemoryUrlStorage : UrlStorage {
 
     override fun getAll(): Map<String, UrlEntry> = map.toMap()
 
+    override fun getByOwnerId(ownerId: String): Map<String, UrlEntry> {
+        return map.filterValues { it.ownerId == ownerId }
+    }
+
+    override fun countByOwnerId(ownerId: String): Int {
+        return map.values.count { it.ownerId == ownerId }
+    }
+
     override fun remove(key: String): Boolean {
         clickLogsMap.remove(key)
         return map.remove(key) != null
+    }
+
+    override fun removeByOwnerId(ownerId: String): Int {
+        val keysToRemove = map.filterValues { it.ownerId == ownerId }.keys
+        var count = 0
+        for (key in keysToRemove) {
+            if (remove(key)) count++
+        }
+        return count
     }
 
     override fun recordClickLog(log: ClickLog) {
@@ -105,5 +126,6 @@ class InMemoryUrlStorage : UrlStorage {
         return clickLogsMap.remove(key) != null
     }
 }
+
 
 
