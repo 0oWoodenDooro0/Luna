@@ -41,9 +41,51 @@ println(originalUrl) // https://example.com/very/long/url
 - **Custom Keys**: Supports custom key aliases or auto-generated random keys.
 - **Expiration Support**: Expiration by duration (`expiresInSeconds`) or exact timestamp (`expiresAt`).
 - **Click Limit**: Limit maximum allowed clicks (`maxClicks`).
+- **Click Analytics & Audit Mode**: Track detailed click traces (timestamps, IP, User-Agent, Referer) for reporting and analytics.
 - **Flexible Storage**: Pluggable storage system (`InMemoryUrlStorage` and SQL-backed `ExposedUrlStorage`).
-
 - **Built-in Web Page**: Lightweight UI generated via Kotlin HTML DSL (`CurtlyWebPage.getHtml()`).
+
+## Click Analytics & Audit Mode
+
+`Curtly` supports detailed click audit logging and analytics computation alongside standard click counts.
+
+### 1. Enable Audit Mode or Record Metadata on Resolve
+
+```kotlin
+// Enable global audit mode when initializing service
+val curtly = CurtlyService(
+    storage = storage,
+    enableAuditMode = true
+)
+
+// Resolve URL and pass visitor metadata (IP, User-Agent, Referer)
+val longUrl = curtly.resolve(
+    key = "my-custom-key",
+    ip = "203.0.113.195",
+    userAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)",
+    referer = "https://google.com"
+)
+```
+
+### 2. Query Click Analytics & Reports
+
+```kotlin
+// Get aggregated analytics report for a short URL key
+val analytics: ClickAnalytics? = curtly.getAnalytics("my-custom-key")
+
+println(analytics?.totalClicks)       // Total click count (e.g. 42)
+println(analytics?.auditLogsCount)    // Total audit traces logged
+println(analytics?.clicksByDate)      // e.g. {"2026-07-23": 15}
+println(analytics?.topUserAgents)     // Map of User-Agents to count
+println(analytics?.topReferers)      // Map of Referer URLs to count
+println(analytics?.topIps)           // Map of IP addresses to count
+
+// Or fetch raw click trace logs
+val logs: List<ClickLog> = curtly.getClickLogs("my-custom-key")
+for (log in logs) {
+    println("${log.timestamp}: IP=${log.ip}, UA=${log.userAgent}, Ref=${log.referer}")
+}
+```
 
 ## Built-in Web Page (Ktor Integration)
 
@@ -71,7 +113,25 @@ routing {
 }
 ```
 
-### 2. Handle the Shorten API Endpoint
+### 2. Redirect with Click Audit Tracing
+
+```kotlin
+get("/{key}") {
+    val key = call.parameters["key"] ?: return@get call.respond(HttpStatusCode.BadRequest)
+    val ip = call.request.origin.remoteHost
+    val userAgent = call.request.headers["User-Agent"]
+    val referer = call.request.headers["Referer"]
+
+    val targetUrl = curtly.resolve(key, ip = ip, userAgent = userAgent, referer = referer)
+    if (targetUrl != null) {
+        call.respondRedirect(targetUrl)
+    } else {
+        call.respond(HttpStatusCode.NotFound, "Short link expired or not found")
+    }
+}
+```
+
+### 3. Handle the Shorten API Endpoint
 
 The webpage sends a `POST` request to `apiEndpoint` (defaults to `/api/shorten`) with the following JSON structure:
 
@@ -130,4 +190,5 @@ fun Route.curtlyRoutes(curtly: CurtlyService) {
 |------|-------------|
 | `./gradlew test`  | Run unit tests |
 | `./gradlew build` | Build the library JAR |
+
 

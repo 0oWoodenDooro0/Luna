@@ -38,9 +38,12 @@ object CurtlyWebPage {
             body {
                 div("container") {
                     div("header") {
-                        div("logo-badge") { +"CURTLY" }
+                        div("badge-container") {
+                            div("logo-badge") { +"CURTLY" }
+                            div("audit-badge") { +"AUDIT & ANALYTICS READY" }
+                        }
                         h1 { +title }
-                        p("subtitle") { +"Create lightweight, customizable, and tracked short links instantly." }
+                        p("subtitle") { +"Create lightweight, customizable, and audit-tracked short links instantly." }
                     }
 
                     form(action = "#", method = FormMethod.post, classes = "card") {
@@ -181,6 +184,13 @@ object CurtlyWebPage {
             text-align: center;
             margin-bottom: 2rem;
         }
+        .badge-container {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.5rem;
+            margin-bottom: 0.75rem;
+        }
         .logo-badge {
             display: inline-block;
             background: linear-gradient(135deg, #38bdf8, #6366f1);
@@ -190,7 +200,17 @@ object CurtlyWebPage {
             letter-spacing: 0.1em;
             padding: 0.25rem 0.75rem;
             border-radius: 9999px;
-            margin-bottom: 0.75rem;
+        }
+        .audit-badge {
+            display: inline-block;
+            background: rgba(16, 185, 129, 0.15);
+            border: 1px solid #10b981;
+            color: #34d399;
+            font-size: 0.7rem;
+            font-weight: 600;
+            letter-spacing: 0.05em;
+            padding: 0.2rem 0.6rem;
+            border-radius: 9999px;
         }
         h1 {
             font-size: 1.875rem;

@@ -1,9 +1,14 @@
 package com.github._0owoodendooro0.curtly
 
+import java.time.Instant
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
+
 class CurtlyService(
     private val storage: UrlStorage,
     private val keyGenerator: KeyGenerator = RandomAlphanumericKeyGenerator(),
-    private val baseUrl: String = "http://localhost:8080/"
+    private val baseUrl: String = "http://localhost:8080/",
+    val enableAuditMode: Boolean = false
 ) {
     /**
      * Shortens a long URL and returns the full short URL.
@@ -67,15 +72,51 @@ class CurtlyService(
 
     /**
      * Resolves a key to the original long URL.
+     * Optionally records click metadata (IP, User-Agent, Referer, Timestamp) if audit mode is enabled or metadata is provided.
      * Returns null if key does not exist or if link has expired / reached max clicks.
      */
-    fun resolve(key: String): String? {
+    fun resolve(
+        key: String,
+        metadata: ClickMetadata? = null
+    ): String? {
         val entry = storage.get(key) ?: return null
         if (entry.isExpired()) {
             return null
         }
+
         storage.incrementClick(key)
+
+        val shouldRecordAudit = enableAuditMode || metadata != null
+        if (shouldRecordAudit) {
+            val log = ClickLog(
+                key = key,
+                timestamp = metadata?.timestamp ?: System.currentTimeMillis(),
+                ip = metadata?.ip,
+                userAgent = metadata?.userAgent,
+                referer = metadata?.referer
+            )
+            storage.recordClickLog(log)
+        }
+
         return entry.longUrl
+    }
+
+    /**
+     * Resolves a key to the original long URL with individual metadata parameters.
+     */
+    fun resolve(
+        key: String,
+        ip: String? = null,
+        userAgent: String? = null,
+        referer: String? = null
+    ): String? {
+        val hasMetadata = ip != null || userAgent != null || referer != null
+        val metadata = if (hasMetadata || enableAuditMode) {
+            ClickMetadata(ip = ip, userAgent = userAgent, referer = referer)
+        } else {
+            null
+        }
+        return resolve(key, metadata)
     }
 
     /**
@@ -106,4 +147,67 @@ class CurtlyService(
     fun delete(key: String): Boolean {
         return storage.delete(key)
     }
+
+    /**
+     * Retrieves all recorded click logs for a specific key.
+     */
+    fun getClickLogs(key: String): List<ClickLog> {
+        return storage.getClickLogs(key)
+    }
+
+    /**
+     * Retrieves all recorded click logs across all short URLs.
+     */
+    fun getAllClickLogs(): List<ClickLog> {
+        return storage.getAllClickLogs()
+    }
+
+    /**
+     * Generates a ClickAnalytics report for a specific short link key.
+     * Returns null if the key does not exist.
+     */
+    fun getAnalytics(key: String): ClickAnalytics? {
+        val entry = storage.get(key) ?: return null
+        val logs = storage.getClickLogs(key)
+
+        val dateFormat = DateTimeFormatter.ofPattern("yyyy-MM-dd")
+            .withZone(ZoneId.systemDefault())
+
+        val clicksByDate = logs.groupingBy { log ->
+            dateFormat.format(Instant.ofEpochMilli(log.timestamp))
+        }.eachCount()
+
+        val topUserAgents = logs.mapNotNull { it.userAgent }.groupingBy { it }.eachCount()
+        val topReferers = logs.mapNotNull { it.referer }.groupingBy { it }.eachCount()
+        val topIps = logs.mapNotNull { it.ip }.groupingBy { it }.eachCount()
+
+        return ClickAnalytics(
+            key = key,
+            totalClicks = entry.clickCount,
+            auditLogsCount = logs.size,
+            clicksByDate = clicksByDate,
+            topUserAgents = topUserAgents,
+            topReferers = topReferers,
+            topIps = topIps,
+            logs = logs
+        )
+    }
+
+    /**
+     * Generates a map of ClickAnalytics reports for all stored short URL keys.
+     */
+    fun getAllAnalytics(): Map<String, ClickAnalytics> {
+        val allEntries = storage.getAll()
+        return allEntries.keys.mapNotNull { key ->
+            getAnalytics(key)?.let { key to it }
+        }.toMap()
+    }
+
+    /**
+     * Clears click logs for a specific key.
+     */
+    fun clearClickLogs(key: String): Boolean {
+        return storage.clearClickLogs(key)
+    }
 }
+

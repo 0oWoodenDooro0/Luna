@@ -14,6 +14,17 @@ object UrlEntries : Table("curtly_urls") {
     override val primaryKey = PrimaryKey(key)
 }
 
+object ClickLogsEntries : Table("curtly_click_logs") {
+    val id = varchar("id", 36)
+    val key = varchar("key", 255)
+    val timestamp = long("timestamp")
+    val ip = varchar("ip", 45).nullable()
+    val userAgent = text("user_agent").nullable()
+    val referer = text("referer").nullable()
+
+    override val primaryKey = PrimaryKey(id)
+}
+
 class ExposedUrlStorage(
     private val database: Database? = null,
     autoCreateTable: Boolean = true
@@ -22,7 +33,7 @@ class ExposedUrlStorage(
     init {
         if (autoCreateTable) {
             transaction(db = database) {
-                SchemaUtils.create(UrlEntries)
+                SchemaUtils.create(UrlEntries, ClickLogsEntries)
             }
         }
     }
@@ -67,7 +78,42 @@ class ExposedUrlStorage(
 
     override fun remove(key: String): Boolean {
         return transaction(db = database) {
+            ClickLogsEntries.deleteWhere { ClickLogsEntries.key.eq(key) }
             UrlEntries.deleteWhere { UrlEntries.key.eq(key) } > 0
+        }
+    }
+
+    override fun recordClickLog(log: ClickLog) {
+        transaction(db = database) {
+            ClickLogsEntries.insert {
+                it[id] = log.id
+                it[key] = log.key
+                it[timestamp] = log.timestamp
+                it[ip] = log.ip
+                it[userAgent] = log.userAgent
+                it[referer] = log.referer
+            }
+        }
+    }
+
+    override fun getClickLogs(key: String): List<ClickLog> {
+        return transaction(db = database) {
+            ClickLogsEntries.selectAll()
+                .where { ClickLogsEntries.key.eq(key) }
+                .map { rowToClickLog(it) }
+        }
+    }
+
+    override fun getAllClickLogs(): List<ClickLog> {
+        return transaction(db = database) {
+            ClickLogsEntries.selectAll()
+                .map { rowToClickLog(it) }
+        }
+    }
+
+    override fun clearClickLogs(key: String): Boolean {
+        return transaction(db = database) {
+            ClickLogsEntries.deleteWhere { ClickLogsEntries.key.eq(key) } > 0
         }
     }
 
@@ -79,4 +125,16 @@ class ExposedUrlStorage(
             clickCount = row[UrlEntries.clickCount]
         )
     }
+
+    private fun rowToClickLog(row: ResultRow): ClickLog {
+        return ClickLog(
+            id = row[ClickLogsEntries.id],
+            key = row[ClickLogsEntries.key],
+            timestamp = row[ClickLogsEntries.timestamp],
+            ip = row[ClickLogsEntries.ip],
+            userAgent = row[ClickLogsEntries.userAgent],
+            referer = row[ClickLogsEntries.referer]
+        )
+    }
 }
+
