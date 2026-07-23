@@ -1,5 +1,6 @@
 plugins {
     kotlin("jvm") version "2.3.10"
+    kotlin("plugin.serialization") version "2.3.10"
     application
     id("org.jmailen.kotlinter") version "5.4.2"
 }
@@ -31,9 +32,10 @@ dependencies {
     // Ktor Server
     implementation("io.ktor:ktor-server-core-jvm:3.5.0")
     implementation("io.ktor:ktor-server-netty-jvm:3.5.0")
+    implementation("io.ktor:ktor-server-sessions-jvm:3.5.0")
 
     // Curtly URL Shortener Library
-    implementation("com.github.0oWoodenDooro0:Curtly:3.0.0")
+    implementation("com.github.0oWoodenDooro0:Curtly:3.1.0")
 }
 
 kotlin {

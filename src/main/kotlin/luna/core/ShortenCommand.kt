@@ -46,6 +46,7 @@ class ShortenCommand(
                     customKey = customKey,
                     expiresInSeconds = expiresInSeconds,
                     maxClicks = maxClicks,
+                    ownerId = interaction.user.id.toString(),
                 )
 
             val details = mutableListOf<String>()
