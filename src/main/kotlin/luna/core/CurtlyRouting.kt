@@ -105,15 +105,7 @@ fun Routing.curtlyRouting(
             return@get
         }
 
-        val appBaseUrl =
-            if (baseUrl.endsWith("/s/")) {
-                baseUrl.substringBefore("/s/")
-            } else if (baseUrl.endsWith("/")) {
-                baseUrl.dropLast(1)
-            } else {
-                baseUrl
-            }
-        val redirectUri = System.getenv("DISCORD_REDIRECT_URI") ?: "$appBaseUrl/api/auth/discord/callback"
+        val redirectUri = call.resolveDiscordRedirectUri(baseUrl)
         val encodedRedirect = java.net.URLEncoder.encode(redirectUri, "UTF-8")
         val discordAuthUrl =
             "https://discord.com/oauth2/authorize?client_id=$clientId&redirect_uri=$encodedRedirect&response_type=code&scope=identify"
@@ -131,15 +123,7 @@ fun Routing.curtlyRouting(
         try {
             val clientId = System.getenv("DISCORD_CLIENT_ID") ?: System.getenv("DISCORD_APP_ID") ?: ""
             val clientSecret = System.getenv("DISCORD_CLIENT_SECRET") ?: ""
-            val appBaseUrl =
-                if (baseUrl.endsWith("/s/")) {
-                    baseUrl.substringBefore("/s/")
-                } else if (baseUrl.endsWith("/")) {
-                    baseUrl.dropLast(1)
-                } else {
-                    baseUrl
-                }
-            val redirectUri = System.getenv("DISCORD_REDIRECT_URI") ?: "$appBaseUrl/api/auth/discord/callback"
+            val redirectUri = call.resolveDiscordRedirectUri(baseUrl)
 
             val httpClient =
                 java.net.http.HttpClient
@@ -431,5 +415,27 @@ fun Routing.curtlyRouting(
 
         curtlyService.delete(key)
         call.respondText("""{"message":"已刪除短網址"}""", ContentType.Application.Json)
+    }
+}
+
+private fun io.ktor.server.application.ApplicationCall.resolveDiscordRedirectUri(baseUrl: String): String {
+    val envRedirect = System.getenv("DISCORD_REDIRECT_URI")
+    if (!envRedirect.isNullOrBlank()) return envRedirect
+
+    val proto = request.headers["X-Forwarded-Proto"] ?: request.origin.scheme
+    val host = request.headers["X-Forwarded-Host"] ?: request.headers["Host"] ?: request.origin.serverHost
+
+    return if (host.isNotBlank() && !host.contains("localhost")) {
+        "$proto://$host/api/auth/discord/callback"
+    } else {
+        val appBaseUrl =
+            if (baseUrl.endsWith("/s/")) {
+                baseUrl.substringBefore("/s/")
+            } else if (baseUrl.endsWith("/")) {
+                baseUrl.dropLast(1)
+            } else {
+                baseUrl
+            }
+        "$appBaseUrl/api/auth/discord/callback"
     }
 }
