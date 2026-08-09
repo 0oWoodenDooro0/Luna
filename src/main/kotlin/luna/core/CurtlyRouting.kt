@@ -1,7 +1,6 @@
 package luna.core
 
 import com.github._0owoodendooro0.curtly.CurtlyService
-import com.github._0owoodendooro0.curtly.CurtlyWebPage
 import io.ktor.http.ContentType
 import io.ktor.http.HttpStatusCode
 import io.ktor.server.plugins.origin
@@ -29,6 +28,7 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.longOrNull
 import kotlinx.serialization.json.put
+import java.net.URLEncoder
 
 @Serializable
 data class UserSession(
@@ -41,6 +41,29 @@ fun Routing.curtlyRouting(
     userStorage: UserStorage,
     baseUrl: String = "http://localhost:8080/s/",
 ) {
+    curtlyRouting(
+        curtlyService = curtlyService,
+        authService = AuthService(userStorage),
+        baseUrl = baseUrl,
+    )
+}
+
+fun Routing.curtlyRouting(
+    curtlyService: CurtlyService,
+    authService: AuthService,
+    baseUrl: String = "http://localhost:8080/s/",
+) {
+    // Helper to resolve application base URL for OAuth redirect
+    fun resolveAppBaseUrl(): String {
+        return if (baseUrl.endsWith("/s/")) {
+            baseUrl.substringBefore("/s/")
+        } else if (baseUrl.endsWith("/")) {
+            baseUrl.dropLast(1)
+        } else {
+            baseUrl
+        }
+    }
+
     // ----------------------------------------------------
     // Web Pages
     // ----------------------------------------------------
@@ -95,30 +118,18 @@ fun Routing.curtlyRouting(
     // Discord OAuth2 Routes
     // ----------------------------------------------------
     get("/api/auth/discord/login") {
-        val clientId = System.getenv("DISCORD_CLIENT_ID") ?: System.getenv("DISCORD_APP_ID") ?: ""
-        if (clientId.isBlank()) {
+        try {
+            val appBaseUrl = resolveAppBaseUrl()
+            val redirectUri = System.getenv("DISCORD_REDIRECT_URI") ?: "$appBaseUrl/api/auth/discord/callback"
+            val discordAuthUrl = authService.getDiscordLoginUrl(redirectUri)
+            call.respondRedirect(discordAuthUrl)
+        } catch (e: Exception) {
             call.respondText(
-                "❌ 伺服器未設定 DISCORD_CLIENT_ID 環境變數，無法啟用 Discord OAuth2 登入。",
+                "❌ ${e.message ?: "無法啟用 Discord OAuth2 登入"}",
                 ContentType.Text.Plain,
                 HttpStatusCode.InternalServerError,
             )
-            return@get
         }
-
-        val appBaseUrl =
-            if (baseUrl.endsWith("/s/")) {
-                baseUrl.substringBefore("/s/")
-            } else if (baseUrl.endsWith("/")) {
-                baseUrl.dropLast(1)
-            } else {
-                baseUrl
-            }
-        val redirectUri = System.getenv("DISCORD_REDIRECT_URI") ?: "$appBaseUrl/api/auth/discord/callback"
-        val encodedRedirect = java.net.URLEncoder.encode(redirectUri, "UTF-8")
-        val discordAuthUrl =
-            "https://discord.com/oauth2/authorize?client_id=$clientId&redirect_uri=$encodedRedirect&response_type=code&scope=identify"
-
-        call.respondRedirect(discordAuthUrl)
     }
 
     get("/api/auth/discord/callback") {
@@ -129,85 +140,14 @@ fun Routing.curtlyRouting(
         }
 
         try {
-            val clientId = System.getenv("DISCORD_CLIENT_ID") ?: System.getenv("DISCORD_APP_ID") ?: ""
-            val clientSecret = System.getenv("DISCORD_CLIENT_SECRET") ?: ""
-            val appBaseUrl =
-                if (baseUrl.endsWith("/s/")) {
-                    baseUrl.substringBefore("/s/")
-                } else if (baseUrl.endsWith("/")) {
-                    baseUrl.dropLast(1)
-                } else {
-                    baseUrl
-                }
+            val appBaseUrl = resolveAppBaseUrl()
             val redirectUri = System.getenv("DISCORD_REDIRECT_URI") ?: "$appBaseUrl/api/auth/discord/callback"
-
-            val httpClient =
-                java.net.http.HttpClient
-                    .newHttpClient()
-
-            val encodedRedirect = java.net.URLEncoder.encode(redirectUri, "UTF-8")
-            val tokenRequestBody =
-                "client_id=$clientId&client_secret=$clientSecret&grant_type=authorization_code&code=$code&redirect_uri=$encodedRedirect"
-
-            val tokenReq =
-                java.net.http.HttpRequest
-                    .newBuilder()
-                    .uri(java.net.URI.create("https://discord.com/api/v10/oauth2/token"))
-                    .header("Content-Type", "application/x-www-form-urlencoded")
-                    .POST(
-                        java.net.http.HttpRequest.BodyPublishers
-                            .ofString(tokenRequestBody),
-                    ).build()
-
-            val tokenRes =
-                httpClient.send(
-                    tokenReq,
-                    java.net.http.HttpResponse.BodyHandlers
-                        .ofString(),
-                )
-            if (tokenRes.statusCode() != 200) {
-                call.respondRedirect("/login?error=discord_token_error")
-                return@get
-            }
-
-            val tokenJson = Json.parseToJsonElement(tokenRes.body()).jsonObject
-            val accessToken =
-                tokenJson["access_token"]?.jsonPrimitive?.content
-                    ?: throw IllegalStateException("No access_token returned")
-
-            val userReq =
-                java.net.http.HttpRequest
-                    .newBuilder()
-                    .uri(java.net.URI.create("https://discord.com/api/v10/users/@me"))
-                    .header("Authorization", "Bearer $accessToken")
-                    .GET()
-                    .build()
-
-            val userRes =
-                httpClient.send(
-                    userReq,
-                    java.net.http.HttpResponse.BodyHandlers
-                        .ofString(),
-                )
-            if (userRes.statusCode() != 200) {
-                call.respondRedirect("/login?error=discord_user_error")
-                return@get
-            }
-
-            val userJson = Json.parseToJsonElement(userRes.body()).jsonObject
-            val discordId =
-                userJson["id"]?.jsonPrimitive?.content
-                    ?: throw IllegalStateException("No user id returned")
-            val globalName = userJson["global_name"]?.jsonPrimitive?.content
-            val username = userJson["username"]?.jsonPrimitive?.content ?: "DiscordUser"
-            val displayName = globalName ?: username
-
-            val user = userStorage.upsertDiscordUser(discordUserId = discordId, username = displayName)
-
-            call.sessions.set(UserSession(user.id, user.username))
+            val session = authService.handleDiscordCallback(code, redirectUri)
+            call.sessions.set(session)
             call.respondRedirect("/dashboard")
         } catch (e: Exception) {
-            call.respondRedirect("/login?error=${java.net.URLEncoder.encode(e.message ?: "unknown", "UTF-8")}")
+            val errorMsg = URLEncoder.encode(e.message ?: "unknown", "UTF-8")
+            call.respondRedirect("/login?error=$errorMsg")
         }
     }
 
@@ -220,10 +160,10 @@ fun Routing.curtlyRouting(
             val username = body["username"]?.jsonPrimitive?.content ?: throw IllegalArgumentException("使用者名稱為必填")
             val password = body["password"]?.jsonPrimitive?.content ?: throw IllegalArgumentException("密碼為必填")
 
-            val user = userStorage.register(username, password)
-            call.sessions.set(UserSession(user.id, user.username))
+            val session = authService.register(username, password)
+            call.sessions.set(session)
             call.respondText(
-                """{"message":"註冊成功","user":{"id":"${user.id}","username":"${user.username}"}}""",
+                """{"message":"註冊成功","user":{"id":"${session.userId}","username":"${session.username}"}}""",
                 ContentType.Application.Json,
             )
         } catch (e: Exception) {
@@ -238,13 +178,13 @@ fun Routing.curtlyRouting(
             val username = body["username"]?.jsonPrimitive?.content ?: throw IllegalArgumentException("使用者名稱為必填")
             val password = body["password"]?.jsonPrimitive?.content ?: throw IllegalArgumentException("密碼為必填")
 
-            val user =
-                userStorage.authenticate(username, password)
+            val session =
+                authService.authenticate(username, password)
                     ?: throw IllegalArgumentException("使用者名稱或密碼錯誤")
 
-            call.sessions.set(UserSession(user.id, user.username))
+            call.sessions.set(session)
             call.respondText(
-                """{"message":"登入成功","user":{"id":"${user.id}","username":"${user.username}"}}""",
+                """{"message":"登入成功","user":{"id":"${session.userId}","username":"${session.username}"}}""",
                 ContentType.Application.Json,
             )
         } catch (e: Exception) {

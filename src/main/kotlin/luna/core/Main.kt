@@ -71,6 +71,8 @@ suspend fun main() {
         }
     val curtlyService = CurtlyService(storage = storage, baseUrl = baseUrl, enableAuditMode = true)
 
+    val authService = AuthService(userStorage)
+
     val serverPort = System.getenv("PORT")?.toIntOrNull() ?: 8080
     val server =
         embeddedServer(Netty, port = serverPort, host = "0.0.0.0") {
@@ -78,7 +80,7 @@ suspend fun main() {
                 cookie<UserSession>("LUNA_SESSION")
             }
             routing {
-                curtlyRouting(curtlyService, userStorage, baseUrl)
+                curtlyRouting(curtlyService, authService, baseUrl)
             }
         }
 

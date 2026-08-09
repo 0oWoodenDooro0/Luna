@@ -20,6 +20,8 @@ import org.jetbrains.exposed.v1.jdbc.Database
 import org.junit.jupiter.api.Test
 import java.util.UUID
 import kotlin.test.assertEquals
+import kotlin.test.assertNotNull
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 class CurtlyRoutingTest {
@@ -172,4 +174,147 @@ class CurtlyRoutingTest {
             val afterDelResponse = cookieClient.get("/api/user/urls")
             assertEquals("[]", afterDelResponse.bodyAsText())
         }
+
+    @Test
+    fun testDiscordOAuthLoginRedirect() =
+        testApplication {
+            val storage = InMemoryUrlStorage()
+            val curtlyService = CurtlyService(storage = storage, baseUrl = "http://localhost:8080/s/")
+            val fakeDiscord = FakeDiscordOAuthClient(mockAuthUrl = "https://discord.com/oauth2/authorize?client_id=123&test=1")
+            val authService = AuthService(userStorage = UserStorage(createTestDb()), discordOAuthClient = fakeDiscord)
+
+            application {
+                install(Sessions) {
+                    cookie<UserSession>("LUNA_SESSION")
+                }
+                routing {
+                    curtlyRouting(curtlyService, authService)
+                }
+            }
+
+            val clientNoFollow = createClient { followRedirects = false }
+            val response = clientNoFollow.get("/api/auth/discord/login")
+
+            assertEquals(HttpStatusCode.Found, response.status)
+            assertEquals("https://discord.com/oauth2/authorize?client_id=123&test=1", response.headers["Location"])
+            assertEquals(1, fakeDiscord.receivedRedirectUris.size)
+        }
+
+    @Test
+    fun testDiscordOAuthCallbackSuccessAndDashboard() =
+        testApplication {
+            val storage = InMemoryUrlStorage()
+            val curtlyService = CurtlyService(storage = storage, baseUrl = "http://localhost:8080/s/")
+            val userStorage = UserStorage(createTestDb())
+            val fakeDiscord =
+                FakeDiscordOAuthClient(
+                    mockUserProfile =
+                        DiscordUserProfile(
+                            id = "discord_999",
+                            username = "luna_bot_dev",
+                            globalName = "Luna Developer",
+                        ),
+                )
+            val authService = AuthService(userStorage = userStorage, discordOAuthClient = fakeDiscord)
+
+            application {
+                install(Sessions) {
+                    cookie<UserSession>("LUNA_SESSION")
+                }
+                routing {
+                    curtlyRouting(curtlyService, authService)
+                }
+            }
+
+            val cookieClient =
+                createClient {
+                    install(HttpCookies)
+                    followRedirects = false
+                }
+
+            // 1. Trigger callback with authorization code
+            val callbackResponse = cookieClient.get("/api/auth/discord/callback?code=mock_discord_auth_code")
+            assertEquals(HttpStatusCode.Found, callbackResponse.status)
+            assertEquals("/dashboard", callbackResponse.headers["Location"])
+            assertEquals(listOf("mock_discord_auth_code"), fakeDiscord.receivedCodes)
+
+            // 2. Verify /api/auth/me returns authenticated user
+            val meResponse = cookieClient.get("/api/auth/me")
+            assertEquals(HttpStatusCode.OK, meResponse.status)
+            val meBody = meResponse.bodyAsText()
+            assertTrue(meBody.contains("discord_999"))
+            assertTrue(meBody.contains("Luna Developer"))
+
+            // 3. Verify user was stored in database
+            val user = userStorage.findById("discord_999")
+            assertNotNull(user)
+            assertEquals("Luna Developer", user.username)
+        }
+
+    @Test
+    fun testDiscordOAuthCallbackErrorHandling() =
+        testApplication {
+            val storage = InMemoryUrlStorage()
+            val curtlyService = CurtlyService(storage = storage, baseUrl = "http://localhost:8080/s/")
+            val fakeDiscord =
+                FakeDiscordOAuthClient(
+                    shouldFail = true,
+                    failureException = IllegalStateException("Discord upstream 500 error"),
+                )
+            val authService = AuthService(userStorage = UserStorage(createTestDb()), discordOAuthClient = fakeDiscord)
+
+            application {
+                install(Sessions) {
+                    cookie<UserSession>("LUNA_SESSION")
+                }
+                routing {
+                    curtlyRouting(curtlyService, authService)
+                }
+            }
+
+            val clientNoFollow = createClient { followRedirects = false }
+
+            // 1. Missing code parameter
+            val noCodeResponse = clientNoFollow.get("/api/auth/discord/callback")
+            assertEquals(HttpStatusCode.Found, noCodeResponse.status)
+            assertEquals("/login?error=discord_cancel", noCodeResponse.headers["Location"])
+
+            // 2. Exception during code exchange
+            val failedCodeResponse = clientNoFollow.get("/api/auth/discord/callback?code=bad_code")
+            assertEquals(HttpStatusCode.Found, failedCodeResponse.status)
+            val location = failedCodeResponse.headers["Location"] ?: ""
+            assertTrue(location.startsWith("/login?error="))
+            assertTrue(location.contains("Discord"))
+        }
+
+    @Test
+    fun testAuthServiceDirectUnit() {
+        val userStorage = UserStorage(createTestDb())
+        val fakeDiscord =
+            FakeDiscordOAuthClient(
+                mockUserProfile =
+                    DiscordUserProfile(
+                        id = "u_888",
+                        username = "alice",
+                        globalName = null,
+                    ),
+            )
+        val authService = AuthService(userStorage, fakeDiscord)
+
+        // Test normal registration and login
+        val registered = authService.register("bob123", "password123")
+        assertEquals("bob123", registered.username)
+
+        val authenticated = authService.authenticate("bob123", "password123")
+        assertNotNull(authenticated)
+        assertEquals("bob123", authenticated.username)
+
+        val wrongAuth = authService.authenticate("bob123", "wrong_password")
+        assertNull(wrongAuth)
+
+        // Test findById
+        val found = authService.findById(registered.userId)
+        assertNotNull(found)
+        assertEquals("bob123", found.username)
+    }
 }
