@@ -54,15 +54,14 @@ fun Routing.curtlyRouting(
     baseUrl: String = "http://localhost:8080/s/",
 ) {
     // Helper to resolve application base URL for OAuth redirect
-    fun resolveAppBaseUrl(): String {
-        return if (baseUrl.endsWith("/s/")) {
+    fun resolveAppBaseUrl(): String =
+        if (baseUrl.endsWith("/s/")) {
             baseUrl.substringBefore("/s/")
         } else if (baseUrl.endsWith("/")) {
             baseUrl.dropLast(1)
         } else {
             baseUrl
         }
-    }
 
     // ----------------------------------------------------
     // Web Pages

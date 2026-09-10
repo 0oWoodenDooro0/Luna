@@ -19,7 +19,11 @@ data class DiscordUserProfile(
 
 interface DiscordOAuthClient {
     fun getAuthorizationUrl(redirectUri: String): String
-    suspend fun exchangeCode(code: String, redirectUri: String): DiscordUserProfile
+
+    suspend fun exchangeCode(
+        code: String,
+        redirectUri: String,
+    ): DiscordUserProfile
 }
 
 class HttpDiscordOAuthClient(
@@ -31,7 +35,6 @@ class HttpDiscordOAuthClient(
     },
     private val httpClient: HttpClient = HttpClient.newHttpClient(),
 ) : DiscordOAuthClient {
-
     override fun getAuthorizationUrl(redirectUri: String): String {
         val clientId = clientIdProvider()
         require(clientId.isNotBlank()) {
@@ -41,7 +44,10 @@ class HttpDiscordOAuthClient(
         return "https://discord.com/oauth2/authorize?client_id=$clientId&redirect_uri=$encodedRedirect&response_type=code&scope=identify"
     }
 
-    override suspend fun exchangeCode(code: String, redirectUri: String): DiscordUserProfile {
+    override suspend fun exchangeCode(
+        code: String,
+        redirectUri: String,
+    ): DiscordUserProfile {
         val clientId = clientIdProvider()
         val clientSecret = clientSecretProvider()
         require(clientId.isNotBlank()) { "未設定 DISCORD_CLIENT_ID" }
@@ -52,7 +58,8 @@ class HttpDiscordOAuthClient(
             "client_id=$clientId&client_secret=$clientSecret&grant_type=authorization_code&code=$code&redirect_uri=$encodedRedirect"
 
         val tokenReq =
-            HttpRequest.newBuilder()
+            HttpRequest
+                .newBuilder()
                 .uri(URI.create("https://discord.com/api/v10/oauth2/token"))
                 .header("Content-Type", "application/x-www-form-urlencoded")
                 .POST(HttpRequest.BodyPublishers.ofString(tokenRequestBody))
@@ -69,7 +76,8 @@ class HttpDiscordOAuthClient(
                 ?: throw IllegalStateException("No access_token returned from Discord")
 
         val userReq =
-            HttpRequest.newBuilder()
+            HttpRequest
+                .newBuilder()
                 .uri(URI.create("https://discord.com/api/v10/users/@me"))
                 .header("Authorization", "Bearer $accessToken")
                 .GET()

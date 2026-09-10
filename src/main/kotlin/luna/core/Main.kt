@@ -8,6 +8,8 @@ import dev.kord.core.behavior.interaction.response.respond
 import dev.kord.core.event.interaction.ChatInputCommandInteractionCreateEvent
 import dev.kord.core.event.interaction.SelectMenuInteractionCreateEvent
 import dev.kord.core.on
+import dev.kord.gateway.Intent
+import dev.kord.gateway.PrivilegedIntent
 import io.ktor.server.application.install
 import io.ktor.server.engine.embeddedServer
 import io.ktor.server.netty.Netty
@@ -17,6 +19,9 @@ import io.ktor.server.sessions.cookie
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import luna.preview.PreviewCommand
+import luna.preview.PreviewSettingsStorage
+import luna.preview.SocialPreviewService
 import luna.undercover.UndercoverManager
 import luna.undercover.command.RevealCommand
 import luna.undercover.command.UndercoverCommand
@@ -25,10 +30,12 @@ import org.yaml.snakeyaml.Yaml
 import java.io.File
 import java.io.InputStream
 
+@OptIn(PrivilegedIntent::class)
 suspend fun main() {
     val db = Database.connect("jdbc:sqlite:data/urls.db", driver = "org.sqlite.JDBC")
     val storage = ExposedUrlStorage(database = db)
     val userStorage = UserStorage(db)
+    val previewSettingsStorage = PreviewSettingsStorage(db)
 
     val yamlFile = File("application.yml")
     val yamlStream: InputStream? =
@@ -97,8 +104,12 @@ suspend fun main() {
             RevealCommand(),
             ShortenCommand(curtlyService),
             MyUrlsCommand(curtlyService, baseUrl),
+            PreviewCommand(previewSettingsStorage),
         )
     commands.forEach { it.register(kord) }
+
+    // Register Social Post Preview Service
+    SocialPreviewService.register(kord, previewSettingsStorage)
 
     kord.on<ChatInputCommandInteractionCreateEvent> {
         val commandName = interaction.command.rootName
@@ -168,5 +179,8 @@ suspend fun main() {
         }
     }
 
-    kord.login()
+    kord.login {
+        @OptIn(PrivilegedIntent::class)
+        intents += Intent.MessageContent
+    }
 }

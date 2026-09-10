@@ -4,9 +4,7 @@ class AuthService(
     private val userStorage: UserStorage,
     private val discordOAuthClient: DiscordOAuthClient = HttpDiscordOAuthClient(),
 ) {
-    fun getDiscordLoginUrl(redirectUri: String): String {
-        return discordOAuthClient.getAuthorizationUrl(redirectUri)
-    }
+    fun getDiscordLoginUrl(redirectUri: String): String = discordOAuthClient.getAuthorizationUrl(redirectUri)
 
     suspend fun handleDiscordCallback(
         code: String,
@@ -37,7 +35,5 @@ class AuthService(
         return UserSession(userId = user.id, username = user.username)
     }
 
-    fun findById(id: String): User? {
-        return userStorage.findById(id)
-    }
+    fun findById(id: String): User? = userStorage.findById(id)
 }

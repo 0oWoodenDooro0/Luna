@@ -36,6 +36,9 @@ dependencies {
 
     // Curtly URL Shortener Library
     implementation("com.github.0oWoodenDooro0:Curtly:3.1.0")
+
+    // SocialPeek Social Post Resolver Library
+    implementation("com.github.0oWoodenDooro0:SocialPeek:v0.1.0")
 }
 
 kotlin {
@@ -54,7 +57,7 @@ tasks.jar {
 
     duplicatesStrategy = DuplicatesStrategy.EXCLUDE
 
-    configurations["runtimeClasspath"].forEach { file: File ->
-        from(zipTree(file.absoluteFile))
-    }
+    from(configurations.runtimeClasspath.map { configuration ->
+        configuration.map { if (it.isDirectory) it else zipTree(it) }
+    })
 }
