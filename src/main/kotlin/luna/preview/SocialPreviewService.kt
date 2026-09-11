@@ -140,20 +140,26 @@ object SocialPreviewService {
                     if (post.platform == Platform.REDDIT) {
                         // Reddit: author field shows Subreddit link, author is placed at the bottom
                         val subreddit =
-                            post.rawData["subreddit"]
+                            post.community
+                                ?: post.rawData["subreddit"]
                                 ?: SUBREDDIT_REGEX.find(post.originalUrl)?.groupValues?.getOrNull(1)
+
+                        val redditIcon =
+                            post.communityIcon?.takeIf { it.isNotBlank() }
+                                ?: post.rawData["community_icon"]?.takeIf { it.isNotBlank() }
+                                ?: "https://www.redditstatic.com/shreddit/assets/favicon/192x192.png"
 
                         if (!subreddit.isNullOrBlank()) {
                             this.author {
                                 name = "r/$subreddit"
                                 this.url = "https://www.reddit.com/r/$subreddit"
-                                icon = "https://www.redditstatic.com/shreddit/assets/favicon/192x192.png"
+                                icon = redditIcon
                             }
                         } else {
                             this.author {
                                 name = "Reddit"
                                 this.url = post.originalUrl
-                                icon = "https://www.redditstatic.com/shreddit/assets/favicon/192x192.png"
+                                icon = redditIcon
                             }
                         }
                     } else {
