@@ -38,7 +38,7 @@ dependencies {
     implementation("com.github.0oWoodenDooro0:Curtly:3.1.0")
 
     // SocialPeek Social Post Resolver Library
-    implementation("com.github.0oWoodenDooro0:SocialPeek:v0.1.0")
+    implementation("com.github.0oWoodenDooro0:SocialPeek:v0.2.0")
 }
 
 kotlin {
