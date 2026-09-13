@@ -5,21 +5,13 @@ rootProject.name = "Luna"
 
 val localSocialPeek = file("../SocialPeek")
 
-val isRemote = providers.gradleProperty("remote").isPresent ||
-    providers.gradleProperty("remoteSocialPeek").isPresent ||
-    providers.gradleProperty("useLocalSocialPeek").orNull == "false"
-
 val isLocal = providers.gradleProperty("local").isPresent ||
     providers.gradleProperty("localSocialPeek").isPresent ||
     providers.gradleProperty("useLocalSocialPeek").orNull == "true"
 
-val useLocal = when {
-    isRemote -> false
-    isLocal -> true
-    else -> localSocialPeek.exists()
-}
+val useLocal = isLocal && localSocialPeek.exists()
 
-if (useLocal && localSocialPeek.exists()) {
+if (useLocal) {
     logger.lifecycle(">> [SocialPeek] Using LOCAL relative project: ${localSocialPeek.path}")
     includeBuild(localSocialPeek) {
         dependencySubstitution {

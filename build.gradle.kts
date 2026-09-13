@@ -6,7 +6,7 @@ plugins {
 }
 
 group = "luna"
-version = "1.3.1"
+version = "1.4.0"
 
 application {
     mainClass.set("luna.core.MainKt")
@@ -38,7 +38,7 @@ dependencies {
     implementation("com.github.0oWoodenDooro0:Curtly:3.1.0")
 
     // SocialPeek Social Post Resolver Library
-    implementation("com.github.0oWoodenDooro0:SocialPeek:v0.2.0")
+    implementation("com.github.0oWoodenDooro0:SocialPeek:v0.3.0")
 }
 
 kotlin {
