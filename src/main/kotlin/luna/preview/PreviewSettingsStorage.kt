@@ -14,6 +14,8 @@ object GuildPreviewSettingsTable : Table("guild_preview_settings") {
     val guildId = varchar("guild_id", 64)
     val enabled = bool("enabled").default(true)
     val disabledPlatforms = text("disabled_platforms").default("")
+    val cleanUrlEnabled = bool("clean_url_enabled").default(true)
+    val webhookReplaceEnabled = bool("webhook_replace_enabled").default(true)
 
     override val primaryKey = PrimaryKey(guildId)
 }
@@ -23,7 +25,8 @@ class PreviewSettingsStorage(
 ) {
     init {
         transaction(database) {
-            SchemaUtils.create(GuildPreviewSettingsTable)
+            @Suppress("DEPRECATION")
+            SchemaUtils.createMissingTablesAndColumns(GuildPreviewSettingsTable)
         }
     }
 
@@ -36,6 +39,80 @@ class PreviewSettingsStorage(
                     .singleOrNull()
             row?.get(GuildPreviewSettingsTable.enabled) ?: true
         }
+
+    fun isCleanUrlEnabled(guildId: String): Boolean =
+        transaction(database) {
+            val row =
+                GuildPreviewSettingsTable
+                    .selectAll()
+                    .where(GuildPreviewSettingsTable.guildId eq guildId)
+                    .singleOrNull()
+            row?.get(GuildPreviewSettingsTable.cleanUrlEnabled) ?: true
+        }
+
+    fun setCleanUrlEnabled(
+        guildId: String,
+        enabled: Boolean,
+    ) {
+        transaction(database) {
+            val existing =
+                GuildPreviewSettingsTable
+                    .selectAll()
+                    .where(GuildPreviewSettingsTable.guildId eq guildId)
+                    .singleOrNull()
+
+            if (existing != null) {
+                GuildPreviewSettingsTable.update({ GuildPreviewSettingsTable.guildId eq guildId }) {
+                    it[cleanUrlEnabled] = enabled
+                }
+            } else {
+                GuildPreviewSettingsTable.insert {
+                    it[GuildPreviewSettingsTable.guildId] = guildId
+                    it[GuildPreviewSettingsTable.enabled] = true
+                    it[disabledPlatforms] = ""
+                    it[cleanUrlEnabled] = enabled
+                    it[webhookReplaceEnabled] = true
+                }
+            }
+        }
+    }
+
+    fun isWebhookReplaceEnabled(guildId: String): Boolean =
+        transaction(database) {
+            val row =
+                GuildPreviewSettingsTable
+                    .selectAll()
+                    .where(GuildPreviewSettingsTable.guildId eq guildId)
+                    .singleOrNull()
+            row?.get(GuildPreviewSettingsTable.webhookReplaceEnabled) ?: true
+        }
+
+    fun setWebhookReplaceEnabled(
+        guildId: String,
+        enabled: Boolean,
+    ) {
+        transaction(database) {
+            val existing =
+                GuildPreviewSettingsTable
+                    .selectAll()
+                    .where(GuildPreviewSettingsTable.guildId eq guildId)
+                    .singleOrNull()
+
+            if (existing != null) {
+                GuildPreviewSettingsTable.update({ GuildPreviewSettingsTable.guildId eq guildId }) {
+                    it[webhookReplaceEnabled] = enabled
+                }
+            } else {
+                GuildPreviewSettingsTable.insert {
+                    it[GuildPreviewSettingsTable.guildId] = guildId
+                    it[GuildPreviewSettingsTable.enabled] = true
+                    it[disabledPlatforms] = ""
+                    it[cleanUrlEnabled] = true
+                    it[webhookReplaceEnabled] = enabled
+                }
+            }
+        }
+    }
 
     fun getDisabledPlatforms(guildId: String): Set<Platform> {
         return transaction(database) {
@@ -119,6 +196,8 @@ class PreviewSettingsStorage(
                     it[GuildPreviewSettingsTable.guildId] = guildId
                     it[GuildPreviewSettingsTable.enabled] = true
                     it[disabledPlatforms] = newDisabledStr
+                    it[cleanUrlEnabled] = true
+                    it[webhookReplaceEnabled] = true
                 }
             }
         }
@@ -144,6 +223,8 @@ class PreviewSettingsStorage(
                     it[GuildPreviewSettingsTable.guildId] = guildId
                     it[GuildPreviewSettingsTable.enabled] = enabled
                     it[disabledPlatforms] = ""
+                    it[cleanUrlEnabled] = true
+                    it[webhookReplaceEnabled] = true
                 }
             }
         }

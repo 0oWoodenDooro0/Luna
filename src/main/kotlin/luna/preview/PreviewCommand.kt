@@ -19,11 +19,11 @@ class PreviewCommand(
 
     override suspend fun register(kord: Kord) {
         kord.createGlobalChatInputCommand(name, description) {
-            subCommand("status", "查看目前伺服器的各平臺預覽開關狀態")
-            subCommand("toggle", "開啟或關閉指定平臺的預覽") {
-                string("platform", "選擇要設定的社群平臺") {
+            subCommand("status", "查看目前伺服器的各平台預覽開關狀態")
+            subCommand("toggle", "開啟或關閉指定平台的預覽") {
+                string("platform", "選擇要設定的社群平台") {
                     required = true
-                    choice("全部平臺 (總開關)", "ALL")
+                    choice("全部平台 (總開關)", "ALL")
                     choice("X (Twitter)", "X")
                     choice("Bilibili", "BILIBILI")
                     choice("Threads", "THREADS")
@@ -32,6 +32,16 @@ class PreviewCommand(
                     choice("YouTube", "YOUTUBE")
                 }
                 boolean("enabled", "是否開啟預覽") {
+                    required = true
+                }
+            }
+            subCommand("clean_url", "設定是否在偵測到追蹤參數時顯示乾淨連結提示") {
+                boolean("enabled", "是否開啟乾淨連結提示") {
+                    required = true
+                }
+            }
+            subCommand("webhook_replace", "設定是否使用 Webhook 擬真替換使用者訊息（含乾淨連結與預覽）") {
+                boolean("enabled", "是否開啟 Webhook 擬真替換") {
                     required = true
                 }
             }
@@ -68,6 +78,8 @@ class PreviewCommand(
             "status" -> {
                 val guildEnabled = storage.isGuildEnabled(guildId)
                 val disabled = storage.getDisabledPlatforms(guildId)
+                val cleanUrlEnabled = storage.isCleanUrlEnabled(guildId)
+                val webhookReplaceEnabled = storage.isWebhookReplaceEnabled(guildId)
 
                 val platforms =
                     listOf(
@@ -87,16 +99,20 @@ class PreviewCommand(
                     }
 
                 val totalStatus = if (guildEnabled) "✅ 開啟" else "❌ 停用"
+                val cleanUrlStatus = if (cleanUrlEnabled) "✅ 開啟" else "❌ 關閉"
+                val webhookStatus = if (webhookReplaceEnabled) "✅ 開啟" else "❌ 關閉"
                 response.respond {
                     content =
                         """
                         ⚙️ **本伺服器社群預覽設定**
                         伺服器總開關：$totalStatus
+                        Webhook 擬真替換：$webhookStatus
+                        追蹤參數清洗提示：$cleanUrlStatus
 
-                        各平臺狀態：
+                        各平台狀態：
                         $statusLines
 
-                        *(可使用 `/preview toggle` 隨時調整特定平臺的啟用狀態)*
+                        *(可使用 `/preview toggle` 調整平台預覽，`/preview webhook_replace` 調整替換模式，或 `/preview clean_url` 調整乾淨連結提示)*
                         """.trimIndent()
                 }
             }
@@ -106,7 +122,7 @@ class PreviewCommand(
                 val enabled = subCommand.booleans["enabled"] ?: true
 
                 if (platformKey == null) {
-                    response.respond { content = "❌ 請指定要設定的平臺！" }
+                    response.respond { content = "❌ 請指定要設定的平台！" }
                     return
                 }
 
@@ -118,7 +134,7 @@ class PreviewCommand(
                     val platform =
                         runCatching { Platform.valueOf(platformKey) }.getOrNull()
                     if (platform == null) {
-                        response.respond { content = "❌ 未知的平臺：`$platformKey`" }
+                        response.respond { content = "❌ 未知的平台：`$platformKey`" }
                         return
                     }
 
@@ -130,8 +146,28 @@ class PreviewCommand(
                 }
             }
 
+            "clean_url" -> {
+                val enabled = subCommand.booleans["enabled"] ?: true
+                storage.setCleanUrlEnabled(guildId, enabled)
+                val statusText = if (enabled) "開啟" else "關閉"
+                response.respond {
+                    content = "✅ 已將本伺服器的 **乾淨連結提示** 設定為：**$statusText**！"
+                }
+            }
+
+            "webhook_replace" -> {
+                val enabled = subCommand.booleans["enabled"] ?: true
+                storage.setWebhookReplaceEnabled(guildId, enabled)
+                val statusText = if (enabled) "開啟" else "關閉"
+                response.respond {
+                    content = "✅ 已將本伺服器的 **Webhook 擬真替換** 設定為：**$statusText**！"
+                }
+            }
+
             else -> {
-                response.respond { content = "請使用 `/preview status` 或 `/preview toggle`" }
+                response.respond {
+                    content = "請使用 `/preview status`、`/preview toggle`、`/preview webhook_replace` 或 `/preview clean_url`"
+                }
             }
         }
     }

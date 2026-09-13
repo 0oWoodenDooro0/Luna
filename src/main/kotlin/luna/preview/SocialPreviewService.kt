@@ -1,21 +1,36 @@
 package luna.preview
 
 import dev.kord.common.Color
+import dev.kord.common.entity.AllowedMentionType
 import dev.kord.common.entity.MessageFlag
 import dev.kord.common.entity.MessageFlags
+import dev.kord.common.entity.Permission
+import dev.kord.common.entity.Snowflake
 import dev.kord.core.Kord
+import dev.kord.core.behavior.WebhookBehavior
+import dev.kord.core.behavior.channel.CategorizableChannelBehavior
 import dev.kord.core.behavior.channel.createMessage
+import dev.kord.core.behavior.channel.createWebhook
+import dev.kord.core.behavior.channel.threads.ThreadChannelBehavior
 import dev.kord.core.behavior.edit
+import dev.kord.core.behavior.execute
 import dev.kord.core.entity.Message
+import dev.kord.core.entity.channel.TopGuildChannel
+import dev.kord.core.entity.channel.thread.ThreadChannel
 import dev.kord.core.event.message.MessageCreateEvent
 import dev.kord.core.on
+import dev.kord.rest.builder.message.MessageBuilder
+import dev.kord.rest.builder.message.allowedMentions
+import dev.kord.rest.builder.message.create.WebhookMessageCreateBuilder
 import dev.kord.rest.builder.message.embed
 import dev.socialpeek.SocialPeek
 import dev.socialpeek.model.Media
 import dev.socialpeek.model.PeekPost
 import dev.socialpeek.model.Platform
+import kotlinx.coroutines.flow.firstOrNull
 import luna.core.JsonLogger
 import org.slf4j.LoggerFactory
+import java.util.concurrent.ConcurrentHashMap
 
 object SocialPreviewService {
     private val logger = LoggerFactory.getLogger("SocialPreviewService")
@@ -29,6 +44,9 @@ object SocialPreviewService {
     // Unified limits for post description across all platforms
     private const val MAX_LINES = 5
     private const val MAX_CHARS = 250
+
+    // Webhook cache: channelId -> (webhookId, token)
+    private val webhookCache = ConcurrentHashMap<Snowflake, Pair<Snowflake, String>>()
 
     fun register(
         kord: Kord,
@@ -110,142 +128,62 @@ object SocialPreviewService {
                 post.author.displayName ?: post.author.username,
             )
 
-            // Suppress original message's embeds so Discord's native preview doesn't conflict
-            val suppressResult =
-                runCatching {
-                    originalMessage.edit {
-                        flags = (originalMessage.flags ?: MessageFlags()) + MessageFlag.SuppressEmbeds
-                    }
-                }
-            if (suppressResult.isFailure) {
-                logger.warn(
-                    "Failed to suppress embeds on message {}: {}",
-                    originalMessage.id,
-                    suppressResult.exceptionOrNull()?.message,
-                )
-            }
-
             // Extract and normalize media image URLs
             val mediaImageUrls = getNormalizedImageUrls(post)
+            val targetUrl = post.cleanUrl.ifBlank { post.originalUrl }
+            val hasCleanUrlNotice =
+                (guildId == null || settingsStorage.isCleanUrlEnabled(guildId)) &&
+                    post.cleanUrl.isNotBlank() &&
+                    post.cleanUrl != post.originalUrl
 
-            // Send clean standalone embed message in the same channel
-            // When multiple images exist, Discord renders a native grid gallery when multiple embeds share the same url
-            originalMessage.channel.createMessage {
-                embed {
-                    val platformName = post.platform.displayName
-                    val platformColor = getPlatformColor(post.platform)
+            val isWebhookEnabled = guildId != null && settingsStorage.isWebhookReplaceEnabled(guildId)
+            var webhookSucceeded = false
 
-                    color = platformColor
-
-                    if (post.platform == Platform.REDDIT) {
-                        // Reddit: author field shows Subreddit link, author is placed at the bottom
-                        val subreddit =
-                            post.community
-                                ?: post.rawData["subreddit"]
-                                ?: SUBREDDIT_REGEX.find(post.originalUrl)?.groupValues?.getOrNull(1)
-
-                        val redditIcon =
-                            post.communityIcon?.takeIf { it.isNotBlank() }
-                                ?: post.rawData["community_icon"]?.takeIf { it.isNotBlank() }
-                                ?: "https://www.redditstatic.com/shreddit/assets/favicon/192x192.png"
-
-                        if (!subreddit.isNullOrBlank()) {
-                            this.author {
-                                name = "r/$subreddit"
-                                this.url = "https://www.reddit.com/r/$subreddit"
-                                icon = redditIcon
-                            }
-                        } else {
-                            this.author {
-                                name = "Reddit"
-                                this.url = post.originalUrl
-                                icon = redditIcon
-                            }
-                        }
-                    } else {
-                        val authorName = post.author.displayName?.takeIf { it.isNotBlank() } ?: post.author.username
-                        this.author {
-                            name =
-                                if (authorName != post.author.username) {
-                                    "$authorName (@${post.author.username})"
-                                } else {
-                                    authorName
-                                }
-                            icon = post.author.avatarUrl
-                            this.url = post.author.profileUrl
-                        }
-                    }
-
-                    // Always ensure a clickable title leading to the post URL across all platforms
-                    val postTitle = post.title?.takeIf { it.isNotBlank() }
-                    val resolvedTitle =
-                        if (postTitle != null) {
-                            postTitle
-                        } else {
-                            val authorName = post.author.displayName?.takeIf { it.isNotBlank() } ?: post.author.username
-                            if (authorName.isNotBlank() && authorName != "Unknown") {
-                                "$authorName on ${post.platform.displayName}"
-                            } else {
-                                "${post.platform.displayName} Post"
-                            }
-                        }
-
-                    title = if (resolvedTitle.length > 250) resolvedTitle.take(247) + "..." else resolvedTitle
-                    this.url = post.originalUrl
-
-                    if (post.content.isNotBlank()) {
-                        description = truncateContent(post.content)
-                    }
-
-                    // First image for the main embed
-                    if (mediaImageUrls.isNotEmpty()) {
-                        image = mediaImageUrls.first()
-                    }
-
-                    // Metrics and image count in footer (without platform emoji/icon)
-                    val metricsText = formatMetrics(post)
-                    val imageCountText =
-                        when {
-                            mediaImageUrls.size > 10 -> "🖼️ 10/${mediaImageUrls.size} 張圖片"
-                            mediaImageUrls.size > 1 -> "🖼️ ${mediaImageUrls.size} 張圖片"
-                            else -> ""
-                        }
-                    val footerDetails =
-                        listOf(imageCountText, metricsText).filter { it.isNotBlank() }.joinToString(" • ")
-
-                    footer {
-                        if (post.platform == Platform.REDDIT) {
-                            val authorName = post.author.username.removePrefix("u/")
-                            val authorInfo = "u/$authorName"
-                            text =
-                                when {
-                                    footerDetails.isNotEmpty() -> "$platformName • Posted by $authorInfo • $footerDetails"
-                                    else -> "$platformName • Posted by $authorInfo"
-                                }
-                        } else {
-                            text =
-                                if (footerDetails.isNotEmpty()) {
-                                    "$platformName • $footerDetails"
-                                } else {
-                                    platformName
-                                }
-                        }
-                    }
-
-                    post.createdAtEpochSeconds?.let { epoch ->
-                        timestamp = kotlin.time.Instant.fromEpochSeconds(epoch)
-                    }
+            // Attempt seamless Webhook replacement if enabled and no attachments
+            if (isWebhookEnabled && originalMessage.attachments.isEmpty()) {
+                var cleanContent = originalMessage.content.replace(url, targetUrl)
+                if (post.originalUrl.isNotBlank() && post.originalUrl != targetUrl) {
+                    cleanContent = cleanContent.replace(post.originalUrl, targetUrl)
                 }
 
-                // If post has multiple images, add secondary embeds with the same url to form a Discord Image Gallery (up to Discord's maximum 10 embeds)
-                if (mediaImageUrls.size > 1) {
-                    val maxEmbeds = minOf(mediaImageUrls.size, 10)
-                    for (i in 1 until maxEmbeds) {
-                        embed {
-                            this.url = post.originalUrl
-                            image = mediaImageUrls[i]
+                webhookSucceeded =
+                    runCatching {
+                        executeWebhookReplacement(
+                            kord = originalMessage.kord,
+                            message = originalMessage,
+                            post = post,
+                            targetUrl = targetUrl,
+                            content = cleanContent,
+                            mediaImageUrls = mediaImageUrls,
+                        )
+                    }.onFailure { e ->
+                        logger.warn("Webhook replacement failed, falling back to standard embed: {}", e.message)
+                    }.getOrDefault(false)
+            }
+
+            // Fallback: If webhook replacement was not performed or failed
+            if (!webhookSucceeded) {
+                // Suppress original message's embeds so Discord's native preview doesn't conflict
+                val suppressResult =
+                    runCatching {
+                        originalMessage.edit {
+                            flags = (originalMessage.flags ?: MessageFlags()) + MessageFlag.SuppressEmbeds
                         }
                     }
+                if (suppressResult.isFailure) {
+                    logger.warn(
+                        "Failed to suppress embeds on message {}: {}",
+                        originalMessage.id,
+                        suppressResult.exceptionOrNull()?.message,
+                    )
+                }
+
+                // Send clean standalone embed message in the same channel
+                originalMessage.channel.createMessage {
+                    if (hasCleanUrlNotice) {
+                        content = "🧹 **乾淨連結**：<${post.cleanUrl}>"
+                    }
+                    populatePreviewEmbeds(post, targetUrl, mediaImageUrls)
                 }
             }
 
@@ -257,6 +195,8 @@ object SocialPreviewService {
                     mapOf(
                         "platform" to post.platform.name,
                         "url" to url,
+                        "cleanUrl" to post.cleanUrl,
+                        "replacedByWebhook" to webhookSucceeded,
                         "messageId" to originalMessage.id.toString(),
                         "imageCount" to mediaImageUrls.size,
                     ),
@@ -270,6 +210,278 @@ object SocialPreviewService {
                 data = mapOf("url" to url),
                 errorMessage = e.message,
             )
+        }
+    }
+
+    /**
+     * Executes webhook message replacement: sends the message masquerading as the author
+     * with tracking parameters removed and rich embeds attached, then deletes the original message.
+     */
+    private suspend fun executeWebhookReplacement(
+        kord: Kord,
+        message: Message,
+        post: PeekPost,
+        targetUrl: String,
+        content: String,
+        mediaImageUrls: List<String>,
+    ): Boolean {
+        val channel = message.channel.asChannelOrNull() ?: return false
+        val (webhookChannel, threadId) =
+            when (channel) {
+                is ThreadChannel -> channel.parent to channel.id
+                is CategorizableChannelBehavior -> channel to null
+                else -> return false
+            }
+
+        val rawGuildId = message.data.guildId.value
+        val topGuildChannel =
+            when (channel) {
+                is ThreadChannel -> channel.parent.asChannelOrNull() as? TopGuildChannel
+                is TopGuildChannel -> channel
+                else -> null
+            }
+
+        if (topGuildChannel != null) {
+            val perms = topGuildChannel.getEffectivePermissions(kord.selfId)
+            val canManageMessages =
+                perms.contains(Permission.ManageMessages) || perms.contains(Permission.Administrator)
+            val canManageWebhooks =
+                perms.contains(Permission.ManageWebhooks) || perms.contains(Permission.Administrator)
+            if (!canManageMessages || !canManageWebhooks) {
+                logger.debug(
+                    "Missing ManageMessages or ManageWebhooks permissions in channel {}, skipping webhook replacement",
+                    channel.id,
+                )
+                return false
+            }
+        }
+
+        val webhookPair = getOrCreateWebhook(webhookChannel, kord) ?: return false
+
+        val member = if (rawGuildId != null) message.getAuthorAsMemberOrNull() else null
+        val author = message.author
+
+        val displayName = member?.effectiveName ?: author?.globalName ?: author?.username ?: "User"
+        val avatarUrl =
+            member?.memberAvatar?.cdnUrl?.toUrl()
+                ?: author?.avatar?.cdnUrl?.toUrl()
+                ?: author?.defaultAvatar?.cdnUrl?.toUrl()
+
+        // If user replied to another message, include a quote jump link
+        val ref = message.messageReference
+        val replyPrefix =
+            if (ref != null && rawGuildId != null) {
+                val refMsgId = ref.data.id.value
+                if (refMsgId != null) {
+                    "> 💬 回覆: https://discord.com/channels/$rawGuildId/${message.channelId}/$refMsgId\n"
+                } else {
+                    ""
+                }
+            } else {
+                ""
+            }
+
+        val finalContent = (replyPrefix + content).trim()
+
+        val webhookExecuteBlock: WebhookMessageCreateBuilder.() -> Unit = {
+            this.username = displayName
+            this.avatarUrl = avatarUrl
+            this.content = finalContent
+            allowedMentions {
+                add(AllowedMentionType.UserMentions)
+                add(AllowedMentionType.RoleMentions)
+            }
+            populatePreviewEmbeds(post, targetUrl, mediaImageUrls)
+        }
+
+        // Try executing, retry once if cached webhook was deleted/invalidated
+        var currentPair = webhookPair
+        val executeResult =
+            runCatching {
+                currentPair.first.execute(currentPair.second, threadId, webhookExecuteBlock)
+            }
+
+        if (executeResult.isFailure) {
+            webhookCache.remove(webhookChannel.id)
+            val retryPair = getOrCreateWebhook(webhookChannel, kord) ?: return false
+            currentPair = retryPair
+            currentPair.first.execute(currentPair.second, threadId, webhookExecuteBlock)
+        }
+
+        // Delete the original message now that the replacement has been posted
+        runCatching {
+            message.delete("Replaced by Luna Preview Webhook with clean URL")
+        }.onFailure { e ->
+            logger.warn("Failed to delete original message {}: {}", message.id, e.message)
+        }
+
+        return true
+    }
+
+    private suspend fun getOrCreateWebhook(
+        channel: CategorizableChannelBehavior,
+        kord: Kord,
+    ): Pair<WebhookBehavior, String>? {
+        val cached = webhookCache[channel.id]
+        if (cached != null) {
+            val (id, token) = cached
+            val webhook = runCatching { kord.getWebhookWithTokenOrNull(id, token) }.getOrNull()
+            if (webhook != null) {
+                return Pair(webhook, token)
+            }
+            webhookCache.remove(channel.id)
+        }
+
+        // Find existing webhook created by Luna or named "Luna Preview"
+        val existing =
+            runCatching {
+                channel.webhooks.firstOrNull { it.creatorId == kord.selfId && it.token != null }
+                    ?: channel.webhooks.firstOrNull { it.name == "Luna Preview" && it.token != null }
+            }.getOrNull()
+
+        if (existing != null && existing.token != null) {
+            webhookCache[channel.id] = existing.id to existing.token!!
+            return Pair(existing, existing.token!!)
+        }
+
+        // Create new webhook
+        val created =
+            runCatching {
+                channel.createWebhook(name = "Luna Preview")
+            }.getOrNull()
+
+        if (created != null && created.token != null) {
+            webhookCache[channel.id] = created.id to created.token!!
+            return Pair(created, created.token!!)
+        }
+
+        return null
+    }
+
+    /**
+     * Shared preview embed builder used for both Webhook execution and normal fallback message execution.
+     */
+    private fun MessageBuilder.populatePreviewEmbeds(
+        post: PeekPost,
+        targetUrl: String,
+        mediaImageUrls: List<String>,
+    ) {
+        embed {
+            val platformName = post.platform.displayName
+            val platformColor = getPlatformColor(post.platform)
+
+            color = platformColor
+
+            if (post.platform == Platform.REDDIT) {
+                // Reddit: author field shows Subreddit link, author is placed at the bottom
+                val subreddit =
+                    post.community
+                        ?: post.rawData["subreddit"]
+                        ?: SUBREDDIT_REGEX.find(targetUrl)?.groupValues?.getOrNull(1)
+                        ?: SUBREDDIT_REGEX.find(post.originalUrl)?.groupValues?.getOrNull(1)
+
+                val redditIcon =
+                    post.communityIcon?.takeIf { it.isNotBlank() }
+                        ?: post.rawData["community_icon"]?.takeIf { it.isNotBlank() }
+                        ?: "https://www.redditstatic.com/shreddit/assets/favicon/192x192.png"
+
+                if (!subreddit.isNullOrBlank()) {
+                    this.author {
+                        name = "r/$subreddit"
+                        this.url = "https://www.reddit.com/r/$subreddit"
+                        icon = redditIcon
+                    }
+                } else {
+                    this.author {
+                        name = "Reddit"
+                        this.url = targetUrl
+                        icon = redditIcon
+                    }
+                }
+            } else {
+                val authorName = post.author.displayName?.takeIf { it.isNotBlank() } ?: post.author.username
+                this.author {
+                    name =
+                        if (authorName != post.author.username) {
+                            "$authorName (@${post.author.username})"
+                        } else {
+                            authorName
+                        }
+                    icon = post.author.avatarUrl
+                    this.url = post.author.profileUrl
+                }
+            }
+
+            // Always ensure a clickable title leading to the post URL across all platforms
+            val postTitle = post.title?.takeIf { it.isNotBlank() }
+            val resolvedTitle =
+                if (postTitle != null) {
+                    postTitle
+                } else {
+                    val authorName = post.author.displayName?.takeIf { it.isNotBlank() } ?: post.author.username
+                    if (authorName.isNotBlank() && authorName != "Unknown") {
+                        "$authorName on ${post.platform.displayName}"
+                    } else {
+                        "${post.platform.displayName} Post"
+                    }
+                }
+
+            title = if (resolvedTitle.length > 250) resolvedTitle.take(247) + "..." else resolvedTitle
+            this.url = targetUrl
+
+            if (post.content.isNotBlank()) {
+                description = truncateContent(post.content)
+            }
+
+            // First image for the main embed
+            if (mediaImageUrls.isNotEmpty()) {
+                image = mediaImageUrls.first()
+            }
+
+            // Metrics and image count in footer (without platform emoji/icon)
+            val metricsText = formatMetrics(post)
+            val imageCountText =
+                when {
+                    mediaImageUrls.size > 10 -> "🖼️ 10/${mediaImageUrls.size} 張圖片"
+                    mediaImageUrls.size > 1 -> "🖼️ ${mediaImageUrls.size} 張圖片"
+                    else -> ""
+                }
+            val footerDetails =
+                listOf(imageCountText, metricsText).filter { it.isNotBlank() }.joinToString(" • ")
+
+            footer {
+                if (post.platform == Platform.REDDIT) {
+                    val authorName = post.author.username.removePrefix("u/")
+                    val authorInfo = "u/$authorName"
+                    text =
+                        when {
+                            footerDetails.isNotEmpty() -> "$platformName • Posted by $authorInfo • $footerDetails"
+                            else -> "$platformName • Posted by $authorInfo"
+                        }
+                } else {
+                    text =
+                        if (footerDetails.isNotEmpty()) {
+                            "$platformName • $footerDetails"
+                        } else {
+                            platformName
+                        }
+                }
+            }
+
+            post.createdAtEpochSeconds?.let { epoch ->
+                timestamp = kotlin.time.Instant.fromEpochSeconds(epoch)
+            }
+        }
+
+        // If post has multiple images, add secondary embeds with the same url to form a Discord Image Gallery (up to Discord's maximum 10 embeds)
+        if (mediaImageUrls.size > 1) {
+            val maxEmbeds = minOf(mediaImageUrls.size, 10)
+            for (i in 1 until maxEmbeds) {
+                embed {
+                    this.url = targetUrl
+                    image = mediaImageUrls[i]
+                }
+            }
         }
     }
 
