@@ -1,0 +1,17 @@
+services:
+  luna:
+    # 若要自行由源碼構建，請取消 build 區塊註解：
+    build:
+      context: .
+      dockerfile: Dockerfile
+    # 若直接拉取 GitHub Packages (GHCR) 已發布之映像檔，可使用下列 image (將 0owoodendooro0 換為您的 GitHub 帳號)：
+    image: ghcr.io/0owoodendooro0/luna:latest
+    container_name: luna-bot
+    restart: unless-stopped
+    ports:
+      - "${PORT:-8080}:8080"
+    env_file:
+      - .env
+    volumes:
+      # 持久化保存 SQLite 資料庫 (urls.db) 與運行日誌 (logs/)
+      - ./data:/app/data

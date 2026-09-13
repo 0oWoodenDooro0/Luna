@@ -32,6 +32,7 @@ import java.io.InputStream
 
 @OptIn(PrivilegedIntent::class)
 suspend fun main() {
+    File("data").mkdirs()
     val db = Database.connect("jdbc:sqlite:data/urls.db", driver = "org.sqlite.JDBC")
     val storage = ExposedUrlStorage(database = db)
     val userStorage = UserStorage(db)
