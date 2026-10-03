@@ -298,14 +298,22 @@ object SocialPreviewService {
         var currentPair = webhookPair
         val executeResult =
             runCatching {
-                currentPair.first.execute(currentPair.second, threadId, webhookExecuteBlock)
+                currentPair.first.execute(
+                    token = currentPair.second,
+                    threadId = threadId,
+                    builder = webhookExecuteBlock,
+                )
             }
 
         if (executeResult.isFailure) {
             webhookCache.remove(webhookChannel.id)
             val retryPair = getOrCreateWebhook(webhookChannel, kord) ?: return false
             currentPair = retryPair
-            currentPair.first.execute(currentPair.second, threadId, webhookExecuteBlock)
+            currentPair.first.execute(
+                token = currentPair.second,
+                threadId = threadId,
+                builder = webhookExecuteBlock,
+            )
         }
 
         // Delete the original message now that the replacement has been posted
@@ -368,7 +376,7 @@ object SocialPreviewService {
     ) {
         embed {
             val platformName = post.platform.displayName
-            val platformColor = getPlatformColor(post.platform)
+            val platformColor = Color(post.platform.brandColorHex)
 
             color = platformColor
 
@@ -383,6 +391,7 @@ object SocialPreviewService {
                 val redditIcon =
                     post.communityIcon?.takeIf { it.isNotBlank() }
                         ?: post.rawData["community_icon"]?.takeIf { it.isNotBlank() }
+                        ?: post.platform.defaultIconUrl
                         ?: "https://www.redditstatic.com/shreddit/assets/favicon/192x192.png"
 
                 if (!subreddit.isNullOrBlank()) {
@@ -563,16 +572,5 @@ object SocialPreviewService {
             count >= 1_000_000 -> String.format("%.1fM", count / 1_000_000.0)
             count >= 1_000 -> String.format("%.1fK", count / 1_000.0)
             else -> count.toString()
-        }
-
-    private fun getPlatformColor(platform: Platform): Color =
-        when (platform) {
-            Platform.X -> Color(0x1DA1F2)
-            Platform.THREADS -> Color(0x000000)
-            Platform.INSTAGRAM -> Color(0xE1306C)
-            Platform.REDDIT -> Color(0xFF4500)
-            Platform.BILIBILI -> Color(0x00AEEC)
-            Platform.YOUTUBE -> Color(0xFF0000)
-            Platform.GENERIC -> Color(0x5865F2)
         }
 }

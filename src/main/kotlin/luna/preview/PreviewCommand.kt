@@ -24,12 +24,9 @@ class PreviewCommand(
                 string("platform", "選擇要設定的社群平台") {
                     required = true
                     choice("全部平台 (總開關)", "ALL")
-                    choice("X (Twitter)", "X")
-                    choice("Bilibili", "BILIBILI")
-                    choice("Threads", "THREADS")
-                    choice("Instagram", "INSTAGRAM")
-                    choice("Reddit", "REDDIT")
-                    choice("YouTube", "YOUTUBE")
+                    Platform.entries.filter { it != Platform.GENERIC }.forEach { platform ->
+                        choice(platform.displayName, platform.name)
+                    }
                 }
                 boolean("enabled", "是否開啟預覽") {
                     required = true
@@ -81,21 +78,13 @@ class PreviewCommand(
                 val cleanUrlEnabled = storage.isCleanUrlEnabled(guildId)
                 val webhookReplaceEnabled = storage.isWebhookReplaceEnabled(guildId)
 
-                val platforms =
-                    listOf(
-                        Platform.X to "X (Twitter)",
-                        Platform.BILIBILI to "Bilibili",
-                        Platform.THREADS to "Threads",
-                        Platform.INSTAGRAM to "Instagram",
-                        Platform.REDDIT to "Reddit",
-                        Platform.YOUTUBE to "YouTube",
-                    )
+                val platforms = Platform.entries.filter { it != Platform.GENERIC }
 
                 val statusLines =
-                    platforms.joinToString("\n") { (platform, displayName) ->
+                    platforms.joinToString("\n") { platform ->
                         val isEnabled = guildEnabled && !disabled.contains(platform)
                         val icon = if (isEnabled) "✅" else "❌"
-                        "- $icon **$displayName**"
+                        "- $icon **${platform.displayName}**"
                     }
 
                 val totalStatus = if (guildEnabled) "✅ 開啟" else "❌ 停用"

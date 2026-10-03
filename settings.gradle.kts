@@ -5,9 +5,18 @@ rootProject.name = "Luna"
 
 val localSocialPeek = file("../SocialPeek")
 
-val isLocal = providers.gradleProperty("local").isPresent ||
+val forceRemote = providers.gradleProperty("remote").isPresent ||
+    providers.gradleProperty("useLocalSocialPeek").orNull == "false" ||
+    providers.environmentVariable("USE_LOCAL_SOCIAL_PEEK").orNull == "false"
+
+val isLocal = !forceRemote && (
+    localSocialPeek.exists() ||
+    providers.gradleProperty("local").isPresent ||
     providers.gradleProperty("localSocialPeek").isPresent ||
-    providers.gradleProperty("useLocalSocialPeek").orNull == "true"
+    providers.gradleProperty("useLocalSocialPeek").orNull == "true" ||
+    providers.environmentVariable("USE_LOCAL_SOCIAL_PEEK").orNull == "true" ||
+    providers.environmentVariable("LOCAL_SOCIAL_PEEK").orNull == "true"
+)
 
 val useLocal = isLocal && localSocialPeek.exists()
 
@@ -26,6 +35,7 @@ dependencyResolutionManagement {
     repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
     repositories {
         mavenCentral()
+        maven { url = uri("https://snapshots.kord.dev") }
         maven { url = uri("https://jitpack.io") }
     }
 }

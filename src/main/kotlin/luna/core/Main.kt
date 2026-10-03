@@ -94,7 +94,11 @@ suspend fun main() {
 
     // Start Ktor server in a background coroutine
     CoroutineScope(Dispatchers.Default).launch {
-        server.start(wait = true)
+        try {
+            server.start(wait = true)
+        } catch (e: Exception) {
+            System.err.println("⚠️ Ktor HTTP 伺服器啟動失敗（Port $serverPort 可能已被佔用）：${e.message}")
+        }
     }
 
     val kord = Kord(System.getenv("DISCORD_TOKEN") ?: error("Missing discord token"))
