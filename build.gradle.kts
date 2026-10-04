@@ -46,3 +46,17 @@ tasks.test {
     useJUnitPlatform()
     systemProperty("net.bytebuddy.experimental", "true")
 }
+
+tasks.jar {
+    manifest {
+        attributes["Main-Class"] = "luna.core.MainKt"
+    }
+
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+
+    from(configurations.runtimeClasspath.map { configuration ->
+        configuration.map { if (it.isDirectory) it else zipTree(it) }
+    }) {
+        exclude("META-INF/*.SF", "META-INF/*.DSA", "META-INF/*.RSA")
+    }
+}
