@@ -200,6 +200,212 @@ class ThreadsResolverTest {
     }
 
     @Test
+    fun `resolve should extract video and preview image from quoted attachment post`() = runTest {
+        val scriptJson = """
+        {
+            "require": [
+                ["RelayPrefetchedStreamCache", "next", [], [{
+                    "__bbox": {
+                        "result": {
+                            "data": {
+                                "media": {
+                                    "code": "DeynNaEmZHj",
+                                    "user": {
+                                        "username": "ou.omar.71",
+                                        "full_name": "嘎",
+                                        "profile_pic_url": "https://instagram.fbcdn.net/avatar.jpg",
+                                        "is_verified": false
+                                    },
+                                    "caption": { "text": "留起來吵朋友" },
+                                    "like_count": 497,
+                                    "taken_at": 1792659670,
+                                    "text_post_app_info": {
+                                        "direct_reply_count": 6,
+                                        "repost_count": 57,
+                                        "share_info": {
+                                            "quoted_attachment_post": {
+                                                "code": "Dexy6YlCk-N",
+                                                "original_width": 768,
+                                                "original_height": 576,
+                                                "video_versions": [
+                                                    { "type": 101, "url": "https://cdn.threads.net/video.mp4" }
+                                                ],
+                                                "image_versions2": {
+                                                    "candidates": [
+                                                        { "url": "https://cdn.threads.net/cover.jpg", "width": 640, "height": 480 }
+                                                    ]
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }]]
+            ]
+        }
+        """.trimIndent()
+
+        val pageHtml = """
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <meta property="og:title" content="嘎 (@ou.omar.71) on Threads" />
+            <meta property="og:description" content="留起來吵朋友" />
+            <meta property="og:image" content="https://instagram.fbcdn.net/avatar.jpg?efg=profile_pic" />
+            <script type="application/json">$scriptJson</script>
+        </head>
+        </html>
+        """.trimIndent()
+
+        val client = createMockHttpClient {
+            htmlResponse(pageHtml)
+        }
+
+        val post = resolver.resolve("https://www.threads.net/@ou.omar.71/post/DeynNaEmZHj", client)
+
+        assertEquals("DeynNaEmZHj", post.id)
+        assertEquals("ou.omar.71", post.author.username)
+        assertEquals("嘎", post.author.displayName)
+        assertEquals("留起來吵朋友", post.content)
+        assertEquals(1, post.media.size)
+        assertTrue(post.media.first() is Media.Video)
+        val video = post.media.first() as Media.Video
+        assertEquals("https://cdn.threads.net/video.mp4", video.url)
+        assertEquals("https://cdn.threads.net/cover.jpg", video.previewUrl)
+        assertEquals(640, video.width)
+        assertEquals(480, video.height)
+        assertEquals(497L, post.metrics?.likes)
+        assertEquals(6L, post.metrics?.comments)
+        assertEquals(57L, post.metrics?.reposts)
+        assertEquals(1792659670L, post.createdAtEpochSeconds)
+    }
+
+    @Test
+    fun `resolve should extract direct video post with poster preview and dimensions`() = runTest {
+        val scriptJson = """
+        {
+            "require": [
+                ["RelayPrefetchedStreamCache", "next", [], [{
+                    "__bbox": {
+                        "result": {
+                            "data": {
+                                "media": {
+                                    "code": "DirectVideo123",
+                                    "user": {
+                                        "username": "videocreator",
+                                        "full_name": "Video Creator",
+                                        "profile_pic_url": "https://instagram.fbcdn.net/avatar.jpg"
+                                    },
+                                    "video_versions": [
+                                        { "type": 101, "url": "https://cdn.threads.net/direct_video.mp4", "width": 1080, "height": 1920 }
+                                    ],
+                                    "image_versions2": {
+                                        "candidates": [
+                                            { "url": "https://cdn.threads.net/direct_preview.jpg", "width": 1080, "height": 1920 }
+                                        ]
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }]]
+            ]
+        }
+        """.trimIndent()
+
+        val pageHtml = """
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <meta property="og:title" content="Video Creator (@videocreator) on Threads" />
+            <meta property="og:description" content="Check out my new video" />
+            <script type="application/json">$scriptJson</script>
+        </head>
+        </html>
+        """.trimIndent()
+
+        val client = createMockHttpClient {
+            htmlResponse(pageHtml)
+        }
+
+        val post = resolver.resolve("https://www.threads.net/@videocreator/post/DirectVideo123", client)
+        assertEquals(1, post.media.size)
+        assertTrue(post.media.first() is Media.Video)
+        val video = post.media.first() as Media.Video
+        assertEquals("https://cdn.threads.net/direct_video.mp4", video.url)
+        assertEquals("https://cdn.threads.net/direct_preview.jpg", video.previewUrl)
+        assertEquals(1080, video.width)
+        assertEquals(1920, video.height)
+    }
+
+    @Test
+    fun `resolve should extract GIPHY gif animation with still preview image`() = runTest {
+        val scriptJson = """
+        {
+            "require": [
+                ["RelayPrefetchedStreamCache", "next", [], [{
+                    "__bbox": {
+                        "result": {
+                            "data": {
+                                "media": {
+                                    "code": "GiphyPost123",
+                                    "user": {
+                                        "username": "giflover",
+                                        "full_name": "GIF Lover",
+                                        "profile_pic_url": "https://instagram.fbcdn.net/avatar.jpg"
+                                    },
+                                    "giphy_media_info": {
+                                        "images": {
+                                            "original": {
+                                                "mp4": "https://media.giphy.com/media/xyz/giphy.mp4",
+                                                "url": "https://media.giphy.com/media/xyz/giphy.gif",
+                                                "width": 480,
+                                                "height": 480
+                                            },
+                                            "original_still": {
+                                                "url": "https://media.giphy.com/media/xyz/giphy_s.jpg",
+                                                "width": 480,
+                                                "height": 480
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }]]
+            ]
+        }
+        """.trimIndent()
+
+        val pageHtml = """
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <meta property="og:title" content="GIF Lover (@giflover) on Threads" />
+            <meta property="og:description" content="Mood today" />
+            <script type="application/json">$scriptJson</script>
+        </head>
+        </html>
+        """.trimIndent()
+
+        val client = createMockHttpClient {
+            htmlResponse(pageHtml)
+        }
+
+        val post = resolver.resolve("https://www.threads.net/@giflover/post/GiphyPost123", client)
+        assertEquals(1, post.media.size)
+        assertTrue(post.media.first() is Media.Video)
+        val gifMedia = post.media.first() as Media.Video
+        assertEquals("https://media.giphy.com/media/xyz/giphy.mp4", gifMedia.url)
+        assertEquals("https://media.giphy.com/media/xyz/giphy_s.jpg", gifMedia.previewUrl)
+        assertEquals(480, gifMedia.width)
+        assertEquals(480, gifMedia.height)
+    }
+
+    @Test
     fun `resolve should handle threads share link redirect`() = runTest {
         val pageHtml = """
         <!DOCTYPE html>

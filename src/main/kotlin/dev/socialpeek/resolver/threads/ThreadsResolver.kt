@@ -81,7 +81,8 @@ class ThreadsResolver : PlatformResolver {
         }
 
         val (username, initialDisplayName) = extractUser(ogTitle, urlUsername)
-        val scriptAuthor = MetaMediaExtractor.extractAuthor(html, username)
+        val postDetails = MetaMediaExtractor.extractPostDetails(html, postId, username)
+        val scriptAuthor = postDetails?.author ?: MetaMediaExtractor.extractAuthor(html, username)
 
         var avatarUrl = scriptAuthor?.avatarUrl
         if (avatarUrl == null) {
@@ -90,36 +91,40 @@ class ThreadsResolver : PlatformResolver {
 
         val displayName = scriptAuthor?.displayName ?: initialDisplayName ?: username
         val isVerified = scriptAuthor?.isVerified ?: false
-        val content = ogDescription ?: ""
+        val content = ogDescription ?: postDetails?.content ?: ""
         val mediaList = mutableListOf<Media>()
 
-        // 1. Try extracting multi-image/video carousel from Meta SSR script
-        val carouselMedia = MetaMediaExtractor.extractCarouselMedia(html)
-        if (carouselMedia.isNotEmpty()) {
-            mediaList.addAll(carouselMedia)
+        // 1. Try extracting rich media (single video, quote post video/images, carousel, giphy) from Meta SSR script
+        if (postDetails != null && postDetails.media.isNotEmpty()) {
+            mediaList.addAll(postDetails.media)
         } else {
-            // 2. Fallback to OpenGraph tags
-            if (!ogVideo.isNullOrBlank()) {
-                val preview = ogImages.firstOrNull { !isPlatformShareCard(it, ogImageWidth, ogImageHeight, twitterCard) && !isProfilePic(it) }
-                mediaList.add(
-                    Media.Video(
-                        url = ogVideo,
-                        previewUrl = preview
-                    )
-                )
-            } else if (!twitterCard.equals("summary", ignoreCase = true)) {
-                val validImages = ogImages.filter {
-                    !isProfilePic(it) && !isPlatformShareCard(it, ogImageWidth, ogImageHeight, twitterCard)
-                }
-                validImages.forEachIndexed { index, imgUrl ->
+            val carouselMedia = MetaMediaExtractor.extractCarouselMedia(html)
+            if (carouselMedia.isNotEmpty()) {
+                mediaList.addAll(carouselMedia)
+            } else {
+                // 2. Fallback to OpenGraph tags
+                if (!ogVideo.isNullOrBlank()) {
+                    val preview = ogImages.firstOrNull { !isPlatformShareCard(it, ogImageWidth, ogImageHeight, twitterCard) && !isProfilePic(it) }
                     mediaList.add(
-                        Media.Image(
-                            url = imgUrl,
-                            previewUrl = imgUrl,
-                            width = if (index == 0) ogImageWidth else null,
-                            height = if (index == 0) ogImageHeight else null
+                        Media.Video(
+                            url = ogVideo,
+                            previewUrl = preview
                         )
                     )
+                } else if (!twitterCard.equals("summary", ignoreCase = true)) {
+                    val validImages = ogImages.filter {
+                        !isProfilePic(it) && !isPlatformShareCard(it, ogImageWidth, ogImageHeight, twitterCard)
+                    }
+                    validImages.forEachIndexed { index, imgUrl ->
+                        mediaList.add(
+                            Media.Image(
+                                url = imgUrl,
+                                previewUrl = imgUrl,
+                                width = if (index == 0) ogImageWidth else null,
+                                height = if (index == 0) ogImageHeight else null
+                            )
+                        )
+                    }
                 }
             }
         }
@@ -141,7 +146,9 @@ class ThreadsResolver : PlatformResolver {
             cleanUrl = cleanUrl,
             author = author,
             content = content,
-            media = mediaList
+            media = mediaList,
+            metrics = postDetails?.metrics,
+            createdAtEpochSeconds = postDetails?.createdAtEpochSeconds
         )
     }
 

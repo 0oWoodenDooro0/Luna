@@ -98,4 +98,20 @@ class SocialPeekIntegrationTest {
         assertEquals("https://www.facebook.com/lolSEA2016", post.author.profileUrl)
         assertTrue(post.media.isNotEmpty())
     }
+
+    @Test
+    fun `peek should resolve live Threads post with video and preview`() = runTest {
+        val post = SocialPeek.peek("https://www.threads.net/@ou.omar.71/post/DeynNaEmZHj")
+        assertEquals(Platform.THREADS, post.platform)
+        assertEquals("DeynNaEmZHj", post.id)
+        assertEquals("ou.omar.71", post.author.username)
+        assertEquals("嘎", post.author.displayName)
+        assertEquals("留起來吵朋友", post.content)
+        assertTrue(post.media.isNotEmpty())
+        val video = post.media.first() as Media.Video
+        assertTrue(video.url.contains(".mp4"))
+        assertNotNull(video.previewUrl)
+        assertTrue(video.previewUrl.contains("cdninstagram.com"))
+        assertNotNull(post.createdAtEpochSeconds)
+    }
 }
