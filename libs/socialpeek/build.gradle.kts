@@ -4,8 +4,8 @@ plugins {
     `maven-publish`
 }
 
-group = "com.github.0oWoodenDooro0"
-version = "0.5.0"
+group = "com.github.0oWoodenDooro0.Luna"
+version = rootProject.version.toString()
 
 val ktorVersion = "3.5.2"
 val serializationVersion = "1.11.0"
@@ -55,7 +55,7 @@ publishing {
             pom {
                 name.set("SocialPeek")
                 description.set("A pure Kotlin multi-platform social media post metadata and media parser")
-                url.set("https://github.com/0oWoodenDooro0/SocialPeek")
+                url.set("https://github.com/0oWoodenDooro0/Luna")
                 licenses {
                     license {
                         name.set("The Apache License, Version 2.0")
