@@ -7,24 +7,29 @@ import io.ktor.client.request.*
 import io.ktor.http.*
 
 fun createMockHttpClient(handler: suspend MockRequestHandleScope.(HttpRequestData) -> HttpResponseData): SocialPeekHttpClient {
-    val mockEngine = MockEngine { request ->
-        handler(request)
-    }
+    val mockEngine =
+        MockEngine { request ->
+            handler(request)
+        }
     return KtorSocialPeekHttpClient(engine = mockEngine)
 }
 
-fun MockRequestHandleScope.jsonResponse(content: String, status: HttpStatusCode = HttpStatusCode.OK): HttpResponseData {
-    return respond(
+fun MockRequestHandleScope.jsonResponse(
+    content: String,
+    status: HttpStatusCode = HttpStatusCode.OK,
+): HttpResponseData =
+    respond(
         content = content,
         status = status,
-        headers = headersOf(HttpHeaders.ContentType, "application/json; charset=utf-8")
+        headers = headersOf(HttpHeaders.ContentType, "application/json; charset=utf-8"),
     )
-}
 
-fun MockRequestHandleScope.htmlResponse(content: String, status: HttpStatusCode = HttpStatusCode.OK): HttpResponseData {
-    return respond(
+fun MockRequestHandleScope.htmlResponse(
+    content: String,
+    status: HttpStatusCode = HttpStatusCode.OK,
+): HttpResponseData =
+    respond(
         content = content,
         status = status,
-        headers = headersOf(HttpHeaders.ContentType, "text/html; charset=utf-8")
+        headers = headersOf(HttpHeaders.ContentType, "text/html; charset=utf-8"),
     )
-}

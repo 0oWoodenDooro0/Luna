@@ -33,3 +33,6 @@ jobs:
 
       - name: Run checks and tests
         run: ./gradlew check test --no-daemon
+
+      - name: Verify Docker build
+        run: docker build -t luna:ci-test .

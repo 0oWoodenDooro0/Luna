@@ -12,65 +12,73 @@ import kotlinx.serialization.json.*
 import org.jsoup.Jsoup
 
 class RedditResolver : PlatformResolver {
-
     override val platform: Platform = Platform.REDDIT
 
-    private val json = Json {
-        ignoreUnknownKeys = true
-        isLenient = true
-    }
+    private val json =
+        Json {
+            ignoreUnknownKeys = true
+            isLenient = true
+        }
 
-    private val redditCommentsPattern = Regex(
-        """https?://(?:(?:www\.|old\.|new\.)?reddit\.com/(?:r/([a-zA-Z0-9_]+)/)?comments/|redd\.it/)([a-zA-Z0-9]+)""",
-        RegexOption.IGNORE_CASE
-    )
+    private val redditCommentsPattern =
+        Regex(
+            """https?://(?:(?:www\.|old\.|new\.)?reddit\.com/(?:r/([a-zA-Z0-9_]+)/)?comments/|redd\.it/)([a-zA-Z0-9]+)""",
+            RegexOption.IGNORE_CASE,
+        )
 
-    private val redditSharePattern = Regex(
-        """https?://(?:(?:www\.|old\.|new\.)?reddit\.com/(?:r/[a-zA-Z0-9_]+/)?s/|redd\.it/s/)([a-zA-Z0-9]+)""",
-        RegexOption.IGNORE_CASE
-    )
+    private val redditSharePattern =
+        Regex(
+            """https?://(?:(?:www\.|old\.|new\.)?reddit\.com/(?:r/[a-zA-Z0-9_]+/)?s/|redd\.it/s/)([a-zA-Z0-9]+)""",
+            RegexOption.IGNORE_CASE,
+        )
 
     companion object {
-        val REDDIT_HEADERS = mapOf(
-            HttpHeaders.UserAgent to KtorSocialPeekHttpClient.BOT_USER_AGENT
-        )
+        val REDDIT_HEADERS =
+            mapOf(
+                HttpHeaders.UserAgent to KtorSocialPeekHttpClient.BOT_USER_AGENT,
+            )
 
         private val JsonElement?.asJsonObject: JsonObject? get() = this as? JsonObject
         private val JsonElement?.asJsonArray: JsonArray? get() = this as? JsonArray
         private val JsonElement?.asJsonPrimitive: JsonPrimitive? get() = this as? JsonPrimitive
     }
 
-    override fun canResolve(url: String): Boolean {
-        return redditCommentsPattern.containsMatchIn(url) || redditSharePattern.containsMatchIn(url)
-    }
+    override fun canResolve(url: String): Boolean = redditCommentsPattern.containsMatchIn(url) || redditSharePattern.containsMatchIn(url)
 
-    override suspend fun resolve(url: String, client: SocialPeekHttpClient): PeekPost {
+    override suspend fun resolve(
+        url: String,
+        client: SocialPeekHttpClient,
+    ): PeekPost {
         var currentUrl = url
 
         // Handle short share links if matched
         if (redditSharePattern.containsMatchIn(url) && !redditCommentsPattern.containsMatchIn(url)) {
-            currentUrl = try {
-                client.resolveFinalUrl(url, REDDIT_HEADERS)
-            } catch (e: Exception) {
-                url
+            currentUrl =
+                try {
+                    client.resolveFinalUrl(url, REDDIT_HEADERS)
+                } catch (e: Exception) {
+                    url
+                }
+        }
+
+        val (urlSubreddit, postId) =
+            extractSubredditAndPostId(currentUrl)
+                ?: throw ParsingException(currentUrl, "Could not extract Reddit post ID from URL: $currentUrl")
+
+        val canonicalPathUrl =
+            if (urlSubreddit != null) {
+                "https://www.reddit.com/r/$urlSubreddit/comments/$postId/"
+            } else {
+                "https://www.reddit.com/comments/$postId/"
             }
-        }
-
-        val (urlSubreddit, postId) = extractSubredditAndPostId(currentUrl)
-            ?: throw ParsingException(currentUrl, "Could not extract Reddit post ID from URL: $currentUrl")
-
-        val canonicalPathUrl = if (urlSubreddit != null) {
-            "https://www.reddit.com/r/$urlSubreddit/comments/$postId/"
-        } else {
-            "https://www.reddit.com/comments/$postId/"
-        }
 
         // 1. Primary: Try direct JSON API via api.reddit.com or www.reddit.com
-        val jsonUrls = listOfNotNull(
-            if (urlSubreddit != null) "https://api.reddit.com/r/$urlSubreddit/comments/$postId" else null,
-            "https://api.reddit.com/comments/$postId",
-            "https://www.reddit.com/comments/$postId.json"
-        )
+        val jsonUrls =
+            listOfNotNull(
+                if (urlSubreddit != null) "https://api.reddit.com/r/$urlSubreddit/comments/$postId" else null,
+                "https://api.reddit.com/comments/$postId",
+                "https://www.reddit.com/comments/$postId.json",
+            )
         for (jsonUrl in jsonUrls) {
             try {
                 val responseText = client.get(jsonUrl, REDDIT_HEADERS)
@@ -81,7 +89,14 @@ class RedditResolver : PlatformResolver {
         }
 
         // 2. Fallback: oEmbed + Bot HTML scraping
-        return resolveFallback(postId, originalUrl = url, currentUrl = currentUrl, canonicalPathUrl = canonicalPathUrl, urlSubreddit = urlSubreddit, client = client)
+        return resolveFallback(
+            postId,
+            originalUrl = url,
+            currentUrl = currentUrl,
+            canonicalPathUrl = canonicalPathUrl,
+            urlSubreddit = urlSubreddit,
+            client = client,
+        )
     }
 
     private fun extractSubredditAndPostId(url: String): Pair<String?, String>? {
@@ -107,29 +122,37 @@ class RedditResolver : PlatformResolver {
         fallbackPostId: String,
         originalUrl: String,
         currentUrl: String,
-        client: SocialPeekHttpClient
+        client: SocialPeekHttpClient,
     ): PeekPost {
-        val root = try {
-            json.parseToJsonElement(jsonText)
-        } catch (e: Exception) {
-            throw ParsingException(originalUrl, "Failed to parse Reddit JSON response", e)
-        }
+        val root =
+            try {
+                json.parseToJsonElement(jsonText)
+            } catch (e: Exception) {
+                throw ParsingException(originalUrl, "Failed to parse Reddit JSON response", e)
+            }
 
-        val jsonArray = root as? JsonArray
-            ?: throw PostNotFoundException(originalUrl, "Unexpected Reddit API format")
+        val jsonArray =
+            root as? JsonArray
+                ?: throw PostNotFoundException(originalUrl, "Unexpected Reddit API format")
 
         if (jsonArray.isEmpty()) {
             throw PostNotFoundException(originalUrl, "Empty response from Reddit API")
         }
 
         val listing = jsonArray[0].asJsonObject
-        val children = listing?.get("data")?.asJsonObject?.get("children")?.asJsonArray
+        val children =
+            listing
+                ?.get("data")
+                ?.asJsonObject
+                ?.get("children")
+                ?.asJsonArray
         if (children.isNullOrEmpty()) {
             throw PostNotFoundException(originalUrl, "Post not found in Reddit listing")
         }
 
-        val postData = children[0].asJsonObject?.get("data")?.asJsonObject
-            ?: throw PostNotFoundException(originalUrl, "Post data missing")
+        val postData =
+            children[0].asJsonObject?.get("data")?.asJsonObject
+                ?: throw PostNotFoundException(originalUrl, "Post data missing")
 
         val id = postData["id"]?.asJsonPrimitive?.contentOrNull ?: fallbackPostId
         val authorName = postData["author"]?.asJsonPrimitive?.contentOrNull ?: "unknown"
@@ -144,12 +167,13 @@ class RedditResolver : PlatformResolver {
 
         val communityIcon = subreddit?.let { fetchSubredditIcon(it, client) }
 
-        val author = Author(
-            id = authorFullname,
-            username = authorName,
-            displayName = "u/$authorName",
-            profileUrl = "https://www.reddit.com/user/$authorName"
-        )
+        val author =
+            Author(
+                id = authorFullname,
+                username = authorName,
+                displayName = "u/$authorName",
+                profileUrl = "https://www.reddit.com/user/$authorName",
+            )
 
         val mediaList = mutableListOf<Media>()
 
@@ -169,8 +193,18 @@ class RedditResolver : PlatformResolver {
             val height = videoObj["height"]?.asJsonPrimitive?.intOrNull
 
             val previewImages = postData["preview"]?.asJsonObject?.get("images")?.asJsonArray
-            val previewSource = previewImages?.firstOrNull()?.asJsonObject?.get("source")?.asJsonObject
-            val previewUrl = previewSource?.get("url")?.asJsonPrimitive?.contentOrNull?.replace("&amp;", "&")
+            val previewSource =
+                previewImages
+                    ?.firstOrNull()
+                    ?.asJsonObject
+                    ?.get("source")
+                    ?.asJsonObject
+            val previewUrl =
+                previewSource
+                    ?.get("url")
+                    ?.asJsonPrimitive
+                    ?.contentOrNull
+                    ?.replace("&amp;", "&")
 
             val videoUrl = fallbackUrl ?: hlsUrl
             if (!videoUrl.isNullOrBlank()) {
@@ -180,8 +214,8 @@ class RedditResolver : PlatformResolver {
                         previewUrl = previewUrl,
                         durationSeconds = duration,
                         width = width,
-                        height = height
-                    )
+                        height = height,
+                    ),
                 )
             }
         } else {
@@ -191,14 +225,29 @@ class RedditResolver : PlatformResolver {
             val mediaMetadata = postData["media_metadata"]?.asJsonObject
 
             if (mediaMetadata != null && (isGallery || galleryData != null || mediaMetadata.isNotEmpty())) {
-                val mediaIds = galleryData?.mapNotNull { it.asJsonObject?.get("media_id")?.asJsonPrimitive?.contentOrNull }
-                    ?: mediaMetadata.keys.toList()
+                val mediaIds =
+                    galleryData?.mapNotNull {
+                        it.asJsonObject
+                            ?.get("media_id")
+                            ?.asJsonPrimitive
+                            ?.contentOrNull
+                    }
+                        ?: mediaMetadata.keys.toList()
 
                 mediaIds.forEach { mediaId ->
                     val meta = mediaMetadata[mediaId]?.asJsonObject
                     val s = meta?.get("s")?.asJsonObject
-                    val imgUrl = s?.get("u")?.asJsonPrimitive?.contentOrNull?.replace("&amp;", "&")
-                        ?: s?.get("gif")?.asJsonPrimitive?.contentOrNull?.replace("&amp;", "&")
+                    val imgUrl =
+                        s
+                            ?.get("u")
+                            ?.asJsonPrimitive
+                            ?.contentOrNull
+                            ?.replace("&amp;", "&")
+                            ?: s
+                                ?.get("gif")
+                                ?.asJsonPrimitive
+                                ?.contentOrNull
+                                ?.replace("&amp;", "&")
                     val width = s?.get("x")?.asJsonPrimitive?.intOrNull
                     val height = s?.get("y")?.asJsonPrimitive?.intOrNull
 
@@ -208,8 +257,8 @@ class RedditResolver : PlatformResolver {
                                 url = imgUrl,
                                 previewUrl = imgUrl,
                                 width = width,
-                                height = height
-                            )
+                                height = height,
+                            ),
                         )
                     }
                 }
@@ -219,23 +268,34 @@ class RedditResolver : PlatformResolver {
             if (mediaList.isEmpty()) {
                 val postUrl = postData["url"]?.asJsonPrimitive?.contentOrNull
                 val previewImages = postData["preview"]?.asJsonObject?.get("images")?.asJsonArray
-                val firstPreview = previewImages?.firstOrNull()?.asJsonObject?.get("source")?.asJsonObject
+                val firstPreview =
+                    previewImages
+                        ?.firstOrNull()
+                        ?.asJsonObject
+                        ?.get("source")
+                        ?.asJsonObject
 
                 if (postUrl != null && !isPlatformPreviewOrAsset(postUrl) && (
                         postUrl.contains("i.redd.it") ||
-                        postUrl.contains("preview.redd.it") ||
-                        postUrl.endsWith(".jpg") || postUrl.endsWith(".jpeg") ||
-                        postUrl.endsWith(".png") || postUrl.endsWith(".webp")
-                    )) {
+                            postUrl.contains("preview.redd.it") ||
+                            postUrl.endsWith(".jpg") || postUrl.endsWith(".jpeg") ||
+                            postUrl.endsWith(".png") || postUrl.endsWith(".webp")
+                    )
+                ) {
                     val width = firstPreview?.get("width")?.asJsonPrimitive?.intOrNull
                     val height = firstPreview?.get("height")?.asJsonPrimitive?.intOrNull
                     mediaList.add(
                         Media.Image(
                             url = postUrl,
-                            previewUrl = firstPreview?.get("url")?.asJsonPrimitive?.contentOrNull?.replace("&amp;", "&") ?: postUrl,
+                            previewUrl =
+                                firstPreview
+                                    ?.get("url")
+                                    ?.asJsonPrimitive
+                                    ?.contentOrNull
+                                    ?.replace("&amp;", "&") ?: postUrl,
                             width = width,
-                            height = height
-                        )
+                            height = height,
+                        ),
                     )
                 }
             }
@@ -249,7 +309,14 @@ class RedditResolver : PlatformResolver {
             rawMap["community_icon"] = communityIcon
         }
 
-        val targetUrl = if (currentUrl != originalUrl) currentUrl else (if (!permalink.isNullOrBlank()) "https://www.reddit.com$permalink" else originalUrl)
+        val targetUrl =
+            if (currentUrl !=
+                originalUrl
+            ) {
+                currentUrl
+            } else {
+                (if (!permalink.isNullOrBlank()) "https://www.reddit.com$permalink" else originalUrl)
+            }
         val cleanUrl = UrlSanitizer.clean(targetUrl, Platform.REDDIT)
 
         return PeekPost(
@@ -265,7 +332,7 @@ class RedditResolver : PlatformResolver {
             createdAtEpochSeconds = createdUtc,
             community = subreddit,
             communityIcon = communityIcon,
-            rawData = rawMap
+            rawData = rawMap,
         )
     }
 
@@ -275,7 +342,7 @@ class RedditResolver : PlatformResolver {
         currentUrl: String,
         canonicalPathUrl: String,
         urlSubreddit: String?,
-        client: SocialPeekHttpClient
+        client: SocialPeekHttpClient,
     ): PeekPost {
         // 1. Try oEmbed
         var oembedTitle: String? = null
@@ -333,8 +400,9 @@ class RedditResolver : PlatformResolver {
                 }
             }
 
-            val metaDesc = doc.selectFirst("meta[property=og:description]")?.attr("content")
-                ?: doc.selectFirst("meta[name=description]")?.attr("content")
+            val metaDesc =
+                doc.selectFirst("meta[property=og:description]")?.attr("content")
+                    ?: doc.selectFirst("meta[name=description]")?.attr("content")
             if (!metaDesc.isNullOrBlank()) {
                 val descRegex = Regex("""^(?:([0-9,]+)\s*votes?,\s*)?(?:([0-9,]+)\s*comments?\.\s*)?(.*)$""", RegexOption.DOT_MATCHES_ALL)
                 val descMatch = descRegex.find(metaDesc)
@@ -351,8 +419,10 @@ class RedditResolver : PlatformResolver {
                 }
             }
 
-            val ogImages = doc.select("meta[property=og:image]")
-                .mapNotNull { it.attr("content").takeIf { c -> c.isNotBlank() && !isPlatformPreviewOrAsset(c) } }
+            val ogImages =
+                doc
+                    .select("meta[property=og:image]")
+                    .mapNotNull { it.attr("content").takeIf { c -> c.isNotBlank() && !isPlatformPreviewOrAsset(c) } }
             scrapedImages.addAll(ogImages)
 
             scrapedVideo = doc.selectFirst("meta[property=og:video]")?.attr("content")
@@ -371,27 +441,28 @@ class RedditResolver : PlatformResolver {
             throw PostNotFoundException(canonicalPathUrl, "Reddit post not found or could not be resolved: $canonicalPathUrl")
         }
 
-        val author = Author(
-            username = finalAuthorName,
-            displayName = "u/$finalAuthorName",
-            profileUrl = "https://www.reddit.com/user/$finalAuthorName"
-        )
+        val author =
+            Author(
+                username = finalAuthorName,
+                displayName = "u/$finalAuthorName",
+                profileUrl = "https://www.reddit.com/user/$finalAuthorName",
+            )
 
         val mediaList = mutableListOf<Media>()
         if (!scrapedVideo.isNullOrBlank()) {
             mediaList.add(
                 Media.Video(
                     url = scrapedVideo,
-                    previewUrl = scrapedImages.firstOrNull()
-                )
+                    previewUrl = scrapedImages.firstOrNull(),
+                ),
             )
         } else {
             scrapedImages.distinct().forEach { imgUrl ->
                 mediaList.add(
                     Media.Image(
                         url = imgUrl,
-                        previewUrl = imgUrl
-                    )
+                        previewUrl = imgUrl,
+                    ),
                 )
             }
         }
@@ -417,39 +488,53 @@ class RedditResolver : PlatformResolver {
             title = finalTitle ?: "Reddit Post",
             content = scrapedContent,
             media = mediaList,
-            metrics = if (scrapedVotes != null || scrapedComments != null) {
-                Metrics(likes = scrapedVotes, comments = scrapedComments)
-            } else null,
+            metrics =
+                if (scrapedVotes != null || scrapedComments != null) {
+                    Metrics(likes = scrapedVotes, comments = scrapedComments)
+                } else {
+                    null
+                },
             community = foundSubreddit,
             communityIcon = communityIcon,
-            rawData = rawMap
+            rawData = rawMap,
         )
     }
 
     private fun initialSubreddit(subreddit: String?): String? = subreddit
 
-    private suspend fun fetchSubredditIcon(subreddit: String, client: SocialPeekHttpClient): String? {
-        return try {
+    private suspend fun fetchSubredditIcon(
+        subreddit: String,
+        client: SocialPeekHttpClient,
+    ): String? =
+        try {
             val aboutUrl = "https://api.reddit.com/r/$subreddit/about"
             val responseText = client.get(aboutUrl, REDDIT_HEADERS)
             val root = json.parseToJsonElement(responseText).asJsonObject
             val dataObj = root?.get("data")?.asJsonObject
-            val icon = dataObj?.get("community_icon")?.asJsonPrimitive?.contentOrNull?.takeIf { it.isNotBlank() }
-                ?: dataObj?.get("icon_img")?.asJsonPrimitive?.contentOrNull?.takeIf { it.isNotBlank() }
+            val icon =
+                dataObj
+                    ?.get("community_icon")
+                    ?.asJsonPrimitive
+                    ?.contentOrNull
+                    ?.takeIf { it.isNotBlank() }
+                    ?: dataObj
+                        ?.get("icon_img")
+                        ?.asJsonPrimitive
+                        ?.contentOrNull
+                        ?.takeIf { it.isNotBlank() }
             icon?.replace("&amp;", "&")?.takeIf { it.isNotBlank() }
         } catch (_: Exception) {
             null
         }
-    }
 
     private fun isPlatformPreviewOrAsset(url: String): Boolean {
         val lower = url.lowercase()
         return lower.contains("share.redd.it/preview/post/") ||
-                lower.contains("redditstatic.com") ||
-                lower.contains("redditinc.com") ||
-                lower.contains("/shreddit/assets/") ||
-                lower.contains("styles/communityicon") ||
-                lower.contains("styles/bannerbackgroundimage") ||
-                lower.contains("styles/profileicon")
+            lower.contains("redditstatic.com") ||
+            lower.contains("redditinc.com") ||
+            lower.contains("/shreddit/assets/") ||
+            lower.contains("styles/communityicon") ||
+            lower.contains("styles/bannerbackgroundimage") ||
+            lower.contains("styles/profileicon")
     }
 }

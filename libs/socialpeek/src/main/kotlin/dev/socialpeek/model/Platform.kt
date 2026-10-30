@@ -3,7 +3,7 @@ package dev.socialpeek.model
 enum class Platform(
     val displayName: String,
     val brandColorHex: Int = 0x5865F2,
-    val defaultIconUrl: String? = null
+    val defaultIconUrl: String? = null,
 ) {
     FACEBOOK("Facebook", 0x1877F2),
     BILIBILI("Bilibili", 0x00AEEC),
@@ -14,7 +14,7 @@ enum class Platform(
     REDDIT(
         "Reddit",
         0xFF4500,
-        "https://www.redditstatic.com/shreddit/assets/favicon/192x192.png"
+        "https://www.redditstatic.com/shreddit/assets/favicon/192x192.png",
     ),
-    GENERIC("Generic", 0x5865F2);
+    GENERIC("Generic", 0x5865F2),
 }

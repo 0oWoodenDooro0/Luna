@@ -4,12 +4,11 @@ import org.jetbrains.exposed.v1.jdbc.Database
 import kotlin.test.*
 
 class ClickAnalyticsTest {
-
     private fun createTestDatabase(): Database {
         val dbName = "test_analytics_" + System.nanoTime()
         return Database.connect(
             url = "jdbc:h2:mem:$dbName;DB_CLOSE_DELAY=-1",
-            driver = "org.h2.Driver"
+            driver = "org.h2.Driver",
         )
     }
 
@@ -22,7 +21,7 @@ class ClickAnalyticsTest {
 
         val log1 = ClickLog(key = "key1", ip = "127.0.0.1", userAgent = "Mozilla/5.0")
         val log2 = ClickLog(key = "key1", ip = "10.0.0.1", referer = "https://google.com")
-        
+
         storage.recordClickLog(log1)
         storage.recordClickLog(log2)
 
@@ -88,12 +87,12 @@ class ClickAnalyticsTest {
         val service = CurtlyService(storage, enableAuditMode = false)
 
         service.shorten("https://example.com", "key1")
-        
+
         service.resolve(
             key = "key1",
             ip = "1.2.3.4",
             userAgent = "Safari/15",
-            referer = "https://twitter.com"
+            referer = "https://twitter.com",
         )
 
         val logs = service.getClickLogs("key1")

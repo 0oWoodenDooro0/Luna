@@ -16,48 +16,55 @@ import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 class SocialPeekDispatchTest {
+    private val dummyResolver =
+        object : PlatformResolver {
+            override val platform = Platform.X
 
-    private val dummyResolver = object : PlatformResolver {
-        override val platform = Platform.X
-        override fun canResolve(url: String): Boolean = url.contains("x.com") || url.contains("twitter.com")
-        override suspend fun resolve(url: String, client: SocialPeekHttpClient): PeekPost {
-            return PeekPost(
-                platform = Platform.X,
-                id = "12345",
-                originalUrl = url,
-                author = Author(id = "1", username = "dummy", displayName = "Dummy User"),
-                content = "Hello World",
-                media = listOf(Media.Image(url = "https://example.com/img.jpg"))
-            )
+            override fun canResolve(url: String): Boolean = url.contains("x.com") || url.contains("twitter.com")
+
+            override suspend fun resolve(
+                url: String,
+                client: SocialPeekHttpClient,
+            ): PeekPost =
+                PeekPost(
+                    platform = Platform.X,
+                    id = "12345",
+                    originalUrl = url,
+                    author = Author(id = "1", username = "dummy", displayName = "Dummy User"),
+                    content = "Hello World",
+                    media = listOf(Media.Image(url = "https://example.com/img.jpg")),
+                )
         }
-    }
 
     @Test
-    fun `should dispatch url to matching resolver`() = runTest {
-        val client = SocialPeekClient(resolvers = listOf(dummyResolver))
-        val post = client.peek("https://x.com/dummy/status/12345")
-        
-        assertEquals(Platform.X, post.platform)
-        assertEquals("12345", post.id)
-        assertEquals("Hello World", post.content)
-        assertEquals("dummy", post.author.username)
-        assertEquals(1, post.media.size)
-    }
+    fun `should dispatch url to matching resolver`() =
+        runTest {
+            val client = SocialPeekClient(resolvers = listOf(dummyResolver))
+            val post = client.peek("https://x.com/dummy/status/12345")
 
-    @Test
-    fun `should throw UnsupportedPlatformException for unregistered url in peek`() = runTest {
-        val client = SocialPeekClient(resolvers = listOf(dummyResolver))
-        assertFailsWith<UnsupportedPlatformException> {
-            client.peek("https://unknown-platform.com/post/999")
+            assertEquals(Platform.X, post.platform)
+            assertEquals("12345", post.id)
+            assertEquals("Hello World", post.content)
+            assertEquals("dummy", post.author.username)
+            assertEquals(1, post.media.size)
         }
-    }
 
     @Test
-    fun `should return null for unregistered url in peekOrNull`() = runTest {
-        val client = SocialPeekClient(resolvers = listOf(dummyResolver))
-        val result = client.peekOrNull("https://unknown-platform.com/post/999")
-        assertNull(result)
-    }
+    fun `should throw UnsupportedPlatformException for unregistered url in peek`() =
+        runTest {
+            val client = SocialPeekClient(resolvers = listOf(dummyResolver))
+            assertFailsWith<UnsupportedPlatformException> {
+                client.peek("https://unknown-platform.com/post/999")
+            }
+        }
+
+    @Test
+    fun `should return null for unregistered url in peekOrNull`() =
+        runTest {
+            val client = SocialPeekClient(resolvers = listOf(dummyResolver))
+            val result = client.peekOrNull("https://unknown-platform.com/post/999")
+            assertNull(result)
+        }
 
     @Test
     fun `SocialPeek facade should clean tracking URLs and detect tracking params`() {

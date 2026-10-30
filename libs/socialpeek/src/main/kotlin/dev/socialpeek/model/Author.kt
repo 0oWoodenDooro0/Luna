@@ -9,5 +9,5 @@ data class Author(
     val displayName: String? = null,
     val avatarUrl: String? = null,
     val profileUrl: String? = null,
-    val isVerified: Boolean = false
+    val isVerified: Boolean = false,
 )

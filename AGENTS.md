@@ -1,5 +1,10 @@
 # Agent Instructions
 
+## Monorepo modules
+
+- `libs/socialpeek/`: Multi-platform social media post and video metadata resolver library.
+- `libs/curtly/`: Lightweight URL shortening and analytics engine.
+
 ## Agent skills
 
 ### Issue tracker

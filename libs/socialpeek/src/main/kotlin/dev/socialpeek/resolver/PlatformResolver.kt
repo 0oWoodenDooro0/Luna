@@ -15,5 +15,8 @@ interface PlatformResolver {
     /**
      * Resolves the given URL into a unified structured [PeekPost].
      */
-    suspend fun resolve(url: String, client: SocialPeekHttpClient): PeekPost
+    suspend fun resolve(
+        url: String,
+        client: SocialPeekHttpClient,
+    ): PeekPost
 }

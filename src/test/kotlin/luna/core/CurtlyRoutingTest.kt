@@ -25,8 +25,7 @@ import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 class CurtlyRoutingTest {
-    private fun createTestDb(): Database =
-        Database.connect("jdbc:h2:mem:test_${UUID.randomUUID()};DB_CLOSE_DELAY=-1;", driver = "org.h2.Driver")
+    private fun createTestDb(): Database = Database.connect("jdbc:h2:mem:test_${UUID.randomUUID()};DB_CLOSE_DELAY=-1;", driver = "org.h2.Driver")
 
     @Test
     fun testGetHomePage() =

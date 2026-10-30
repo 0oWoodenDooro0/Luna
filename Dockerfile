@@ -7,12 +7,15 @@ WORKDIR /app
 # Copy gradle wrapper and build files first to leverage Docker layer caching
 COPY gradlew gradlew.bat settings.gradle.kts build.gradle.kts gradle.properties ./
 COPY gradle ./gradle
+COPY libs/curtly/build.gradle.kts ./libs/curtly/
+COPY libs/socialpeek/build.gradle.kts ./libs/socialpeek/
 
 # Make gradlew executable and fetch dependencies
 RUN chmod +x gradlew && ./gradlew dependencies --no-daemon || true
 
 # Copy source code
 COPY src ./src
+COPY libs ./libs
 
 # Build the fat jar
 RUN ./gradlew jar --no-daemon

@@ -3,12 +3,11 @@ package com.github._0owoodendooro0.curtly
 import kotlin.test.*
 
 class CurtlyServiceTest {
-
     @Test
     fun testInMemoryUrlStorage() {
         val storage = InMemoryUrlStorage()
         assertNull(storage.get("key1"))
-        
+
         storage.save("key1", "https://google.com")
         assertEquals(UrlEntry("https://google.com"), storage.get("key1"))
         assertEquals(mapOf("key1" to UrlEntry("https://google.com")), storage.getAll())
@@ -34,7 +33,6 @@ class CurtlyServiceTest {
         assertNull(service.getEntry("key2"))
         assertFalse(service.delete("key2"))
     }
-
 
     @Test
     fun testCurtlyServiceUrlNormalization() {

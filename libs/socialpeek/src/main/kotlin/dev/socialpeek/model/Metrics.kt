@@ -8,5 +8,5 @@ data class Metrics(
     val reposts: Long? = null,
     val comments: Long? = null,
     val views: Long? = null,
-    val bookmarks: Long? = null
+    val bookmarks: Long? = null,
 )

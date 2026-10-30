@@ -4,12 +4,11 @@ import org.jetbrains.exposed.v1.jdbc.Database
 import kotlin.test.*
 
 class ExposedUrlStorageTest {
-
     private fun createTestDatabase(): Database {
         val dbName = "test_" + System.nanoTime()
         return Database.connect(
             url = "jdbc:h2:mem:$dbName;DB_CLOSE_DELAY=-1",
-            driver = "org.h2.Driver"
+            driver = "org.h2.Driver",
         )
     }
 
@@ -69,11 +68,12 @@ class ExposedUrlStorageTest {
         val storage = ExposedUrlStorage(database = db)
         val service = CurtlyService(storage, baseUrl = "http://localhost/")
 
-        val shortUrl = service.shorten(
-            longUrl = "https://example.com/long/path",
-            customKey = "exposedKey",
-            maxClicks = 2
-        )
+        val shortUrl =
+            service.shorten(
+                longUrl = "https://example.com/long/path",
+                customKey = "exposedKey",
+                maxClicks = 2,
+            )
         assertEquals("http://localhost/exposedKey", shortUrl)
 
         // 1st click

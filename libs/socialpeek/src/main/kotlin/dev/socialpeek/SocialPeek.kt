@@ -7,7 +7,6 @@ import dev.socialpeek.resolver.PlatformResolver
 import dev.socialpeek.util.UrlSanitizer
 
 object SocialPeek {
-
     /**
      * Default global instance with all standard resolvers.
      */
@@ -48,17 +47,20 @@ object SocialPeek {
         private val customResolvers = mutableListOf<PlatformResolver>()
         private var includeDefaults: Boolean = true
 
-        fun httpClient(client: SocialPeekHttpClient) = apply {
-            this.httpClient = client
-        }
+        fun httpClient(client: SocialPeekHttpClient) =
+            apply {
+                this.httpClient = client
+            }
 
-        fun addResolver(resolver: PlatformResolver) = apply {
-            this.customResolvers.add(resolver)
-        }
+        fun addResolver(resolver: PlatformResolver) =
+            apply {
+                this.customResolvers.add(resolver)
+            }
 
-        fun includeDefaultResolvers(include: Boolean) = apply {
-            this.includeDefaults = include
-        }
+        fun includeDefaultResolvers(include: Boolean) =
+            apply {
+                this.includeDefaults = include
+            }
 
         fun build(): SocialPeekClient {
             val list = mutableListOf<PlatformResolver>()
@@ -68,7 +70,7 @@ object SocialPeek {
             }
             return SocialPeekClient(
                 resolvers = list,
-                httpClient = httpClient ?: KtorSocialPeekHttpClient()
+                httpClient = httpClient ?: KtorSocialPeekHttpClient(),
             )
         }
     }

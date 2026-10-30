@@ -4,53 +4,112 @@ import dev.socialpeek.model.Platform
 import io.ktor.http.*
 
 object UrlSanitizer {
-
-    private val GLOBAL_TRACKING_PARAMS = setOf(
-        // Google / UTM
-        "utm_source", "utm_medium", "utm_campaign", "utm_term", "utm_content", "utm_id", "gclid", "gclsrc",
-        // Meta / Facebook
-        "fbclid", "fbid",
-        // Ads & Referral
-        "ref", "ref_src", "ref_url", "source", "campaign", "affiliate_id", "click_id", "_openstat"
-    )
-
-    private val PLATFORM_BLACKLIST = mapOf(
-        Platform.FACEBOOK to setOf(
-            "mibextid", "share_url", "fs", "rdid", "sfnsn", "paipv", "eav", "feed_story_type",
-            "__tn__", "__cft__", "acontext", "epa", "entry_point", "extid", "notif_t", "notif_id",
-            "substory_index", "checkpoint_src"
-        ),
-        Platform.X to setOf("s", "t", "cn", "ref_src", "ref_url"),
-        Platform.INSTAGRAM to setOf("igsh"),
-        Platform.THREADS to setOf("xmt", "s"),
-        Platform.BILIBILI to setOf(
-            "spm_id_from", "vd_source", "from_source", "from", "is_story_h5", "mid",
-            "share_source", "share_medium", "share_plat", "share_session_id", "share_tag", "unique_k"
-        ),
-        Platform.YOUTUBE to setOf(
-            "si", "feature", "app", "pp", "embeds_referring_euri", "embeds_referring_origin"
-        ),
-        Platform.REDDIT to setOf(
-            "utm_source", "utm_medium", "utm_name", "utm_term", "utm_content", "share_id", "rdt"
+    private val GLOBAL_TRACKING_PARAMS =
+        setOf(
+            // Google / UTM
+            "utm_source",
+            "utm_medium",
+            "utm_campaign",
+            "utm_term",
+            "utm_content",
+            "utm_id",
+            "gclid",
+            "gclsrc",
+            // Meta / Facebook
+            "fbclid",
+            "fbid",
+            // Ads & Referral
+            "ref",
+            "ref_src",
+            "ref_url",
+            "source",
+            "campaign",
+            "affiliate_id",
+            "click_id",
+            "_openstat",
         )
-    )
 
-    private val PLATFORM_WHITELIST = mapOf(
-        Platform.FACEBOOK to setOf("fbid", "story_fbid", "v", "id", "comment_id", "set"),
-        Platform.INSTAGRAM to setOf("img_index"),
-        Platform.BILIBILI to setOf("p", "t"),
-        Platform.YOUTUBE to setOf("v", "t", "list", "index"),
-        Platform.REDDIT to setOf("context")
-    )
+    private val PLATFORM_BLACKLIST =
+        mapOf(
+            Platform.FACEBOOK to
+                setOf(
+                    "mibextid",
+                    "share_url",
+                    "fs",
+                    "rdid",
+                    "sfnsn",
+                    "paipv",
+                    "eav",
+                    "feed_story_type",
+                    "__tn__",
+                    "__cft__",
+                    "acontext",
+                    "epa",
+                    "entry_point",
+                    "extid",
+                    "notif_t",
+                    "notif_id",
+                    "substory_index",
+                    "checkpoint_src",
+                ),
+            Platform.X to setOf("s", "t", "cn", "ref_src", "ref_url"),
+            Platform.INSTAGRAM to setOf("igsh"),
+            Platform.THREADS to setOf("xmt", "s"),
+            Platform.BILIBILI to
+                setOf(
+                    "spm_id_from",
+                    "vd_source",
+                    "from_source",
+                    "from",
+                    "is_story_h5",
+                    "mid",
+                    "share_source",
+                    "share_medium",
+                    "share_plat",
+                    "share_session_id",
+                    "share_tag",
+                    "unique_k",
+                ),
+            Platform.YOUTUBE to
+                setOf(
+                    "si",
+                    "feature",
+                    "app",
+                    "pp",
+                    "embeds_referring_euri",
+                    "embeds_referring_origin",
+                ),
+            Platform.REDDIT to
+                setOf(
+                    "utm_source",
+                    "utm_medium",
+                    "utm_name",
+                    "utm_term",
+                    "utm_content",
+                    "share_id",
+                    "rdt",
+                ),
+        )
 
-    private val REDDIT_POST_PATH_REGEX = Regex(
-        """^/r/([a-zA-Z0-9_]+)/comments/([a-zA-Z0-9]+)(?:/[^/]+)?/?$""",
-        RegexOption.IGNORE_CASE
-    )
-    private val REDDIT_SHORT_PATH_REGEX = Regex(
-        """^/comments/([a-zA-Z0-9]+)(?:/[^/]+)?/?$""",
-        RegexOption.IGNORE_CASE
-    )
+    private val PLATFORM_WHITELIST =
+        mapOf(
+            Platform.FACEBOOK to setOf("fbid", "story_fbid", "v", "id", "comment_id", "set"),
+            Platform.INSTAGRAM to setOf("img_index"),
+            Platform.BILIBILI to setOf("p", "t"),
+            Platform.YOUTUBE to setOf("v", "t", "list", "index"),
+            Platform.REDDIT to setOf("context"),
+        )
+
+    private val REDDIT_POST_PATH_REGEX =
+        Regex(
+            """^/r/([a-zA-Z0-9_]+)/comments/([a-zA-Z0-9]+)(?:/[^/]+)?/?$""",
+            RegexOption.IGNORE_CASE,
+        )
+    private val REDDIT_SHORT_PATH_REGEX =
+        Regex(
+            """^/comments/([a-zA-Z0-9]+)(?:/[^/]+)?/?$""",
+            RegexOption.IGNORE_CASE,
+        )
 
     /**
      * 清洗 URL，去除所有通用與特定平台的 tracking/行銷參數。
@@ -60,25 +119,30 @@ object UrlSanitizer {
      * @param platform 可選的平台提示；若為 null 則會自動依網域名稱判斷
      * @return 清洗後乾淨的標準化 URL
      */
-    fun clean(url: String, platform: Platform? = null): String {
+    fun clean(
+        url: String,
+        platform: Platform? = null,
+    ): String {
         if (url.isBlank()) return url
 
         val trimmed = url.trim()
 
         // Ensure URL has a scheme for proper parsing
         val hasScheme = trimmed.contains("://")
-        val inputWithScheme = if (!hasScheme) {
-            "https://$trimmed"
-        } else {
-            trimmed
-        }
+        val inputWithScheme =
+            if (!hasScheme) {
+                "https://$trimmed"
+            } else {
+                trimmed
+            }
 
-        val parsed = try {
-            Url(inputWithScheme)
-        } catch (_: Exception) {
-            // If Ktor fails to parse, return original url safely
-            return trimmed
-        }
+        val parsed =
+            try {
+                Url(inputWithScheme)
+            } catch (_: Exception) {
+                // If Ktor fails to parse, return original url safely
+                return trimmed
+            }
 
         val detectedPlatform = platform ?: detectPlatformFromHost(parsed.host)
         val builder = URLBuilder(parsed)
@@ -151,17 +215,21 @@ object UrlSanitizer {
     /**
      * 檢查給定的 URL 是否包含任何已知的追蹤/行銷參數。
      */
-    fun hasTrackingParams(url: String, platform: Platform? = null): Boolean {
+    fun hasTrackingParams(
+        url: String,
+        platform: Platform? = null,
+    ): Boolean {
         if (!url.contains("?")) return false
 
         val hasScheme = url.contains("://")
         val inputWithScheme = if (!hasScheme) "https://$url" else url
 
-        val parsed = try {
-            Url(inputWithScheme)
-        } catch (_: Exception) {
-            return false
-        }
+        val parsed =
+            try {
+                Url(inputWithScheme)
+            } catch (_: Exception) {
+                return false
+            }
 
         val detectedPlatform = platform ?: detectPlatformFromHost(parsed.host)
         return parsed.parameters.names().any { isTrackingParam(it, detectedPlatform) }
@@ -170,7 +238,10 @@ object UrlSanitizer {
     /**
      * 判斷給定參數名稱是否為指定平台的追蹤參數。
      */
-    private fun isTrackingParam(name: String, platform: Platform?): Boolean {
+    private fun isTrackingParam(
+        name: String,
+        platform: Platform?,
+    ): Boolean {
         val lower = name.lowercase()
         // 1. Whitelist protection
         if (platform != null && PLATFORM_WHITELIST[platform]?.contains(lower) == true) {
@@ -197,13 +268,26 @@ object UrlSanitizer {
     private fun detectPlatformFromHost(host: String): Platform? {
         val h = host.lowercase()
         return when {
-            h == "facebook.com" || h.endsWith(".facebook.com") || h == "fb.com" || h.endsWith(".fb.com") || h == "fb.watch" || h.endsWith(".fb.watch") || h == "fb.me" || h.endsWith(".fb.me") -> Platform.FACEBOOK
+            h == "facebook.com" || h.endsWith(".facebook.com") || h == "fb.com" || h.endsWith(".fb.com") || h == "fb.watch" ||
+                h.endsWith(".fb.watch") ||
+                h == "fb.me" ||
+                h.endsWith(".fb.me") -> Platform.FACEBOOK
+
             h == "bilibili.com" || h.endsWith(".bilibili.com") || h == "b23.tv" || h.endsWith(".b23.tv") -> Platform.BILIBILI
-            h == "x.com" || h.endsWith(".x.com") || h == "twitter.com" || h.endsWith(".twitter.com") || h == "t.co" || h.endsWith(".t.co") -> Platform.X
+
+            h == "x.com" ||
+                h.endsWith(
+                    ".x.com",
+                ) || h == "twitter.com" || h.endsWith(".twitter.com") || h == "t.co" || h.endsWith(".t.co") -> Platform.X
+
             h == "instagram.com" || h.endsWith(".instagram.com") || h == "instagr.am" || h.endsWith(".instagr.am") -> Platform.INSTAGRAM
+
             h == "threads.net" || h.endsWith(".threads.net") || h == "threads.com" || h.endsWith(".threads.com") -> Platform.THREADS
+
             h == "youtube.com" || h.endsWith(".youtube.com") || h == "youtu.be" || h.endsWith(".youtu.be") -> Platform.YOUTUBE
+
             h == "reddit.com" || h.endsWith(".reddit.com") || h == "redd.it" || h.endsWith(".redd.it") -> Platform.REDDIT
+
             else -> null
         }
     }

@@ -8,7 +8,7 @@ class CurtlyService(
     private val storage: UrlStorage,
     private val keyGenerator: KeyGenerator = RandomAlphanumericKeyGenerator(),
     private val baseUrl: String = "http://localhost:8080/",
-    val enableAuditMode: Boolean = false
+    val enableAuditMode: Boolean = false,
 ) {
     /**
      * Shortens a long URL and returns the full short URL.
@@ -20,7 +20,7 @@ class CurtlyService(
         expiresInSeconds: Long? = null,
         expiresAt: Long? = null,
         maxClicks: Int? = null,
-        ownerId: String? = null
+        ownerId: String? = null,
     ): String {
         require(expiresInSeconds == null || expiresInSeconds > 0) {
             "expiresInSeconds must be positive"
@@ -30,41 +30,45 @@ class CurtlyService(
         }
 
         // Basic normalization (make sure it starts with http or https)
-        val normalizedUrl = if (!longUrl.startsWith("http://") && !longUrl.startsWith("https://")) {
-            "https://$longUrl"
-        } else {
-            longUrl
-        }
-
-        val key = if (customKey != null) {
-            require(customKey.matches(Regex("[a-zA-Z0-9_-]+"))) { 
-                "Custom key must contain only letters, numbers, hyphens or underscores" 
+        val normalizedUrl =
+            if (!longUrl.startsWith("http://") && !longUrl.startsWith("https://")) {
+                "https://$longUrl"
+            } else {
+                longUrl
             }
-            require(storage.get(customKey) == null) {
-                "Custom key '$customKey' is already in use"
-            }
-            customKey
-        } else {
-            var generatedKey = keyGenerator.generate()
-            // Avoid collisions
-            while (storage.get(generatedKey) != null) {
-                generatedKey = keyGenerator.generate()
-            }
-            generatedKey
-        }
 
-        val calculatedExpiresAt = when {
-            expiresInSeconds != null -> System.currentTimeMillis() + expiresInSeconds * 1000L
-            expiresAt != null -> expiresAt
-            else -> null
-        }
+        val key =
+            if (customKey != null) {
+                require(customKey.matches(Regex("[a-zA-Z0-9_-]+"))) {
+                    "Custom key must contain only letters, numbers, hyphens or underscores"
+                }
+                require(storage.get(customKey) == null) {
+                    "Custom key '$customKey' is already in use"
+                }
+                customKey
+            } else {
+                var generatedKey = keyGenerator.generate()
+                // Avoid collisions
+                while (storage.get(generatedKey) != null) {
+                    generatedKey = keyGenerator.generate()
+                }
+                generatedKey
+            }
 
-        val entry = UrlEntry(
-            longUrl = normalizedUrl,
-            expiresAt = calculatedExpiresAt,
-            maxClicks = maxClicks,
-            ownerId = ownerId
-        )
+        val calculatedExpiresAt =
+            when {
+                expiresInSeconds != null -> System.currentTimeMillis() + expiresInSeconds * 1000L
+                expiresAt != null -> expiresAt
+                else -> null
+            }
+
+        val entry =
+            UrlEntry(
+                longUrl = normalizedUrl,
+                expiresAt = calculatedExpiresAt,
+                maxClicks = maxClicks,
+                ownerId = ownerId,
+            )
 
         storage.save(key, entry)
 
@@ -79,7 +83,7 @@ class CurtlyService(
      */
     fun resolve(
         key: String,
-        metadata: ClickMetadata? = null
+        metadata: ClickMetadata? = null,
     ): String? {
         val entry = storage.get(key) ?: return null
         if (entry.isExpired()) {
@@ -90,13 +94,14 @@ class CurtlyService(
 
         val shouldRecordAudit = enableAuditMode || metadata != null
         if (shouldRecordAudit) {
-            val log = ClickLog(
-                key = key,
-                timestamp = metadata?.timestamp ?: System.currentTimeMillis(),
-                ip = metadata?.ip,
-                userAgent = metadata?.userAgent,
-                referer = metadata?.referer
-            )
+            val log =
+                ClickLog(
+                    key = key,
+                    timestamp = metadata?.timestamp ?: System.currentTimeMillis(),
+                    ip = metadata?.ip,
+                    userAgent = metadata?.userAgent,
+                    referer = metadata?.referer,
+                )
             storage.recordClickLog(log)
         }
 
@@ -110,95 +115,74 @@ class CurtlyService(
         key: String,
         ip: String? = null,
         userAgent: String? = null,
-        referer: String? = null
+        referer: String? = null,
     ): String? {
         val hasMetadata = ip != null || userAgent != null || referer != null
-        val metadata = if (hasMetadata || enableAuditMode) {
-            ClickMetadata(ip = ip, userAgent = userAgent, referer = referer)
-        } else {
-            null
-        }
+        val metadata =
+            if (hasMetadata || enableAuditMode) {
+                ClickMetadata(ip = ip, userAgent = userAgent, referer = referer)
+            } else {
+                null
+            }
         return resolve(key, metadata)
     }
 
     /**
      * Gets stored URL entry details by key without incrementing click count.
      */
-    fun getEntry(key: String): UrlEntry? {
-        return storage.get(key)
-    }
+    fun getEntry(key: String): UrlEntry? = storage.get(key)
 
     /**
      * Gets all stored URL entries.
      */
-    fun getAll(): Map<String, UrlEntry> {
-        return storage.getAll()
-    }
+    fun getAll(): Map<String, UrlEntry> = storage.getAll()
 
     /**
      * Gets all URL entries created by a specific ownerId.
      */
-    fun getByOwnerId(ownerId: String): Map<String, UrlEntry> {
-        return storage.getByOwnerId(ownerId)
-    }
+    fun getByOwnerId(ownerId: String): Map<String, UrlEntry> = storage.getByOwnerId(ownerId)
 
     /**
      * Gets all short URL keys created by a specific ownerId.
      */
-    fun getKeysByOwnerId(ownerId: String): List<String> {
-        return storage.getByOwnerId(ownerId).keys.toList()
-    }
+    fun getKeysByOwnerId(ownerId: String): List<String> = storage.getByOwnerId(ownerId).keys.toList()
 
     /**
      * Counts the total number of short URLs created by a specific ownerId.
      */
-    fun countByOwnerId(ownerId: String): Int {
-        return storage.countByOwnerId(ownerId)
-    }
+    fun countByOwnerId(ownerId: String): Int = storage.countByOwnerId(ownerId)
 
     /**
      * Removes a stored short URL entry by key.
      * Returns true if entry existed and was removed, false otherwise.
      */
-    fun remove(key: String): Boolean {
-        return storage.remove(key)
-    }
+    fun remove(key: String): Boolean = storage.remove(key)
 
     /**
      * Alias for remove. Removes a stored short URL entry by key.
      */
-    fun delete(key: String): Boolean {
-        return storage.delete(key)
-    }
+    fun delete(key: String): Boolean = storage.delete(key)
 
     /**
      * Removes all short URLs created by a specific ownerId.
      * Returns the count of entries removed.
      */
-    fun removeByOwnerId(ownerId: String): Int {
-        return storage.removeByOwnerId(ownerId)
-    }
+    fun removeByOwnerId(ownerId: String): Int = storage.removeByOwnerId(ownerId)
 
     /**
      * Alias for removeByOwnerId. Removes all short URLs created by a specific ownerId.
      */
-    fun deleteByOwnerId(ownerId: String): Int {
-        return removeByOwnerId(ownerId)
-    }
+    fun deleteByOwnerId(ownerId: String): Int = removeByOwnerId(ownerId)
 
     /**
      * Retrieves all recorded click logs for a specific key.
      */
-    fun getClickLogs(key: String): List<ClickLog> {
-        return storage.getClickLogs(key)
-    }
+    fun getClickLogs(key: String): List<ClickLog> = storage.getClickLogs(key)
 
     /**
      * Retrieves all recorded click logs across all short URLs.
      */
-    fun getAllClickLogs(): List<ClickLog> {
-        return storage.getAllClickLogs()
-    }
+    fun getAllClickLogs(): List<ClickLog> = storage.getAllClickLogs()
 
     /**
      * Generates a ClickAnalytics report for a specific short link key.
@@ -208,12 +192,16 @@ class CurtlyService(
         val entry = storage.get(key) ?: return null
         val logs = storage.getClickLogs(key)
 
-        val dateFormat = DateTimeFormatter.ofPattern("yyyy-MM-dd")
-            .withZone(ZoneId.systemDefault())
+        val dateFormat =
+            DateTimeFormatter
+                .ofPattern("yyyy-MM-dd")
+                .withZone(ZoneId.systemDefault())
 
-        val clicksByDate = logs.groupingBy { log ->
-            dateFormat.format(Instant.ofEpochMilli(log.timestamp))
-        }.eachCount()
+        val clicksByDate =
+            logs
+                .groupingBy { log ->
+                    dateFormat.format(Instant.ofEpochMilli(log.timestamp))
+                }.eachCount()
 
         val topUserAgents = logs.mapNotNull { it.userAgent }.groupingBy { it }.eachCount()
         val topReferers = logs.mapNotNull { it.referer }.groupingBy { it }.eachCount()
@@ -227,7 +215,7 @@ class CurtlyService(
             topUserAgents = topUserAgents,
             topReferers = topReferers,
             topIps = topIps,
-            logs = logs
+            logs = logs,
         )
     }
 
@@ -236,9 +224,10 @@ class CurtlyService(
      */
     fun getAllAnalytics(): Map<String, ClickAnalytics> {
         val allEntries = storage.getAll()
-        return allEntries.keys.mapNotNull { key ->
-            getAnalytics(key)?.let { key to it }
-        }.toMap()
+        return allEntries.keys
+            .mapNotNull { key ->
+                getAnalytics(key)?.let { key to it }
+            }.toMap()
     }
 
     /**
@@ -246,16 +235,14 @@ class CurtlyService(
      */
     fun getAnalyticsByOwnerId(ownerId: String): Map<String, ClickAnalytics> {
         val ownerEntries = storage.getByOwnerId(ownerId)
-        return ownerEntries.keys.mapNotNull { key ->
-            getAnalytics(key)?.let { key to it }
-        }.toMap()
+        return ownerEntries.keys
+            .mapNotNull { key ->
+                getAnalytics(key)?.let { key to it }
+            }.toMap()
     }
 
     /**
      * Clears click logs for a specific key.
      */
-    fun clearClickLogs(key: String): Boolean {
-        return storage.clearClickLogs(key)
-    }
+    fun clearClickLogs(key: String): Boolean = storage.clearClickLogs(key)
 }
-

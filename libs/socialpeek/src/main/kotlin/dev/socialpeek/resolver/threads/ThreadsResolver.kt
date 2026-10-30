@@ -11,66 +11,75 @@ import io.ktor.http.*
 import org.jsoup.Jsoup
 
 class ThreadsResolver : PlatformResolver {
-
     override val platform: Platform = Platform.THREADS
 
-    private val threadsUrlPattern = Regex(
-        """https?://(?:www\.)?threads\.(?:net|com)/(?:@([a-zA-Z0-9_.-]+)/post/|t/)([a-zA-Z0-9_-]+)""",
-        RegexOption.IGNORE_CASE
-    )
+    private val threadsUrlPattern =
+        Regex(
+            """https?://(?:www\.)?threads\.(?:net|com)/(?:@([a-zA-Z0-9_.-]+)/post/|t/)([a-zA-Z0-9_-]+)""",
+            RegexOption.IGNORE_CASE,
+        )
 
-    private val threadsSharePattern = Regex(
-        """https?://(?:www\.)?threads\.(?:net|com)/share/([a-zA-Z0-9_-]+)""",
-        RegexOption.IGNORE_CASE
-    )
+    private val threadsSharePattern =
+        Regex(
+            """https?://(?:www\.)?threads\.(?:net|com)/share/([a-zA-Z0-9_-]+)""",
+            RegexOption.IGNORE_CASE,
+        )
 
     companion object {
-        val THREADS_HEADERS = mapOf(
-            HttpHeaders.UserAgent to "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)"
-        )
+        val THREADS_HEADERS =
+            mapOf(
+                HttpHeaders.UserAgent to "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)",
+            )
     }
 
-    override fun canResolve(url: String): Boolean {
-        return threadsUrlPattern.containsMatchIn(url) || threadsSharePattern.containsMatchIn(url)
-    }
+    override fun canResolve(url: String): Boolean = threadsUrlPattern.containsMatchIn(url) || threadsSharePattern.containsMatchIn(url)
 
-    override suspend fun resolve(url: String, client: SocialPeekHttpClient): PeekPost {
+    override suspend fun resolve(
+        url: String,
+        client: SocialPeekHttpClient,
+    ): PeekPost {
         var currentUrl = url
         if (threadsSharePattern.containsMatchIn(url)) {
-            currentUrl = try {
-                client.resolveFinalUrl(url, THREADS_HEADERS)
-            } catch (e: Exception) {
-                url
-            }
+            currentUrl =
+                try {
+                    client.resolveFinalUrl(url, THREADS_HEADERS)
+                } catch (e: Exception) {
+                    url
+                }
         }
 
-        val match = threadsUrlPattern.find(currentUrl)
-            ?: throw ParsingException(currentUrl, "Could not extract Threads post ID from URL: $currentUrl")
-        
+        val match =
+            threadsUrlPattern.find(currentUrl)
+                ?: throw ParsingException(currentUrl, "Could not extract Threads post ID from URL: $currentUrl")
+
         val urlUsername = match.groupValues[1].takeIf { it.isNotBlank() }
         val postId = match.groupValues[2]
 
-        val targetUrl = if (urlUsername != null) {
-            "https://www.threads.net/@$urlUsername/post/$postId"
-        } else {
-            "https://www.threads.net/t/$postId"
-        }
+        val targetUrl =
+            if (urlUsername != null) {
+                "https://www.threads.net/@$urlUsername/post/$postId"
+            } else {
+                "https://www.threads.net/t/$postId"
+            }
 
-        val html = try {
-            client.get(targetUrl, THREADS_HEADERS)
-        } catch (e: PostNotFoundException) {
-            throw e
-        } catch (e: Exception) {
-            throw PostNotFoundException(url, e.message)
-        }
+        val html =
+            try {
+                client.get(targetUrl, THREADS_HEADERS)
+            } catch (e: PostNotFoundException) {
+                throw e
+            } catch (e: Exception) {
+                throw PostNotFoundException(url, e.message)
+            }
 
         val doc = Jsoup.parse(html)
 
         val ogTitle = doc.selectFirst("meta[property=og:title]")?.attr("content")
         val ogDescription = doc.selectFirst("meta[property=og:description]")?.attr("content")
-        val ogImages = doc.select("meta[property=og:image]")
-            .mapNotNull { it.attr("content").takeIf { c -> c.isNotBlank() } }
-            .distinct()
+        val ogImages =
+            doc
+                .select("meta[property=og:image]")
+                .mapNotNull { it.attr("content").takeIf { c -> c.isNotBlank() } }
+                .distinct()
         val ogVideo = doc.selectFirst("meta[property=og:video]")?.attr("content")
         val twitterCard = doc.selectFirst("meta[name=twitter:card]")?.attr("content")
         val ogImageWidth = doc.selectFirst("meta[property=og:image:width]")?.attr("content")?.toIntOrNull()
@@ -104,38 +113,44 @@ class ThreadsResolver : PlatformResolver {
             } else {
                 // 2. Fallback to OpenGraph tags
                 if (!ogVideo.isNullOrBlank()) {
-                    val preview = ogImages.firstOrNull { !isPlatformShareCard(it, ogImageWidth, ogImageHeight, twitterCard) && !isProfilePic(it) }
+                    val preview =
+                        ogImages.firstOrNull {
+                            !isPlatformShareCard(it, ogImageWidth, ogImageHeight, twitterCard) &&
+                                !isProfilePic(it)
+                        }
                     mediaList.add(
                         Media.Video(
                             url = ogVideo,
-                            previewUrl = preview
-                        )
+                            previewUrl = preview,
+                        ),
                     )
                 } else if (!twitterCard.equals("summary", ignoreCase = true)) {
-                    val validImages = ogImages.filter {
-                        !isProfilePic(it) && !isPlatformShareCard(it, ogImageWidth, ogImageHeight, twitterCard)
-                    }
+                    val validImages =
+                        ogImages.filter {
+                            !isProfilePic(it) && !isPlatformShareCard(it, ogImageWidth, ogImageHeight, twitterCard)
+                        }
                     validImages.forEachIndexed { index, imgUrl ->
                         mediaList.add(
                             Media.Image(
                                 url = imgUrl,
                                 previewUrl = imgUrl,
                                 width = if (index == 0) ogImageWidth else null,
-                                height = if (index == 0) ogImageHeight else null
-                            )
+                                height = if (index == 0) ogImageHeight else null,
+                            ),
                         )
                     }
                 }
             }
         }
 
-        val author = Author(
-            username = username,
-            displayName = displayName,
-            avatarUrl = avatarUrl,
-            isVerified = isVerified,
-            profileUrl = "https://www.threads.net/@$username"
-        )
+        val author =
+            Author(
+                username = username,
+                displayName = displayName,
+                avatarUrl = avatarUrl,
+                isVerified = isVerified,
+                profileUrl = "https://www.threads.net/@$username",
+            )
 
         val cleanUrl = UrlSanitizer.clean(targetUrl, Platform.THREADS)
 
@@ -148,19 +163,24 @@ class ThreadsResolver : PlatformResolver {
             content = content,
             media = mediaList,
             metrics = postDetails?.metrics,
-            createdAtEpochSeconds = postDetails?.createdAtEpochSeconds
+            createdAtEpochSeconds = postDetails?.createdAtEpochSeconds,
         )
     }
 
     private fun isProfilePic(url: String): Boolean {
         val lower = url.lowercase()
         return lower.contains("/t51.82787-19/") ||
-                lower.contains("/t51.2885-19/") ||
-                lower.contains("profile_pic") ||
-                lower.contains("eyj2zw5jb2rlx3rhzyi6inpvbglszv9wawm")
+            lower.contains("/t51.2885-19/") ||
+            lower.contains("profile_pic") ||
+            lower.contains("eyj2zw5jb2rlx3rhzyi6inpvbglszv9wawm")
     }
 
-    private fun isPlatformShareCard(url: String, width: Int?, height: Int?, twitterCard: String?): Boolean {
+    private fun isPlatformShareCard(
+        url: String,
+        width: Int?,
+        height: Int?,
+        twitterCard: String?,
+    ): Boolean {
         val lower = url.lowercase()
         if (lower.contains("share.threads.net") || lower.contains("/t39.92108-6/")) {
             return true
@@ -171,7 +191,10 @@ class ThreadsResolver : PlatformResolver {
         return false
     }
 
-    private fun extractUser(ogTitle: String?, fallbackUsername: String?): Pair<String, String?> {
+    private fun extractUser(
+        ogTitle: String?,
+        fallbackUsername: String?,
+    ): Pair<String, String?> {
         if (ogTitle.isNullOrBlank()) {
             val user = fallbackUsername ?: "unknown"
             return Pair(user, user)

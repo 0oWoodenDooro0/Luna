@@ -28,9 +28,8 @@ object ClickLogsEntries : Table("curtly_click_logs") {
 
 class ExposedUrlStorage(
     private val database: Database? = null,
-    autoCreateTable: Boolean = true
+    autoCreateTable: Boolean = true,
 ) : UrlStorage {
-
     init {
         if (autoCreateTable) {
             transaction(db = database) {
@@ -39,7 +38,10 @@ class ExposedUrlStorage(
         }
     }
 
-    override fun save(key: String, entry: UrlEntry) {
+    override fun save(
+        key: String,
+        entry: UrlEntry,
+    ) {
         transaction(db = database) {
             UrlEntries.upsert {
                 it[UrlEntries.key] = key
@@ -52,69 +54,68 @@ class ExposedUrlStorage(
         }
     }
 
-    override fun get(key: String): UrlEntry? {
-        return transaction(db = database) {
-            UrlEntries.selectAll()
+    override fun get(key: String): UrlEntry? =
+        transaction(db = database) {
+            UrlEntries
+                .selectAll()
                 .where { UrlEntries.key.eq(key) }
                 .map { rowToUrlEntry(it) }
                 .singleOrNull()
         }
-    }
 
-    override fun incrementClick(key: String): Boolean {
-        return transaction(db = database) {
-            val updatedRows = UrlEntries.update({ UrlEntries.key.eq(key) }) {
-                it.update(UrlEntries.clickCount, UrlEntries.clickCount.plus(1))
-            }
+    override fun incrementClick(key: String): Boolean =
+        transaction(db = database) {
+            val updatedRows =
+                UrlEntries.update({ UrlEntries.key.eq(key) }) {
+                    it.update(UrlEntries.clickCount, UrlEntries.clickCount.plus(1))
+                }
             updatedRows > 0
         }
-    }
 
-    override fun getAll(): Map<String, UrlEntry> {
-        return transaction(db = database) {
+    override fun getAll(): Map<String, UrlEntry> =
+        transaction(db = database) {
             UrlEntries.selectAll().associate { row ->
                 row[UrlEntries.key] to rowToUrlEntry(row)
             }
         }
-    }
 
-    override fun getByOwnerId(ownerId: String): Map<String, UrlEntry> {
-        return transaction(db = database) {
-            UrlEntries.selectAll()
+    override fun getByOwnerId(ownerId: String): Map<String, UrlEntry> =
+        transaction(db = database) {
+            UrlEntries
+                .selectAll()
                 .where { UrlEntries.ownerId.eq(ownerId) }
                 .associate { row ->
                     row[UrlEntries.key] to rowToUrlEntry(row)
                 }
         }
-    }
 
-    override fun countByOwnerId(ownerId: String): Int {
-        return transaction(db = database) {
-            UrlEntries.selectAll()
+    override fun countByOwnerId(ownerId: String): Int =
+        transaction(db = database) {
+            UrlEntries
+                .selectAll()
                 .where { UrlEntries.ownerId.eq(ownerId) }
                 .count()
                 .toInt()
         }
-    }
 
-    override fun remove(key: String): Boolean {
-        return transaction(db = database) {
+    override fun remove(key: String): Boolean =
+        transaction(db = database) {
             ClickLogsEntries.deleteWhere { ClickLogsEntries.key.eq(key) }
             UrlEntries.deleteWhere { UrlEntries.key.eq(key) } > 0
         }
-    }
 
-    override fun removeByOwnerId(ownerId: String): Int {
-        return transaction(db = database) {
-            val keys = UrlEntries.selectAll()
-                .where { UrlEntries.ownerId.eq(ownerId) }
-                .map { it[UrlEntries.key] }
+    override fun removeByOwnerId(ownerId: String): Int =
+        transaction(db = database) {
+            val keys =
+                UrlEntries
+                    .selectAll()
+                    .where { UrlEntries.ownerId.eq(ownerId) }
+                    .map { it[UrlEntries.key] }
             if (keys.isNotEmpty()) {
                 ClickLogsEntries.deleteWhere { ClickLogsEntries.key.inList(keys) }
             }
             UrlEntries.deleteWhere { UrlEntries.ownerId.eq(ownerId) }
         }
-    }
 
     override fun recordClickLog(log: ClickLog) {
         transaction(db = database) {
@@ -129,46 +130,42 @@ class ExposedUrlStorage(
         }
     }
 
-    override fun getClickLogs(key: String): List<ClickLog> {
-        return transaction(db = database) {
-            ClickLogsEntries.selectAll()
+    override fun getClickLogs(key: String): List<ClickLog> =
+        transaction(db = database) {
+            ClickLogsEntries
+                .selectAll()
                 .where { ClickLogsEntries.key.eq(key) }
                 .map { rowToClickLog(it) }
         }
-    }
 
-    override fun getAllClickLogs(): List<ClickLog> {
-        return transaction(db = database) {
-            ClickLogsEntries.selectAll()
+    override fun getAllClickLogs(): List<ClickLog> =
+        transaction(db = database) {
+            ClickLogsEntries
+                .selectAll()
                 .map { rowToClickLog(it) }
         }
-    }
 
-    override fun clearClickLogs(key: String): Boolean {
-        return transaction(db = database) {
+    override fun clearClickLogs(key: String): Boolean =
+        transaction(db = database) {
             ClickLogsEntries.deleteWhere { ClickLogsEntries.key.eq(key) } > 0
         }
-    }
 
-    private fun rowToUrlEntry(row: ResultRow): UrlEntry {
-        return UrlEntry(
+    private fun rowToUrlEntry(row: ResultRow): UrlEntry =
+        UrlEntry(
             longUrl = row[UrlEntries.longUrl],
             expiresAt = row[UrlEntries.expiresAt],
             maxClicks = row[UrlEntries.maxClicks],
             clickCount = row[UrlEntries.clickCount],
-            ownerId = row[UrlEntries.ownerId]
+            ownerId = row[UrlEntries.ownerId],
         )
-    }
 
-    private fun rowToClickLog(row: ResultRow): ClickLog {
-        return ClickLog(
+    private fun rowToClickLog(row: ResultRow): ClickLog =
+        ClickLog(
             id = row[ClickLogsEntries.id],
             key = row[ClickLogsEntries.key],
             timestamp = row[ClickLogsEntries.timestamp],
             ip = row[ClickLogsEntries.ip],
             userAgent = row[ClickLogsEntries.userAgent],
-            referer = row[ClickLogsEntries.referer]
+            referer = row[ClickLogsEntries.referer],
         )
-    }
 }
-

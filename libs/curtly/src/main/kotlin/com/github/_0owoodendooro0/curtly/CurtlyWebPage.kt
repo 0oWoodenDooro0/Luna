@@ -12,158 +12,160 @@ object CurtlyWebPage {
      */
     fun getHtml(
         apiEndpoint: String = "/api/shorten",
-        title: String = "Curtly - Short URL Generator"
+        title: String = "Curtly - Short URL Generator",
     ): String {
         val sanitizedEndpoint = apiEndpoint.replace("\\", "\\\\").replace("\"", "\\\"")
 
-        return "<!DOCTYPE html>\n" + createHTML().html {
-            lang = "en"
-            head {
-                meta { charset = "UTF-8" }
-                meta {
-                    name = "viewport"
-                    content = "width=device-width, initial-scale=1.0"
-                }
-                title { +title }
-                link {
-                    rel = "stylesheet"
-                    href = "https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
-                }
-                style {
-                    unsafe {
-                        +cssStyles()
+        return "<!DOCTYPE html>\n" +
+            createHTML().html {
+                lang = "en"
+                head {
+                    meta { charset = "UTF-8" }
+                    meta {
+                        name = "viewport"
+                        content = "width=device-width, initial-scale=1.0"
+                    }
+                    title { +title }
+                    link {
+                        rel = "stylesheet"
+                        href = "https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
+                    }
+                    style {
+                        unsafe {
+                            +cssStyles()
+                        }
                     }
                 }
-            }
-            body {
-                div("container") {
-                    div("header") {
-                        div("badge-container") {
-                            div("logo-badge") { +"CURTLY" }
-                            div("audit-badge") { +"AUDIT & ANALYTICS READY" }
-                        }
-                        h1 { +title }
-                        p("subtitle") { +"Create lightweight, customizable, and audit-tracked short links instantly." }
-                    }
-
-                    form(action = "#", method = FormMethod.post, classes = "card") {
-                        id = "shorten-form"
-
-                        div("form-group") {
-                            label("form-label") {
-                                htmlFor = "longUrl"
-                                +"Destination URL "
-                                span("required-star") { +"*" }
+                body {
+                    div("container") {
+                        div("header") {
+                            div("badge-container") {
+                                div("logo-badge") { +"CURTLY" }
+                                div("audit-badge") { +"AUDIT & ANALYTICS READY" }
                             }
-                            input(type = InputType.url, classes = "form-input") {
-                                id = "longUrl"
-                                name = "longUrl"
-                                placeholder = "https://example.com/long-url"
-                                required = true
-                            }
+                            h1 { +title }
+                            p("subtitle") { +"Create lightweight, customizable, and audit-tracked short links instantly." }
                         }
 
-                        div("form-row") {
-                            div("form-group") {
-                                label("form-label") {
-                                    htmlFor = "customKey"
-                                    +"Custom Key (Optional)"
-                                }
-                                input(type = InputType.text, classes = "form-input") {
-                                    id = "customKey"
-                                    name = "customKey"
-                                    placeholder = "e.g. my-link"
-                                }
-                            }
+                        form(action = "#", method = FormMethod.post, classes = "card") {
+                            id = "shorten-form"
 
                             div("form-group") {
                                 label("form-label") {
-                                    htmlFor = "expiresInSeconds"
-                                    +"Expiration (Seconds)"
+                                    htmlFor = "longUrl"
+                                    +"Destination URL "
+                                    span("required-star") { +"*" }
+                                }
+                                input(type = InputType.url, classes = "form-input") {
+                                    id = "longUrl"
+                                    name = "longUrl"
+                                    placeholder = "https://example.com/long-url"
+                                    required = true
+                                }
+                            }
+
+                            div("form-row") {
+                                div("form-group") {
+                                    label("form-label") {
+                                        htmlFor = "customKey"
+                                        +"Custom Key (Optional)"
+                                    }
+                                    input(type = InputType.text, classes = "form-input") {
+                                        id = "customKey"
+                                        name = "customKey"
+                                        placeholder = "e.g. my-link"
+                                    }
+                                }
+
+                                div("form-group") {
+                                    label("form-label") {
+                                        htmlFor = "expiresInSeconds"
+                                        +"Expiration (Seconds)"
+                                    }
+                                    input(type = InputType.number, classes = "form-input") {
+                                        id = "expiresInSeconds"
+                                        name = "expiresInSeconds"
+                                        placeholder = "e.g. 3600"
+                                        min = "1"
+                                    }
+                                }
+                            }
+
+                            div("form-group") {
+                                label("form-label") {
+                                    htmlFor = "maxClicks"
+                                    +"Max Click Limit (Optional)"
                                 }
                                 input(type = InputType.number, classes = "form-input") {
-                                    id = "expiresInSeconds"
-                                    name = "expiresInSeconds"
-                                    placeholder = "e.g. 3600"
+                                    id = "maxClicks"
+                                    name = "maxClicks"
+                                    placeholder = "e.g. 100"
                                     min = "1"
                                 }
                             }
-                        }
 
-                        div("form-group") {
-                            label("form-label") {
-                                htmlFor = "maxClicks"
-                                +"Max Click Limit (Optional)"
-                            }
-                            input(type = InputType.number, classes = "form-input") {
-                                id = "maxClicks"
-                                name = "maxClicks"
-                                placeholder = "e.g. 100"
-                                min = "1"
-                            }
-                        }
-
-                        button(type = ButtonType.submit, classes = "submit-btn") {
-                            id = "submit-btn"
-                            span {
-                                id = "btn-text"
-                                +"Create Short URL"
-                            }
-                            span("spinner") {
-                                id = "loading-spinner"
-                                style = "display: none;"
-                            }
-                        }
-                    }
-
-                    div("result-card") {
-                        id = "result-box"
-                        style = "display: none;"
-
-                        div("result-header") {
-                            span("result-title") { +"Short URL Created!" }
-                        }
-                        div("result-body") {
-                            a(classes = "short-url-link") {
-                                id = "short-url-link"
-                                target = "_blank"
-                                rel = "noopener noreferrer"
-                            }
-                            button(type = ButtonType.button, classes = "copy-btn") {
-                                id = "copy-btn"
+                            button(type = ButtonType.submit, classes = "submit-btn") {
+                                id = "submit-btn"
                                 span {
-                                    id = "copy-text"
-                                    +"Copy"
+                                    id = "btn-text"
+                                    +"Create Short URL"
+                                }
+                                span("spinner") {
+                                    id = "loading-spinner"
+                                    style = "display: none;"
                                 }
                             }
                         }
-                    }
 
-                    div("error-card") {
-                        id = "error-box"
-                        style = "display: none;"
+                        div("result-card") {
+                            id = "result-box"
+                            style = "display: none;"
 
-                        span("error-title") { +"Error" }
-                        p {
-                            id = "error-message"
+                            div("result-header") {
+                                span("result-title") { +"Short URL Created!" }
+                            }
+                            div("result-body") {
+                                a(classes = "short-url-link") {
+                                    id = "short-url-link"
+                                    target = "_blank"
+                                    rel = "noopener noreferrer"
+                                }
+                                button(type = ButtonType.button, classes = "copy-btn") {
+                                    id = "copy-btn"
+                                    span {
+                                        id = "copy-text"
+                                        +"Copy"
+                                    }
+                                }
+                            }
+                        }
+
+                        div("error-card") {
+                            id = "error-box"
+                            style = "display: none;"
+
+                            span("error-title") { +"Error" }
+                            p {
+                                id = "error-message"
+                            }
+                        }
+
+                        div("footer") {
+                            +"Powered by Curtly URL Shortener Library"
                         }
                     }
 
-                    div("footer") {
-                        +"Powered by Curtly URL Shortener Library"
-                    }
-                }
-
-                script {
-                    unsafe {
-                        +jsScript(sanitizedEndpoint)
+                    script {
+                        unsafe {
+                            +jsScript(sanitizedEndpoint)
+                        }
                     }
                 }
             }
-        }
     }
 
-    private fun cssStyles(): String = """
+    private fun cssStyles(): String =
+        """
         * { box-sizing: border-box; margin: 0; padding: 0; }
         body {
             font-family: 'Inter', system-ui, -apple-system, sans-serif;
@@ -362,9 +364,10 @@ object CurtlyWebPage {
             font-size: 0.8rem;
             color: #64748b;
         }
-    """.trimIndent()
+        """.trimIndent()
 
-    private fun jsScript(apiEndpoint: String): String = """
+    private fun jsScript(apiEndpoint: String): String =
+        """
         document.addEventListener('DOMContentLoaded', () => {
             const form = document.getElementById('shorten-form');
             const submitBtn = document.getElementById('submit-btn');
@@ -449,5 +452,5 @@ object CurtlyWebPage {
                 });
             });
         });
-    """.trimIndent()
+        """.trimIndent()
 }

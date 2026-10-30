@@ -4,7 +4,6 @@ import kotlin.test.Test
 import kotlin.test.assertTrue
 
 class CurtlyWebPageTest {
-
     @Test
     fun testDefaultWebPageHtmlGeneration() {
         val html = CurtlyWebPage.getHtml()
@@ -24,10 +23,11 @@ class CurtlyWebPageTest {
         val customEndpoint = "/v1/urls/shorten"
         val customTitle = "My Company Shortener"
 
-        val html = CurtlyWebPage.getHtml(
-            apiEndpoint = customEndpoint,
-            title = customTitle
-        )
+        val html =
+            CurtlyWebPage.getHtml(
+                apiEndpoint = customEndpoint,
+                title = customTitle,
+            )
 
         assertTrue(html.contains("<title>My Company Shortener</title>"))
         assertTrue(html.contains("const API_ENDPOINT = \"/v1/urls/shorten\";"))

@@ -6,7 +6,6 @@ import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 
 class PlatformTest {
-
     @Test
     fun `test platform metadata values`() {
         assertEquals(0x1877F2, Platform.FACEBOOK.brandColorHex)
@@ -30,7 +29,7 @@ class PlatformTest {
         assertEquals(0xFF4500, Platform.REDDIT.brandColorHex)
         assertEquals(
             "https://www.redditstatic.com/shreddit/assets/favicon/192x192.png",
-            Platform.REDDIT.defaultIconUrl
+            Platform.REDDIT.defaultIconUrl,
         )
 
         assertEquals(0x5865F2, Platform.GENERIC.brandColorHex)

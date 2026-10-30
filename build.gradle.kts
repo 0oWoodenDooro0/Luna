@@ -2,7 +2,11 @@ plugins {
     alias(libs.plugins.kotlin.jvm)
     alias(libs.plugins.kotlin.serialization)
     application
-    id("org.jmailen.kotlinter") version "5.4.2"
+    alias(libs.plugins.kotlinter)
+}
+
+subprojects {
+    apply(plugin = "org.jmailen.kotlinter")
 }
 
 group = "luna"
@@ -14,22 +18,22 @@ application {
 
 dependencies {
     testImplementation(kotlin("test"))
-    testImplementation("io.mockk:mockk:1.14.9")
-    testImplementation("com.h2database:h2:2.3.232")
-    testImplementation("io.ktor:ktor-server-test-host-jvm:3.5.0")
-    implementation("dev.kord:kord-core:0.19.0-SNAPSHOT")
-    implementation("ch.qos.logback:logback-classic:1.5.38")
-    implementation("net.logstash.logback:logstash-logback-encoder:9.0")
+    testImplementation(libs.mockk)
+    testImplementation(libs.h2)
+    testImplementation(libs.ktor.server.test.host)
+    implementation(libs.kord.core)
+    implementation(libs.logback.classic)
+    implementation(libs.logstash.logback.encoder)
     
     // Fix CVE-2026-29062 in transitive jackson-core dependency from logstash-logback-encoder
-    implementation("tools.jackson.core:jackson-core:3.1.0")
-    implementation("org.jetbrains.exposed:exposed-core:1.1.1")
-    implementation("org.jetbrains.exposed:exposed-jdbc:1.1.1")
-    implementation("org.xerial:sqlite-jdbc:3.51.1.0")
-    implementation("org.yaml:snakeyaml:2.5")
-    implementation("io.ktor:ktor-server-core-jvm:3.5.0")
-    implementation("io.ktor:ktor-server-netty-jvm:3.5.0")
-    implementation("io.ktor:ktor-server-sessions-jvm:3.5.0")
+    implementation(libs.jackson.core)
+    implementation(libs.exposed.core)
+    implementation(libs.exposed.jdbc)
+    implementation(libs.sqlite.jdbc)
+    implementation(libs.snakeyaml)
+    implementation(libs.ktor.server.core)
+    implementation(libs.ktor.server.netty)
+    implementation(libs.ktor.server.sessions)
 
     // Curtly URL Shortener Library
     implementation(project(":libs:curtly"))

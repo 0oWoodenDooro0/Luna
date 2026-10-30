@@ -1,9 +1,11 @@
 .git
 .github
 .gradle
+**/.gradle
 .idea
 .kotlin
 build
+**/build
 data
 *.log
 .env

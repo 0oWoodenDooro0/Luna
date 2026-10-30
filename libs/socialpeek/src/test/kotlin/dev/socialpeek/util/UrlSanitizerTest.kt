@@ -7,7 +7,6 @@ import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 class UrlSanitizerTest {
-
     @Test
     fun `1 X (Twitter) tests`() {
         // s and t params removed

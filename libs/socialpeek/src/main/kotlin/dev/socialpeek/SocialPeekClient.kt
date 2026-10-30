@@ -16,19 +16,19 @@ import dev.socialpeek.util.UrlSanitizer
 
 class SocialPeekClient(
     val resolvers: List<PlatformResolver> = defaultResolvers(),
-    val httpClient: SocialPeekHttpClient = KtorSocialPeekHttpClient()
+    val httpClient: SocialPeekHttpClient = KtorSocialPeekHttpClient(),
 ) {
-
     companion object {
-        fun defaultResolvers(): List<PlatformResolver> = listOf(
-            FacebookResolver(),
-            BilibiliResolver(),
-            XResolver(),
-            InstagramResolver(),
-            ThreadsResolver(),
-            YouTubeResolver(),
-            RedditResolver()
-        )
+        fun defaultResolvers(): List<PlatformResolver> =
+            listOf(
+                FacebookResolver(),
+                BilibiliResolver(),
+                XResolver(),
+                InstagramResolver(),
+                ThreadsResolver(),
+                YouTubeResolver(),
+                RedditResolver(),
+            )
     }
 
     /**
@@ -55,16 +55,12 @@ class SocialPeekClient(
     /**
      * Checks if any registered resolver can handle this [url].
      */
-    fun canResolve(url: String): Boolean {
-        return findResolver(url) != null
-    }
+    fun canResolve(url: String): Boolean = findResolver(url) != null
 
     /**
      * Finds a matching resolver for the given [url], or null if none match.
      */
-    fun findResolver(url: String): PlatformResolver? {
-        return resolvers.firstOrNull { it.canResolve(url) }
-    }
+    fun findResolver(url: String): PlatformResolver? = resolvers.firstOrNull { it.canResolve(url) }
 
     /**
      * Cleans the URL by stripping tracking parameters.

@@ -11,11 +11,10 @@ data class MetaPostDetails(
     val author: Author? = null,
     val content: String? = null,
     val createdAtEpochSeconds: Long? = null,
-    val metrics: Metrics? = null
+    val metrics: Metrics? = null,
 )
 
 object MetaMediaExtractor {
-
     private val json = Json { ignoreUnknownKeys = true }
 
     /**
@@ -24,7 +23,7 @@ object MetaMediaExtractor {
     fun extractPostDetails(
         html: String,
         targetPostId: String? = null,
-        fallbackUsername: String? = null
+        fallbackUsername: String? = null,
     ): MetaPostDetails? {
         try {
             val doc = Jsoup.parse(html)
@@ -36,7 +35,8 @@ object MetaMediaExtractor {
                 val content = script.data().takeIf { it.isNotBlank() } ?: script.html()
                 if (content.isBlank()) continue
 
-                val hasMediaIndicator = content.contains("\"video_versions\"") ||
+                val hasMediaIndicator =
+                    content.contains("\"video_versions\"") ||
                         content.contains("\"carousel_media\"") ||
                         content.contains("\"quoted_attachment_post\"") ||
                         content.contains("\"giphy_media_info\"") ||
@@ -46,14 +46,17 @@ object MetaMediaExtractor {
 
                 if (!hasMediaIndicator) continue
 
-                val element = runCatching { json.parseToJsonElement(content) }.getOrNull()
-                    ?: runCatching {
-                        val firstBrace = content.indexOf('{')
-                        if (firstBrace != -1) {
-                            val slice = extractBalancedBracket(content, firstBrace, '{', '}')
-                            if (slice != null) json.parseToJsonElement(slice) else null
-                        } else null
-                    }.getOrNull()
+                val element =
+                    runCatching { json.parseToJsonElement(content) }.getOrNull()
+                        ?: runCatching {
+                            val firstBrace = content.indexOf('{')
+                            if (firstBrace != -1) {
+                                val slice = extractBalancedBracket(content, firstBrace, '{', '}')
+                                if (slice != null) json.parseToJsonElement(slice) else null
+                            } else {
+                                null
+                            }
+                        }.getOrNull()
 
                 if (element != null) {
                     candidateJsonElements.add(element)
@@ -88,23 +91,31 @@ object MetaMediaExtractor {
 
             // Extract author
             val userObj = targetPostNode["user"] as? JsonObject
-            val author = if (userObj != null) {
-                val username = (userObj["username"] as? JsonPrimitive)?.contentOrNull
-                    ?: fallbackUsername
-                    ?: "unknown"
-                val displayName = (userObj["full_name"] as? JsonPrimitive)?.contentOrNull
-                    ?.takeIf { it.isNotBlank() } ?: username
-                val avatarUrl = (userObj["profile_pic_url"] as? JsonPrimitive)?.contentOrNull
-                    ?.replace("\\/", "/")
-                val isVerified = (userObj["is_verified"] as? JsonPrimitive)?.booleanOrNull ?: false
-                Author(
-                    username = username,
-                    displayName = displayName,
-                    avatarUrl = avatarUrl,
-                    isVerified = isVerified,
-                    profileUrl = null
-                )
-            } else null
+            val author =
+                if (userObj != null) {
+                    val username =
+                        (userObj["username"] as? JsonPrimitive)?.contentOrNull
+                            ?: fallbackUsername
+                            ?: "unknown"
+                    val displayName =
+                        (userObj["full_name"] as? JsonPrimitive)
+                            ?.contentOrNull
+                            ?.takeIf { it.isNotBlank() } ?: username
+                    val avatarUrl =
+                        (userObj["profile_pic_url"] as? JsonPrimitive)
+                            ?.contentOrNull
+                            ?.replace("\\/", "/")
+                    val isVerified = (userObj["is_verified"] as? JsonPrimitive)?.booleanOrNull ?: false
+                    Author(
+                        username = username,
+                        displayName = displayName,
+                        avatarUrl = avatarUrl,
+                        isVerified = isVerified,
+                        profileUrl = null,
+                    )
+                } else {
+                    null
+                }
 
             // Extract content
             val captionObj = targetPostNode["caption"] as? JsonObject
@@ -119,13 +130,16 @@ object MetaMediaExtractor {
             val directReplyCount = (textPostAppInfo?.get("direct_reply_count") as? JsonPrimitive)?.longOrNull
             val repostCount = (textPostAppInfo?.get("repost_count") as? JsonPrimitive)?.longOrNull
 
-            val metrics = if (likeCount != null || directReplyCount != null || repostCount != null) {
-                Metrics(
-                    likes = likeCount,
-                    comments = directReplyCount,
-                    reposts = repostCount
-                )
-            } else null
+            val metrics =
+                if (likeCount != null || directReplyCount != null || repostCount != null) {
+                    Metrics(
+                        likes = likeCount,
+                        comments = directReplyCount,
+                        reposts = repostCount,
+                    )
+                } else {
+                    null
+                }
 
             // Extract media
             val mediaList = extractMediaFromPostNode(targetPostNode)
@@ -135,7 +149,7 @@ object MetaMediaExtractor {
                 author = author,
                 content = contentText,
                 createdAtEpochSeconds = createdAt,
-                metrics = metrics
+                metrics = metrics,
             )
         } catch (_: Exception) {
             return null
@@ -189,7 +203,10 @@ object MetaMediaExtractor {
     /**
      * Extracts author information from Meta (Instagram/Threads) SSR HTML scripts.
      */
-    fun extractAuthor(html: String, fallbackUsername: String? = null): Author? {
+    fun extractAuthor(
+        html: String,
+        fallbackUsername: String? = null,
+    ): Author? {
         try {
             val doc = Jsoup.parse(html)
             val scripts = doc.getElementsByTag("script")
@@ -200,13 +217,18 @@ object MetaMediaExtractor {
                     val element = json.parseToJsonElement(content)
                     val userObj = findUserObject(element, fallbackUsername)
                     if (userObj != null) {
-                        val username = (userObj["username"] as? JsonPrimitive)?.contentOrNull
-                            ?: fallbackUsername
-                            ?: "unknown"
-                        val displayName = (userObj["full_name"] as? JsonPrimitive)?.contentOrNull
-                            ?.takeIf { it.isNotBlank() } ?: username
-                        val avatarUrl = (userObj["profile_pic_url"] as? JsonPrimitive)?.contentOrNull
-                            ?.replace("\\/", "/")
+                        val username =
+                            (userObj["username"] as? JsonPrimitive)?.contentOrNull
+                                ?: fallbackUsername
+                                ?: "unknown"
+                        val displayName =
+                            (userObj["full_name"] as? JsonPrimitive)
+                                ?.contentOrNull
+                                ?.takeIf { it.isNotBlank() } ?: username
+                        val avatarUrl =
+                            (userObj["profile_pic_url"] as? JsonPrimitive)
+                                ?.contentOrNull
+                                ?.replace("\\/", "/")
                         val isVerified = (userObj["is_verified"] as? JsonPrimitive)?.booleanOrNull ?: false
 
                         return Author(
@@ -214,7 +236,7 @@ object MetaMediaExtractor {
                             displayName = displayName,
                             avatarUrl = avatarUrl,
                             isVerified = isVerified,
-                            profileUrl = null
+                            profileUrl = null,
                         )
                     }
                 } catch (_: Exception) {
@@ -227,15 +249,17 @@ object MetaMediaExtractor {
         return null
     }
 
-    private fun isPostObject(obj: JsonObject): Boolean {
-        return obj.containsKey("user") ||
-                obj.containsKey("caption") ||
-                obj.containsKey("text_post_app_info") ||
-                obj.containsKey("media_type") ||
-                obj.containsKey("carousel_media")
-    }
+    private fun isPostObject(obj: JsonObject): Boolean =
+        obj.containsKey("user") ||
+            obj.containsKey("caption") ||
+            obj.containsKey("text_post_app_info") ||
+            obj.containsKey("media_type") ||
+            obj.containsKey("carousel_media")
 
-    private fun findJsonObject(element: JsonElement, predicate: (JsonObject) -> Boolean): JsonObject? {
+    private fun findJsonObject(
+        element: JsonElement,
+        predicate: (JsonObject) -> Boolean,
+    ): JsonObject? {
         if (element is JsonObject) {
             if (predicate(element)) return element
             for (v in element.values) {
@@ -251,7 +275,10 @@ object MetaMediaExtractor {
         return null
     }
 
-    private fun findPostById(element: JsonElement, targetId: String): JsonObject? {
+    private fun findPostById(
+        element: JsonElement,
+        targetId: String,
+    ): JsonObject? {
         return findJsonObject(element) { obj ->
             if (!isPostObject(obj)) return@findJsonObject false
             val code = (obj["code"] as? JsonPrimitive)?.contentOrNull
@@ -264,18 +291,19 @@ object MetaMediaExtractor {
 
     private fun findFallbackPostObject(element: JsonElement): JsonObject? {
         // Constrained fallback: prefer target query media node, or container with carousel/video/giphy
-        val targetQueryPost = findJsonObject(element) { obj ->
-            val media = obj["media"] as? JsonObject
-            media != null && isPostObject(media)
-        }?.get("media") as? JsonObject
+        val targetQueryPost =
+            findJsonObject(element) { obj ->
+                val media = obj["media"] as? JsonObject
+                media != null && isPostObject(media)
+            }?.get("media") as? JsonObject
 
         if (targetQueryPost != null) return targetQueryPost
 
         return findJsonObject(element) { obj ->
             isPostObject(obj) && (
                 obj.containsKey("carousel_media") ||
-                obj.containsKey("video_versions") ||
-                obj.containsKey("giphy_media_info")
+                    obj.containsKey("video_versions") ||
+                    obj.containsKey("giphy_media_info")
             )
         }
     }
@@ -284,9 +312,10 @@ object MetaMediaExtractor {
         // 1. carousel_media
         val carouselMedia = postNode["carousel_media"] as? JsonArray
         if (carouselMedia != null && carouselMedia.isNotEmpty()) {
-            val items = carouselMedia.mapNotNull { item ->
-                (item as? JsonObject)?.let { extractSingleMedia(it) }
-            }
+            val items =
+                carouselMedia.mapNotNull { item ->
+                    (item as? JsonObject)?.let { extractSingleMedia(it) }
+                }
             if (items.isNotEmpty()) return items
         }
 
@@ -311,17 +340,22 @@ object MetaMediaExtractor {
         return emptyList()
     }
 
-    private data class ImageCandidate(val url: String, val width: Int?, val height: Int?)
+    private data class ImageCandidate(
+        val url: String,
+        val width: Int?,
+        val height: Int?,
+    )
 
     private fun extractBestCandidate(imageVersions2: JsonElement?): ImageCandidate? {
         val candidates = (imageVersions2 as? JsonObject)?.get("candidates") as? JsonArray ?: return null
-        val list = candidates.mapNotNull { elem ->
-            val obj = elem as? JsonObject ?: return@mapNotNull null
-            val url = (obj["url"] as? JsonPrimitive)?.contentOrNull?.replace("\\/", "/") ?: return@mapNotNull null
-            val w = (obj["width"] as? JsonPrimitive)?.intOrNull
-            val h = (obj["height"] as? JsonPrimitive)?.intOrNull
-            ImageCandidate(url, w, h)
-        }
+        val list =
+            candidates.mapNotNull { elem ->
+                val obj = elem as? JsonObject ?: return@mapNotNull null
+                val url = (obj["url"] as? JsonPrimitive)?.contentOrNull?.replace("\\/", "/") ?: return@mapNotNull null
+                val w = (obj["width"] as? JsonPrimitive)?.intOrNull
+                val h = (obj["height"] as? JsonPrimitive)?.intOrNull
+                ImageCandidate(url, w, h)
+            }
         if (list.isEmpty()) return null
         return list.maxByOrNull { it.width ?: 0 } ?: list.first()
     }
@@ -331,20 +365,24 @@ object MetaMediaExtractor {
         val originalHeight = (node["original_height"] as? JsonPrimitive)?.intOrNull
 
         val imageCandidate = extractBestCandidate(node["image_versions2"])
-        val posterUrl = imageCandidate?.url
-            ?: (node["display_uri"] as? JsonPrimitive)?.contentOrNull?.replace("\\/", "/")
+        val posterUrl =
+            imageCandidate?.url
+                ?: (node["display_uri"] as? JsonPrimitive)?.contentOrNull?.replace("\\/", "/")
         val width = imageCandidate?.width ?: originalWidth
         val height = imageCandidate?.height ?: originalHeight
 
         // 1. Check video_versions
         val videoVersions = node["video_versions"] as? JsonArray
         if (videoVersions != null && videoVersions.isNotEmpty()) {
-            val validVideos = videoVersions.mapNotNull { it as? JsonObject }
-                .filter { (it["url"] as? JsonPrimitive)?.contentOrNull?.isNotBlank() == true }
+            val validVideos =
+                videoVersions
+                    .mapNotNull { it as? JsonObject }
+                    .filter { (it["url"] as? JsonPrimitive)?.contentOrNull?.isNotBlank() == true }
 
             if (validVideos.isNotEmpty()) {
-                val bestVideo = validVideos.maxByOrNull { (it["width"] as? JsonPrimitive)?.intOrNull ?: 0 }
-                    ?: validVideos.first()
+                val bestVideo =
+                    validVideos.maxByOrNull { (it["width"] as? JsonPrimitive)?.intOrNull ?: 0 }
+                        ?: validVideos.first()
                 val videoUrl = (bestVideo["url"] as? JsonPrimitive)?.contentOrNull?.replace("\\/", "/")
                 if (!videoUrl.isNullOrBlank()) {
                     val vWidth = (bestVideo["width"] as? JsonPrimitive)?.intOrNull ?: width
@@ -355,7 +393,7 @@ object MetaMediaExtractor {
                         previewUrl = posterUrl,
                         durationSeconds = duration,
                         width = vWidth,
-                        height = vHeight
+                        height = vHeight,
                     )
                 }
             }
@@ -365,16 +403,18 @@ object MetaMediaExtractor {
         val giphy = node["giphy_media_info"] as? JsonObject
         if (giphy != null) {
             val images = giphy["images"] as? JsonObject
-            val imgObj = (images?.get("original") as? JsonObject)
-                ?: (images?.get("fixed_height") as? JsonObject)
-                ?: (images?.values?.firstOrNull() as? JsonObject)
+            val imgObj =
+                (images?.get("original") as? JsonObject)
+                    ?: (images?.get("fixed_height") as? JsonObject)
+                    ?: (images?.values?.firstOrNull() as? JsonObject)
 
             if (imgObj != null) {
                 val mp4 = (imgObj["mp4"] as? JsonPrimitive)?.contentOrNull?.replace("\\/", "/")
                 // Prefer still frame for preview if available
-                val stillObj = (images?.get("original_still") as? JsonObject)
-                    ?: (images?.get("fixed_height_still") as? JsonObject)
-                    ?: (images?.get("downsized_still") as? JsonObject)
+                val stillObj =
+                    (images?.get("original_still") as? JsonObject)
+                        ?: (images?.get("fixed_height_still") as? JsonObject)
+                        ?: (images?.get("downsized_still") as? JsonObject)
                 val stillUrl = (stillObj?.get("url") as? JsonPrimitive)?.contentOrNull?.replace("\\/", "/")
                 val preview = stillUrl ?: (imgObj["url"] as? JsonPrimitive)?.contentOrNull?.replace("\\/", "/")
 
@@ -386,14 +426,14 @@ object MetaMediaExtractor {
                         url = mp4,
                         previewUrl = preview,
                         width = gWidth,
-                        height = gHeight
+                        height = gHeight,
                     )
                 } else if (!preview.isNullOrBlank()) {
                     return Media.Image(
                         url = preview,
                         previewUrl = preview,
                         width = gWidth,
-                        height = gHeight
+                        height = gHeight,
                     )
                 }
             }
@@ -405,7 +445,7 @@ object MetaMediaExtractor {
                 url = imageCandidate.url,
                 previewUrl = imageCandidate.url,
                 width = width,
-                height = height
+                height = height,
             )
         }
 
@@ -416,14 +456,17 @@ object MetaMediaExtractor {
                 url = displayUri,
                 previewUrl = displayUri,
                 width = width,
-                height = height
+                height = height,
             )
         }
 
         return null
     }
 
-    private fun extractBalancedJsonArray(text: String, key: String): JsonArray? {
+    private fun extractBalancedJsonArray(
+        text: String,
+        key: String,
+    ): JsonArray? {
         val keyIndex = text.indexOf("\"$key\"")
         if (keyIndex == -1) return null
         val colonIndex = text.indexOf(':', keyIndex)
@@ -451,8 +494,9 @@ object MetaMediaExtractor {
             val isVideo = (node["is_video"] as? JsonPrimitive)?.booleanOrNull ?: false
             val displayResources = node["display_resources"] as? JsonArray
             val lastResource = displayResources?.lastOrNull() as? JsonObject
-            val displayUrl = (node["display_url"] as? JsonPrimitive)?.contentOrNull
-                ?: (lastResource?.get("src") as? JsonPrimitive)?.contentOrNull
+            val displayUrl =
+                (node["display_url"] as? JsonPrimitive)?.contentOrNull
+                    ?: (lastResource?.get("src") as? JsonPrimitive)?.contentOrNull
             val dimensions = node["dimensions"] as? JsonObject
             val width = (dimensions?.get("width") as? JsonPrimitive)?.intOrNull
             val height = (dimensions?.get("height") as? JsonPrimitive)?.intOrNull
@@ -471,7 +515,12 @@ object MetaMediaExtractor {
         return list
     }
 
-    private fun extractBalancedBracket(text: String, startIndex: Int, openChar: Char, closeChar: Char): String? {
+    private fun extractBalancedBracket(
+        text: String,
+        startIndex: Int,
+        openChar: Char,
+        closeChar: Char,
+    ): String? {
         var depth = 0
         var inString = false
         var escape = false
@@ -490,8 +539,9 @@ object MetaMediaExtractor {
                 continue
             }
             if (!inString) {
-                if (c == openChar) depth++
-                else if (c == closeChar) {
+                if (c == openChar) {
+                    depth++
+                } else if (c == closeChar) {
                     depth--
                     if (depth == 0) {
                         return text.substring(startIndex, i + 1)
@@ -502,7 +552,10 @@ object MetaMediaExtractor {
         return null
     }
 
-    private fun findKeyInJson(element: JsonElement, targetKey: String): JsonElement? {
+    private fun findKeyInJson(
+        element: JsonElement,
+        targetKey: String,
+    ): JsonElement? {
         if (element is JsonObject) {
             if (element.containsKey(targetKey)) {
                 return element[targetKey]
@@ -520,7 +573,10 @@ object MetaMediaExtractor {
         return null
     }
 
-    private fun findUserObject(element: JsonElement, targetUsername: String?): JsonObject? {
+    private fun findUserObject(
+        element: JsonElement,
+        targetUsername: String?,
+    ): JsonObject? {
         if (element is JsonObject) {
             if (element.containsKey("profile_pic_url") && element.containsKey("username")) {
                 val u = (element["username"] as? JsonPrimitive)?.contentOrNull
@@ -559,8 +615,9 @@ object MetaMediaExtractor {
             val displayUri = (obj["display_uri"] as? JsonPrimitive)?.contentOrNull
 
             val bestCandidate = imageVersions?.firstOrNull() as? JsonObject
-            val posterUrl = (bestCandidate?.get("url") as? JsonPrimitive)?.contentOrNull?.replace("\\/", "/")
-                ?: displayUri?.replace("\\/", "/")
+            val posterUrl =
+                (bestCandidate?.get("url") as? JsonPrimitive)?.contentOrNull?.replace("\\/", "/")
+                    ?: displayUri?.replace("\\/", "/")
 
             if (videoVersions != null && videoVersions.isNotEmpty()) {
                 val bestVideo = videoVersions.firstOrNull() as? JsonObject
@@ -571,15 +628,16 @@ object MetaMediaExtractor {
                             url = videoUrl,
                             previewUrl = posterUrl,
                             width = (bestVideo["width"] as? JsonPrimitive)?.intOrNull,
-                            height = (bestVideo["height"] as? JsonPrimitive)?.intOrNull
-                        )
+                            height = (bestVideo["height"] as? JsonPrimitive)?.intOrNull,
+                        ),
                     )
                     continue
                 }
             }
 
-            val imageUrl = (bestCandidate?.get("url") as? JsonPrimitive)?.contentOrNull?.replace("\\/", "/")
-                ?: displayUri?.replace("\\/", "/")
+            val imageUrl =
+                (bestCandidate?.get("url") as? JsonPrimitive)?.contentOrNull?.replace("\\/", "/")
+                    ?: displayUri?.replace("\\/", "/")
 
             if (!imageUrl.isNullOrBlank()) {
                 list.add(
@@ -587,8 +645,8 @@ object MetaMediaExtractor {
                         url = imageUrl,
                         previewUrl = imageUrl,
                         width = (bestCandidate?.get("width") as? JsonPrimitive)?.intOrNull,
-                        height = (bestCandidate?.get("height") as? JsonPrimitive)?.intOrNull
-                    )
+                        height = (bestCandidate?.get("height") as? JsonPrimitive)?.intOrNull,
+                    ),
                 )
             }
         }

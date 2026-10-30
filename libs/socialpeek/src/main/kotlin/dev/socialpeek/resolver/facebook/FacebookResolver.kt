@@ -11,86 +11,125 @@ import org.jsoup.Jsoup
 import org.jsoup.nodes.Document
 
 class FacebookResolver : PlatformResolver {
-
     override val platform: Platform = Platform.FACEBOOK
 
     companion object {
-        val FACEBOOK_HEADERS = mapOf(
-            HttpHeaders.UserAgent to "facebookexternalhit/1.1 (+http://www.facebook.com/externalhit_uatext.php)",
-            HttpHeaders.AcceptLanguage to "en-US,en;q=0.9"
-        )
+        val FACEBOOK_HEADERS =
+            mapOf(
+                HttpHeaders.UserAgent to "facebookexternalhit/1.1 (+http://www.facebook.com/externalhit_uatext.php)",
+                HttpHeaders.AcceptLanguage to "en-US,en;q=0.9",
+            )
 
-        private val FB_DOMAINS = setOf(
-            "facebook.com", "www.facebook.com", "m.facebook.com", "web.facebook.com",
-            "touch.facebook.com", "fb.com", "www.fb.com", "fb.watch", "fb.me"
-        )
+        private val FB_DOMAINS =
+            setOf(
+                "facebook.com",
+                "www.facebook.com",
+                "m.facebook.com",
+                "web.facebook.com",
+                "touch.facebook.com",
+                "fb.com",
+                "www.fb.com",
+                "fb.watch",
+                "fb.me",
+            )
 
-        private val POST_PATH_REGEX = Regex(
-            """/(?:[^/]+/)?posts/([a-zA-Z0-9_.-]+)""",
-            RegexOption.IGNORE_CASE
-        )
-        private val REEL_PATH_REGEX = Regex(
-            """/reel/([0-9a-zA-Z_-]+)""",
-            RegexOption.IGNORE_CASE
-        )
-        private val VIDEO_PATH_REGEX = Regex(
-            """/(?:[^/]+/)?videos/(?:[^/]+/)?([0-9]+)""",
-            RegexOption.IGNORE_CASE
-        )
-        private val PHOTO_PATH_REGEX = Regex(
-            """/(?:[^/]+/)?photos/(?:[^/]+/)?([0-9]+)""",
-            RegexOption.IGNORE_CASE
-        )
-        private val GROUP_POST_REGEX = Regex(
-            """/groups/([^/]+)/(?:posts|permalink|multi_permalinks)/([a-zA-Z0-9_.-]+)""",
-            RegexOption.IGNORE_CASE
-        )
-        private val SHARE_PATH_REGEX = Regex(
-            """/share/(?:[pvr]/)?([a-zA-Z0-9_-]+)""",
-            RegexOption.IGNORE_CASE
-        )
-        private val FB_WATCH_REGEX = Regex(
-            """^https?://(?:www\.)?fb\.watch/([a-zA-Z0-9_-]+)""",
-            RegexOption.IGNORE_CASE
-        )
-        private val FB_SHORT_REGEX = Regex(
-            """^https?://(?:www\.)?fb\.(?:com|me)/([a-zA-Z0-9_.-]+)""",
-            RegexOption.IGNORE_CASE
-        )
+        private val POST_PATH_REGEX =
+            Regex(
+                """/(?:[^/]+/)?posts/([a-zA-Z0-9_.-]+)""",
+                RegexOption.IGNORE_CASE,
+            )
+        private val REEL_PATH_REGEX =
+            Regex(
+                """/reel/([0-9a-zA-Z_-]+)""",
+                RegexOption.IGNORE_CASE,
+            )
+        private val VIDEO_PATH_REGEX =
+            Regex(
+                """/(?:[^/]+/)?videos/(?:[^/]+/)?([0-9]+)""",
+                RegexOption.IGNORE_CASE,
+            )
+        private val PHOTO_PATH_REGEX =
+            Regex(
+                """/(?:[^/]+/)?photos/(?:[^/]+/)?([0-9]+)""",
+                RegexOption.IGNORE_CASE,
+            )
+        private val GROUP_POST_REGEX =
+            Regex(
+                """/groups/([^/]+)/(?:posts|permalink|multi_permalinks)/([a-zA-Z0-9_.-]+)""",
+                RegexOption.IGNORE_CASE,
+            )
+        private val SHARE_PATH_REGEX =
+            Regex(
+                """/share/(?:[pvr]/)?([a-zA-Z0-9_-]+)""",
+                RegexOption.IGNORE_CASE,
+            )
+        private val FB_WATCH_REGEX =
+            Regex(
+                """^https?://(?:www\.)?fb\.watch/([a-zA-Z0-9_-]+)""",
+                RegexOption.IGNORE_CASE,
+            )
+        private val FB_SHORT_REGEX =
+            Regex(
+                """^https?://(?:www\.)?fb\.(?:com|me)/([a-zA-Z0-9_.-]+)""",
+                RegexOption.IGNORE_CASE,
+            )
 
-        private val METRIC_VIEWS_REGEX = Regex(
-            """([\d,.]+[KMBkmb萬億]?)\s*(?:views|觀看|次觀看)""",
-            RegexOption.IGNORE_CASE
-        )
-        private val METRIC_REACTIONS_REGEX = Regex(
-            """([\d,.]+[KMBkmb萬億]?)\s*(?:reactions|likes|個心情|個讚|讚)""",
-            RegexOption.IGNORE_CASE
-        )
-        private val METRIC_COMMENTS_REGEX = Regex(
-            """([\d,.]+[KMBkmb萬億]?)\s*(?:comments|則留言|留言)""",
-            RegexOption.IGNORE_CASE
-        )
-        private val METRIC_SHARES_REGEX = Regex(
-            """([\d,.]+[KMBkmb萬億]?)\s*(?:shares|次分享|分享)""",
-            RegexOption.IGNORE_CASE
-        )
+        private val METRIC_VIEWS_REGEX =
+            Regex(
+                """([\d,.]+[KMBkmb萬億]?)\s*(?:views|觀看|次觀看)""",
+                RegexOption.IGNORE_CASE,
+            )
+        private val METRIC_REACTIONS_REGEX =
+            Regex(
+                """([\d,.]+[KMBkmb萬億]?)\s*(?:reactions|likes|個心情|個讚|讚)""",
+                RegexOption.IGNORE_CASE,
+            )
+        private val METRIC_COMMENTS_REGEX =
+            Regex(
+                """([\d,.]+[KMBkmb萬億]?)\s*(?:comments|則留言|留言)""",
+                RegexOption.IGNORE_CASE,
+            )
+        private val METRIC_SHARES_REGEX =
+            Regex(
+                """([\d,.]+[KMBkmb萬億]?)\s*(?:shares|次分享|分享)""",
+                RegexOption.IGNORE_CASE,
+            )
 
-        private val RESERVED_SEGMENTS = setOf(
-            "posts", "reel", "videos", "watch", "photos", "photo", "groups", "share",
-            "permalink.php", "story.php", "photo.php", "video.php", "profile.php",
-            "pages", "people", "events", "marketplace", "gaming", "login", "help"
-        )
+        private val RESERVED_SEGMENTS =
+            setOf(
+                "posts",
+                "reel",
+                "videos",
+                "watch",
+                "photos",
+                "photo",
+                "groups",
+                "share",
+                "permalink.php",
+                "story.php",
+                "photo.php",
+                "video.php",
+                "profile.php",
+                "pages",
+                "people",
+                "events",
+                "marketplace",
+                "gaming",
+                "login",
+                "help",
+            )
     }
 
     private data class OEmbedAuthor(
         val displayName: String?,
         val username: String?,
-        val profileUrl: String?
+        val profileUrl: String?,
     )
 
     override fun canResolve(url: String): Boolean {
-        val parsed = runCatching { Url(if (url.contains("://")) url else "https://$url") }.getOrNull()
-            ?: return false
+        val parsed =
+            runCatching { Url(if (url.contains("://")) url else "https://$url") }.getOrNull()
+                ?: return false
         val host = parsed.host.lowercase()
         val isFbHost = FB_DOMAINS.contains(host) || FB_DOMAINS.any { host.endsWith(".$it") }
         if (!isFbHost) return false
@@ -115,53 +154,64 @@ class FacebookResolver : PlatformResolver {
         }
     }
 
-    override suspend fun resolve(url: String, client: SocialPeekHttpClient): PeekPost {
+    override suspend fun resolve(
+        url: String,
+        client: SocialPeekHttpClient,
+    ): PeekPost {
         var currentUrl = url
 
         // 1. Follow redirects for share or short links
         if (isShareOrShortUrl(url)) {
-            currentUrl = try {
-                client.resolveFinalUrl(url, FACEBOOK_HEADERS)
-            } catch (_: Exception) {
-                url
-            }
+            currentUrl =
+                try {
+                    client.resolveFinalUrl(url, FACEBOOK_HEADERS)
+                } catch (_: Exception) {
+                    url
+                }
         }
 
         val cleanTargetUrl = UrlSanitizer.clean(currentUrl, Platform.FACEBOOK)
         val extractedId = extractPostId(currentUrl) ?: extractPostId(cleanTargetUrl)
 
-        val html = try {
-            client.get(cleanTargetUrl, FACEBOOK_HEADERS)
-        } catch (e: PostNotFoundException) {
-            throw e
-        } catch (e: Exception) {
-            throw PostNotFoundException(url, e.message)
-        }
+        val html =
+            try {
+                client.get(cleanTargetUrl, FACEBOOK_HEADERS)
+            } catch (e: PostNotFoundException) {
+                throw e
+            } catch (e: Exception) {
+                throw PostNotFoundException(url, e.message)
+            }
 
         val doc = Jsoup.parse(html)
         val oembedUrl = doc.selectFirst("link[rel=alternate][type='application/json+oembed']")?.attr("href")
-        val oembedAuthor = if (!oembedUrl.isNullOrBlank()) {
-            fetchOEmbedAuthor(client, oembedUrl)
-        } else {
-            null
-        }
+        val oembedAuthor =
+            if (!oembedUrl.isNullOrBlank()) {
+                fetchOEmbedAuthor(client, oembedUrl)
+            } else {
+                null
+            }
 
         return parseHtml(doc, currentUrl, cleanTargetUrl, extractedId, oembedAuthor)
     }
 
-    private suspend fun fetchOEmbedAuthor(client: SocialPeekHttpClient, oembedUrl: String): OEmbedAuthor? {
+    private suspend fun fetchOEmbedAuthor(
+        client: SocialPeekHttpClient,
+        oembedUrl: String,
+    ): OEmbedAuthor? {
         val oembedTarget = extractOembedAuthorFromUrl(oembedUrl)
-        val jsonText = try {
-            client.get(oembedUrl, FACEBOOK_HEADERS)
-        } catch (_: Exception) {
-            return oembedTarget
-        }
+        val jsonText =
+            try {
+                client.get(oembedUrl, FACEBOOK_HEADERS)
+            } catch (_: Exception) {
+                return oembedTarget
+            }
 
-        val json = try {
-            Json.parseToJsonElement(jsonText).jsonObject
-        } catch (_: Exception) {
-            return oembedTarget
-        }
+        val json =
+            try {
+                Json.parseToJsonElement(jsonText).jsonObject
+            } catch (_: Exception) {
+                return oembedTarget
+            }
 
         // Try to get author name and url from html field
         val html = json["html"]?.jsonPrimitive?.contentOrNull
@@ -177,7 +227,7 @@ class FacebookResolver : PlatformResolver {
                     return OEmbedAuthor(
                         displayName = displayName ?: username,
                         username = username,
-                        profileUrl = authorUrl ?: username?.let { "https://www.facebook.com/$it" }
+                        profileUrl = authorUrl ?: username?.let { "https://www.facebook.com/$it" },
                     )
                 }
             }
@@ -190,7 +240,7 @@ class FacebookResolver : PlatformResolver {
             return OEmbedAuthor(
                 displayName = authorName ?: username,
                 username = username,
-                profileUrl = authorUrl ?: username?.let { "https://www.facebook.com/$it" }
+                profileUrl = authorUrl ?: username?.let { "https://www.facebook.com/$it" },
             )
         }
 
@@ -205,19 +255,19 @@ class FacebookResolver : PlatformResolver {
         return OEmbedAuthor(
             displayName = username,
             username = username,
-            profileUrl = "https://www.facebook.com/$username"
+            profileUrl = "https://www.facebook.com/$username",
         )
     }
 
-    private fun isShareOrShortUrl(url: String): Boolean {
-        return FB_WATCH_REGEX.containsMatchIn(url) ||
-                FB_SHORT_REGEX.containsMatchIn(url) ||
-                url.contains("/share/")
-    }
+    private fun isShareOrShortUrl(url: String): Boolean =
+        FB_WATCH_REGEX.containsMatchIn(url) ||
+            FB_SHORT_REGEX.containsMatchIn(url) ||
+            url.contains("/share/")
 
     internal fun extractPostId(url: String): String? {
-        val parsed = runCatching { Url(if (url.contains("://")) url else "https://$url") }.getOrNull()
-            ?: return null
+        val parsed =
+            runCatching { Url(if (url.contains("://")) url else "https://$url") }.getOrNull()
+                ?: return null
 
         // 1. Check query parameters first
         parsed.parameters["story_fbid"]?.takeIf { it.isNotBlank() }?.let { return it }
@@ -227,19 +277,62 @@ class FacebookResolver : PlatformResolver {
         val path = parsed.encodedPath
 
         // 2. Check path patterns
-        GROUP_POST_REGEX.find(path)?.groupValues?.get(2)?.takeIf { it.isNotBlank() }?.let { return it }
-        POST_PATH_REGEX.find(path)?.groupValues?.get(1)?.takeIf { it.isNotBlank() }?.let { return it }
-        REEL_PATH_REGEX.find(path)?.groupValues?.get(1)?.takeIf { it.isNotBlank() }?.let { return it }
-        VIDEO_PATH_REGEX.find(path)?.groupValues?.get(1)?.takeIf { it.isNotBlank() }?.let { return it }
-        PHOTO_PATH_REGEX.find(path)?.groupValues?.get(1)?.takeIf { it.isNotBlank() }?.let { return it }
-        SHARE_PATH_REGEX.find(path)?.groupValues?.get(1)?.takeIf { it.isNotBlank() }?.let { return it }
-        FB_WATCH_REGEX.find(url)?.groupValues?.get(1)?.takeIf { it.isNotBlank() }?.let { return it }
-        FB_SHORT_REGEX.find(url)?.groupValues?.get(1)?.takeIf { it.isNotBlank() }?.let { return it }
+        GROUP_POST_REGEX
+            .find(path)
+            ?.groupValues
+            ?.get(2)
+            ?.takeIf { it.isNotBlank() }
+            ?.let { return it }
+        POST_PATH_REGEX
+            .find(path)
+            ?.groupValues
+            ?.get(1)
+            ?.takeIf { it.isNotBlank() }
+            ?.let { return it }
+        REEL_PATH_REGEX
+            .find(path)
+            ?.groupValues
+            ?.get(1)
+            ?.takeIf { it.isNotBlank() }
+            ?.let { return it }
+        VIDEO_PATH_REGEX
+            .find(path)
+            ?.groupValues
+            ?.get(1)
+            ?.takeIf { it.isNotBlank() }
+            ?.let { return it }
+        PHOTO_PATH_REGEX
+            .find(path)
+            ?.groupValues
+            ?.get(1)
+            ?.takeIf { it.isNotBlank() }
+            ?.let { return it }
+        SHARE_PATH_REGEX
+            .find(path)
+            ?.groupValues
+            ?.get(1)
+            ?.takeIf { it.isNotBlank() }
+            ?.let { return it }
+        FB_WATCH_REGEX
+            .find(url)
+            ?.groupValues
+            ?.get(1)
+            ?.takeIf { it.isNotBlank() }
+            ?.let { return it }
+        FB_SHORT_REGEX
+            .find(url)
+            ?.groupValues
+            ?.get(1)
+            ?.takeIf { it.isNotBlank() }
+            ?.let { return it }
 
         return null
     }
 
-    private fun extractCommunity(url: String, ogTitle: String?): String? {
+    private fun extractCommunity(
+        url: String,
+        ogTitle: String?,
+    ): String? {
         val groupMatch = GROUP_POST_REGEX.find(url)
         if (groupMatch != null) {
             return groupMatch.groupValues[1]
@@ -259,29 +352,37 @@ class FacebookResolver : PlatformResolver {
         originalUrl: String,
         cleanUrl: String,
         fallbackId: String?,
-        oembedAuthor: OEmbedAuthor? = null
+        oembedAuthor: OEmbedAuthor? = null,
     ): PeekPost {
-        val ogTitle = doc.selectFirst("meta[property=og:title]")?.attr("content")
-            ?: doc.selectFirst("meta[name=twitter:title]")?.attr("content")
-        val ogDescription = doc.selectFirst("meta[property=og:description]")?.attr("content")
-            ?: doc.selectFirst("meta[name=description]")?.attr("content")
+        val ogTitle =
+            doc.selectFirst("meta[property=og:title]")?.attr("content")
+                ?: doc.selectFirst("meta[name=twitter:title]")?.attr("content")
+        val ogDescription =
+            doc.selectFirst("meta[property=og:description]")?.attr("content")
+                ?: doc.selectFirst("meta[name=description]")?.attr("content")
         val ogType = doc.selectFirst("meta[property=og:type]")?.attr("content")
         val ogUrl = doc.selectFirst("meta[property=og:url]")?.attr("content")
         val canonicalHref = doc.selectFirst("link[rel=canonical]")?.attr("href")
 
-        val ogImages = doc.select("meta[property=og:image], meta[name=twitter:image]")
-            .mapNotNull { it.attr("content").takeIf { c -> c.isNotBlank() } }
-            .distinct()
-        val ogVideo = doc.selectFirst("meta[property=og:video], meta[property=og:video:url], meta[property=og:video:secure_url]")
-            ?.attr("content")
+        val ogImages =
+            doc
+                .select("meta[property=og:image], meta[name=twitter:image]")
+                .mapNotNull { it.attr("content").takeIf { c -> c.isNotBlank() } }
+                .distinct()
+        val ogVideo =
+            doc
+                .selectFirst("meta[property=og:video], meta[property=og:video:url], meta[property=og:video:secure_url]")
+                ?.attr("content")
 
         val pageTitle = doc.title()
 
         // Detect not found or private
         val isEmptyOg = ogTitle.isNullOrBlank() && ogDescription.isNullOrBlank() && ogImages.isEmpty()
-        val isGenericTitle = (ogTitle.equals("Facebook", ignoreCase = true) || pageTitle.equals("Facebook", ignoreCase = true)) &&
+        val isGenericTitle =
+            (ogTitle.equals("Facebook", ignoreCase = true) || pageTitle.equals("Facebook", ignoreCase = true)) &&
                 ogDescription.isNullOrBlank() && ogImages.isEmpty()
-        val isLoginBlocked = pageTitle.contains("Log in", ignoreCase = true) ||
+        val isLoginBlocked =
+            pageTitle.contains("Log in", ignoreCase = true) ||
                 pageTitle.contains("Log In", ignoreCase = true) ||
                 pageTitle.contains("登入")
 
@@ -290,34 +391,39 @@ class FacebookResolver : PlatformResolver {
         }
 
         // Post ID
-        val postId = (ogUrl?.let { extractPostId(it) })
-            ?: fallbackId
-            ?: (canonicalHref?.let { extractPostId(it) })
-            ?: "unknown"
+        val postId =
+            (ogUrl?.let { extractPostId(it) })
+                ?: fallbackId
+                ?: (canonicalHref?.let { extractPostId(it) })
+                ?: "unknown"
 
-        val finalCleanUrl = when {
-            !ogUrl.isNullOrBlank() && !ogUrl.contains("/share/") -> UrlSanitizer.clean(ogUrl, Platform.FACEBOOK)
-            !canonicalHref.isNullOrBlank() && !canonicalHref.contains("/share/") -> UrlSanitizer.clean(canonicalHref, Platform.FACEBOOK)
-            else -> cleanUrl
-        }
+        val finalCleanUrl =
+            when {
+                !ogUrl.isNullOrBlank() && !ogUrl.contains("/share/") -> UrlSanitizer.clean(ogUrl, Platform.FACEBOOK)
+                !canonicalHref.isNullOrBlank() && !canonicalHref.contains("/share/") -> UrlSanitizer.clean(canonicalHref, Platform.FACEBOOK)
+                else -> cleanUrl
+            }
 
         // Author & Title extraction
         val authorFromMeta = doc.selectFirst("meta[name=author]")?.attr("content")?.takeIf { it != "Facebook" }
         val community = extractCommunity(finalCleanUrl, ogTitle)
         val (parsedDisplayName, title, extractedAuthor) = parseTitleAndAuthor(ogTitle, authorFromMeta, originalUrl)
 
-        val displayName = oembedAuthor?.displayName
-            ?: (if (parsedDisplayName != "Facebook User") parsedDisplayName else (oembedAuthor?.username ?: "Facebook User"))
+        val displayName =
+            oembedAuthor?.displayName
+                ?: (if (parsedDisplayName != "Facebook User") parsedDisplayName else (oembedAuthor?.username ?: "Facebook User"))
 
-        val authorUsername = oembedAuthor?.username
-            ?: extractUsernameFromUrl(finalCleanUrl)
-            ?: extractUsernameFromUrl(ogUrl ?: "")
-            ?: extractedAuthor
-            ?: displayName.takeIf { it != "Facebook User" }?.lowercase()?.replace(Regex("""[^a-zA-Z0-9_.-]"""), "")
-            ?: ""
+        val authorUsername =
+            oembedAuthor?.username
+                ?: extractUsernameFromUrl(finalCleanUrl)
+                ?: extractUsernameFromUrl(ogUrl ?: "")
+                ?: extractedAuthor
+                ?: displayName.takeIf { it != "Facebook User" }?.lowercase()?.replace(Regex("""[^a-zA-Z0-9_.-]"""), "")
+                ?: ""
 
-        val profileUrl = oembedAuthor?.profileUrl?.trimEnd('/')
-            ?: authorUsername.takeIf { it.isNotBlank() }?.let { "https://www.facebook.com/$it" }
+        val profileUrl =
+            oembedAuthor?.profileUrl?.trimEnd('/')
+                ?: authorUsername.takeIf { it.isNotBlank() }?.let { "https://www.facebook.com/$it" }
 
         // Content
         val content = ogDescription ?: title ?: ""
@@ -328,7 +434,8 @@ class FacebookResolver : PlatformResolver {
 
         // Media
         val mediaList = mutableListOf<Media>()
-        val isVideoPost = !ogVideo.isNullOrBlank() ||
+        val isVideoPost =
+            !ogVideo.isNullOrBlank() ||
                 ogType.equals("video.other", ignoreCase = true) ||
                 finalCleanUrl.contains("/reel/") ||
                 finalCleanUrl.contains("/watch") ||
@@ -345,8 +452,8 @@ class FacebookResolver : PlatformResolver {
                     url = videoUrl,
                     previewUrl = previewImage,
                     width = videoWidth,
-                    height = videoHeight
-                )
+                    height = videoHeight,
+                ),
             )
         } else {
             val validImages = ogImages.filter { !isPlaceholder(it) }
@@ -359,18 +466,26 @@ class FacebookResolver : PlatformResolver {
                         url = imgUrl,
                         previewUrl = imgUrl,
                         width = if (index == 0) imgWidth else null,
-                        height = if (index == 0) imgHeight else null
-                    )
+                        height = if (index == 0) imgHeight else null,
+                    ),
                 )
             }
         }
 
-        val author = Author(
-            username = authorUsername,
-            displayName = displayName,
-            avatarUrl = previewImage?.takeIf { !isVideoPost && (it.contains("/profile_pic") || it.contains("crawler/media/?media_id=")) },
-            profileUrl = profileUrl
-        )
+        val author =
+            Author(
+                username = authorUsername,
+                displayName = displayName,
+                avatarUrl =
+                    previewImage?.takeIf {
+                        !isVideoPost && (
+                            it.contains(
+                                "/profile_pic",
+                            ) || it.contains("crawler/media/?media_id=")
+                        )
+                    },
+                profileUrl = profileUrl,
+            )
 
         return PeekPost(
             platform = Platform.FACEBOOK,
@@ -382,14 +497,14 @@ class FacebookResolver : PlatformResolver {
             title = title,
             media = mediaList,
             metrics = metrics,
-            community = community
+            community = community,
         )
     }
 
     private fun parseTitleAndAuthor(
         ogTitle: String?,
         authorMeta: String?,
-        url: String
+        url: String,
     ): Triple<String, String?, String?> {
         if (ogTitle.isNullOrBlank()) {
             val name = authorMeta ?: "Facebook User"
@@ -429,8 +544,9 @@ class FacebookResolver : PlatformResolver {
     }
 
     private fun extractUsernameFromUrl(url: String): String? {
-        val parsed = runCatching { Url(if (url.contains("://")) url else "https://$url") }.getOrNull()
-            ?: return null
+        val parsed =
+            runCatching { Url(if (url.contains("://")) url else "https://$url") }.getOrNull()
+                ?: return null
         val segments = parsed.encodedPath.split("/").filter { it.isNotBlank() }
         if (segments.isNotEmpty()) {
             val first = segments[0]
@@ -444,16 +560,36 @@ class FacebookResolver : PlatformResolver {
     private fun isPlaceholder(url: String): Boolean {
         val lower = url.lowercase()
         return lower.endsWith(".ico") ||
-                lower.contains("static.xx.fbcdn.net/rsrc.php") && lower.endsWith(".gif") ||
-                lower.contains("blank.gif") ||
-                lower.contains("spacer.gif")
+            (lower.contains("static.xx.fbcdn.net/rsrc.php") && lower.endsWith(".gif")) ||
+            lower.contains("blank.gif") ||
+            lower.contains("spacer.gif")
     }
 
     private fun parseMetrics(text: String): Metrics? {
-        val views = METRIC_VIEWS_REGEX.find(text)?.groupValues?.get(1)?.let { parseMetricNumber(it) }
-        val reactions = METRIC_REACTIONS_REGEX.find(text)?.groupValues?.get(1)?.let { parseMetricNumber(it) }
-        val comments = METRIC_COMMENTS_REGEX.find(text)?.groupValues?.get(1)?.let { parseMetricNumber(it) }
-        val shares = METRIC_SHARES_REGEX.find(text)?.groupValues?.get(1)?.let { parseMetricNumber(it) }
+        val views =
+            METRIC_VIEWS_REGEX
+                .find(text)
+                ?.groupValues
+                ?.get(1)
+                ?.let { parseMetricNumber(it) }
+        val reactions =
+            METRIC_REACTIONS_REGEX
+                .find(text)
+                ?.groupValues
+                ?.get(1)
+                ?.let { parseMetricNumber(it) }
+        val comments =
+            METRIC_COMMENTS_REGEX
+                .find(text)
+                ?.groupValues
+                ?.get(1)
+                ?.let { parseMetricNumber(it) }
+        val shares =
+            METRIC_SHARES_REGEX
+                .find(text)
+                ?.groupValues
+                ?.get(1)
+                ?.let { parseMetricNumber(it) }
 
         if (views == null && reactions == null && comments == null && shares == null) {
             return null
@@ -463,7 +599,7 @@ class FacebookResolver : PlatformResolver {
             views = views,
             likes = reactions,
             comments = comments,
-            reposts = shares
+            reposts = shares,
         )
     }
 
@@ -471,14 +607,15 @@ class FacebookResolver : PlatformResolver {
         val cleaned = raw.replace(",", "").trim()
         val lower = cleaned.lowercase()
 
-        val multiplier = when {
-            lower.endsWith("b") -> 1_000_000_000.0
-            lower.endsWith("m") -> 1_000_000.0
-            lower.endsWith("k") -> 1_000.0
-            lower.endsWith("億") -> 100_000_000.0
-            lower.endsWith("萬") -> 10_000.0
-            else -> 1.0
-        }
+        val multiplier =
+            when {
+                lower.endsWith("b") -> 1_000_000_000.0
+                lower.endsWith("m") -> 1_000_000.0
+                lower.endsWith("k") -> 1_000.0
+                lower.endsWith("億") -> 100_000_000.0
+                lower.endsWith("萬") -> 10_000.0
+                else -> 1.0
+            }
 
         val numStr = cleaned.filter { it.isDigit() || it == '.' }
         val value = numStr.toDoubleOrNull() ?: return null

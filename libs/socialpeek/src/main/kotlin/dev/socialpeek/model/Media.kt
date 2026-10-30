@@ -12,7 +12,7 @@ sealed interface Media {
         override val url: String,
         override val previewUrl: String? = null,
         val width: Int? = null,
-        val height: Int? = null
+        val height: Int? = null,
     ) : Media
 
     @Serializable
@@ -22,6 +22,6 @@ sealed interface Media {
         val durationSeconds: Double? = null,
         val width: Int? = null,
         val height: Int? = null,
-        val bitrate: Long? = null
+        val bitrate: Long? = null,
     ) : Media
 }
