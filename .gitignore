@@ -1,23 +1,28 @@
-.gradle
+# Gradle & Multi-Project Build Artifacts
+.gradle/
+**/.gradle/
 build/
+**/build/
 !gradle/wrapper/gradle-wrapper.jar
+!**/gradle/wrapper/gradle-wrapper.jar
+!**/gradle/wrapper/gradle-wrapper.properties
 !**/src/main/**/build/
 !**/src/test/**/build/
 
 ### IntelliJ IDEA ###
-.idea/modules.xml
-.idea/jarRepositories.xml
-.idea/compiler.xml
-.idea/libraries/
+.idea/
+**/.idea/
 *.iws
 *.iml
 *.ipr
 out/
+**/out/
 !**/src/main/**/out/
 !**/src/test/**/out/
 
 ### Kotlin ###
-.kotlin
+.kotlin/
+**/.kotlin/
 
 ### Eclipse ###
 .apt_generated
@@ -28,24 +33,29 @@ out/
 .springBeans
 .sts4-cache
 bin/
+**/bin/
 !**/src/main/**/bin/
 !**/src/test/**/bin/
 
 ### NetBeans ###
-/nbproject/private/
-/nbbuild/
-/dist/
-/nbdist/
-/.nb-gradle/
+**/nbproject/private/
+**/nbbuild/
+**/dist/
+**/nbdist/
+**/.nb-gradle/
 
 ### VS Code ###
 .vscode/
+**/.vscode/
 
-### Mac OS ###
+### OS & Logs ###
 .DS_Store
+**/.DS_Store
+Thumbs.db
+**/*.log
 
-# RPG Database
+# RPG Database & Local Configs
 data/
+**/data/
 config.yml
 config_test.yml
-/.idea/
