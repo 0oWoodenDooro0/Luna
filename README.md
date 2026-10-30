@@ -1,6 +1,6 @@
-# 🌘 Luna Curtly - 短網址與數據分析系統
+# 🌕 Luna Curtly - 短網址與數據分析系統
 
-Luna 是一款結合 **Discord 機器人** 與 **Ktor Web 控制台** 的現代化短網址服務。基於 [Curtly 3.1.0](https://github.com/0oWoodenDooro0/Curtly) 短網址引擎庫開發，支援 **Discord OAuth2 一鍵登入**、短網址個人化管理與多維度點擊數據分析。
+Luna 是一款結合 **Discord 機器人** 與 **Ktor Web 控制台** 的現代化短網址服務。基於內部 Monorepo 子模組 [Curtly](file:///libs/curtly) 短網址引擎庫與 [SocialPeek](file:///libs/socialpeek) 社群貼文解析庫開發，支援 **Discord OAuth2 一鍵登入**、短網址個人化管理與多維度點擊數據分析。
 
 ---
 
@@ -15,7 +15,7 @@ Luna 是一款結合 **Discord 機器人** 與 **Ktor Web 控制台** 的現代�
   - 即時統計總點擊數、每日點擊趨勢、熱門來源網站 (Top Referrers)、熱門裝置/瀏覽器 (User-Agent)、點擊 IP 來源與詳細時間點擊日誌。
 - 🎨 **現代化玻璃擬態 Dashboard**：
   - 極簡暗色系 Web 介面，支援一鍵複製短網址、即時搜尋、點擊分析彈窗與鏈接刪除。
-- ⚡ **高效能與 SQLite 持久化**：
+- ⚡ **高性能與 SQLite 持久化**：
   - 使用 Kotlin + Ktor + Exposed (SQLite) 打造，輕量高效。
 - 🐳 **Docker 與容器化就緒**：
   - 提供多階段優化 Dockerfile、Docker Compose 與 GitHub Actions 自動構建工作流，支援直接拉取即用。
@@ -178,6 +178,41 @@ export BASE_URL="http://localhost:8080/s/"
 
 ---
 
+### 🛠️ Monorepo 構建與測試指令 (Building & Testing)
+
+本專案採用 Gradle 多專案 Monorepo 架構，支援跨模組統一構建、驗證與測試：
+
+- **建置全專案**：
+  ```bash
+  ./gradlew build
+  ```
+- **執行全專案檢查與測試 (包含所有模組共 107 項測試)**：
+  ```bash
+  ./gradlew clean check test
+  ```
+- **獨立測試各子模組**：
+  ```bash
+  # 僅測試 SocialPeek 社群解析模組 (67 tests)
+  ./gradlew :libs:socialpeek:test
+
+  # 僅測試 Curtly 短網址模組 (22 tests)
+  ./gradlew :libs:curtly:test
+
+  # 僅測試 Luna 機器人核心模組 (18 tests)
+  ./gradlew test
+  ```
+- **代碼格式檢查 (Kotlinter)**：
+  ```bash
+  ./gradlew formatKotlin
+  ./gradlew lintKotlin
+  ```
+- **本機驗證 Maven 發布 (Maven Local)**：
+  ```bash
+  ./gradlew publishToMavenLocal
+  ```
+
+---
+
 ## 📖 使用方法 (Usage)
 
 ### 1. 🤖 在 Discord 使用
@@ -209,26 +244,64 @@ export BASE_URL="http://localhost:8080/s/"
 
 ---
 
-## 📂 專案結構 (Project Structure)
+## 📁 專案結構與 Monorepo 架構 (Monorepo Architecture & Structure)
+
+Luna 採用 Gradle 多專案 Monorepo 架構，整合了獨立的社群貼文解析庫與短網址庫：
+
+### 📦 模組說明 (Modules)
+
+1. **Luna 根應用程式 (`:`)**
+   - **用途**：Luna Discord 機器人與 Ktor 核心服務主程式 (Application version: `1.5.0`, group: `luna`)。
+   - **進入點**：`luna.core.MainKt`。
+   - **功能**：整合 Discord Slash 指令 (`/shorten`, `/myurls`)、Web 控制台儀表板、OAuth2 認證以及底層模組。
+
+2. **SocialPeek 社群貼文解析模組 (`:libs:socialpeek`)**
+   - **用途**：純 Kotlin 多平台社群媒體貼文中繼資料與媒體解析庫 (Library version: `1.0.0`, group: `com.github.0oWoodenDooro0.Luna`)。
+   - **功能**：支援 Threads、Bilibili、Reddit、YouTube、Facebook、X (Twitter)、Instagram 等平台之貼文標題、內容、作者及多媒體資源解析。
+   - **發布**：支援獨立發布 MavenPublication (`socialpeek`)。
+
+3. **Curtly 短網址核心模組 (`:libs:curtly`)**
+   - **用途**：輕量級 Kotlin 短網址服務與點擊分析核心庫 (Library version: `1.0.0`, group: `com.github.0oWoodenDooro0.Luna`)。
+   - **功能**：短網址鍵值生成、自訂別名、過期時間判定、點擊次數限制與點擊日誌追蹤，內建 Exposed/SQLite 儲存實作與 Web 頁面渲染。
+   - **發布**：支援獨立發布 MavenPublication (`curtly`)。
+
+4. **集中式版本目錄 (Version Catalog)**
+   - **位置**：`gradle/libs.versions.toml`。
+   - **功能**：統一管理根專案與所有子模組之依賴套件版本與 Gradle 插件。
+
+### 📂 目錄架構
 
 ```text
 Luna/
 ├── .github/workflows/
-│   └── docker-publish.yml # GitHub Actions 自動構建與發布 Docker 映像檔
-├── Dockerfile             # 多階段輕量化 Docker 構建檔
-├── docker-compose.yml     # 一鍵容器編排設定檔
-├── .dockerignore          # Docker 構建排除清單
-├── .env.example           # 環境變數設定範本檔
+│   ├── ci.yml               # GitHub Actions CI 工作流 (單元測試、程式碼規範、Maven 發布驗證)
+│   └── docker-publish.yml   # GitHub Actions 自動構建與發布 Docker 映像檔
+├── gradle/
+│   ├── libs.versions.toml   # 集中式 Gradle Version Catalog 依賴版本目錄
+│   └── wrapper/             # 根目錄 Gradle Wrapper
+├── libs/
+│   ├── curtly/              # Curtly 短網址模組 (:libs:curtly)
+│   │   ├── src/             # 模組原始碼與單元測試 (22 tests)
+│   │   ├── build.gradle.kts # 模組構建與 Maven 發布設定
+│   │   └── README.md        # Curtly 模組說明文件
+│   └── socialpeek/          # SocialPeek 社群貼文解析模組 (:libs:socialpeek)
+│       ├── src/             # 模組原始碼與單元測試 (67 tests)
+│       ├── build.gradle.kts # 模組構建與 Maven 發布設定
+│       └── README.md        # SocialPeek 模組說明文件
 ├── src/main/kotlin/luna/core/
-│   ├── Main.kt            # 應用程式進入點與 Ktor/Kord 初始化
-│   ├── CurtlyRouting.kt   # Web 路由、API Endpoints 與 Discord OAuth2 控制
-│   ├── LunaWebPages.kt    # 前端 HTML/CSS/JS 控制台與登入頁面渲染
-│   ├── UserStorage.kt     # 使用者資料庫與 Exposed Table 定義
-│   ├── ShortenCommand.kt  # Discord Slash Command: /shorten
-│   ├── MyUrlsCommand.kt   # Discord Slash Command: /myurls
-│   └── JsonLogger.kt      # JSON 結構化日誌記錄器
-├── build.gradle.kts       # Gradle 專案設定檔
-└── README.md              # 專案說明文件
+│   ├── Main.kt              # 應用程式進入點與 Ktor/Kord 初始化
+│   ├── CurtlyRouting.kt     # Web 路由、API Endpoints 與 Discord OAuth2 控制
+│   ├── LunaWebPages.kt      # 前端 HTML/CSS/JS 控制台與登入頁面渲染
+│   ├── UserStorage.kt       # 使用者資料庫與 Exposed Table 定義
+│   ├── ShortenCommand.kt    # Discord Slash Command: /shorten
+│   ├── MyUrlsCommand.kt     # Discord Slash Command: /myurls
+│   └── JsonLogger.kt        # JSON 結構化日誌記錄器
+├── src/test/kotlin/luna/    # 根應用測試套件 (18 tests)
+├── build.gradle.kts         # 根專案 Gradle 設定檔
+├── settings.gradle.kts      # 多專案設定與子模組包含設定
+├── Dockerfile               # 多階段輕量化 Docker 構建檔
+├── docker-compose.yml       # 一鍵容器編排設定檔
+└── README.md                # 專案說明文件
 ```
 
 ---
