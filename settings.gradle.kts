@@ -14,9 +14,4 @@ dependencyResolutionManagement {
         maven { url = uri("https://snapshots.kord.dev") }
         maven { url = uri("https://jitpack.io") }
     }
-    versionCatalogs {
-        create("libs") {
-            from(files("libs/curtly/gradle/libs.versions.toml"))
-        }
-    }
 }

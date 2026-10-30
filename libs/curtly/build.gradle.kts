@@ -5,7 +5,7 @@ plugins {
 }
 
 group = "com.github.0oWoodenDooro0.Luna"
-version = rootProject.version.toString()
+version = "1.0.0"
 
 kotlin {
     jvmToolchain(17)

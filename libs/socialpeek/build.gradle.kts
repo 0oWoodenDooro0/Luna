@@ -5,7 +5,7 @@ plugins {
 }
 
 group = "com.github.0oWoodenDooro0.Luna"
-version = rootProject.version.toString()
+version = "1.0.0"
 
 val ktorVersion = "3.5.2"
 val serializationVersion = "1.11.0"

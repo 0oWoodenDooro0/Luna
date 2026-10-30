@@ -5,8 +5,8 @@ plugins {
     id("org.jmailen.kotlinter") version "5.4.2"
 }
 
-group = "com.github.0oWoodenDooro0.Luna"
-version = "1.0.0"
+group = "luna"
+version = "1.5.0"
 
 application {
     mainClass.set("luna.core.MainKt")
