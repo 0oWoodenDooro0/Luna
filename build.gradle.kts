@@ -32,10 +32,10 @@ dependencies {
     implementation("io.ktor:ktor-server-sessions-jvm:3.5.0")
 
     // Curtly URL Shortener Library
-    implementation("com.github.0oWoodenDooro0:Curtly:3.1.0")
+    implementation(project(":libs:curtly"))
 
     // SocialPeek Social Post Resolver Library
-    implementation("com.github.0oWoodenDooro0:SocialPeek:v0.5.0")
+    implementation(project(":libs:socialpeek"))
 }
 
 kotlin {
