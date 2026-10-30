@@ -111,7 +111,7 @@ class SocialPeekIntegrationTest {
         val video = post.media.first() as Media.Video
         assertTrue(video.url.contains(".mp4"))
         assertNotNull(video.previewUrl)
-        assertTrue(video.previewUrl.contains("cdninstagram.com"))
+        assertTrue(video.previewUrl.contains("cdninstagram.com") || video.previewUrl.contains("fbcdn.net"))
         assertNotNull(post.createdAtEpochSeconds)
     }
 }

@@ -3,6 +3,10 @@ plugins {
 }
 rootProject.name = "Luna"
 
+include(":libs:socialpeek", ":libs:curtly")
+project(":libs:socialpeek").projectDir = file("libs/socialpeek")
+project(":libs:curtly").projectDir = file("libs/curtly")
+
 val localSocialPeek = file("../SocialPeek")
 
 val forceRemote = providers.gradleProperty("remote").isPresent ||
@@ -32,10 +36,15 @@ if (useLocal) {
 }
 
 dependencyResolutionManagement {
-    repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+    repositoriesMode.set(RepositoriesMode.PREFER_SETTINGS)
     repositories {
         mavenCentral()
         maven { url = uri("https://snapshots.kord.dev") }
         maven { url = uri("https://jitpack.io") }
+    }
+    versionCatalogs {
+        create("libs") {
+            from(files("libs/curtly/gradle/libs.versions.toml"))
+        }
     }
 }

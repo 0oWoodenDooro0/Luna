@@ -1,15 +1,11 @@
 plugins {
-    kotlin("jvm") version "2.4.10"
-    kotlin("plugin.serialization") version "2.4.10"
+    alias(libs.plugins.kotlin.jvm)
+    alias(libs.plugins.kotlin.serialization)
     `maven-publish`
 }
 
 group = "com.github.0oWoodenDooro0"
 version = "0.5.0"
-
-repositories {
-    mavenCentral()
-}
 
 val ktorVersion = "3.5.2"
 val serializationVersion = "1.11.0"
