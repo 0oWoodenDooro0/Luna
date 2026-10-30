@@ -33,6 +33,3 @@ jobs:
 
       - name: Run checks and tests
         run: ./gradlew check test --no-daemon
-
-      - name: Verify Maven publication
-        run: ./gradlew publishToMavenLocal --no-daemon

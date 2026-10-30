@@ -1,11 +1,7 @@
 plugins {
     alias(libs.plugins.kotlin.jvm)
     alias(libs.plugins.kotlin.serialization)
-    `maven-publish`
 }
-
-group = "com.github.0oWoodenDooro0.Luna"
-version = "1.0.0"
 
 val ktorVersion = "3.5.2"
 val serializationVersion = "1.11.0"
@@ -42,33 +38,4 @@ kotlin {
 
 tasks.test {
     useJUnitPlatform()
-}
-
-publishing {
-    publications {
-        create<MavenPublication>("mavenJava") {
-            from(components["java"])
-            groupId = project.group.toString()
-            artifactId = "socialpeek"
-            version = project.version.toString()
-
-            pom {
-                name.set("SocialPeek")
-                description.set("A pure Kotlin multi-platform social media post metadata and media parser")
-                url.set("https://github.com/0oWoodenDooro0/Luna")
-                licenses {
-                    license {
-                        name.set("The Apache License, Version 2.0")
-                        url.set("http://www.apache.org/licenses/LICENSE-2.0.txt")
-                    }
-                }
-                developers {
-                    developer {
-                        id.set("0oWoodenDooro0")
-                        name.set("0oWoodenDooro0")
-                    }
-                }
-            }
-        }
-    }
 }

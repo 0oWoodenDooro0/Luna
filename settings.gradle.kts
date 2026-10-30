@@ -12,6 +12,5 @@ dependencyResolutionManagement {
     repositories {
         mavenCentral()
         maven { url = uri("https://snapshots.kord.dev") }
-        maven { url = uri("https://jitpack.io") }
     }
 }

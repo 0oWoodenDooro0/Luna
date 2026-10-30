@@ -14,26 +14,17 @@
 4. **策略模式 (Strategy Pattern)**：各平台各自實作 `PlatformResolver`，易擴展、高維護性。
 5. **協程友善 (Kotlin Coroutines)**：原生 `suspend fun` 支援與非阻塞 I/O。
 6. **最新依賴與技術棧**：Kotlin 2.x、Ktor 3.5.x、kotlinx.coroutines 1.10.x、kotlinx.serialization、Jsoup 1.21.x。
-7. **JitPack 開箱即用**：內建 `maven-publish` 配置。
+7. **Monorepo 多模組架構**：作為 `:libs:socialpeek` 內部模組隨專案一同編譯與測試。
 
 ---
 
-## 📦 安裝方式 (JitPack)
+## 📦 模組引入方式
 
-在專案的 `settings.gradle.kts` 或根目錄 `build.gradle.kts` 中添加 JitPack 倉庫：
-
-```kotlin
-repositories {
-    mavenCentral()
-    maven { url = uri("https://jitpack.io") }
-}
-```
-
-在模組的 `build.gradle.kts` 中加入依賴：
+在同一 Monorepo 專案中直接作為子模組引入：
 
 ```kotlin
 dependencies {
-    implementation("com.github.0oWoodenDooro0:SocialPeek:v0.5.0")
+    implementation(project(":libs:socialpeek"))
 }
 ```
 
