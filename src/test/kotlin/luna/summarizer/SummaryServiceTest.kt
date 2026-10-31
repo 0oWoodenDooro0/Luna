@@ -1365,4 +1365,176 @@ class SummaryServiceTest {
             service.handleReaction(event2)
             coVerify(exactly = 0) { summarizer.summarize(any<SummaryInput>()) }
         }
+
+    @Test
+    fun `complete flow multi-participant dialogue produces structured summary with viewpoints and replies to Discord`() =
+        runTest {
+            val summarizer = mockk<GeminiSummarizer>()
+            var capturedInput: SummaryInput? = null
+            var replyCaptured: String? = null
+
+            val baseTime = Instant.parse("2026-10-31T10:00:00Z")
+            val msg1 = createMockMessage(1701L, "alice", "我們是否應該改用 PostgreSQL？", timestamp = baseTime)
+            val msg2 = createMockMessage(1702L, "bob", "PostgreSQL 的 JSON 支援更完整，我贊成更換。", timestamp = baseTime + 1.minutes)
+            val msg3 = createMockMessage(1703L, "charlie", "MySQL 目前維運穩定，更換會有停機風險，建議保留。", timestamp = baseTime + 2.minutes)
+            val targetMsg = createMockMessage(1704L, "alice", "那我們先在測試環境做 benchmark 再做決定。", timestamp = baseTime + 3.minutes)
+
+            val service =
+                SummaryService(
+                    summarizer = summarizer,
+                    historyFetcher = { _, _ -> listOf(msg1, msg2, msg3) },
+                    replySender = { _, content -> replyCaptured = content },
+                )
+
+            val structuredSummary =
+                """
+                TL;DR:
+                團隊討論是否將資料庫改為 PostgreSQL，最終共識為先在測試環境進行效能測試再決定。
+
+                核心重點:
+                • 團隊針對資料庫選型展開技術評估。
+                • 針對 PostgreSQL 功能優勢與現有系統維運成本進行權衡。
+                • 決議建立測試環境進行基準測試，避免未經評估直接遷移。
+
+                參與者觀點:
+                • bob: 肯定 PostgreSQL 的 JSON 支援能力，主張更換。
+                • charlie: 考量維運穩定度與停機風險，建議維持現狀。
+                • alice: 提出折衷方案，先做 benchmark 作為決策依據。
+                """.trimIndent()
+
+            coEvery { summarizer.summarize(any<SummaryInput>()) } answers {
+                capturedInput = firstArg()
+                SummaryResult.Success(structuredSummary)
+            }
+
+            val user = mockk<User>()
+            every { user.isBot } returns false
+
+            val event = mockk<ReactionAddEvent>()
+            every { event.emoji } returns ReactionEmoji.Unicode("📝")
+            every { event.userId } returns Snowflake(55L)
+            every { event.messageId } returns targetMsg.id
+            coEvery { event.getUserOrNull() } returns user
+            coEvery { event.getMessageOrNull() } returns targetMsg
+
+            service.handleReaction(event)
+
+            coVerify(exactly = 1) { summarizer.summarize(any<SummaryInput>()) }
+            assertEquals(SummaryStatus.DONE, service.getStatus(targetMsg.id))
+
+            val input = capturedInput
+            kotlin.test.assertNotNull(input)
+            val expectedContent =
+                """
+                [alice]: 我們是否應該改用 PostgreSQL？
+                [bob]: PostgreSQL 的 JSON 支援更完整，我贊成更換。
+                [charlie]: MySQL 目前維運穩定，更換會有停機風險，建議保留。
+                [alice]: 那我們先在測試環境做 benchmark 再做決定。
+                """.trimIndent()
+            assertEquals(expectedContent, input.content)
+
+            // Verify prompt builder correctly formats this dialogue input
+            val builtPrompt = GeminiPromptBuilder.buildUserPrompt(input)
+            assertTrue(builtPrompt.contains(expectedContent))
+
+            // Verify Discord reply contains all structured sections without emojis
+            val reply = replyCaptured
+            kotlin.test.assertNotNull(reply)
+            assertTrue(reply.contains("TL;DR:"))
+            assertTrue(reply.contains("核心重點:"))
+            assertTrue(reply.contains("參與者觀點:"))
+            assertFalse(EmojiSanitizer.containsEmoji(reply))
+        }
+
+    @Test
+    fun `complete flow multi-participant dialogue discussing peeked link produces full context and replies`() =
+        runTest {
+            val summarizer = mockk<GeminiSummarizer>()
+            var capturedInput: SummaryInput? = null
+            var replyCaptured: String? = null
+
+            val baseTime = Instant.parse("2026-10-31T10:00:00Z")
+            val msg1 = createMockMessage(1801L, "alice", "大家看看這篇報導 https://news.example.com/ai-update", timestamp = baseTime)
+            val msg2 = createMockMessage(1802L, "bob", "模型參數量看起來提升很多", timestamp = baseTime + 1.minutes)
+            val targetMsg = createMockMessage(1803L, "charlie", "幫忙總結一下重點與大家看法", timestamp = baseTime + 2.minutes)
+
+            val mockPeekPost =
+                PeekPost(
+                    platform = Platform.GENERIC,
+                    id = "news-1",
+                    originalUrl = "https://news.example.com/ai-update",
+                    author = Author(username = "reporter"),
+                    title = "AI Architecture Evolution in 2026",
+                    content = "Detailed analysis of new AI models and reasoning capabilities.",
+                    comments = listOf(Comment(author = "commenter1", content = "Impressive benchmark results")),
+                )
+
+            val service =
+                SummaryService(
+                    summarizer = summarizer,
+                    historyFetcher = { _, _ -> listOf(msg1, msg2) },
+                    peekResolver = { mockPeekPost },
+                    replySender = { _, content -> replyCaptured = content },
+                )
+
+            val mockResponse =
+                """
+                TL;DR:
+                報導介紹 2026 年新一代 AI 架構，團隊成員探討模型規模並由共識總結。
+
+                核心重點:
+                • 新架構顯著提升推理能力與參數量。
+                • 基準測試表現亮眼。
+
+                參與者觀點:
+                • bob: 注意到參數量大幅成長。
+                • charlie: 請求統整核心資訊與團隊討論。
+                """.trimIndent()
+
+            coEvery { summarizer.summarize(any<SummaryInput>()) } answers {
+                capturedInput = firstArg()
+                SummaryResult.Success(mockResponse)
+            }
+
+            val user = mockk<User>()
+            every { user.isBot } returns false
+
+            val event = mockk<ReactionAddEvent>()
+            every { event.emoji } returns ReactionEmoji.Unicode("📝")
+            every { event.userId } returns Snowflake(55L)
+            every { event.messageId } returns targetMsg.id
+            coEvery { event.getUserOrNull() } returns user
+            coEvery { event.getMessageOrNull() } returns targetMsg
+
+            service.handleReaction(event)
+
+            val input = capturedInput
+            kotlin.test.assertNotNull(input)
+            assertEquals("AI Architecture Evolution in 2026", input.title)
+            assertEquals("https://news.example.com/ai-update", input.url)
+            assertEquals(listOf("Impressive benchmark results"), input.comments)
+            assertTrue(input.content.contains("[alice]: 大家看看這篇報導 https://news.example.com/ai-update"))
+            assertTrue(input.content.contains("[bob]: 模型參數量看起來提升很多"))
+            assertTrue(input.content.contains("[charlie]: 幫忙總結一下重點與大家看法"))
+            assertTrue(input.content.contains("Detailed analysis of new AI models and reasoning capabilities."))
+
+            val request = GeminiPromptBuilder.buildRequest(input)
+            val userText =
+                request.contents
+                    .first()
+                    .parts
+                    .first()
+                    .text
+            assertTrue(userText.contains("標題：AI Architecture Evolution in 2026"))
+            assertTrue(userText.contains("來源網址：https://news.example.com/ai-update"))
+            assertTrue(userText.contains("社群留言與討論："))
+            assertTrue(userText.contains("1. Impressive benchmark results"))
+
+            val reply = replyCaptured
+            kotlin.test.assertNotNull(reply)
+            assertTrue(reply.contains("TL;DR:"))
+            assertTrue(reply.contains("核心重點:"))
+            assertTrue(reply.contains("參與者觀點:"))
+            assertFalse(EmojiSanitizer.containsEmoji(reply))
+        }
 }
