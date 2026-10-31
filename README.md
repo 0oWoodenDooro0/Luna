@@ -251,7 +251,7 @@ Luna 採用 Gradle 多專案 Monorepo 架構，整合了獨立的社群貼文解
 ### 📦 模組說明 (Modules)
 
 1. **Luna 根應用程式 (`:`)**
-   - **用途**：Luna Discord 機器人與 Ktor 核心服務主程式 (Application version: `1.5.0`, group: `luna`)。
+   - **用途**：Luna Discord 機器人與 Ktor 核心服務主程式 (Application version: `1.6.0`, group: `luna`)。
    - **進入點**：`luna.core.MainKt`。
    - **功能**：整合 Discord Slash 指令 (`/shorten`, `/myurls`)、Web 控制台儀表板、OAuth2 認證以及底層模組。
 
