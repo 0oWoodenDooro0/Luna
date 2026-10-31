@@ -18,6 +18,13 @@ object GeminiPromptBuilder {
             "（若為多人對話討論或包含各方意見，以 2 至 3 點客觀總結不同發言者的主要看法、爭議焦點或共識結論；若為單一貼文且無對話/留言時可省略，若有外部社群留言則以社群觀點呈現）\n\n" +
             "4. 長度限制：內容必須精簡扼要，整體篇幅不可超過 Discord 訊息上限（請控制在 1500 字元以內）。若對話篇幅較長，請自動過濾無關之寒暄或離題閒聊，聚焦於實質論點與結論發展。"
 
+    fun resolveProcessingMode(durationSeconds: Long?): VideoProcessingMode =
+        when {
+            durationSeconds == null -> VideoProcessingMode.STATIC
+            durationSeconds <= 300L -> VideoProcessingMode.STATIC
+            else -> VideoProcessingMode.AGENTIC
+        }
+
     fun buildUserPrompt(input: SummaryInput): String {
         val sb = StringBuilder()
         if (!input.title.isNullOrBlank()) {
@@ -36,8 +43,23 @@ object GeminiPromptBuilder {
         return sb.toString().trim()
     }
 
-    fun buildRequest(input: SummaryInput): GeminiGenerateContentRequest =
-        GeminiGenerateContentRequest(
+    fun buildRequest(input: SummaryInput): GeminiGenerateContentRequest {
+        val parts = mutableListOf<GeminiPart>()
+        if (!input.videoUri.isNullOrBlank()) {
+            val mode = resolveProcessingMode(input.videoDurationSeconds)
+            parts.add(
+                GeminiPart(
+                    fileData =
+                        GeminiFileData(
+                            fileUri = input.videoUri,
+                            processing = mode.value,
+                        ),
+                ),
+            )
+        }
+        parts.add(GeminiPart(text = buildUserPrompt(input)))
+
+        return GeminiGenerateContentRequest(
             systemInstruction =
                 GeminiContent(
                     parts = listOf(GeminiPart(text = SYSTEM_INSTRUCTION)),
@@ -46,7 +68,7 @@ object GeminiPromptBuilder {
                 listOf(
                     GeminiContent(
                         role = "user",
-                        parts = listOf(GeminiPart(text = buildUserPrompt(input))),
+                        parts = parts,
                     ),
                 ),
             generationConfig =
@@ -55,4 +77,5 @@ object GeminiPromptBuilder {
                     maxOutputTokens = 1024,
                 ),
         )
+    }
 }

@@ -1628,6 +1628,7 @@ class SummaryServiceTest {
                     .parts
                     .first()
                     .text
+            kotlin.test.assertNotNull(userText)
             assertTrue(userText.contains("標題：AI Architecture Evolution in 2026"))
             assertTrue(userText.contains("來源網址：https://news.example.com/ai-update"))
             assertTrue(userText.contains("社群留言與討論："))

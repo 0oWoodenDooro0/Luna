@@ -130,7 +130,8 @@ class GeminiSummarizer(
                         .firstOrNull()
                         ?.content
                         ?.parts
-                        ?.joinToString("\n") { it.text }
+                        ?.mapNotNull { it.text }
+                        ?.joinToString("\n")
                         ?.trim()
                 if (rawText.isNullOrBlank()) {
                     return SummaryResult.Error.Generic("Empty text in Gemini summary response")

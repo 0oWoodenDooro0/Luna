@@ -1,6 +1,17 @@
 package luna.summarizer
 
+import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+
+/**
+ * Supported video processing modes for Gemini multimodal video understanding.
+ */
+enum class VideoProcessingMode(
+    val value: String,
+) {
+    STATIC("static"),
+    AGENTIC("agentic"),
+}
 
 /**
  * Input content provided for AI summarization.
@@ -9,12 +20,16 @@ import kotlinx.serialization.Serializable
  * @property title Optional title of the page or post.
  * @property comments Optional list of user comments or discussion items.
  * @property url Optional source URL.
+ * @property videoUri Optional video URI for multimodal video understanding.
+ * @property videoDurationSeconds Optional video duration in seconds for adaptive mode selection.
  */
 data class SummaryInput(
     val content: String,
     val title: String? = null,
     val comments: List<String> = emptyList(),
     val url: String? = null,
+    val videoUri: String? = null,
+    val videoDurationSeconds: Long? = null,
 )
 
 /**
@@ -80,8 +95,19 @@ data class GeminiContent(
 )
 
 @Serializable
+data class GeminiFileData(
+    @SerialName("file_uri")
+    val fileUri: String,
+    @SerialName("mime_type")
+    val mimeType: String? = null,
+    val processing: String? = null,
+)
+
+@Serializable
 data class GeminiPart(
-    val text: String,
+    val text: String? = null,
+    @SerialName("file_data")
+    val fileData: GeminiFileData? = null,
 )
 
 @Serializable

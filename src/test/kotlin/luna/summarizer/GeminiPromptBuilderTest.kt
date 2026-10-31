@@ -133,4 +133,69 @@ class GeminiPromptBuilderTest {
         assertContains(serialized, "\"generationConfig\"")
         assertContains(serialized, "\"temperature\":0.2")
     }
+
+    @Test
+    fun `resolveProcessingMode selects STATIC for under or equal 300s and AGENTIC for over 300s`() {
+        assertEquals(VideoProcessingMode.STATIC, GeminiPromptBuilder.resolveProcessingMode(null))
+        assertEquals(VideoProcessingMode.STATIC, GeminiPromptBuilder.resolveProcessingMode(0L))
+        assertEquals(VideoProcessingMode.STATIC, GeminiPromptBuilder.resolveProcessingMode(300L))
+        assertEquals(VideoProcessingMode.AGENTIC, GeminiPromptBuilder.resolveProcessingMode(301L))
+        assertEquals(VideoProcessingMode.AGENTIC, GeminiPromptBuilder.resolveProcessingMode(3600L))
+    }
+
+    @Test
+    fun `buildRequest includes video file data part with static processing mode for short videos`() {
+        val input =
+            SummaryInput(
+                title = "Short YouTube Clip",
+                content = "A brief 2-minute tutorial",
+                videoUri = "https://www.youtube.com/watch?v=short123",
+                videoDurationSeconds = 120L,
+                comments = listOf("Great explanation!", "Thanks!"),
+            )
+        val request = GeminiPromptBuilder.buildRequest(input)
+
+        val parts = request.contents.first().parts
+        assertEquals(2, parts.size)
+        val videoPart = parts[0]
+        val fileData = videoPart.fileData
+        assertNotNull(fileData)
+        assertEquals("https://www.youtube.com/watch?v=short123", fileData.fileUri)
+        assertEquals("static", fileData.processing)
+
+        val textPart = parts[1]
+        val text = textPart.text
+        assertNotNull(text)
+        assertContains(text, "標題：Short YouTube Clip")
+        assertContains(text, "社群留言與討論：")
+        assertContains(text, "1. Great explanation!")
+
+        val serialized = json.encodeToString(request)
+        assertContains(serialized, "\"file_uri\":\"https://www.youtube.com/watch?v=short123\"")
+        assertContains(serialized, "\"processing\":\"static\"")
+    }
+
+    @Test
+    fun `buildRequest includes video file data part with agentic processing mode for long videos`() {
+        val input =
+            SummaryInput(
+                title = "Long Tech Conference Talk",
+                content = "1-hour deep dive into compiler architecture",
+                videoUri = "https://www.youtube.com/watch?v=longTalk456",
+                videoDurationSeconds = 3600L,
+            )
+        val request = GeminiPromptBuilder.buildRequest(input)
+
+        val parts = request.contents.first().parts
+        assertEquals(2, parts.size)
+        val videoPart = parts[0]
+        val fileData = videoPart.fileData
+        assertNotNull(fileData)
+        assertEquals("https://www.youtube.com/watch?v=longTalk456", fileData.fileUri)
+        assertEquals("agentic", fileData.processing)
+
+        val serialized = json.encodeToString(request)
+        assertContains(serialized, "\"file_uri\":\"https://www.youtube.com/watch?v=longTalk456\"")
+        assertContains(serialized, "\"processing\":\"agentic\"")
+    }
 }
