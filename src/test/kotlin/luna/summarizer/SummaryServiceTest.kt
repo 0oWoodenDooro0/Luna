@@ -1736,4 +1736,115 @@ class SummaryServiceTest {
             assertTrue(input.content.contains("[bob]: Second discussion point"))
             assertTrue(input.content.contains("[charlie]: Concluding remarks"))
         }
+
+    @Test
+    fun `Summary Reaction on YouTube URL extracts videoUri, duration, and comments into SummaryInput and sends formatted reply`() =
+        runTest {
+            val summarizer = mockk<GeminiSummarizer>()
+            var capturedInput: SummaryInput? = null
+            var sentReply: String? = null
+
+            val targetMsg =
+                createMockMessage(
+                    3001L,
+                    "alice",
+                    "Check out this video: https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+                )
+
+            val youtubePost =
+                PeekPost(
+                    platform = Platform.YOUTUBE,
+                    id = "dQw4w9WgXcQ",
+                    originalUrl = "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+                    cleanUrl = "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+                    author = Author(username = "RickAstley", displayName = "Rick Astley"),
+                    title = "Never Gonna Give You Up",
+                    content = "Never Gonna Give You Up",
+                    comments = listOf(Comment(author = "Viewer1", content = "Great music video!")),
+                    rawData = mapOf("durationSeconds" to "213"),
+                )
+
+            val service =
+                SummaryService(
+                    summarizer = summarizer,
+                    peekResolver = { youtubePost },
+                    replySender = { _, content -> sentReply = content },
+                )
+
+            coEvery { summarizer.summarize(any<SummaryInput>()) } answers {
+                capturedInput = firstArg()
+                SummaryResult.Success("TL;DR: Summary of Rick Astley video\n\n核心重點:\n• Classic hit")
+            }
+
+            val user = mockk<User>()
+            every { user.isBot } returns false
+
+            val event = mockk<ReactionAddEvent>()
+            every { event.emoji } returns ReactionEmoji.Unicode("📝")
+            every { event.userId } returns Snowflake(55L)
+            every { event.messageId } returns targetMsg.id
+            coEvery { event.getUserOrNull() } returns user
+            coEvery { event.getMessageOrNull() } returns targetMsg
+
+            service.handleReaction(event)
+
+            val input = capturedInput
+            kotlin.test.assertNotNull(input)
+            assertEquals("https://www.youtube.com/watch?v=dQw4w9WgXcQ", input.videoUri)
+            assertEquals(213L, input.videoDurationSeconds)
+            assertEquals(listOf("Great music video!"), input.comments)
+            assertEquals("Never Gonna Give You Up", input.title)
+
+            kotlin.test.assertNotNull(sentReply)
+            assertTrue(sentReply.contains("TL;DR: Summary of Rick Astley video"))
+        }
+
+    @Test
+    fun `Summary Reaction on YouTube URL exceeding 120 minutes replies with warning and does not call summarizer`() =
+        runTest {
+            val summarizer = mockk<GeminiSummarizer>()
+            var sentReply: String? = null
+
+            val targetMsg =
+                createMockMessage(
+                    3002L,
+                    "alice",
+                    "https://www.youtube.com/watch?v=ultraLongStream",
+                )
+
+            val longVideoPost =
+                PeekPost(
+                    platform = Platform.YOUTUBE,
+                    id = "ultraLongStream",
+                    originalUrl = "https://www.youtube.com/watch?v=ultraLongStream",
+                    cleanUrl = "https://www.youtube.com/watch?v=ultraLongStream",
+                    author = Author(username = "Streamer", displayName = "Streamer"),
+                    title = "5-Hour Marathon Stream",
+                    content = "5-Hour Marathon Stream",
+                    rawData = mapOf("durationSeconds" to "18000"), // 5 hours = 18000s > 7200s
+                )
+
+            val service =
+                SummaryService(
+                    summarizer = summarizer,
+                    peekResolver = { longVideoPost },
+                    replySender = { _, content -> sentReply = content },
+                )
+
+            val user = mockk<User>()
+            every { user.isBot } returns false
+
+            val event = mockk<ReactionAddEvent>()
+            every { event.emoji } returns ReactionEmoji.Unicode("📝")
+            every { event.userId } returns Snowflake(55L)
+            every { event.messageId } returns targetMsg.id
+            coEvery { event.getUserOrNull() } returns user
+            coEvery { event.getMessageOrNull() } returns targetMsg
+
+            service.handleReaction(event)
+
+            coVerify(exactly = 0) { summarizer.summarize(any<SummaryInput>()) }
+            kotlin.test.assertNotNull(sentReply)
+            assertTrue(sentReply.contains("超過 2 小時上限"))
+        }
 }

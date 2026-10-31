@@ -11,6 +11,7 @@ import dev.kord.core.on
 import dev.kord.rest.builder.message.allowedMentions
 import dev.socialpeek.SocialPeek
 import dev.socialpeek.model.PeekPost
+import dev.socialpeek.model.Platform
 import kotlinx.coroutines.flow.toList
 import luna.core.JsonLogger
 import org.slf4j.LoggerFactory
@@ -198,6 +199,13 @@ class SummaryService(
             if (primaryUrl != null) {
                 val post = runCatching { peekResolver(primaryUrl) }.getOrNull()
                 if (post != null) {
+                    val durationSeconds = post.rawData["durationSeconds"]?.toLongOrNull()
+                    if (post.platform == Platform.YOUTUBE && durationSeconds != null && durationSeconds > 7200L) {
+                        statusCache[event.messageId] = SummaryStatus.DONE
+                        replySender(message, "此影片長度超過 2 小時上限，為避免運算逾時，請選擇較短的片段或精華進行摘要。")
+                        return
+                    }
+
                     val postContent = post.content.ifBlank { "" }.trim()
                     val combinedContent =
                         if (precedingMessages.isEmpty()) {
@@ -219,6 +227,8 @@ class SummaryService(
                         title = post.title,
                         comments = post.comments.map { it.content },
                         url = primaryUrl,
+                        videoUri = if (post.platform == Platform.YOUTUBE) (post.cleanUrl.ifBlank { primaryUrl }) else null,
+                        videoDurationSeconds = durationSeconds,
                     )
                 } else {
                     SummaryInput(
