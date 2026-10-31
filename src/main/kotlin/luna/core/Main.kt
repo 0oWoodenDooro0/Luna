@@ -22,6 +22,8 @@ import kotlinx.coroutines.launch
 import luna.preview.PreviewCommand
 import luna.preview.PreviewSettingsStorage
 import luna.preview.SocialPreviewService
+import luna.summarizer.GeminiSummarizer
+import luna.summarizer.SummaryService
 import luna.undercover.UndercoverManager
 import luna.undercover.command.RevealCommand
 import luna.undercover.command.UndercoverCommand
@@ -115,6 +117,11 @@ suspend fun main() {
 
     // Register Social Post Preview Service
     SocialPreviewService.register(kord, previewSettingsStorage)
+
+    // Register Reaction-Triggered Summary Service
+    val geminiSummarizer = GeminiSummarizer()
+    val summaryService = SummaryService(summarizer = geminiSummarizer)
+    summaryService.register(kord)
 
     kord.on<ChatInputCommandInteractionCreateEvent> {
         val commandName = interaction.command.rootName

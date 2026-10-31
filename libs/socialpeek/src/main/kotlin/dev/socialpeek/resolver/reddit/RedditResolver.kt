@@ -319,6 +319,44 @@ class RedditResolver : PlatformResolver {
             }
         val cleanUrl = UrlSanitizer.clean(targetUrl, Platform.REDDIT)
 
+        val commentsList = mutableListOf<Comment>()
+        if (jsonArray.size > 1) {
+            val commentsListing = jsonArray[1].asJsonObject
+            val commentChildren =
+                commentsListing
+                    ?.get("data")
+                    ?.asJsonObject
+                    ?.get("children")
+                    ?.asJsonArray
+
+            commentChildren?.forEach { childElem ->
+                val childObj = childElem.asJsonObject ?: return@forEach
+                val kind = childObj["kind"]?.asJsonPrimitive?.contentOrNull
+                if (kind == "more") return@forEach
+
+                val data = childObj["data"]?.asJsonObject ?: return@forEach
+                val body = data["body"]?.asJsonPrimitive?.contentOrNull
+                if (body.isNullOrBlank() || body == "[deleted]" || body == "[removed]") return@forEach
+
+                val commentId = data["id"]?.asJsonPrimitive?.contentOrNull
+                val authorName = data["author"]?.asJsonPrimitive?.contentOrNull ?: "unknown"
+                val score =
+                    data["score"]?.asJsonPrimitive?.longOrNull
+                        ?: data["ups"]?.asJsonPrimitive?.longOrNull
+                val createdUtcComment = data["created_utc"]?.asJsonPrimitive?.doubleOrNull?.toLong()
+
+                commentsList.add(
+                    Comment(
+                        id = commentId,
+                        author = authorName,
+                        content = body,
+                        score = score,
+                        createdAtEpochSeconds = createdUtcComment,
+                    ),
+                )
+            }
+        }
+
         return PeekPost(
             platform = Platform.REDDIT,
             id = id,
@@ -329,6 +367,7 @@ class RedditResolver : PlatformResolver {
             content = selftext,
             media = mediaList,
             metrics = if (ups != null || numComments != null) Metrics(likes = ups, comments = numComments) else null,
+            comments = commentsList,
             createdAtEpochSeconds = createdUtc,
             community = subreddit,
             communityIcon = communityIcon,

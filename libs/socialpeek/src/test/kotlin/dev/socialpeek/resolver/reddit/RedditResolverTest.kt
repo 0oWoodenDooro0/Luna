@@ -389,4 +389,99 @@ class RedditResolverTest {
                 resolver.resolve("https://reddit.com/comments/unknown", client)
             }
         }
+
+    @Test
+    fun `resolve should extract top comments from Reddit json listing`() =
+        runTest {
+            val mockJson =
+                """
+                [
+                    {
+                        "data": {
+                            "children": [
+                                {
+                                    "data": {
+                                        "id": "t3_12345",
+                                        "title": "SocialPeek Released!",
+                                        "selftext": "A brand new social media metadata parser for Kotlin.",
+                                        "author": "kotlin_dev",
+                                        "subreddit": "kotlindev",
+                                        "ups": 350,
+                                        "num_comments": 42,
+                                        "permalink": "/r/kotlindev/comments/12345/socialpeek_released/",
+                                        "created_utc": 1715000000.0
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    {
+                        "data": {
+                            "children": [
+                                {
+                                    "kind": "t1",
+                                    "data": {
+                                        "id": "c_1",
+                                        "author": "alice_fan",
+                                        "body": "This library looks amazing, great work!",
+                                        "ups": 120,
+                                        "score": 120,
+                                        "created_utc": 1715000100.0
+                                    }
+                                },
+                                {
+                                    "kind": "t1",
+                                    "data": {
+                                        "id": "c_2",
+                                        "author": "bob_reviewer",
+                                        "body": "Does it support multiplatform?",
+                                        "ups": 45,
+                                        "score": 45,
+                                        "created_utc": 1715000200.0
+                                    }
+                                },
+                                {
+                                    "kind": "more",
+                                    "data": {
+                                        "count": 10,
+                                        "children": ["c_3", "c_4"]
+                                    }
+                                },
+                                {
+                                    "kind": "t1",
+                                    "data": {
+                                        "id": "c_del",
+                                        "author": "[deleted]",
+                                        "body": "[deleted]",
+                                        "score": 1
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                ]
+                """.trimIndent()
+
+            val client =
+                createMockHttpClient {
+                    jsonResponse(mockJson)
+                }
+
+            val post = resolver.resolve("https://www.reddit.com/r/kotlindev/comments/12345/socialpeek_released/", client)
+
+            assertEquals(2, post.comments.size)
+            val comment1 = post.comments[0]
+            assertEquals("c_1", comment1.id)
+            assertEquals("alice_fan", comment1.author)
+            assertEquals("This library looks amazing, great work!", comment1.content)
+            assertEquals(120L, comment1.score)
+            assertEquals(1715000100L, comment1.createdAtEpochSeconds)
+
+            val comment2 = post.comments[1]
+            assertEquals("c_2", comment2.id)
+            assertEquals("bob_reviewer", comment2.author)
+            assertEquals("Does it support multiplatform?", comment2.content)
+            assertEquals(45L, comment2.score)
+            assertEquals(1715000200L, comment2.createdAtEpochSeconds)
+        }
 }

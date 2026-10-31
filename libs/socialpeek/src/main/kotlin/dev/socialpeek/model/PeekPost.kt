@@ -13,6 +13,7 @@ data class PeekPost(
     val title: String? = null,
     val media: List<Media> = emptyList(),
     val metrics: Metrics? = null,
+    val comments: List<Comment> = emptyList(),
     val createdAtEpochSeconds: Long? = null,
     val community: String? = null,
     val communityIcon: String? = null,

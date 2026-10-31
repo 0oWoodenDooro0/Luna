@@ -7,6 +7,7 @@ import dev.socialpeek.network.SocialPeekHttpClient
 import dev.socialpeek.resolver.PlatformResolver
 import dev.socialpeek.resolver.bilibili.BilibiliResolver
 import dev.socialpeek.resolver.facebook.FacebookResolver
+import dev.socialpeek.resolver.generic.GenericWebResolver
 import dev.socialpeek.resolver.instagram.InstagramResolver
 import dev.socialpeek.resolver.reddit.RedditResolver
 import dev.socialpeek.resolver.threads.ThreadsResolver
@@ -28,6 +29,7 @@ class SocialPeekClient(
                 ThreadsResolver(),
                 YouTubeResolver(),
                 RedditResolver(),
+                GenericWebResolver(),
             )
     }
 
@@ -56,6 +58,14 @@ class SocialPeekClient(
      * Checks if any registered resolver can handle this [url].
      */
     fun canResolve(url: String): Boolean = findResolver(url) != null
+
+    /**
+     * Checks if any registered social media resolver (excluding generic web fallback) can handle this [url].
+     */
+    fun canResolveSocial(url: String): Boolean {
+        val resolver = findResolver(url) ?: return false
+        return resolver.platform != dev.socialpeek.model.Platform.GENERIC
+    }
 
     /**
      * Finds a matching resolver for the given [url], or null if none match.
