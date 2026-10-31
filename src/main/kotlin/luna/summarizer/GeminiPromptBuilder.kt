@@ -5,9 +5,9 @@ package luna.summarizer
  */
 object GeminiPromptBuilder {
     const val SYSTEM_INSTRUCTION: String =
-        "你是個專業的內容摘要助理。請根據使用者提供的內容或多人對話討論紀錄進行結構化摘要。\n" +
+        "你是一個專業的內容摘要助理。請根據使用者提供的內容或多人對話討論紀錄進行結構化摘要。\n" +
             "請務必嚴格遵守以下所有規則：\n" +
-            "1. 語言與用語：一律使用台灣繁體中文（zh-TW）與台灣慣用語彙，絕對不可使用簡體中文或中國大陸用語。\n" +
+            "1. 語言與用語：一律使用台灣繁體中文（zh-TW）與台灣慣用語，絕對不可使用簡體中文或中國大陸用語。\n" +
             "2. 嚴格禁用 Emoji：輸出中絕對不可包含任何 Emoji、表情符號或繪文字圖示。\n" +
             "3. 輸出結構：必須依照下列結構分段輸出，標題格式請保持一致：\n" +
             "TL;DR:\n" +
@@ -19,9 +19,9 @@ object GeminiPromptBuilder {
             "4. 長度限制：內容必須精簡扼要，整體篇幅不可超過 Discord 訊息上限（請控制在 1500 字元以內）。若對話篇幅較長，請自動過濾無關之寒暄或離題閒聊，聚焦於實質論點與結論發展。"
 
     const val VIDEO_SYSTEM_INSTRUCTION: String =
-        "你是個專業的影音內容摘要助理。請結合多模態影片理解（視覺畫面、口述語音、操作展示等）與創作者資訊進行結構化摘要。\n" +
+        "你是一個專業的影音內容摘要助理。請結合多模態影片理解（視覺畫面、口述語音、操作展示等）與創作者資訊進行結構化摘要。\n" +
             "請務必嚴格遵守以下所有規則：\n" +
-            "1. 語言與用語：一律使用台灣繁體中文（zh-TW）與台灣慣用語彙，絕對不可使用簡體中文或中國大陸用語。\n" +
+            "1. 語言與用語：一律使用台灣繁體中文（zh-TW）與台灣慣用語，絕對不可使用簡體中文或中國大陸用語。\n" +
             "2. 嚴格禁用 Emoji：輸出中絕對不可包含任何 Emoji、表情符號或繪文字圖示。\n" +
             "3. 影片多模態焦點與實質收穫（Video Focus Prompting）：\n" +
             "   • 充分運用多模態影片理解能力，深入分析影片之視覺畫面、語音口述、操作展示、程式碼或投影片，精準提煉創作者的核心論點、實質成果與關鍵結論。\n" +
@@ -52,6 +52,18 @@ object GeminiPromptBuilder {
             else -> VideoProcessingMode.AGENTIC
         }
 
+    private fun appendComments(
+        sb: StringBuilder,
+        comments: List<String>,
+    ) {
+        if (comments.isNotEmpty()) {
+            sb.append("\n\n社群留言與討論：\n")
+            comments.forEachIndexed { index, comment ->
+                sb.append("${index + 1}. ").append(comment.trim()).append("\n")
+            }
+        }
+    }
+
     fun buildUserPrompt(input: SummaryInput): String {
         val sb = StringBuilder()
         if (!input.title.isNullOrBlank()) {
@@ -63,12 +75,7 @@ object GeminiPromptBuilder {
 
         if (!input.videoUri.isNullOrBlank()) {
             sb.append("創作者說明與大綱：\n").append(input.content.trim())
-            if (input.comments.isNotEmpty()) {
-                sb.append("\n\n社群留言與討論：\n")
-                input.comments.forEachIndexed { index, comment ->
-                    sb.append("${index + 1}. ").append(comment.trim()).append("\n")
-                }
-            }
+            appendComments(sb, input.comments)
             sb.append("\n\n【指示】：請運用多模態視覺與語音理解影片內容，將核心論點與操作展示提煉至「核心重點」（可標註時間戳記 [mm:ss]）。嚴格落實來源隔離：核心重點絕不可引用社群留言；")
             if (input.comments.isNotEmpty()) {
                 sb.append("社群留言僅能用於統整「社群觀點」。")
@@ -77,12 +84,7 @@ object GeminiPromptBuilder {
             }
         } else {
             sb.append("內文：\n").append(input.content.trim())
-            if (input.comments.isNotEmpty()) {
-                sb.append("\n\n社群留言與討論：\n")
-                input.comments.forEachIndexed { index, comment ->
-                    sb.append("${index + 1}. ").append(comment.trim()).append("\n")
-                }
-            }
+            appendComments(sb, input.comments)
         }
         return sb.toString().trim()
     }
