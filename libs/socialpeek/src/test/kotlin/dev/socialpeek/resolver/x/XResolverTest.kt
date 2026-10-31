@@ -11,6 +11,7 @@ import org.junit.jupiter.api.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
+import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 
 class XResolverTest {
@@ -164,5 +165,159 @@ class XResolverTest {
             assertFailsWith<PostNotFoundException> {
                 resolver.resolve("https://x.com/ghost/status/404404404", client)
             }
+        }
+
+    @Test
+    fun `resolve should parse quote tweet with outer commentary and strip trailing quote url`() =
+        runTest {
+            val mockJson =
+                """
+                {
+                    "id_str": "10001",
+                    "text": "This is brilliant commentary https://t.co/quoteLink123",
+                    "user": {
+                        "id_str": "111",
+                        "name": "Commentator",
+                        "screen_name": "commentator",
+                        "profile_image_url_https": "https://pbs.twimg.com/avatar_comm.jpg"
+                    },
+                    "quoted_tweet": {
+                        "id_str": "20002",
+                        "text": "Original deep insight",
+                        "user": {
+                            "id_str": "222",
+                            "name": "Original Author",
+                            "screen_name": "original_author",
+                            "profile_image_url_https": "https://pbs.twimg.com/avatar_orig.jpg"
+                        },
+                        "photos": [
+                            {
+                                "url": "https://pbs.twimg.com/media/quoted_pic.jpg",
+                                "width": 800,
+                                "height": 600
+                            }
+                        ],
+                        "favorite_count": 500,
+                        "conversation_count": 42
+                    }
+                }
+                """.trimIndent()
+
+            val client =
+                createMockHttpClient {
+                    jsonResponse(mockJson)
+                }
+
+            val post = resolver.resolve("https://x.com/commentator/status/10001", client)
+
+            assertEquals("10001", post.id)
+            assertEquals("This is brilliant commentary\n\n[引用 @original_author: Original deep insight]", post.content)
+            val quoted = post.quotedPost
+            assertNotNull(quoted)
+            assertEquals("20002", quoted.id)
+            assertEquals("original_author", quoted.author.username)
+            assertEquals("Original Author", quoted.author.displayName)
+            assertEquals("Original deep insight", quoted.content)
+            assertEquals(500L, quoted.metrics?.likes)
+            assertEquals(42L, quoted.metrics?.comments)
+            assertEquals(1, quoted.media.size)
+            assertEquals("https://pbs.twimg.com/media/quoted_pic.jpg", (quoted.media.first() as Media.Image).url)
+
+            // Media fallback: outer tweet had no media, so it should inherit from quoted post
+            assertEquals(1, post.media.size)
+            assertEquals("https://pbs.twimg.com/media/quoted_pic.jpg", (post.media.first() as Media.Image).url)
+        }
+
+    @Test
+    fun `resolve should parse quote tweet without outer commentary`() =
+        runTest {
+            val mockJson =
+                """
+                {
+                    "id_str": "10002",
+                    "text": "https://t.co/quoteLink456",
+                    "user": {
+                        "id_str": "333",
+                        "name": "Retweeter",
+                        "screen_name": "retweeter"
+                    },
+                    "quoted_tweet": {
+                        "id_str": "30003",
+                        "text": "Just the quoted news",
+                        "user": {
+                            "name": "News Outlet",
+                            "screen_name": "news_outlet"
+                        }
+                    }
+                }
+                """.trimIndent()
+
+            val client =
+                createMockHttpClient {
+                    jsonResponse(mockJson)
+                }
+
+            val post = resolver.resolve("https://x.com/retweeter/status/10002", client)
+
+            assertEquals("[引用 @news_outlet: Just the quoted news]", post.content)
+            val quoted = post.quotedPost
+            assertNotNull(quoted)
+            assertEquals("30003", quoted.id)
+            assertEquals("news_outlet", quoted.author.username)
+            assertEquals("Just the quoted news", quoted.content)
+        }
+
+    @Test
+    fun `resolve should preserve outer media when outer tweet has its own media`() =
+        runTest {
+            val mockJson =
+                """
+                {
+                    "id_str": "10003",
+                    "text": "Look at my photo quoting this https://t.co/quoteLink789",
+                    "user": {
+                        "name": "Photographer",
+                        "screen_name": "photographer"
+                    },
+                    "photos": [
+                        {
+                            "url": "https://pbs.twimg.com/media/outer_pic.jpg",
+                            "width": 1000,
+                            "height": 1000
+                        }
+                    ],
+                    "quoted_tweet": {
+                        "id_str": "40004",
+                        "text": "Quoted video clip",
+                        "user": {
+                            "name": "Videographer",
+                            "screen_name": "videographer"
+                        },
+                        "video": {
+                            "poster": "https://pbs.twimg.com/video_thumb.jpg",
+                            "variants": [
+                                { "type": "video/mp4", "src": "https://video.twimg.com/quoted_vid.mp4", "bitrate": 1500000 }
+                            ]
+                        }
+                    }
+                }
+                """.trimIndent()
+
+            val client =
+                createMockHttpClient {
+                    jsonResponse(mockJson)
+                }
+
+            val post = resolver.resolve("https://x.com/photographer/status/10003", client)
+
+            assertEquals("Look at my photo quoting this\n\n[引用 @videographer: Quoted video clip]", post.content)
+            assertEquals(1, post.media.size)
+            assertEquals("https://pbs.twimg.com/media/outer_pic.jpg", (post.media.first() as Media.Image).url)
+            val quoted = post.quotedPost
+            assertNotNull(quoted)
+            assertEquals(1, quoted.media.size)
+            val quotedMedia = quoted.media.first() as Media.Video
+            assertEquals("https://video.twimg.com/quoted_vid.mp4", quotedMedia.url)
+            assertEquals("https://pbs.twimg.com/video_thumb.jpg", quotedMedia.previewUrl)
         }
 }

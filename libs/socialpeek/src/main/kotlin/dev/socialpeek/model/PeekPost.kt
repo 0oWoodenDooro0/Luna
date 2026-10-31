@@ -18,6 +18,7 @@ data class PeekPost(
     val community: String? = null,
     val communityIcon: String? = null,
     val rawData: Map<String, String> = emptyMap(),
+    val quotedPost: PeekPost? = null,
 ) {
     val board: String? get() = community
     val subreddit: String? get() = community

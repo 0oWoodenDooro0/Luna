@@ -23,6 +23,8 @@ class XResolver : PlatformResolver {
             isLenient = true
         }
 
+    private val trailingTcoRegex = Regex("""\s*https?://t\.co/\S+\s*$""")
+
     override fun canResolve(url: String): Boolean = tweetUrlPattern.containsMatchIn(url)
 
     override suspend fun resolve(
@@ -54,14 +56,52 @@ class XResolver : PlatformResolver {
             throw PostNotFoundException(url, rootElement["error"]?.jsonPrimitive?.contentOrNull)
         }
 
-        val id = rootElement["id_str"]?.jsonPrimitive?.contentOrNull ?: tweetId
-        val text = rootElement["text"]?.jsonPrimitive?.contentOrNull ?: ""
+        val parsedRoot = parseTweetElement(rootElement, defaultId = tweetId, defaultUrl = url)
 
-        val userObj = rootElement["user"]?.jsonObject
+        val quotedTweetObj = rootElement["quoted_tweet"]?.jsonObject
+        val quotedPost = quotedTweetObj?.let { parseTweetElement(it) }
+
+        val (finalContent, finalMedia) =
+            if (quotedPost != null) {
+                val outerText = parsedRoot.content.replace(trailingTcoRegex, "").trim()
+                val content =
+                    if (outerText.isEmpty()) {
+                        "[引用 @${quotedPost.author.username}: ${quotedPost.content}]"
+                    } else {
+                        "$outerText\n\n[引用 @${quotedPost.author.username}: ${quotedPost.content}]"
+                    }
+                val media =
+                    if (parsedRoot.media.isEmpty()) {
+                        quotedPost.media
+                    } else {
+                        parsedRoot.media
+                    }
+                content to media
+            } else {
+                parsedRoot.content to parsedRoot.media
+            }
+
+        return parsedRoot.copy(
+            content = finalContent,
+            media = finalMedia,
+            quotedPost = quotedPost,
+        )
+    }
+
+    private fun parseTweetElement(
+        tweetObj: JsonObject,
+        defaultId: String? = null,
+        defaultUrl: String? = null,
+    ): PeekPost {
+        val id = tweetObj["id_str"]?.jsonPrimitive?.contentOrNull ?: defaultId ?: ""
+        val text = tweetObj["text"]?.jsonPrimitive?.contentOrNull ?: ""
+
+        val userObj = tweetObj["user"]?.jsonObject
+        val username = userObj?.get("screen_name")?.jsonPrimitive?.contentOrNull ?: "unknown"
         val author =
             Author(
                 id = userObj?.get("id_str")?.jsonPrimitive?.contentOrNull,
-                username = userObj?.get("screen_name")?.jsonPrimitive?.contentOrNull ?: "unknown",
+                username = username,
                 displayName = userObj?.get("name")?.jsonPrimitive?.contentOrNull,
                 avatarUrl =
                     userObj
@@ -84,7 +124,7 @@ class XResolver : PlatformResolver {
         val mediaList = mutableListOf<Media>()
 
         // 1. media_extended (vxTwitter / fxTwitter rich multi-media format)
-        val mediaExtended = rootElement["media_extended"]?.jsonArray
+        val mediaExtended = tweetObj["media_extended"]?.jsonArray
         if (mediaExtended != null && mediaExtended.isNotEmpty()) {
             mediaExtended.forEach { elem ->
                 val obj = elem.jsonObject
@@ -120,7 +160,7 @@ class XResolver : PlatformResolver {
 
         // 2. Photos (if media_extended wasn't present or yielded no images)
         if (mediaList.isEmpty()) {
-            rootElement["photos"]?.jsonArray?.forEach { photoElem ->
+            tweetObj["photos"]?.jsonArray?.forEach { photoElem ->
                 val photoUrl =
                     if (photoElem is JsonObject) {
                         photoElem["url"]?.jsonPrimitive?.contentOrNull
@@ -144,7 +184,7 @@ class XResolver : PlatformResolver {
 
         // 3. Videos (if not already captured by media_extended)
         if (mediaList.none { it is Media.Video }) {
-            val videoObj = rootElement["video"]?.jsonObject
+            val videoObj = tweetObj["video"]?.jsonObject
             if (videoObj != null) {
                 val posterUrl = videoObj["poster"]?.jsonPrimitive?.contentOrNull
                 val variants = videoObj["variants"]?.jsonArray ?: JsonArray(emptyList())
@@ -176,8 +216,8 @@ class XResolver : PlatformResolver {
             }
         }
 
-        val likes = rootElement["favorite_count"]?.jsonPrimitive?.longOrNull
-        val comments = rootElement["conversation_count"]?.jsonPrimitive?.longOrNull
+        val likes = tweetObj["favorite_count"]?.jsonPrimitive?.longOrNull
+        val comments = tweetObj["conversation_count"]?.jsonPrimitive?.longOrNull
 
         val metrics =
             if (likes != null || comments != null) {
@@ -186,11 +226,19 @@ class XResolver : PlatformResolver {
                 null
             }
 
+        val postUrl =
+            defaultUrl
+                ?: if (username != "unknown" && id.isNotEmpty()) {
+                    "https://x.com/$username/status/$id"
+                } else {
+                    "https://x.com/i/status/$id"
+                }
+
         return PeekPost(
             platform = Platform.X,
             id = id,
-            originalUrl = url,
-            cleanUrl = UrlSanitizer.clean(url, Platform.X),
+            originalUrl = postUrl,
+            cleanUrl = UrlSanitizer.clean(postUrl, Platform.X),
             author = author,
             content = text,
             media = mediaList,
