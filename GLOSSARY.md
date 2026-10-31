@@ -48,3 +48,11 @@ _Avoid_: Agent loop, autonomous video watcher
 The independent extraction of YouTube top-level comments and viewer reactions via the YouTube Data API to supplement video multimodal understanding in the summary prompt.
 _Avoid_: Comment scraping, comment crawling
 
+**Video Focus Prompting**:
+The specialized prompt strategy directing the multimodal model to prioritize extracting concrete audiovisual evidence, demonstrations, and narrative milestones from the video stream while strictly isolating community comments to audience reception.
+_Avoid_: Video prompt tweak, YouTube prompt tuning
+
+**Creator Description Ingestion**:
+The extraction and sanitization of video description metadata (including author-provided outlines, summaries, and timestamp markers) to serve as semantic prior context in the summary pipeline.
+_Avoid_: Description scraping, info grabbing
+
