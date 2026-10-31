@@ -1,5 +1,6 @@
 package luna.summarizer
 
+import dev.kord.common.entity.MessageType
 import dev.kord.common.entity.Snowflake
 import dev.kord.core.Kord
 import dev.kord.core.behavior.reply
@@ -10,10 +11,12 @@ import dev.kord.core.on
 import dev.kord.rest.builder.message.allowedMentions
 import dev.socialpeek.SocialPeek
 import dev.socialpeek.model.PeekPost
+import kotlinx.coroutines.flow.toList
 import luna.core.JsonLogger
 import org.slf4j.LoggerFactory
 import java.util.Collections
 import java.util.LinkedHashMap
+import kotlin.time.Duration.Companion.minutes
 
 enum class SummaryStatus {
     IN_PROGRESS,
@@ -68,6 +71,12 @@ class SummaryService(
         }
     },
     val configuredEmoji: String? = System.getenv("SUMMARY_EMOJI")?.takeIf { it.isNotBlank() },
+    private val historyFetcher: suspend (message: Message, limit: Int) -> List<Message> = { message, limit ->
+        message.channel
+            .getMessagesBefore(message.id, limit = limit)
+            .toList()
+            .reversed()
+    },
 ) {
     private val logger = LoggerFactory.getLogger(SummaryService::class.java)
     private val statusCache = BoundedStatusCache()
@@ -151,45 +160,64 @@ class SummaryService(
             return
         }
 
-        if (message.author?.isBot == true) {
-            logger.debug("Ignoring reaction on message authored by bot {}", message.author?.username)
+        if (isNoiseMessage(message)) {
+            logger.debug("Ignoring reaction on noise or bot message {}", event.messageId)
             statusCache.remove(event.messageId)
             return
         }
 
-        if (message.content.isBlank()) {
-            logger.debug("Ignoring reaction on empty message {}", event.messageId)
-            statusCache.remove(event.messageId)
-            return
-        }
+        val precedingMessages = retrieveContextMessages(message).filterNot { isNoiseMessage(it) }
+        val allMessages =
+            if (precedingMessages.isNotEmpty()) {
+                precedingMessages + message
+            } else {
+                listOf(message)
+            }
+        val primaryUrl = allMessages.asReversed().firstNotNullOfOrNull { msg -> URL_REGEX.find(msg.content)?.value }
 
-        val url = URL_REGEX.find(message.content)?.value
+        val formattedContent =
+            if (precedingMessages.isNotEmpty()) {
+                allMessages.joinToString("\n") { msg ->
+                    "[${msg.author?.username ?: "Unknown"}]: ${msg.content}"
+                }
+            } else {
+                message.content
+            }
+
         val summaryInput =
-            if (url != null) {
-                val post = runCatching { peekResolver(url) }.getOrNull()
+            if (primaryUrl != null) {
+                val post = runCatching { peekResolver(primaryUrl) }.getOrNull()
                 if (post != null) {
-                    val commentary = message.content.replace(url, "").trim()
-                    val postContent = post.content.ifBlank { message.content }
+                    val postContent = post.content.ifBlank { "" }.trim()
                     val combinedContent =
-                        if (commentary.isNotBlank() && post.content.isNotBlank()) {
-                            "使用者附註: $commentary\n\n內容:\n$postContent"
+                        if (precedingMessages.isEmpty()) {
+                            val commentary = message.content.replace(primaryUrl, "").trim()
+                            if (commentary.isNotBlank() && postContent.isNotBlank()) {
+                                "使用者附註: $commentary\n\n內容:\n$postContent"
+                            } else {
+                                postContent.ifBlank { message.content }
+                            }
                         } else {
-                            postContent
+                            if (postContent.isNotBlank()) {
+                                "$formattedContent\n\n內容:\n$postContent"
+                            } else {
+                                formattedContent
+                            }
                         }
                     SummaryInput(
                         content = combinedContent,
                         title = post.title,
                         comments = post.comments.map { it.content },
-                        url = url,
+                        url = primaryUrl,
                     )
                 } else {
                     SummaryInput(
-                        content = message.content,
-                        url = url,
+                        content = formattedContent,
+                        url = primaryUrl,
                     )
                 }
             } else {
-                SummaryInput(content = message.content)
+                SummaryInput(content = formattedContent)
             }
 
         try {
@@ -207,8 +235,8 @@ class SummaryService(
                         data =
                             mapOf(
                                 "messageId" to event.messageId.toString(),
-                                "hasUrl" to (url != null),
-                                "url" to (url ?: ""),
+                                "hasUrl" to (primaryUrl != null),
+                                "url" to (primaryUrl ?: ""),
                                 "summaryLength" to textToSend.length,
                             ),
                     )
@@ -245,10 +273,149 @@ class SummaryService(
         }
     }
 
+    private suspend fun retrieveContextMessages(targetMessage: Message): List<Message> {
+        val rawHistory =
+            runCatching {
+                historyFetcher(targetMessage, MAX_HISTORY_MESSAGES)
+            }.getOrElse { e ->
+                logger.warn("Failed to retrieve message history for {}: {}", targetMessage.id, e.message)
+                emptyList()
+            }
+
+        if (rawHistory.isEmpty()) {
+            return emptyList()
+        }
+
+        // Normalize to chronological order (oldest first, newest last)
+        val chronological =
+            if (rawHistory.size >= 2) {
+                val firstTime = runCatching { rawHistory.first().timestamp }.getOrNull()
+                val lastTime = runCatching { rawHistory.last().timestamp }.getOrNull()
+                if (firstTime != null && lastTime != null && firstTime > lastTime) {
+                    rawHistory.reversed()
+                } else {
+                    val firstId = runCatching { rawHistory.first().id }.getOrNull()
+                    val lastId = runCatching { rawHistory.last().id }.getOrNull()
+                    if (firstId != null && lastId != null && firstId > lastId) {
+                        rawHistory.reversed()
+                    } else {
+                        rawHistory
+                    }
+                }
+            } else {
+                rawHistory
+            }.takeLast(MAX_HISTORY_MESSAGES)
+
+        // Bounded backtracking starting from targetMessage
+        val acceptedPreceding = ArrayDeque<Message>()
+        var referenceMessage = targetMessage
+
+        for (i in chronological.lastIndex downTo 0) {
+            val msg = chronological[i]
+
+            // Stop if an earlier message sent by the bot containing a summary is encountered
+            if (isBotSummaryMessage(msg)) {
+                logger.debug("Encountered bot summary message {}, stopping history backtracking", msg.id)
+                break
+            }
+
+            // Stop if elapsed time between two consecutive messages exceeds 15 minutes
+            val elapsed =
+                runCatching {
+                    referenceMessage.timestamp - msg.timestamp
+                }.getOrNull()
+
+            if (elapsed != null && elapsed > MAX_INACTIVITY_GAP) {
+                logger.debug("Inactivity gap {} exceeds {}, stopping history backtracking", elapsed, MAX_INACTIVITY_GAP)
+                break
+            }
+
+            acceptedPreceding.addFirst(msg)
+            referenceMessage = msg
+        }
+
+        return acceptedPreceding.toList()
+    }
+
+    fun isBotSummaryMessage(message: Message): Boolean =
+        message.author?.isBot == true &&
+            (
+                message.content.startsWith("TL;DR:") || message.content.startsWith("TL;DR") || message.content.contains("重點摘要") ||
+                    message.content.contains("Previous summary")
+            )
+
+    fun isNoiseMessage(message: Message): Boolean {
+        // Exclude bot or missing author
+        if (message.author == null || message.author?.isBot == true) {
+            return true
+        }
+
+        // Exclude webhooks
+        if (runCatching { message.webhookId }.getOrNull() != null) {
+            return true
+        }
+
+        // Exclude system message types
+        val type = runCatching { message.type }.getOrNull()
+        if (type != null && isSystemMessageType(type)) {
+            return true
+        }
+
+        // Exclude commands matching slash or bot command patterns
+        if (isCommand(message.content, type)) {
+            return true
+        }
+
+        // Exclude messages consisting solely of stickers
+        val hasStickers = runCatching { message.stickers }.getOrNull()?.isNotEmpty() == true
+        if (hasStickers && isBlankOrCustomEmojiOnly(message.content)) {
+            return true
+        }
+
+        // Exclude empty, blank, or solely custom graphic emojis without text (unless attachments are present)
+        val hasAttachments = runCatching { message.attachments }.getOrNull()?.isNotEmpty() == true
+        if (!hasAttachments && isBlankOrCustomEmojiOnly(message.content)) {
+            return true
+        }
+
+        return false
+    }
+
+    private fun isSystemMessageType(type: MessageType): Boolean =
+        when (type) {
+            MessageType.Default,
+            MessageType.Reply,
+            MessageType.ThreadStarterMessage,
+            -> false
+
+            else -> true
+        }
+
+    private fun isCommand(
+        content: String,
+        type: MessageType?,
+    ): Boolean {
+        if (type == MessageType.ChatInputCommand || type == MessageType.ContextMenuCommand) {
+            return true
+        }
+        val trimmed = content.trim()
+        if (trimmed.startsWith("/")) return true
+        if (trimmed.startsWith("!") && trimmed.length > 1 && trimmed[1].isLetter()) return true
+        return false
+    }
+
+    private fun isBlankOrCustomEmojiOnly(content: String): Boolean {
+        if (content.isBlank()) return true
+        return CUSTOM_EMOJI_REGEX.replace(content, "").isBlank()
+    }
+
     companion object {
         const val DEFAULT_EMOJI = "📝"
         const val DISCORD_MAX_MESSAGE_LENGTH = 2000
+        const val MAX_HISTORY_MESSAGES = 20
+        val MAX_INACTIVITY_GAP = 15.minutes
 
         val URL_REGEX = Regex("""https?://[^\s<>"']+""")
+        val CUSTOM_EMOJI_REGEX = Regex("""<a?:[a-zA-Z0-9_]+:\d+>""")
     }
 }

@@ -21,15 +21,64 @@ class GeminiPromptBuilderTest {
         val instruction = GeminiPromptBuilder.SYSTEM_INSTRUCTION
 
         assertContains(instruction, "台灣繁體中文")
+        assertContains(instruction, "zh-TW")
         assertContains(instruction, "TL;DR:")
-        assertContains(instruction, "重點摘要:")
-        assertContains(instruction, "社群討論風向:")
+        assertContains(instruction, "核心重點:")
+        assertContains(instruction, "參與者觀點:")
         assertContains(instruction, "Emoji")
 
         assertFalse(EmojiSanitizer.containsEmoji(instruction), "System instruction should not contain emojis")
         // Also verify that actual emojis would be detected
-        assertTrue(EmojiSanitizer.containsEmoji("重點摘要: 🚀"))
-        assertTrue(EmojiSanitizer.containsEmoji("社群討論 👍"))
+        assertTrue(EmojiSanitizer.containsEmoji("核心重點: 🚀"))
+        assertTrue(EmojiSanitizer.containsEmoji("參與者觀點 👍"))
+    }
+
+    @Test
+    fun `buildUserPrompt cleanly accommodates multi-message dialogues alongside optional title and url`() {
+        val dialogueContent =
+            """
+            [alice]: 請問大家對新架構有什麼看法？
+            [bob]: 我認為效能提升非常顯著，值得採用。
+            [charlie]: 但遷移成本可能需要評估一下。
+            """.trimIndent()
+
+        val input =
+            SummaryInput(
+                title = "Luna Architecture RFC",
+                content = dialogueContent,
+                url = "https://github.com/project/luna/issues/23",
+                comments = listOf("外部留言 1: 贊同", "外部留言 2: 反對"),
+            )
+        val prompt = GeminiPromptBuilder.buildUserPrompt(input)
+
+        assertContains(prompt, "標題：Luna Architecture RFC")
+        assertContains(prompt, "來源網址：https://github.com/project/luna/issues/23")
+        assertContains(
+            prompt,
+            "內文：\n[alice]: 請問大家對新架構有什麼看法？\n[bob]: 我認為效能提升非常顯著，值得採用。\n[charlie]: 但遷移成本可能需要評估一下。",
+        )
+        assertContains(prompt, "社群留言與討論：\n1. 外部留言 1: 贊同\n2. 外部留言 2: 反對")
+    }
+
+    @Test
+    fun `buildUserPrompt cleanly accommodates multi-message dialogues without title and url`() {
+        val dialogueContent =
+            """
+            [alice]: 今天下午三點開會討論？
+            [bob]: +1 沒問題
+            [charlie]: 我會準時參加
+            """.trimIndent()
+
+        val input =
+            SummaryInput(
+                content = dialogueContent,
+            )
+        val prompt = GeminiPromptBuilder.buildUserPrompt(input)
+
+        assertFalse(prompt.contains("標題："))
+        assertFalse(prompt.contains("來源網址："))
+        assertFalse(prompt.contains("社群留言與討論："))
+        assertEquals("內文：\n$dialogueContent", prompt)
     }
 
     @Test
