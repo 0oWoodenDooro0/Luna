@@ -168,7 +168,7 @@ class XResolverTest {
         }
 
     @Test
-    fun `resolve should parse quote tweet with outer commentary and strip trailing quote url`() =
+    fun `resolve should parse quoted post with outer commentary and strip trailing quote url`() =
         runTest {
             val mockJson =
                 """
@@ -229,7 +229,7 @@ class XResolverTest {
         }
 
     @Test
-    fun `resolve should parse quote tweet without outer commentary`() =
+    fun `resolve should parse quoted post without outer commentary`() =
         runTest {
             val mockJson =
                 """

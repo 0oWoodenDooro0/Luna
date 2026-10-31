@@ -64,11 +64,12 @@ class XResolver : PlatformResolver {
         val (finalContent, finalMedia) =
             if (quotedPost != null) {
                 val outerText = parsedRoot.content.replace(trailingTcoRegex, "").trim()
+                val quotedBlock = "[引用 @${quotedPost.author.username}: ${quotedPost.content}]"
                 val content =
                     if (outerText.isEmpty()) {
-                        "[引用 @${quotedPost.author.username}: ${quotedPost.content}]"
+                        quotedBlock
                     } else {
-                        "$outerText\n\n[引用 @${quotedPost.author.username}: ${quotedPost.content}]"
+                        "$outerText\n\n$quotedBlock"
                     }
                 val media =
                     if (parsedRoot.media.isEmpty()) {
