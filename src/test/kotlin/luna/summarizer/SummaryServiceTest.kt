@@ -2,6 +2,7 @@ package luna.summarizer
 
 import dev.kord.common.entity.MessageType
 import dev.kord.common.entity.Snowflake
+import dev.kord.core.entity.Attachment
 import dev.kord.core.entity.Message
 import dev.kord.core.entity.ReactionEmoji
 import dev.kord.core.entity.StickerItem
@@ -458,6 +459,7 @@ class SummaryServiceTest {
         timestamp: Instant = Instant.fromEpochMilliseconds(id * 1000),
         type: MessageType = MessageType.Default,
         stickers: List<StickerItem> = emptyList(),
+        attachments: Set<Attachment> = emptySet(),
     ): Message {
         val author = mockk<User>()
         every { author.username } returns username
@@ -470,6 +472,7 @@ class SummaryServiceTest {
         every { msg.timestamp } returns timestamp
         every { msg.type } returns type
         every { msg.stickers } returns stickers
+        every { msg.attachments } returns attachments
         return msg
     }
 
@@ -1536,5 +1539,100 @@ class SummaryServiceTest {
             assertTrue(reply.contains("核心重點:"))
             assertTrue(reply.contains("參與者觀點:"))
             assertFalse(EmojiSanitizer.containsEmoji(reply))
+        }
+
+    @Test
+    fun `retains messages with blank text if attachments are present`() =
+        runTest {
+            val summarizer = mockk<GeminiSummarizer>()
+            var capturedInput: SummaryInput? = null
+
+            val baseTime = Instant.parse("2026-10-31T10:00:00Z")
+            val msgWithAttachment =
+                createMockMessage(
+                    id = 1901L,
+                    username = "alice",
+                    content = "",
+                    timestamp = baseTime,
+                    attachments = setOf(mockk()),
+                )
+            val targetMsg = createMockMessage(1902L, "bob", "Reviewed the attachment", timestamp = baseTime + 1.minutes)
+
+            val service =
+                SummaryService(
+                    summarizer = summarizer,
+                    historyFetcher = { _, _ -> listOf(msgWithAttachment) },
+                    replySender = { _, _ -> },
+                )
+
+            coEvery { summarizer.summarize(any<SummaryInput>()) } answers {
+                capturedInput = firstArg()
+                SummaryResult.Success("TL;DR: Reviewed attachment")
+            }
+
+            val user = mockk<User>()
+            every { user.isBot } returns false
+
+            val event = mockk<ReactionAddEvent>()
+            every { event.emoji } returns ReactionEmoji.Unicode("📝")
+            every { event.userId } returns Snowflake(55L)
+            every { event.messageId } returns targetMsg.id
+            coEvery { event.getUserOrNull() } returns user
+            coEvery { event.getMessageOrNull() } returns targetMsg
+
+            service.handleReaction(event)
+
+            val input = capturedInput
+            kotlin.test.assertNotNull(input)
+            assertTrue(input.content.contains("[alice]: "))
+            assertTrue(input.content.contains("[bob]: Reviewed the attachment"))
+        }
+
+    @Test
+    fun `continues backtracking past third-party non-summary bot messages while filtering them from dialogue`() =
+        runTest {
+            val summarizer = mockk<GeminiSummarizer>()
+            var capturedInput: SummaryInput? = null
+
+            val baseTime = Instant.parse("2026-10-31T10:00:00Z")
+            val msg1 = createMockMessage(2001L, "alice", "Initial discussion point", timestamp = baseTime)
+            val musicBotMsg = createMockMessage(2002L, "MusicBot", "Now playing: Track 1", isBot = true, timestamp = baseTime + 1.minutes)
+            val msg2 = createMockMessage(2003L, "bob", "Second discussion point", timestamp = baseTime + 2.minutes)
+            val targetMsg = createMockMessage(2004L, "charlie", "Concluding remarks", timestamp = baseTime + 3.minutes)
+
+            val service =
+                SummaryService(
+                    summarizer = summarizer,
+                    historyFetcher = { _, _ -> listOf(msg1, musicBotMsg, msg2) },
+                    replySender = { _, _ -> },
+                )
+
+            coEvery { summarizer.summarize(any<SummaryInput>()) } answers {
+                capturedInput = firstArg()
+                SummaryResult.Success("TL;DR: Discussion summary")
+            }
+
+            val user = mockk<User>()
+            every { user.isBot } returns false
+
+            val event = mockk<ReactionAddEvent>()
+            every { event.emoji } returns ReactionEmoji.Unicode("📝")
+            every { event.userId } returns Snowflake(55L)
+            every { event.messageId } returns targetMsg.id
+            coEvery { event.getUserOrNull() } returns user
+            coEvery { event.getMessageOrNull() } returns targetMsg
+
+            service.handleReaction(event)
+
+            val input = capturedInput
+            kotlin.test.assertNotNull(input)
+            // msg1 is retained because musicBot did not break history backtracking
+            assertTrue(input.content.contains("[alice]: Initial discussion point"))
+            // musicBot is excluded by noise filter
+            assertFalse(input.content.contains("MusicBot"))
+            assertFalse(input.content.contains("Now playing: Track 1"))
+            // msg2 and targetMsg are retained
+            assertTrue(input.content.contains("[bob]: Second discussion point"))
+            assertTrue(input.content.contains("[charlie]: Concluding remarks"))
         }
 }

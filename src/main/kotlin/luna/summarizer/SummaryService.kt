@@ -174,47 +174,35 @@ class SummaryService(
                 listOf(message)
             }
         val primaryUrl = allMessages.asReversed().firstNotNullOfOrNull { msg -> URL_REGEX.find(msg.content)?.value }
-        val summaryInput =
+
+        val formattedContent =
             if (precedingMessages.isNotEmpty()) {
-                val formattedContent =
-                    allMessages.joinToString("\n") { msg ->
-                        "[${msg.author?.username ?: "Unknown"}]: ${msg.content}"
-                    }
-                if (primaryUrl != null) {
-                    val post = runCatching { peekResolver(primaryUrl) }.getOrNull()
-                    if (post != null) {
-                        val postContent = post.content.ifBlank { "" }.trim()
-                        val combinedContent =
+                allMessages.joinToString("\n") { msg ->
+                    "[${msg.author?.username ?: "Unknown"}]: ${msg.content}"
+                }
+            } else {
+                message.content
+            }
+
+        val summaryInput =
+            if (primaryUrl != null) {
+                val post = runCatching { peekResolver(primaryUrl) }.getOrNull()
+                if (post != null) {
+                    val postContent = post.content.ifBlank { "" }.trim()
+                    val combinedContent =
+                        if (precedingMessages.isEmpty()) {
+                            val commentary = message.content.replace(primaryUrl, "").trim()
+                            if (commentary.isNotBlank() && postContent.isNotBlank()) {
+                                "使用者附註: $commentary\n\n內容:\n$postContent"
+                            } else {
+                                postContent.ifBlank { message.content }
+                            }
+                        } else {
                             if (postContent.isNotBlank()) {
                                 "$formattedContent\n\n內容:\n$postContent"
                             } else {
                                 formattedContent
                             }
-                        SummaryInput(
-                            content = combinedContent,
-                            title = post.title,
-                            comments = post.comments.map { it.content },
-                            url = primaryUrl,
-                        )
-                    } else {
-                        SummaryInput(
-                            content = formattedContent,
-                            url = primaryUrl,
-                        )
-                    }
-                } else {
-                    SummaryInput(content = formattedContent)
-                }
-            } else if (primaryUrl != null) {
-                val post = runCatching { peekResolver(primaryUrl) }.getOrNull()
-                if (post != null) {
-                    val commentary = message.content.replace(primaryUrl, "").trim()
-                    val postContent = post.content.ifBlank { message.content }
-                    val combinedContent =
-                        if (commentary.isNotBlank() && post.content.isNotBlank()) {
-                            "使用者附註: $commentary\n\n內容:\n$postContent"
-                        } else {
-                            postContent
                         }
                     SummaryInput(
                         content = combinedContent,
@@ -224,12 +212,12 @@ class SummaryService(
                     )
                 } else {
                     SummaryInput(
-                        content = message.content,
+                        content = formattedContent,
                         url = primaryUrl,
                     )
                 }
             } else {
-                SummaryInput(content = message.content)
+                SummaryInput(content = formattedContent)
             }
 
         try {
@@ -325,9 +313,9 @@ class SummaryService(
         for (i in chronological.lastIndex downTo 0) {
             val msg = chronological[i]
 
-            // Stop if an earlier message sent by a bot is encountered
-            if (msg.author?.isBot == true) {
-                logger.debug("Encountered bot message {}, stopping history backtracking", msg.id)
+            // Stop if an earlier message sent by the bot containing a summary is encountered
+            if (isBotSummaryMessage(msg)) {
+                logger.debug("Encountered bot summary message {}, stopping history backtracking", msg.id)
                 break
             }
 
@@ -348,6 +336,13 @@ class SummaryService(
 
         return acceptedPreceding.toList()
     }
+
+    fun isBotSummaryMessage(message: Message): Boolean =
+        message.author?.isBot == true &&
+            (
+                message.content.startsWith("TL;DR:") || message.content.startsWith("TL;DR") || message.content.contains("重點摘要") ||
+                    message.content.contains("Previous summary")
+            )
 
     fun isNoiseMessage(message: Message): Boolean {
         // Exclude bot or missing author
@@ -377,8 +372,9 @@ class SummaryService(
             return true
         }
 
-        // Exclude empty, blank, or solely custom graphic emojis without text
-        if (isBlankOrCustomEmojiOnly(message.content)) {
+        // Exclude empty, blank, or solely custom graphic emojis without text (unless attachments are present)
+        val hasAttachments = runCatching { message.attachments }.getOrNull()?.isNotEmpty() == true
+        if (!hasAttachments && isBlankOrCustomEmojiOnly(message.content)) {
             return true
         }
 
