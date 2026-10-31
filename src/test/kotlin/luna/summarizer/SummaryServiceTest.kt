@@ -1738,7 +1738,7 @@ class SummaryServiceTest {
         }
 
     @Test
-    fun `Summary Reaction on YouTube URL extracts videoUri, duration, and comments into SummaryInput and sends formatted reply`() =
+    fun `Summary Reaction on YouTube URL with creator description, title, comments verifies SummaryInput and replies`() =
         runTest {
             val summarizer = mockk<GeminiSummarizer>()
             var capturedInput: SummaryInput? = null
@@ -1751,17 +1751,33 @@ class SummaryServiceTest {
                     "Check out this video: https://www.youtube.com/watch?v=dQw4w9WgXcQ",
                 )
 
+            val sanitizedDescription =
+                """
+                00:00 - Introduction to Kotlin Coroutines
+                02:15 - Dispatchers and Structured Concurrency
+                05:30 - Flow and StateFlow Live Demo
+                08:45 - Key Takeaways and Summary
+                """.trimIndent()
+
             val youtubePost =
                 PeekPost(
                     platform = Platform.YOUTUBE,
                     id = "dQw4w9WgXcQ",
                     originalUrl = "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
                     cleanUrl = "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
-                    author = Author(username = "RickAstley", displayName = "Rick Astley"),
-                    title = "Never Gonna Give You Up",
-                    content = "Never Gonna Give You Up",
-                    comments = listOf(Comment(author = "Viewer1", content = "Great music video!")),
-                    rawData = mapOf("durationSeconds" to "213"),
+                    author = Author(username = "KotlinDev", displayName = "Kotlin Developer"),
+                    title = "Kotlin Coroutines Deep Dive",
+                    content = sanitizedDescription,
+                    comments =
+                        listOf(
+                            Comment(author = "Viewer1", content = "Crystal clear explanation at 02:15!"),
+                            Comment(author = "Viewer2", content = "StateFlow vs SharedFlow was awesome"),
+                        ),
+                    rawData =
+                        mapOf(
+                            "durationSeconds" to "600",
+                            "description" to sanitizedDescription,
+                        ),
                 )
 
             val service =
@@ -1771,9 +1787,25 @@ class SummaryServiceTest {
                     replySender = { _, content -> sentReply = content },
                 )
 
+            val formattedReply =
+                """
+                TL;DR:
+                本影片深度剖析 Kotlin 協程的核心架構與實務應用，解說調度器運作與結構化併發機制。
+
+                核心重點:
+                • [00:00] 介紹協程基本概念與輕量執行緒優勢。
+                • [02:15] 詳細解析 Dispatchers 與結構化併發模型。
+                • [05:30] 實機展示 Flow 與 Channels 異步資料流處理。
+                • [08:45] 總結常見開發陷阱與最佳實踐準則。
+
+                社群觀點:
+                • 觀眾高度肯定 02:30 調度器與併發架構的清晰解說。
+                • 期待後續推出更多進階教學內容。
+                """.trimIndent()
+
             coEvery { summarizer.summarize(any<SummaryInput>()) } answers {
                 capturedInput = firstArg()
-                SummaryResult.Success("TL;DR: Summary of Rick Astley video\n\n核心重點:\n• Classic hit")
+                SummaryResult.Success(formattedReply)
             }
 
             val user = mockk<User>()
@@ -1791,12 +1823,222 @@ class SummaryServiceTest {
             val input = capturedInput
             kotlin.test.assertNotNull(input)
             assertEquals("https://www.youtube.com/watch?v=dQw4w9WgXcQ", input.videoUri)
-            assertEquals(213L, input.videoDurationSeconds)
-            assertEquals(listOf("Great music video!"), input.comments)
-            assertEquals("Never Gonna Give You Up", input.title)
+            assertEquals(600L, input.videoDurationSeconds)
+            assertEquals(
+                listOf("Crystal clear explanation at 02:15!", "StateFlow vs SharedFlow was awesome"),
+                input.comments,
+            )
+            assertEquals("Kotlin Coroutines Deep Dive", input.title)
+            assertTrue(input.content.contains(sanitizedDescription))
+            assertTrue(input.content.contains("Check out this video:"))
+
+            // Verify prompt builder outputs creator outline and Video Focus instructions
+            val userPrompt = GeminiPromptBuilder.buildUserPrompt(input)
+            assertTrue(userPrompt.contains("標題：Kotlin Coroutines Deep Dive"))
+            assertTrue(userPrompt.contains("來源網址：https://www.youtube.com/watch?v=dQw4w9WgXcQ"))
+            assertTrue(userPrompt.contains("創作者說明與大綱："))
+            assertTrue(userPrompt.contains("00:00 - Introduction to Kotlin Coroutines"))
+            assertTrue(userPrompt.contains("社群留言與討論："))
+            assertTrue(userPrompt.contains("1. Crystal clear explanation at 02:15!"))
+            assertTrue(userPrompt.contains("【指示】：請運用多模態視覺與語音理解影片內容"))
+            assertTrue(userPrompt.contains("[mm:ss]"))
+            assertTrue(userPrompt.contains("社群留言僅能用於統整「社群觀點」。"))
+
+            val sysInstruction = GeminiPromptBuilder.buildSystemInstruction(input)
+            assertEquals(GeminiPromptBuilder.VIDEO_SYSTEM_INSTRUCTION, sysInstruction)
 
             kotlin.test.assertNotNull(sentReply)
-            assertTrue(sentReply.contains("TL;DR: Summary of Rick Astley video"))
+            assertEquals(formattedReply, sentReply)
+            assertFalse(EmojiSanitizer.containsEmoji(sentReply))
+            assertEquals(SummaryStatus.DONE, service.getStatus(targetMsg.id))
+        }
+
+    @Test
+    fun `Summary Reaction on a YouTube URL without comments or description succeeds cleanly with video substance and proper prompt structure`() =
+        runTest {
+            val summarizer = mockk<GeminiSummarizer>()
+            var capturedInput: SummaryInput? = null
+            var sentReply: String? = null
+
+            val targetMsg =
+                createMockMessage(
+                    3004L,
+                    "bob",
+                    "https://www.youtube.com/watch?v=cleanVideo123",
+                )
+
+            val youtubePost =
+                PeekPost(
+                    platform = Platform.YOUTUBE,
+                    id = "cleanVideo123",
+                    originalUrl = "https://www.youtube.com/watch?v=cleanVideo123",
+                    cleanUrl = "https://www.youtube.com/watch?v=cleanVideo123",
+                    author = Author(username = "SoloCreator", displayName = "Solo Creator"),
+                    title = "Solo Software Architecture Walkthrough",
+                    content = "", // No description provided
+                    comments = emptyList(), // No comments
+                    rawData = mapOf("durationSeconds" to "180"),
+                )
+
+            val service =
+                SummaryService(
+                    summarizer = summarizer,
+                    peekResolver = { youtubePost },
+                    replySender = { _, content -> sentReply = content },
+                )
+
+            val videoSubstanceReply =
+                """
+                TL;DR:
+                作者展示並逐步解說單人軟體架構設計與模組拆分策略。
+
+                核心重點:
+                • [00:30] 展示系統整體架構圖與模組相依性規劃。
+                • [01:45] 逐步示範核心模組介面隔離與深層模組設計原則。
+                • [02:40] 總結單人開發之程式庫組織策略與維護考量。
+                """.trimIndent()
+
+            coEvery { summarizer.summarize(any<SummaryInput>()) } answers {
+                capturedInput = firstArg()
+                SummaryResult.Success(videoSubstanceReply)
+            }
+
+            val user = mockk<User>()
+            every { user.isBot } returns false
+
+            val event = mockk<ReactionAddEvent>()
+            every { event.emoji } returns ReactionEmoji.Unicode("📝")
+            every { event.userId } returns Snowflake(55L)
+            every { event.messageId } returns targetMsg.id
+            coEvery { event.getUserOrNull() } returns user
+            coEvery { event.getMessageOrNull() } returns targetMsg
+
+            service.handleReaction(event)
+
+            val input = capturedInput
+            kotlin.test.assertNotNull(input)
+            assertEquals("https://www.youtube.com/watch?v=cleanVideo123", input.videoUri)
+            assertEquals(180L, input.videoDurationSeconds)
+            assertTrue(input.comments.isEmpty())
+            assertEquals("Solo Software Architecture Walkthrough", input.title)
+            assertTrue(input.content.isNotBlank())
+
+            // Verify prompt construction enforces Video Focus prompting and omits community perspectives
+            val userPrompt = GeminiPromptBuilder.buildUserPrompt(input)
+            assertTrue(userPrompt.contains("標題：Solo Software Architecture Walkthrough"))
+            assertTrue(userPrompt.contains("來源網址：https://www.youtube.com/watch?v=cleanVideo123"))
+            assertTrue(userPrompt.contains("創作者說明與大綱："))
+            assertFalse(userPrompt.contains("社群留言與討論："), "Should not contain community comments section")
+            assertTrue(userPrompt.contains("【指示】：請運用多模態視覺與語音理解影片內容"))
+            assertTrue(userPrompt.contains("[mm:ss]"))
+            assertTrue(userPrompt.contains("由於無社群留言，請務必省略「社群觀點」區塊。"))
+
+            val sysInstruction = GeminiPromptBuilder.buildSystemInstruction(input)
+            assertEquals(GeminiPromptBuilder.VIDEO_SYSTEM_INSTRUCTION, sysInstruction)
+
+            kotlin.test.assertNotNull(sentReply)
+            assertEquals(videoSubstanceReply, sentReply)
+            assertFalse(sentReply.contains("社群觀點:"), "Reply must omit community perspectives section")
+            assertFalse(EmojiSanitizer.containsEmoji(sentReply))
+            assertEquals(SummaryStatus.DONE, service.getStatus(targetMsg.id))
+        }
+
+    @Test
+    fun `prompt construction on captured input creates Video Focus directives without regressing text summaries`() =
+        runTest {
+            val summarizer = mockk<GeminiSummarizer>()
+            var lastCapturedInput: SummaryInput? = null
+
+            val service =
+                SummaryService(
+                    summarizer = summarizer,
+                    peekResolver = { url ->
+                        if (url.contains("youtube.com")) {
+                            PeekPost(
+                                platform = Platform.YOUTUBE,
+                                id = "ytTest1",
+                                originalUrl = url,
+                                cleanUrl = url,
+                                author = Author(username = "DevChannel"),
+                                title = "Video Tech Spec",
+                                content = "00:00 Spec Overview\n03:00 Code Implementation",
+                                comments = listOf(Comment(author = "dev", content = "LGTM")),
+                                rawData = mapOf("durationSeconds" to "240"),
+                            )
+                        } else {
+                            null
+                        }
+                    },
+                    replySender = { _, _ -> },
+                )
+
+            coEvery { summarizer.summarize(any<SummaryInput>()) } answers {
+                lastCapturedInput = firstArg()
+                SummaryResult.Success("TL;DR: Summary text\n\n核心重點:\n• Point")
+            }
+
+            val user = mockk<User>()
+            every { user.isBot } returns false
+
+            // 1. YouTube summary interaction
+            val ytMsg = createMockMessage(3005L, "alice", "https://www.youtube.com/watch?v=ytTest1")
+            val ytEvent = mockk<ReactionAddEvent>()
+            every { ytEvent.emoji } returns ReactionEmoji.Unicode("📝")
+            every { ytEvent.userId } returns Snowflake(55L)
+            every { ytEvent.messageId } returns ytMsg.id
+            coEvery { ytEvent.getUserOrNull() } returns user
+            coEvery { ytEvent.getMessageOrNull() } returns ytMsg
+
+            service.handleReaction(ytEvent)
+
+            val ytInput = lastCapturedInput
+            kotlin.test.assertNotNull(ytInput)
+            val ytPrompt = GeminiPromptBuilder.buildUserPrompt(ytInput)
+            val ytSys = GeminiPromptBuilder.buildSystemInstruction(ytInput)
+
+            // Video Focus assertions
+            assertTrue(ytPrompt.contains("創作者說明與大綱："))
+            assertTrue(ytPrompt.contains("00:00 Spec Overview"))
+            assertTrue(ytPrompt.contains("社群留言與討論："))
+            assertTrue(ytPrompt.contains("1. LGTM"))
+            assertTrue(ytPrompt.contains("【指示】：請運用多模態視覺與語音理解影片內容"))
+            assertTrue(ytPrompt.contains("嚴格落實來源隔離"))
+            assertTrue(ytPrompt.contains("[mm:ss]"))
+            assertEquals(GeminiPromptBuilder.VIDEO_SYSTEM_INSTRUCTION, ytSys)
+
+            // 2. Text conversation summary interaction (regression prevention)
+            val textMsg1 = createMockMessage(3006L, "bob", "We should decide on the schema")
+            val textMsg2 = createMockMessage(3007L, "charlie", "I prefer using PostgreSQL JSONB")
+            val textService =
+                SummaryService(
+                    summarizer = summarizer,
+                    historyFetcher = { _, _ -> listOf(textMsg1) },
+                    replySender = { _, _ -> },
+                )
+
+            val textEvent = mockk<ReactionAddEvent>()
+            every { textEvent.emoji } returns ReactionEmoji.Unicode("📝")
+            every { textEvent.userId } returns Snowflake(56L)
+            every { textEvent.messageId } returns textMsg2.id
+            coEvery { textEvent.getUserOrNull() } returns user
+            coEvery { textEvent.getMessageOrNull() } returns textMsg2
+
+            textService.handleReaction(textEvent)
+
+            val textInput = lastCapturedInput
+            kotlin.test.assertNotNull(textInput)
+            val textPrompt = GeminiPromptBuilder.buildUserPrompt(textInput)
+            val textSys = GeminiPromptBuilder.buildSystemInstruction(textInput)
+
+            // Standard conversation assertions ensuring no leakage or regression
+            assertTrue(textPrompt.contains("內文："))
+            assertTrue(textPrompt.contains("[bob]: We should decide on the schema"))
+            assertTrue(textPrompt.contains("[charlie]: I prefer using PostgreSQL JSONB"))
+            assertFalse(textPrompt.contains("創作者說明與大綱："), "Text summary must not contain creator description header")
+            assertFalse(textPrompt.contains("多模態視覺與語音理解影片內容"), "Text summary must not contain multimodal video directives")
+            assertFalse(textPrompt.contains("嚴格落實來源隔離"), "Text summary must not contain video source isolation directives")
+            assertFalse(textPrompt.contains("[mm:ss]"), "Text summary must not contain timestamp directives")
+            assertEquals(GeminiPromptBuilder.SYSTEM_INSTRUCTION, textSys)
         }
 
     @Test
