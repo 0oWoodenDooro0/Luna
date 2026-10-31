@@ -821,4 +821,229 @@ class SummaryServiceTest {
             // Graceful fallback to single message
             assertEquals("Target message content", capturedInput?.content)
         }
+
+    @Test
+    fun `detects and resolves URL present in an earlier message of conversation slice via peekResolver`() =
+        runTest {
+            val summarizer = mockk<GeminiSummarizer>()
+            var capturedInput: SummaryInput? = null
+            var resolvedUrl: String? = null
+
+            val baseTime = Instant.parse("2026-10-31T10:00:00Z")
+            val msg1 = createMockMessage(1001L, "alice", "Check this out https://reddit.com/r/kotlin/comments/123/post", timestamp = baseTime)
+            val targetMsg = createMockMessage(1002L, "bob", "What do you think of this?", timestamp = baseTime + 2.minutes)
+
+            val mockPeekPost =
+                PeekPost(
+                    platform = Platform.REDDIT,
+                    id = "post-100",
+                    originalUrl = "https://reddit.com/r/kotlin/comments/123/post",
+                    author = Author(username = "kotlindev"),
+                    title = "Exciting Kotlin Features",
+                    content = "Kotlin 2.0 brings K2 compiler.",
+                    comments = listOf(Comment(author = "reviewer", content = "Looks great")),
+                )
+
+            val service =
+                SummaryService(
+                    summarizer = summarizer,
+                    historyFetcher = { _, _ -> listOf(msg1) },
+                    peekResolver = { url ->
+                        resolvedUrl = url
+                        mockPeekPost
+                    },
+                    replySender = { _, _ -> },
+                )
+
+            coEvery { summarizer.summarize(any<SummaryInput>()) } answers {
+                capturedInput = firstArg()
+                SummaryResult.Success("TL;DR: Summary")
+            }
+
+            val user = mockk<User>()
+            every { user.isBot } returns false
+
+            val event = mockk<ReactionAddEvent>()
+            every { event.emoji } returns ReactionEmoji.Unicode("📝")
+            every { event.userId } returns Snowflake(55L)
+            every { event.messageId } returns targetMsg.id
+            coEvery { event.getUserOrNull() } returns user
+            coEvery { event.getMessageOrNull() } returns targetMsg
+
+            service.handleReaction(event)
+
+            assertEquals("https://reddit.com/r/kotlin/comments/123/post", resolvedUrl)
+            val input = capturedInput
+            kotlin.test.assertNotNull(input)
+            assertEquals("Exciting Kotlin Features", input.title)
+            assertEquals("https://reddit.com/r/kotlin/comments/123/post", input.url)
+        }
+
+    @Test
+    fun `includes extracted title, content, and comments from link alongside chat dialogue in SummaryInput`() =
+        runTest {
+            val summarizer = mockk<GeminiSummarizer>()
+            var capturedInput: SummaryInput? = null
+
+            val baseTime = Instant.parse("2026-10-31T10:00:00Z")
+            val msg1 = createMockMessage(1101L, "alice", "Interesting article: https://example.com/guide", timestamp = baseTime)
+            val targetMsg = createMockMessage(1102L, "bob", "Let's summarize this discussion", timestamp = baseTime + 3.minutes)
+
+            val mockPeekPost =
+                PeekPost(
+                    platform = Platform.GENERIC,
+                    id = "guide-1",
+                    originalUrl = "https://example.com/guide",
+                    author = Author(username = "editor"),
+                    title = "Comprehensive Guide to Kotlin Flows",
+                    content = "Flows are cold asynchronous data streams in Kotlin Coroutines.",
+                    comments =
+                        listOf(
+                            Comment(author = "reader1", content = "Super clear explanation!"),
+                            Comment(author = "reader2", content = "Helped me understand backpressure."),
+                        ),
+                )
+
+            val service =
+                SummaryService(
+                    summarizer = summarizer,
+                    historyFetcher = { _, _ -> listOf(msg1) },
+                    peekResolver = { mockPeekPost },
+                    replySender = { _, _ -> },
+                )
+
+            coEvery { summarizer.summarize(any<SummaryInput>()) } answers {
+                capturedInput = firstArg()
+                SummaryResult.Success("TL;DR: Summary")
+            }
+
+            val user = mockk<User>()
+            every { user.isBot } returns false
+
+            val event = mockk<ReactionAddEvent>()
+            every { event.emoji } returns ReactionEmoji.Unicode("📝")
+            every { event.userId } returns Snowflake(55L)
+            every { event.messageId } returns targetMsg.id
+            coEvery { event.getUserOrNull() } returns user
+            coEvery { event.getMessageOrNull() } returns targetMsg
+
+            service.handleReaction(event)
+
+            val input = capturedInput
+            kotlin.test.assertNotNull(input)
+            assertEquals("Comprehensive Guide to Kotlin Flows", input.title)
+            assertEquals("https://example.com/guide", input.url)
+            assertEquals(
+                listOf("Super clear explanation!", "Helped me understand backpressure."),
+                input.comments,
+            )
+            // Dialogue context is preserved
+            assertTrue(input.content.contains("[alice]: Interesting article: https://example.com/guide"))
+            assertTrue(input.content.contains("[bob]: Let's summarize this discussion"))
+            // Resolved article content is preserved
+            assertTrue(input.content.contains("Flows are cold asynchronous data streams in Kotlin Coroutines."))
+        }
+
+    @Test
+    fun `gracefully falls back to raw conversation dialogue when URL cannot be resolved`() =
+        runTest {
+            val summarizer = mockk<GeminiSummarizer>()
+            var capturedInput: SummaryInput? = null
+
+            val baseTime = Instant.parse("2026-10-31T10:00:00Z")
+            val msg1 = createMockMessage(1201L, "alice", "Broken link here: https://unreachable.example.com/404", timestamp = baseTime)
+            val targetMsg = createMockMessage(1202L, "bob", "Yeah that link is broken", timestamp = baseTime + 2.minutes)
+
+            val service =
+                SummaryService(
+                    summarizer = summarizer,
+                    historyFetcher = { _, _ -> listOf(msg1) },
+                    peekResolver = { null },
+                    replySender = { _, _ -> },
+                )
+
+            coEvery { summarizer.summarize(any<SummaryInput>()) } answers {
+                capturedInput = firstArg()
+                SummaryResult.Success("TL;DR: Summary")
+            }
+
+            val user = mockk<User>()
+            every { user.isBot } returns false
+
+            val event = mockk<ReactionAddEvent>()
+            every { event.emoji } returns ReactionEmoji.Unicode("📝")
+            every { event.userId } returns Snowflake(55L)
+            every { event.messageId } returns targetMsg.id
+            coEvery { event.getUserOrNull() } returns user
+            coEvery { event.getMessageOrNull() } returns targetMsg
+
+            service.handleReaction(event)
+
+            val input = capturedInput
+            kotlin.test.assertNotNull(input)
+            assertEquals(null, input.title)
+            assertEquals(emptyList(), input.comments)
+            assertEquals("https://unreachable.example.com/404", input.url)
+            val expectedDialogue =
+                """
+                [alice]: Broken link here: https://unreachable.example.com/404
+                [bob]: Yeah that link is broken
+                """.trimIndent()
+            assertEquals(expectedDialogue, input.content)
+        }
+
+    @Test
+    fun `identifies most recent URL in conversation slice when multiple messages contain URLs`() =
+        runTest {
+            val summarizer = mockk<GeminiSummarizer>()
+            var resolvedUrl: String? = null
+            var capturedInput: SummaryInput? = null
+
+            val baseTime = Instant.parse("2026-10-31T10:00:00Z")
+            val msg1 = createMockMessage(1301L, "alice", "Old topic link: https://example.com/first", timestamp = baseTime)
+            val msg2 = createMockMessage(1302L, "bob", "No, look at this one instead: https://example.com/second", timestamp = baseTime + 2.minutes)
+            val targetMsg = createMockMessage(1303L, "charlie", "Let's summarize this", timestamp = baseTime + 4.minutes)
+
+            val mockPeekPost =
+                PeekPost(
+                    platform = Platform.GENERIC,
+                    id = "second-1",
+                    originalUrl = "https://example.com/second",
+                    author = Author(username = "bob"),
+                    title = "Second Link Title",
+                    content = "Second Link Content",
+                )
+
+            val service =
+                SummaryService(
+                    summarizer = summarizer,
+                    historyFetcher = { _, _ -> listOf(msg1, msg2) },
+                    peekResolver = { url ->
+                        resolvedUrl = url
+                        mockPeekPost
+                    },
+                    replySender = { _, _ -> },
+                )
+
+            coEvery { summarizer.summarize(any<SummaryInput>()) } answers {
+                capturedInput = firstArg()
+                SummaryResult.Success("TL;DR: Summary")
+            }
+
+            val user = mockk<User>()
+            every { user.isBot } returns false
+
+            val event = mockk<ReactionAddEvent>()
+            every { event.emoji } returns ReactionEmoji.Unicode("📝")
+            every { event.userId } returns Snowflake(55L)
+            every { event.messageId } returns targetMsg.id
+            coEvery { event.getUserOrNull() } returns user
+            coEvery { event.getMessageOrNull() } returns targetMsg
+
+            service.handleReaction(event)
+
+            assertEquals("https://example.com/second", resolvedUrl)
+            assertEquals("https://example.com/second", capturedInput?.url)
+            assertEquals("Second Link Title", capturedInput?.title)
+        }
 }

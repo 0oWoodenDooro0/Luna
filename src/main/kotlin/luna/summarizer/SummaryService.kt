@@ -171,20 +171,50 @@ class SummaryService(
             return
         }
 
-        val url = URL_REGEX.find(message.content)?.value
         val precedingMessages = retrieveContextMessages(message)
+        val allMessages =
+            if (precedingMessages.isNotEmpty()) {
+                precedingMessages + message
+            } else {
+                listOf(message)
+            }
+        val primaryUrl = allMessages.asReversed().firstNotNullOfOrNull { msg -> URL_REGEX.find(msg.content)?.value }
+
         val summaryInput =
             if (precedingMessages.isNotEmpty()) {
-                val allMessages = precedingMessages + message
                 val formattedContent =
                     allMessages.joinToString("\n") { msg ->
                         "[${msg.author?.username ?: "Unknown"}]: ${msg.content}"
                     }
-                SummaryInput(content = formattedContent)
-            } else if (url != null) {
-                val post = runCatching { peekResolver(url) }.getOrNull()
+                if (primaryUrl != null) {
+                    val post = runCatching { peekResolver(primaryUrl) }.getOrNull()
+                    if (post != null) {
+                        val postContent = post.content.ifBlank { "" }.trim()
+                        val combinedContent =
+                            if (postContent.isNotBlank()) {
+                                "$formattedContent\n\n內容:\n$postContent"
+                            } else {
+                                formattedContent
+                            }
+                        SummaryInput(
+                            content = combinedContent,
+                            title = post.title,
+                            comments = post.comments.map { it.content },
+                            url = primaryUrl,
+                        )
+                    } else {
+                        SummaryInput(
+                            content = formattedContent,
+                            url = primaryUrl,
+                        )
+                    }
+                } else {
+                    SummaryInput(content = formattedContent)
+                }
+            } else if (primaryUrl != null) {
+                val post = runCatching { peekResolver(primaryUrl) }.getOrNull()
                 if (post != null) {
-                    val commentary = message.content.replace(url, "").trim()
+                    val commentary = message.content.replace(primaryUrl, "").trim()
                     val postContent = post.content.ifBlank { message.content }
                     val combinedContent =
                         if (commentary.isNotBlank() && post.content.isNotBlank()) {
@@ -196,12 +226,12 @@ class SummaryService(
                         content = combinedContent,
                         title = post.title,
                         comments = post.comments.map { it.content },
-                        url = url,
+                        url = primaryUrl,
                     )
                 } else {
                     SummaryInput(
                         content = message.content,
-                        url = url,
+                        url = primaryUrl,
                     )
                 }
             } else {
@@ -223,8 +253,8 @@ class SummaryService(
                         data =
                             mapOf(
                                 "messageId" to event.messageId.toString(),
-                                "hasUrl" to (url != null),
-                                "url" to (url ?: ""),
+                                "hasUrl" to (primaryUrl != null),
+                                "url" to (primaryUrl ?: ""),
                                 "summaryLength" to textToSend.length,
                             ),
                     )
