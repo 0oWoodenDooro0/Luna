@@ -198,4 +198,167 @@ class GeminiPromptBuilderTest {
         assertContains(serialized, "\"file_uri\":\"https://www.youtube.com/watch?v=longTalk456\"")
         assertContains(serialized, "\"processing\":\"agentic\"")
     }
+
+    @Test
+    fun `video system instruction specifies Taiwanese Traditional Chinese, zero emojis, and structured sections`() {
+        val instruction = GeminiPromptBuilder.VIDEO_SYSTEM_INSTRUCTION
+
+        assertContains(instruction, "台灣繁體中文")
+        assertContains(instruction, "zh-TW")
+        assertContains(instruction, "TL;DR:")
+        assertContains(instruction, "核心重點:")
+        assertContains(instruction, "社群觀點:")
+        assertContains(instruction, "Emoji")
+
+        assertFalse(EmojiSanitizer.containsEmoji(instruction), "Video system instruction should not contain emojis")
+    }
+
+    @Test
+    fun `video system instruction enforces multimodal video understanding, source isolation, and timestamp milestones`() {
+        val instruction = GeminiPromptBuilder.VIDEO_SYSTEM_INSTRUCTION
+
+        // Multimodal video understanding directives
+        assertContains(instruction, "視覺畫面")
+        assertContains(instruction, "語音")
+        assertContains(instruction, "操作展示")
+
+        // Strict source isolation directives
+        assertContains(instruction, "核心重點")
+        assertContains(instruction, "嚴禁")
+        assertContains(instruction, "留言")
+        assertContains(instruction, "社群觀點")
+
+        // Milestones and timestamp references allowed
+        assertContains(instruction, "[mm:ss]")
+
+        // Length limit
+        assertContains(instruction, "1500")
+    }
+
+    @Test
+    fun `buildSystemInstruction returns VIDEO_SYSTEM_INSTRUCTION when videoUri is present and SYSTEM_INSTRUCTION otherwise`() {
+        val videoInput =
+            SummaryInput(
+                content = "Video description",
+                videoUri = "https://www.youtube.com/watch?v=sample123",
+            )
+        val nonVideoInput =
+            SummaryInput(
+                content = "Standard chat discussion",
+                url = "https://example.com/article",
+            )
+        val blankVideoInput =
+            SummaryInput(
+                content = "Empty video URI discussion",
+                videoUri = "   ",
+            )
+
+        assertEquals(GeminiPromptBuilder.VIDEO_SYSTEM_INSTRUCTION, GeminiPromptBuilder.buildSystemInstruction(videoInput))
+        assertEquals(GeminiPromptBuilder.SYSTEM_INSTRUCTION, GeminiPromptBuilder.buildSystemInstruction(nonVideoInput))
+        assertEquals(GeminiPromptBuilder.SYSTEM_INSTRUCTION, GeminiPromptBuilder.buildSystemInstruction(blankVideoInput))
+    }
+
+    @Test
+    fun `buildUserPrompt formats creator description, comments, and injects video focus directives when videoUri is present`() {
+        val input =
+            SummaryInput(
+                title = "Kotlin Multiplatform Tutorial",
+                content = "00:00 Intro\n02:15 Shared Logic Demo\n08:30 Native UI Integration",
+                url = "https://www.youtube.com/watch?v=kmpDemo",
+                videoUri = "https://www.youtube.com/watch?v=kmpDemo",
+                videoDurationSeconds = 600L,
+                comments = listOf("Super helpful demo at 02:15!", "Can we use Compose on iOS?"),
+            )
+        val prompt = GeminiPromptBuilder.buildUserPrompt(input)
+
+        assertContains(prompt, "標題：Kotlin Multiplatform Tutorial")
+        assertContains(prompt, "來源網址：https://www.youtube.com/watch?v=kmpDemo")
+        assertContains(prompt, "創作者說明與大綱：")
+        assertContains(prompt, "02:15 Shared Logic Demo")
+        assertContains(prompt, "社群留言與討論：")
+        assertContains(prompt, "1. Super helpful demo at 02:15!")
+        assertContains(prompt, "2. Can we use Compose on iOS?")
+
+        // Video Focus directives and source isolation in prompt
+        assertContains(prompt, "多模態")
+        assertContains(prompt, "核心重點")
+        assertContains(prompt, "社群觀點")
+        assertContains(prompt, "[mm:ss]")
+    }
+
+    @Test
+    fun `buildUserPrompt directs model to omit community perspectives when video comments are empty`() {
+        val input =
+            SummaryInput(
+                title = "Solo Project Deep Dive",
+                content = "Architectural overview and demo",
+                url = "https://www.youtube.com/watch?v=soloProject",
+                videoUri = "https://www.youtube.com/watch?v=soloProject",
+                comments = emptyList(),
+            )
+        val prompt = GeminiPromptBuilder.buildUserPrompt(input)
+
+        assertContains(prompt, "標題：Solo Project Deep Dive")
+        assertContains(prompt, "創作者說明與大綱：")
+        assertFalse(prompt.contains("社群留言與討論："), "Should not contain comments section when empty")
+        assertContains(prompt, "省略「社群觀點」")
+    }
+
+    @Test
+    fun `buildUserPrompt preserves non-video dialogue and web URL formatting without video directives`() {
+        val input =
+            SummaryInput(
+                title = "Web Article",
+                content = "Full article content about distributed consensus",
+                url = "https://example.com/consensus",
+                comments = listOf("Nice overview", "What about Raft?"),
+            )
+        val prompt = GeminiPromptBuilder.buildUserPrompt(input)
+
+        assertContains(prompt, "標題：Web Article")
+        assertContains(prompt, "來源網址：https://example.com/consensus")
+        assertContains(prompt, "內文：")
+        assertFalse(prompt.contains("創作者說明與大綱："))
+        assertFalse(prompt.contains("多模態"))
+        assertFalse(prompt.contains("[mm:ss]"))
+    }
+
+    @Test
+    fun `buildRequest attaches video system instruction when videoUri is present`() {
+        val input =
+            SummaryInput(
+                title = "Video Title",
+                content = "Video Outline",
+                videoUri = "https://www.youtube.com/watch?v=sampleVid",
+            )
+        val request = GeminiPromptBuilder.buildRequest(input)
+
+        val sysText =
+            request.systemInstruction
+                ?.parts
+                ?.firstOrNull()
+                ?.text
+        assertNotNull(sysText)
+        assertEquals(GeminiPromptBuilder.VIDEO_SYSTEM_INSTRUCTION, sysText)
+        assertContains(sysText, "嚴格來源隔離")
+    }
+
+    @Test
+    fun `buildRequest attaches standard system instruction when videoUri is absent`() {
+        val input =
+            SummaryInput(
+                title = "Standard Article",
+                content = "Article text",
+                url = "https://example.com/article",
+            )
+        val request = GeminiPromptBuilder.buildRequest(input)
+
+        val sysText =
+            request.systemInstruction
+                ?.parts
+                ?.firstOrNull()
+                ?.text
+        assertNotNull(sysText)
+        assertEquals(GeminiPromptBuilder.SYSTEM_INSTRUCTION, sysText)
+    }
 }

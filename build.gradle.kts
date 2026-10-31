@@ -83,6 +83,12 @@ tasks.jar {
     }
 }
 
+tasks.register("ktlintCheck") {
+    group = "verification"
+    description = "Runs lintKotlin on root and subprojects for ktlintCheck compatibility."
+    dependsOn("lintKotlin")
+}
+
 tasks.register("installGitHooks") {
     description = "Configures git core.hooksPath to .githooks"
     group = "help"

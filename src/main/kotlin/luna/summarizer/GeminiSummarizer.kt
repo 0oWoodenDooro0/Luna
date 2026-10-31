@@ -93,7 +93,8 @@ class GeminiSummarizer(
 
     private suspend fun summarizeAgentic(input: SummaryInput): SummaryResult {
         val userPrompt = GeminiPromptBuilder.buildUserPrompt(input)
-        val promptText = "${GeminiPromptBuilder.SYSTEM_INSTRUCTION}\n\n---\n\n$userPrompt"
+        val systemInstruction = GeminiPromptBuilder.buildSystemInstruction(input)
+        val promptText = "$systemInstruction\n\n---\n\n$userPrompt"
         val endpoint = "${config.baseUrl.trimEnd('/')}/v1beta/interactions?key=${config.apiKey}"
         val requestPayload =
             GeminiInteractionRequest(
