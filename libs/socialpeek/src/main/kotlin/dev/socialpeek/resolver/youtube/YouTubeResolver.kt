@@ -79,6 +79,9 @@ class YouTubeResolver(
         val contentDetails = firstItem["contentDetails"]?.jsonObject ?: JsonObject(emptyMap())
 
         val title = snippet["title"]?.jsonPrimitive?.contentOrNull ?: "YouTube Video"
+        val rawDescription = snippet["description"]?.jsonPrimitive?.contentOrNull
+        val sanitizedDescription = YouTubeDescriptionSanitizer.sanitize(rawDescription)
+        val content = sanitizedDescription ?: title
         val channelTitle = snippet["channelTitle"]?.jsonPrimitive?.contentOrNull ?: "YouTube Creator"
         val channelId = snippet["channelId"]?.jsonPrimitive?.contentOrNull
         val authorUrl = channelId?.let { "https://www.youtube.com/channel/$it" }
@@ -100,6 +103,7 @@ class YouTubeResolver(
             buildMap {
                 durationSeconds?.let { put("durationSeconds", it) }
                 durationIso?.let { put("durationIso", it) }
+                sanitizedDescription?.let { put("description", it) }
             }
 
         val comments = runCatching { fetchComments(videoId, key, client) }.getOrDefault(emptyList())
@@ -111,7 +115,7 @@ class YouTubeResolver(
             cleanUrl = "https://www.youtube.com/watch?v=$videoId",
             author = author,
             title = title,
-            content = title,
+            content = content,
             comments = comments,
             rawData = rawData,
         )
