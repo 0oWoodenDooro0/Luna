@@ -21,6 +21,8 @@ dependencies {
     testImplementation(libs.mockk)
     testImplementation(libs.h2)
     testImplementation(libs.ktor.server.test.host)
+    testImplementation(libs.ktor.client.mock)
+    testImplementation(libs.kotlinx.coroutines.test)
     implementation(libs.kord.core)
     implementation(libs.logback.classic)
     implementation(libs.logstash.logback.encoder)
@@ -34,6 +36,13 @@ dependencies {
     implementation(libs.ktor.server.core)
     implementation(libs.ktor.server.netty)
     implementation(libs.ktor.server.sessions)
+
+    // Serialization & Ktor Client
+    implementation(libs.kotlinx.serialization.json)
+    implementation(libs.ktor.client.core)
+    implementation(libs.ktor.client.cio)
+    implementation(libs.ktor.client.content.negotiation)
+    implementation(libs.ktor.serialization.kotlinx.json)
 
     // Curtly URL Shortener Library
     implementation(project(":libs:curtly"))
