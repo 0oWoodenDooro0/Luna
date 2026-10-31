@@ -5,10 +5,11 @@ When Discord members trigger a Summary Reaction on a message concluding a discus
 
 ## Decision
 1. **Dual-Boundary Backtracking**:
-   - History retrieval fetches preceding messages from the channel up to an upper bound of 20 messages.
+   - History retrieval fetches preceding messages from the channel up to a configurable upper bound of 50 messages by default (configurable via `SUMMARY_MAX_HISTORY_MESSAGES`, clamped between 1 and 100 to align with Discord's single REST page limit).
    - History backtracking proceeds in reverse chronological order from the target message and terminates early if:
-     a. An inactivity gap between two consecutive messages exceeds 15 minutes (indicating a cold topic boundary).
-     b. A previous bot summary message (identified by `TL;DR:` or previous summary markers) is encountered.
+     a. An inactivity gap between two consecutive messages exceeds a configurable duration (default 15 minutes, configurable via `SUMMARY_INACTIVITY_GAP_MINUTES`).
+     b. Accumulated character budget exceeds the safety threshold (default 20,000 characters, configurable via `SUMMARY_MAX_CHARACTER_BUDGET`).
+     c. A previous bot summary message (identified by `TL;DR:` or previous summary markers) is encountered.
 2. **Local Dialogue Noise Filtering**:
    - Before handing conversation text to the LLM, a local noise filter strips structural noise: slash commands, bot prefixes, system messages (pins, member joins), stickers, and messages containing only custom emojis.
    - Third-party ambient bot messages are filtered out of the dialogue text without terminating the history backtracking loop.

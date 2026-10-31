@@ -488,7 +488,7 @@ class SummaryServiceTest {
                     summarizer = summarizer,
                     historyFetcher = { msg, limit ->
                         assertEquals(targetMsg, msg)
-                        assertEquals(20, limit)
+                        assertEquals(50, limit)
                         listOf(msg1, msg2)
                     },
                     replySender = { _, _ -> },
@@ -685,16 +685,16 @@ class SummaryServiceTest {
         }
 
     @Test
-    fun `respects maximum limit of 20 preceding messages`() =
+    fun `respects default maximum limit of 50 preceding messages`() =
         runTest {
             val summarizer = mockk<GeminiSummarizer>()
             var capturedInput: SummaryInput? = null
             var requestedLimit: Int? = null
 
             val baseTime = Instant.parse("2026-10-31T10:00:00Z")
-            // Create 25 preceding messages 1 minute apart
+            // Create 55 preceding messages 1 minute apart
             val history =
-                (1..25).map { index ->
+                (1..55).map { index ->
                     createMockMessage(
                         id = 600L + index,
                         username = "user$index",
@@ -707,7 +707,7 @@ class SummaryServiceTest {
                     id = 700L,
                     username = "targetUser",
                     content = "Target message",
-                    timestamp = baseTime + 26.minutes,
+                    timestamp = baseTime + 56.minutes,
                 )
 
             val service =
@@ -737,13 +737,117 @@ class SummaryServiceTest {
 
             service.handleReaction(event)
 
-            assertEquals(20, requestedLimit)
+            assertEquals(50, requestedLimit)
             val lines = capturedInput?.content?.lines() ?: emptyList()
-            // 20 preceding messages + 1 target message = 21 lines
-            assertEquals(21, lines.size)
-            // First included line should be user6 (25 - 20 + 1 = 6)
+            // 50 preceding messages + 1 target message = 51 lines
+            assertEquals(51, lines.size)
+            // First included line should be user6 (55 - 50 + 1 = 6)
             assertEquals("[user6]: Message 6", lines.first())
             assertEquals("[targetUser]: Target message", lines.last())
+        }
+
+    @Test
+    fun `resolves configurable maxHistoryMessages from environment with bounds clamping`() {
+        assertEquals(50, SummaryService.resolveMaxHistoryMessages(emptyMap()))
+        assertEquals(25, SummaryService.resolveMaxHistoryMessages(mapOf("SUMMARY_MAX_HISTORY_MESSAGES" to "25")))
+        assertEquals(100, SummaryService.resolveMaxHistoryMessages(mapOf("SUMMARY_MAX_HISTORY_MESSAGES" to "500")))
+        assertEquals(1, SummaryService.resolveMaxHistoryMessages(mapOf("SUMMARY_MAX_HISTORY_MESSAGES" to "-5")))
+        assertEquals(50, SummaryService.resolveMaxHistoryMessages(mapOf("SUMMARY_MAX_HISTORY_MESSAGES" to "invalid")))
+    }
+
+    @Test
+    fun `resolves configurable inactivityGap from environment`() {
+        assertEquals(15.minutes, SummaryService.resolveInactivityGap(emptyMap()))
+        assertEquals(30.minutes, SummaryService.resolveInactivityGap(mapOf("SUMMARY_INACTIVITY_GAP_MINUTES" to "30")))
+        assertEquals(15.minutes, SummaryService.resolveInactivityGap(mapOf("SUMMARY_INACTIVITY_GAP_MINUTES" to "-10")))
+        assertEquals(15.minutes, SummaryService.resolveInactivityGap(mapOf("SUMMARY_INACTIVITY_GAP_MINUTES" to "not-a-number")))
+    }
+
+    @Test
+    fun `respects custom inactivityGap allowing longer conversational pauses`() =
+        runTest {
+            val summarizer = mockk<GeminiSummarizer>()
+            var capturedInput: SummaryInput? = null
+
+            val baseTime = Instant.parse("2026-10-31T10:00:00Z")
+            // msg1 is 20 minutes before targetMsg (exceeds default 15m, but within custom 30m)
+            val msg1 = createMockMessage(651L, "alice", "Deep discussion point", timestamp = baseTime)
+            val targetMsg = createMockMessage(652L, "bob", "Follow up discussion", timestamp = baseTime + 20.minutes)
+
+            val service =
+                SummaryService(
+                    summarizer = summarizer,
+                    inactivityGap = 30.minutes,
+                    historyFetcher = { _, _ -> listOf(msg1) },
+                    replySender = { _, _ -> },
+                )
+
+            coEvery { summarizer.summarize(any<SummaryInput>()) } answers {
+                capturedInput = firstArg()
+                SummaryResult.Success("TL;DR: Summary")
+            }
+
+            val user = mockk<User>()
+            every { user.isBot } returns false
+
+            val event = mockk<ReactionAddEvent>()
+            every { event.emoji } returns ReactionEmoji.Unicode("📝")
+            every { event.userId } returns Snowflake(55L)
+            every { event.messageId } returns targetMsg.id
+            coEvery { event.getUserOrNull() } returns user
+            coEvery { event.getMessageOrNull() } returns targetMsg
+
+            service.handleReaction(event)
+
+            val expectedContent =
+                """
+                [alice]: Deep discussion point
+                [bob]: Follow up discussion
+                """.trimIndent()
+            assertEquals(expectedContent, capturedInput?.content)
+        }
+
+    @Test
+    fun `respects maxCharacterBudget halting backtracking when accumulated characters exceed limit`() =
+        runTest {
+            val summarizer = mockk<GeminiSummarizer>()
+            var capturedInput: SummaryInput? = null
+
+            val baseTime = Instant.parse("2026-10-31T10:00:00Z")
+            val msg1 = createMockMessage(661L, "alice", "A".repeat(300), timestamp = baseTime)
+            val msg2 = createMockMessage(662L, "bob", "B".repeat(300), timestamp = baseTime + 1.minutes)
+            val targetMsg = createMockMessage(663L, "charlie", "C".repeat(100), timestamp = baseTime + 2.minutes)
+
+            // Budget of 500 characters: target is 100, msg2 adds 300 (total 400 <= 500), msg1 adds 300 (total 700 > 500 -> stops)
+            val service =
+                SummaryService(
+                    summarizer = summarizer,
+                    maxCharacterBudget = 500,
+                    historyFetcher = { _, _ -> listOf(msg1, msg2) },
+                    replySender = { _, _ -> },
+                )
+
+            coEvery { summarizer.summarize(any<SummaryInput>()) } answers {
+                capturedInput = firstArg()
+                SummaryResult.Success("TL;DR: Summary")
+            }
+
+            val user = mockk<User>()
+            every { user.isBot } returns false
+
+            val event = mockk<ReactionAddEvent>()
+            every { event.emoji } returns ReactionEmoji.Unicode("📝")
+            every { event.userId } returns Snowflake(55L)
+            every { event.messageId } returns targetMsg.id
+            coEvery { event.getUserOrNull() } returns user
+            coEvery { event.getMessageOrNull() } returns targetMsg
+
+            service.handleReaction(event)
+
+            val lines = capturedInput?.content?.lines() ?: emptyList()
+            assertEquals(2, lines.size)
+            assertEquals("[bob]: " + "B".repeat(300), lines.first())
+            assertEquals("[charlie]: " + "C".repeat(100), lines.last())
         }
 
     @Test

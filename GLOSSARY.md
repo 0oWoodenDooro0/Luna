@@ -29,7 +29,7 @@ The bounded chronological sequence of messages leading up to a target message, c
 _Avoid_: Chat chunk, message window, backscroll buffer
 
 **Dual-Boundary Backtracking**:
-The history traversal algorithm that walks backward from the reaction target message up to 20 messages, halting if an inactivity gap exceeding 15 minutes or a previous bot summary is encountered.
+The history traversal algorithm that walks backward from the reaction target message up to a configurable upper bound (default 50 messages, configurable via `SUMMARY_MAX_HISTORY_MESSAGES`), halting if an inactivity gap (default 15 minutes, configurable via `SUMMARY_INACTIVITY_GAP_MINUTES`), accumulated character budget, or a previous bot summary is encountered.
 _Avoid_: Reverse history search, boundary walk, message scraper
 
 **Dialogue Noise Filter**:

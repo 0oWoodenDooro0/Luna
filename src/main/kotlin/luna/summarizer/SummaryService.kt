@@ -16,6 +16,7 @@ import luna.core.JsonLogger
 import org.slf4j.LoggerFactory
 import java.util.Collections
 import java.util.LinkedHashMap
+import kotlin.time.Duration
 import kotlin.time.Duration.Companion.minutes
 
 enum class SummaryStatus {
@@ -71,6 +72,9 @@ class SummaryService(
         }
     },
     val configuredEmoji: String? = System.getenv("SUMMARY_EMOJI")?.takeIf { it.isNotBlank() },
+    val maxHistoryMessages: Int = resolveMaxHistoryMessages(),
+    val inactivityGap: Duration = resolveInactivityGap(),
+    val maxCharacterBudget: Int = resolveMaxCharacterBudget(),
     private val noiseFilter: DialogueNoiseFilter = DialogueNoiseFilter(),
     private val historyFetcher: suspend (message: Message, limit: Int) -> List<Message> = { message, limit ->
         message.channel
@@ -86,7 +90,12 @@ class SummaryService(
         kord.on<ReactionAddEvent> {
             handleReaction(this)
         }
-        logger.info("SummaryService registered successfully with Summary Reaction emoji: {}", configuredEmoji ?: DEFAULT_EMOJI)
+        logger.info(
+            "SummaryService registered successfully with Summary Reaction emoji: {}, maxHistory: {}, inactivityGap: {}m",
+            configuredEmoji ?: DEFAULT_EMOJI,
+            maxHistoryMessages,
+            inactivityGap.inWholeMinutes,
+        )
     }
 
     fun isSummaryEmoji(emoji: ReactionEmoji): Boolean {
@@ -277,7 +286,7 @@ class SummaryService(
     private suspend fun retrieveContextMessages(targetMessage: Message): List<Message> {
         val rawHistory =
             runCatching {
-                historyFetcher(targetMessage, MAX_HISTORY_MESSAGES)
+                historyFetcher(targetMessage, maxHistoryMessages)
             }.getOrElse { e ->
                 logger.warn("Failed to retrieve message history for {}: {}", targetMessage.id, e.message)
                 emptyList()
@@ -305,11 +314,12 @@ class SummaryService(
                 }
             } else {
                 rawHistory
-            }.takeLast(MAX_HISTORY_MESSAGES)
+            }.takeLast(maxHistoryMessages)
 
         // Bounded backtracking starting from targetMessage
         val acceptedPreceding = ArrayDeque<Message>()
         var referenceMessage = targetMessage
+        var accumulatedLength = targetMessage.content.length
 
         for (i in chronological.lastIndex downTo 0) {
             val msg = chronological[i]
@@ -320,18 +330,29 @@ class SummaryService(
                 break
             }
 
-            // Stop if elapsed time between two consecutive messages exceeds 15 minutes
+            // Stop if elapsed time between two consecutive messages exceeds inactivity gap
             val elapsed =
                 runCatching {
                     referenceMessage.timestamp - msg.timestamp
                 }.getOrNull()
 
-            if (elapsed != null && elapsed > MAX_INACTIVITY_GAP) {
-                logger.debug("Inactivity gap {} exceeds {}, stopping history backtracking", elapsed, MAX_INACTIVITY_GAP)
+            if (elapsed != null && elapsed > inactivityGap) {
+                logger.debug("Inactivity gap {} exceeds {}, stopping history backtracking", elapsed, inactivityGap)
+                break
+            }
+
+            // Stop if accumulated character budget exceeded
+            if (accumulatedLength + msg.content.length > maxCharacterBudget) {
+                logger.debug(
+                    "Accumulated character budget {} exceeded with message {}, stopping history backtracking",
+                    maxCharacterBudget,
+                    msg.id,
+                )
                 break
             }
 
             acceptedPreceding.addFirst(msg)
+            accumulatedLength += msg.content.length
             referenceMessage = msg
         }
 
@@ -345,8 +366,30 @@ class SummaryService(
     companion object {
         const val DEFAULT_EMOJI = "📝"
         const val DISCORD_MAX_MESSAGE_LENGTH = 2000
-        const val MAX_HISTORY_MESSAGES = 20
-        val MAX_INACTIVITY_GAP = 15.minutes
+        const val DEFAULT_MAX_HISTORY_MESSAGES = 50
+        const val MAX_HISTORY_MESSAGES = DEFAULT_MAX_HISTORY_MESSAGES
+        val DEFAULT_INACTIVITY_GAP = 15.minutes
+        val MAX_INACTIVITY_GAP = DEFAULT_INACTIVITY_GAP
+        const val DEFAULT_MAX_CHARACTER_BUDGET = 20000
+
+        fun resolveMaxHistoryMessages(env: Map<String, String> = System.getenv()): Int =
+            env["SUMMARY_MAX_HISTORY_MESSAGES"]
+                ?.toIntOrNull()
+                ?.coerceIn(1, 100)
+                ?: DEFAULT_MAX_HISTORY_MESSAGES
+
+        fun resolveInactivityGap(env: Map<String, String> = System.getenv()): Duration =
+            env["SUMMARY_INACTIVITY_GAP_MINUTES"]
+                ?.toLongOrNull()
+                ?.takeIf { it > 0 }
+                ?.minutes
+                ?: DEFAULT_INACTIVITY_GAP
+
+        fun resolveMaxCharacterBudget(env: Map<String, String> = System.getenv()): Int =
+            env["SUMMARY_MAX_CHARACTER_BUDGET"]
+                ?.toIntOrNull()
+                ?.takeIf { it > 0 }
+                ?: DEFAULT_MAX_CHARACTER_BUDGET
 
         val URL_REGEX = Regex("""https?://[^\s<>"']+""")
     }
