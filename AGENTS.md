@@ -18,3 +18,7 @@ Canonical triage label vocabulary (`needs-triage`, `needs-info`, `ready-for-agen
 ### Domain docs
 
 Single-context repository layout (`GLOSSARY.md` and `docs/adr/`). See `docs/agents/domain.md`.
+
+### Coding standards
+
+Judgement calls for daemon state bounds, transient error eviction, and library boundaries. See `CODING_STANDARDS.md`.

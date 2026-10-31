@@ -73,3 +73,18 @@ tasks.jar {
         exclude("META-INF/*.SF", "META-INF/*.DSA", "META-INF/*.RSA")
     }
 }
+
+tasks.register("installGitHooks") {
+    description = "Configures git core.hooksPath to .githooks"
+    group = "help"
+    doLast {
+        val hooksDir = file(".githooks")
+        if (hooksDir.exists() && file(".git").exists()) {
+            ProcessBuilder("git", "config", "core.hooksPath", ".githooks")
+                .directory(projectDir)
+                .start()
+                .waitFor()
+            logger.lifecycle("Configured git core.hooksPath to .githooks")
+        }
+    }
+}
