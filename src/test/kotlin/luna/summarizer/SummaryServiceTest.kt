@@ -20,6 +20,8 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
+import kotlin.time.Duration.Companion.minutes
+import kotlin.time.Instant
 
 class SummaryServiceTest {
     @Test
@@ -444,5 +446,379 @@ class SummaryServiceTest {
             service.handleReaction(event)
             assertEquals(1, repliesSent)
             assertEquals(SummaryStatus.DONE, service.getStatus(messageId))
+        }
+
+    private fun createMockMessage(
+        id: Long,
+        username: String,
+        content: String,
+        isBot: Boolean = false,
+        timestamp: Instant = Instant.fromEpochMilliseconds(id * 1000),
+    ): Message {
+        val author = mockk<User>()
+        every { author.username } returns username
+        every { author.isBot } returns isBot
+
+        val msg = mockk<Message>()
+        every { msg.id } returns Snowflake(id)
+        every { msg.author } returns author
+        every { msg.content } returns content
+        every { msg.timestamp } returns timestamp
+        return msg
+    }
+
+    @Test
+    fun `retrieves preceding messages and formats them chronologically with username prefix`() =
+        runTest {
+            val summarizer = mockk<GeminiSummarizer>()
+            var capturedInput: SummaryInput? = null
+
+            val baseTime = Instant.parse("2026-10-31T10:00:00Z")
+            val msg1 = createMockMessage(101L, "alice", "Hello team", timestamp = baseTime)
+            val msg2 = createMockMessage(102L, "bob", "Hi Alice, what's the plan?", timestamp = baseTime + 2.minutes)
+            val targetMsg = createMockMessage(103L, "charlie", "Let's summarize our progress", timestamp = baseTime + 5.minutes)
+
+            val service =
+                SummaryService(
+                    summarizer = summarizer,
+                    historyFetcher = { msg, limit ->
+                        assertEquals(targetMsg, msg)
+                        assertEquals(20, limit)
+                        listOf(msg1, msg2)
+                    },
+                    replySender = { _, _ -> },
+                )
+
+            coEvery { summarizer.summarize(any<SummaryInput>()) } answers {
+                capturedInput = firstArg()
+                SummaryResult.Success("TL;DR: Progress summary")
+            }
+
+            val user = mockk<User>()
+            every { user.isBot } returns false
+
+            val event = mockk<ReactionAddEvent>()
+            every { event.emoji } returns ReactionEmoji.Unicode("📝")
+            every { event.userId } returns Snowflake(55L)
+            every { event.messageId } returns targetMsg.id
+            coEvery { event.getUserOrNull() } returns user
+            coEvery { event.getMessageOrNull() } returns targetMsg
+
+            service.handleReaction(event)
+
+            val expectedContent =
+                """
+                [alice]: Hello team
+                [bob]: Hi Alice, what's the plan?
+                [charlie]: Let's summarize our progress
+                """.trimIndent()
+            assertEquals(expectedContent, capturedInput?.content)
+        }
+
+    @Test
+    fun `stops backtracking and discards earlier messages when inactivity gap exceeds 15 minutes`() =
+        runTest {
+            val summarizer = mockk<GeminiSummarizer>()
+            var capturedInput: SummaryInput? = null
+
+            val baseTime = Instant.parse("2026-10-31T10:00:00Z")
+            val msg1 = createMockMessage(201L, "alice", "Old topic from 10:00", timestamp = baseTime)
+            val msg2 = createMockMessage(202L, "bob", "Also old topic from 10:05", timestamp = baseTime + 5.minutes)
+            // 25 minutes gap between msg2 (10:05) and msg3 (10:30)
+            val msg3 = createMockMessage(203L, "alice", "New topic starts at 10:30", timestamp = baseTime + 30.minutes)
+            val targetMsg = createMockMessage(204L, "charlie", "Wrapping up new topic at 10:34", timestamp = baseTime + 34.minutes)
+
+            val service =
+                SummaryService(
+                    summarizer = summarizer,
+                    historyFetcher = { _, _ -> listOf(msg1, msg2, msg3) },
+                    replySender = { _, _ -> },
+                )
+
+            coEvery { summarizer.summarize(any<SummaryInput>()) } answers {
+                capturedInput = firstArg()
+                SummaryResult.Success("TL;DR: Summary")
+            }
+
+            val user = mockk<User>()
+            every { user.isBot } returns false
+
+            val event = mockk<ReactionAddEvent>()
+            every { event.emoji } returns ReactionEmoji.Unicode("📝")
+            every { event.userId } returns Snowflake(55L)
+            every { event.messageId } returns targetMsg.id
+            coEvery { event.getUserOrNull() } returns user
+            coEvery { event.getMessageOrNull() } returns targetMsg
+
+            service.handleReaction(event)
+
+            val expectedContent =
+                """
+                [alice]: New topic starts at 10:30
+                [charlie]: Wrapping up new topic at 10:34
+                """.trimIndent()
+            assertEquals(expectedContent, capturedInput?.content)
+        }
+
+    @Test
+    fun `retains single message when immediate predecessor exceeds 15 minutes gap`() =
+        runTest {
+            val summarizer = mockk<GeminiSummarizer>()
+            var capturedInput: SummaryInput? = null
+
+            val baseTime = Instant.parse("2026-10-31T10:00:00Z")
+            val msg1 = createMockMessage(301L, "alice", "Message from an hour ago", timestamp = baseTime)
+            val targetMsg = createMockMessage(302L, "bob", "Isolated message", timestamp = baseTime + 60.minutes)
+
+            val service =
+                SummaryService(
+                    summarizer = summarizer,
+                    historyFetcher = { _, _ -> listOf(msg1) },
+                    replySender = { _, _ -> },
+                )
+
+            coEvery { summarizer.summarize(any<SummaryInput>()) } answers {
+                capturedInput = firstArg()
+                SummaryResult.Success("TL;DR: Summary")
+            }
+
+            val user = mockk<User>()
+            every { user.isBot } returns false
+
+            val event = mockk<ReactionAddEvent>()
+            every { event.emoji } returns ReactionEmoji.Unicode("📝")
+            every { event.userId } returns Snowflake(55L)
+            every { event.messageId } returns targetMsg.id
+            coEvery { event.getUserOrNull() } returns user
+            coEvery { event.getMessageOrNull() } returns targetMsg
+
+            service.handleReaction(event)
+
+            // Should retain single message without [Username]: prefix
+            assertEquals("Isolated message", capturedInput?.content)
+        }
+
+    @Test
+    fun `stops backtracking and discards earlier messages when bot message is encountered`() =
+        runTest {
+            val summarizer = mockk<GeminiSummarizer>()
+            var capturedInput: SummaryInput? = null
+
+            val baseTime = Instant.parse("2026-10-31T10:00:00Z")
+            val msg1 = createMockMessage(401L, "alice", "Discussion before previous summary", timestamp = baseTime)
+            val botMsg = createMockMessage(402L, "LunaBot", "TL;DR: Previous summary", isBot = true, timestamp = baseTime + 2.minutes)
+            val msg3 = createMockMessage(403L, "bob", "Discussion after previous summary", timestamp = baseTime + 4.minutes)
+            val targetMsg = createMockMessage(404L, "charlie", "Current summary request", timestamp = baseTime + 6.minutes)
+
+            val service =
+                SummaryService(
+                    summarizer = summarizer,
+                    historyFetcher = { _, _ -> listOf(msg1, botMsg, msg3) },
+                    replySender = { _, _ -> },
+                )
+
+            coEvery { summarizer.summarize(any<SummaryInput>()) } answers {
+                capturedInput = firstArg()
+                SummaryResult.Success("TL;DR: Summary")
+            }
+
+            val user = mockk<User>()
+            every { user.isBot } returns false
+
+            val event = mockk<ReactionAddEvent>()
+            every { event.emoji } returns ReactionEmoji.Unicode("📝")
+            every { event.userId } returns Snowflake(55L)
+            every { event.messageId } returns targetMsg.id
+            coEvery { event.getUserOrNull() } returns user
+            coEvery { event.getMessageOrNull() } returns targetMsg
+
+            service.handleReaction(event)
+
+            val expectedContent =
+                """
+                [bob]: Discussion after previous summary
+                [charlie]: Current summary request
+                """.trimIndent()
+            assertEquals(expectedContent, capturedInput?.content)
+        }
+
+    @Test
+    fun `retains single message when immediate predecessor is bot message`() =
+        runTest {
+            val summarizer = mockk<GeminiSummarizer>()
+            var capturedInput: SummaryInput? = null
+
+            val baseTime = Instant.parse("2026-10-31T10:00:00Z")
+            val botMsg = createMockMessage(501L, "LunaBot", "Previous summary", isBot = true, timestamp = baseTime)
+            val targetMsg = createMockMessage(502L, "charlie", "Stand-alone message after bot", timestamp = baseTime + 2.minutes)
+
+            val service =
+                SummaryService(
+                    summarizer = summarizer,
+                    historyFetcher = { _, _ -> listOf(botMsg) },
+                    replySender = { _, _ -> },
+                )
+
+            coEvery { summarizer.summarize(any<SummaryInput>()) } answers {
+                capturedInput = firstArg()
+                SummaryResult.Success("TL;DR: Summary")
+            }
+
+            val user = mockk<User>()
+            every { user.isBot } returns false
+
+            val event = mockk<ReactionAddEvent>()
+            every { event.emoji } returns ReactionEmoji.Unicode("📝")
+            every { event.userId } returns Snowflake(55L)
+            every { event.messageId } returns targetMsg.id
+            coEvery { event.getUserOrNull() } returns user
+            coEvery { event.getMessageOrNull() } returns targetMsg
+
+            service.handleReaction(event)
+
+            assertEquals("Stand-alone message after bot", capturedInput?.content)
+        }
+
+    @Test
+    fun `respects maximum limit of 20 preceding messages`() =
+        runTest {
+            val summarizer = mockk<GeminiSummarizer>()
+            var capturedInput: SummaryInput? = null
+            var requestedLimit: Int? = null
+
+            val baseTime = Instant.parse("2026-10-31T10:00:00Z")
+            // Create 25 preceding messages 1 minute apart
+            val history =
+                (1..25).map { index ->
+                    createMockMessage(
+                        id = 600L + index,
+                        username = "user$index",
+                        content = "Message $index",
+                        timestamp = baseTime + index.minutes,
+                    )
+                }
+            val targetMsg =
+                createMockMessage(
+                    id = 700L,
+                    username = "targetUser",
+                    content = "Target message",
+                    timestamp = baseTime + 26.minutes,
+                )
+
+            val service =
+                SummaryService(
+                    summarizer = summarizer,
+                    historyFetcher = { _, limit ->
+                        requestedLimit = limit
+                        history
+                    },
+                    replySender = { _, _ -> },
+                )
+
+            coEvery { summarizer.summarize(any<SummaryInput>()) } answers {
+                capturedInput = firstArg()
+                SummaryResult.Success("TL;DR: Summary")
+            }
+
+            val user = mockk<User>()
+            every { user.isBot } returns false
+
+            val event = mockk<ReactionAddEvent>()
+            every { event.emoji } returns ReactionEmoji.Unicode("📝")
+            every { event.userId } returns Snowflake(55L)
+            every { event.messageId } returns targetMsg.id
+            coEvery { event.getUserOrNull() } returns user
+            coEvery { event.getMessageOrNull() } returns targetMsg
+
+            service.handleReaction(event)
+
+            assertEquals(20, requestedLimit)
+            val lines = capturedInput?.content?.lines() ?: emptyList()
+            // 20 preceding messages + 1 target message = 21 lines
+            assertEquals(21, lines.size)
+            // First included line should be user6 (25 - 20 + 1 = 6)
+            assertEquals("[user6]: Message 6", lines.first())
+            assertEquals("[targetUser]: Target message", lines.last())
+        }
+
+    @Test
+    fun `handles history provided in reverse chronological order and normalizes it`() =
+        runTest {
+            val summarizer = mockk<GeminiSummarizer>()
+            var capturedInput: SummaryInput? = null
+
+            val baseTime = Instant.parse("2026-10-31T10:00:00Z")
+            val msg1 = createMockMessage(801L, "alice", "First message", timestamp = baseTime)
+            val msg2 = createMockMessage(802L, "bob", "Second message", timestamp = baseTime + 2.minutes)
+            val targetMsg = createMockMessage(803L, "charlie", "Third message", timestamp = baseTime + 4.minutes)
+
+            val service =
+                SummaryService(
+                    summarizer = summarizer,
+                    // Provide in reverse chronological order (newest first)
+                    historyFetcher = { _, _ -> listOf(msg2, msg1) },
+                    replySender = { _, _ -> },
+                )
+
+            coEvery { summarizer.summarize(any<SummaryInput>()) } answers {
+                capturedInput = firstArg()
+                SummaryResult.Success("TL;DR: Summary")
+            }
+
+            val user = mockk<User>()
+            every { user.isBot } returns false
+
+            val event = mockk<ReactionAddEvent>()
+            every { event.emoji } returns ReactionEmoji.Unicode("📝")
+            every { event.userId } returns Snowflake(55L)
+            every { event.messageId } returns targetMsg.id
+            coEvery { event.getUserOrNull() } returns user
+            coEvery { event.getMessageOrNull() } returns targetMsg
+
+            service.handleReaction(event)
+
+            val expectedContent =
+                """
+                [alice]: First message
+                [bob]: Second message
+                [charlie]: Third message
+                """.trimIndent()
+            assertEquals(expectedContent, capturedInput?.content)
+        }
+
+    @Test
+    fun `falls back gracefully to single message when historyFetcher throws exception`() =
+        runTest {
+            val summarizer = mockk<GeminiSummarizer>()
+            var capturedInput: SummaryInput? = null
+
+            val targetMsg = createMockMessage(901L, "charlie", "Target message content")
+
+            val service =
+                SummaryService(
+                    summarizer = summarizer,
+                    historyFetcher = { _, _ -> throw RuntimeException("Discord API 403 Forbidden") },
+                    replySender = { _, _ -> },
+                )
+
+            coEvery { summarizer.summarize(any<SummaryInput>()) } answers {
+                capturedInput = firstArg()
+                SummaryResult.Success("TL;DR: Summary")
+            }
+
+            val user = mockk<User>()
+            every { user.isBot } returns false
+
+            val event = mockk<ReactionAddEvent>()
+            every { event.emoji } returns ReactionEmoji.Unicode("📝")
+            every { event.userId } returns Snowflake(55L)
+            every { event.messageId } returns targetMsg.id
+            coEvery { event.getUserOrNull() } returns user
+            coEvery { event.getMessageOrNull() } returns targetMsg
+
+            service.handleReaction(event)
+
+            // Graceful fallback to single message
+            assertEquals("Target message content", capturedInput?.content)
         }
 }

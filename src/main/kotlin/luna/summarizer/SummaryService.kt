@@ -10,10 +10,12 @@ import dev.kord.core.on
 import dev.kord.rest.builder.message.allowedMentions
 import dev.socialpeek.SocialPeek
 import dev.socialpeek.model.PeekPost
+import kotlinx.coroutines.flow.toList
 import luna.core.JsonLogger
 import org.slf4j.LoggerFactory
 import java.util.Collections
 import java.util.LinkedHashMap
+import kotlin.time.Duration.Companion.minutes
 
 enum class SummaryStatus {
     IN_PROGRESS,
@@ -68,6 +70,12 @@ class SummaryService(
         }
     },
     val configuredEmoji: String? = System.getenv("SUMMARY_EMOJI")?.takeIf { it.isNotBlank() },
+    private val historyFetcher: suspend (message: Message, limit: Int) -> List<Message> = { message, limit ->
+        message.channel
+            .getMessagesBefore(message.id, limit = limit)
+            .toList()
+            .reversed()
+    },
 ) {
     private val logger = LoggerFactory.getLogger(SummaryService::class.java)
     private val statusCache = BoundedStatusCache()
@@ -164,8 +172,16 @@ class SummaryService(
         }
 
         val url = URL_REGEX.find(message.content)?.value
+        val precedingMessages = retrieveContextMessages(message)
         val summaryInput =
-            if (url != null) {
+            if (precedingMessages.isNotEmpty()) {
+                val allMessages = precedingMessages + message
+                val formattedContent =
+                    allMessages.joinToString("\n") { msg ->
+                        "[${msg.author?.username ?: "Unknown"}]: ${msg.content}"
+                    }
+                SummaryInput(content = formattedContent)
+            } else if (url != null) {
                 val post = runCatching { peekResolver(url) }.getOrNull()
                 if (post != null) {
                     val commentary = message.content.replace(url, "").trim()
@@ -245,9 +261,75 @@ class SummaryService(
         }
     }
 
+    private suspend fun retrieveContextMessages(targetMessage: Message): List<Message> {
+        val rawHistory =
+            runCatching {
+                historyFetcher(targetMessage, MAX_HISTORY_MESSAGES)
+            }.getOrElse { e ->
+                logger.warn("Failed to retrieve message history for {}: {}", targetMessage.id, e.message)
+                emptyList()
+            }
+
+        if (rawHistory.isEmpty()) {
+            return emptyList()
+        }
+
+        // Normalize to chronological order (oldest first, newest last)
+        val chronological =
+            if (rawHistory.size >= 2) {
+                val firstTime = runCatching { rawHistory.first().timestamp }.getOrNull()
+                val lastTime = runCatching { rawHistory.last().timestamp }.getOrNull()
+                if (firstTime != null && lastTime != null && firstTime > lastTime) {
+                    rawHistory.reversed()
+                } else {
+                    val firstId = runCatching { rawHistory.first().id }.getOrNull()
+                    val lastId = runCatching { rawHistory.last().id }.getOrNull()
+                    if (firstId != null && lastId != null && firstId > lastId) {
+                        rawHistory.reversed()
+                    } else {
+                        rawHistory
+                    }
+                }
+            } else {
+                rawHistory
+            }.takeLast(MAX_HISTORY_MESSAGES)
+
+        // Bounded backtracking starting from targetMessage
+        val acceptedPreceding = ArrayDeque<Message>()
+        var referenceMessage = targetMessage
+
+        for (i in chronological.lastIndex downTo 0) {
+            val msg = chronological[i]
+
+            // Stop if an earlier message sent by a bot is encountered
+            if (msg.author?.isBot == true) {
+                logger.debug("Encountered bot message {}, stopping history backtracking", msg.id)
+                break
+            }
+
+            // Stop if elapsed time between two consecutive messages exceeds 15 minutes
+            val elapsed =
+                runCatching {
+                    referenceMessage.timestamp - msg.timestamp
+                }.getOrNull()
+
+            if (elapsed != null && elapsed > MAX_INACTIVITY_GAP) {
+                logger.debug("Inactivity gap {} exceeds {}, stopping history backtracking", elapsed, MAX_INACTIVITY_GAP)
+                break
+            }
+
+            acceptedPreceding.addFirst(msg)
+            referenceMessage = msg
+        }
+
+        return acceptedPreceding.toList()
+    }
+
     companion object {
         const val DEFAULT_EMOJI = "📝"
         const val DISCORD_MAX_MESSAGE_LENGTH = 2000
+        const val MAX_HISTORY_MESSAGES = 20
+        val MAX_INACTIVITY_GAP = 15.minutes
 
         val URL_REGEX = Regex("""https?://[^\s<>"']+""")
     }
