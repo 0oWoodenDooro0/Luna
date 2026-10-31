@@ -320,4 +320,201 @@ class XResolverTest {
             assertEquals("https://video.twimg.com/quoted_vid.mp4", quotedMedia.url)
             assertEquals("https://pbs.twimg.com/video_thumb.jpg", quotedMedia.previewUrl)
         }
+
+    @Test
+    fun `resolve should parse cross-tweet media embed with empty outer text`() =
+        runTest {
+            val outerTweetJson =
+                """
+                {
+                    "id_str": "2112817190735085873",
+                    "text": "https://t.co/lUT27eowKZ",
+                    "user": {
+                        "name": "Joshi",
+                        "screen_name": "joshi_no0"
+                    },
+                    "mediaDetails": [
+                        {
+                            "expanded_url": "https://x.com/BlackSandStocks/status/2087832788661854276/video/1"
+                        }
+                    ]
+                }
+                """.trimIndent()
+
+            val sourceTweetJson =
+                """
+                {
+                    "id_str": "2087832788661854276",
+                    "text": "카메라 뺏은분 신고 가능한가요????",
+                    "user": {
+                        "name": "BlackSandStocks",
+                        "screen_name": "BlackSandStocks"
+                    }
+                }
+                """.trimIndent()
+
+            val client =
+                createMockHttpClient { request ->
+                    when (request.url.parameters["id"]) {
+                        "2112817190735085873" -> jsonResponse(outerTweetJson)
+                        "2087832788661854276" -> jsonResponse(sourceTweetJson)
+                        else -> jsonResponse("{}", status = HttpStatusCode.NotFound)
+                    }
+                }
+
+            val post = resolver.resolve("https://x.com/joshi_no0/status/2112817190735085873", client)
+
+            assertEquals("[引用 @BlackSandStocks: 카메라 뺏은분 신고 가능한가요????]", post.content)
+            val quoted = post.quotedPost
+            assertNotNull(quoted)
+            assertEquals("2087832788661854276", quoted.id)
+            assertEquals("BlackSandStocks", quoted.author.username)
+            assertEquals("카메라 뺏은분 신고 가능한가요????", quoted.content)
+        }
+
+    @Test
+    fun `resolve should parse cross-tweet media embed with outer commentary`() =
+        runTest {
+            val outerTweetJson =
+                """
+                {
+                    "id_str": "2112817190735085873",
+                    "text": "Check this out https://t.co/lUT27eowKZ",
+                    "user": {
+                        "name": "Joshi",
+                        "screen_name": "joshi_no0"
+                    },
+                    "entities": {
+                        "media": [
+                            {
+                                "expanded_url": "https://x.com/BlackSandStocks/status/2087832788661854276/video/1"
+                            }
+                        ]
+                    }
+                }
+                """.trimIndent()
+
+            val sourceTweetJson =
+                """
+                {
+                    "id_str": "2087832788661854276",
+                    "text": "카메라 뺏은분 신고 가능한가요????",
+                    "user": {
+                        "name": "BlackSandStocks",
+                        "screen_name": "BlackSandStocks"
+                    }
+                }
+                """.trimIndent()
+
+            val client =
+                createMockHttpClient { request ->
+                    when (request.url.parameters["id"]) {
+                        "2112817190735085873" -> jsonResponse(outerTweetJson)
+                        "2087832788661854276" -> jsonResponse(sourceTweetJson)
+                        else -> jsonResponse("{}", status = HttpStatusCode.NotFound)
+                    }
+                }
+
+            val post = resolver.resolve("https://x.com/joshi_no0/status/2112817190735085873", client)
+
+            assertEquals("Check this out\n\n[引用 @BlackSandStocks: 카메라 뺏은분 신고 가능한가요????]", post.content)
+            val quoted = post.quotedPost
+            assertNotNull(quoted)
+            assertEquals("2087832788661854276", quoted.id)
+            assertEquals("BlackSandStocks", quoted.author.username)
+            assertEquals("카메라 뺏은분 신고 가능한가요????", quoted.content)
+        }
+
+    @Test
+    fun `resolve should gracefully fall back to outer content when cross-tweet source returns 404`() =
+        runTest {
+            val outerTweetJson =
+                """
+                {
+                    "id_str": "2112817190735085873",
+                    "text": "Outer commentary https://t.co/lUT27eowKZ",
+                    "user": {
+                        "name": "Joshi",
+                        "screen_name": "joshi_no0"
+                    },
+                    "mediaDetails": [
+                        {
+                            "expanded_url": "https://x.com/BlackSandStocks/status/2087832788661854276/video/1"
+                        }
+                    ]
+                }
+                """.trimIndent()
+
+            val client =
+                createMockHttpClient { request ->
+                    when (request.url.parameters["id"]) {
+                        "2112817190735085873" -> jsonResponse(outerTweetJson)
+                        else -> jsonResponse("{}", status = HttpStatusCode.NotFound)
+                    }
+                }
+
+            val post = resolver.resolve("https://x.com/joshi_no0/status/2112817190735085873", client)
+
+            assertEquals("Outer commentary https://t.co/lUT27eowKZ", post.content)
+            assertEquals(null, post.quotedPost)
+        }
+
+    @Test
+    fun `resolve should not cascade cross-tweet media embed beyond single hop`() =
+        runTest {
+            val outerTweetJson =
+                """
+                {
+                    "id_str": "1001",
+                    "text": "https://t.co/link1",
+                    "user": { "name": "Outer", "screen_name": "outer" },
+                    "mediaDetails": [
+                        { "expanded_url": "https://x.com/hop1/status/2002/video/1" }
+                    ]
+                }
+                """.trimIndent()
+
+            val hop1TweetJson =
+                """
+                {
+                    "id_str": "2002",
+                    "text": "Hop 1 text https://t.co/link2",
+                    "user": { "name": "Hop1", "screen_name": "hop1" },
+                    "mediaDetails": [
+                        { "expanded_url": "https://x.com/hop2/status/3003/video/1" }
+                    ]
+                }
+                """.trimIndent()
+
+            var hop2Requested = false
+            val client =
+                createMockHttpClient { request ->
+                    when (request.url.parameters["id"]) {
+                        "1001" -> {
+                            jsonResponse(outerTweetJson)
+                        }
+
+                        "2002" -> {
+                            jsonResponse(hop1TweetJson)
+                        }
+
+                        "3003" -> {
+                            hop2Requested = true
+                            jsonResponse("{}", status = HttpStatusCode.NotFound)
+                        }
+
+                        else -> {
+                            jsonResponse("{}", status = HttpStatusCode.NotFound)
+                        }
+                    }
+                }
+
+            val post = resolver.resolve("https://x.com/outer/status/1001", client)
+
+            assertEquals("[引用 @hop1: Hop 1 text https://t.co/link2]", post.content)
+            assertNotNull(post.quotedPost)
+            assertEquals("2002", post.quotedPost.id)
+            assertFalse(hop2Requested, "Source tweet media embed should not trigger a second hop")
+            assertEquals(null, post.quotedPost.quotedPost)
+        }
 }

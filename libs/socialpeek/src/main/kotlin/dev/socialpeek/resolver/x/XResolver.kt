@@ -30,6 +30,12 @@ class XResolver : PlatformResolver {
     override suspend fun resolve(
         url: String,
         client: SocialPeekHttpClient,
+    ): PeekPost = resolve(url, client, depth = 0)
+
+    internal suspend fun resolve(
+        url: String,
+        client: SocialPeekHttpClient,
+        depth: Int,
     ): PeekPost {
         val match =
             tweetUrlPattern.find(url)
@@ -59,7 +65,29 @@ class XResolver : PlatformResolver {
         val parsedRoot = parseTweetElement(rootElement, defaultId = tweetId, defaultUrl = url)
 
         val quotedTweetObj = rootElement["quoted_tweet"]?.jsonObject
-        val quotedPost = quotedTweetObj?.let { parseTweetElement(it) }
+        val directQuotedPost = quotedTweetObj?.let { parseTweetElement(it) }
+
+        val quotedPost =
+            if (directQuotedPost != null) {
+                directQuotedPost
+            } else if (depth == 0) {
+                val sourceTweetId = extractSourceTweetId(rootElement, tweetId)
+                if (sourceTweetId != null) {
+                    try {
+                        resolve(
+                            url = "https://x.com/i/status/$sourceTweetId",
+                            client = client,
+                            depth = depth + 1,
+                        )
+                    } catch (e: Exception) {
+                        null
+                    }
+                } else {
+                    null
+                }
+            } else {
+                null
+            }
 
         val (finalContent, finalMedia) =
             if (quotedPost != null) {
@@ -87,6 +115,31 @@ class XResolver : PlatformResolver {
             media = finalMedia,
             quotedPost = quotedPost,
         )
+    }
+
+    private fun extractSourceTweetId(
+        rootElement: JsonObject,
+        currentTweetId: String,
+    ): String? {
+        val mediaElements = mutableListOf<JsonObject>()
+        rootElement["mediaDetails"]?.jsonArray?.forEach {
+            if (it is JsonObject) mediaElements.add(it)
+        }
+        rootElement["entities"]?.jsonObject?.get("media")?.jsonArray?.forEach {
+            if (it is JsonObject) mediaElements.add(it)
+        }
+
+        for (media in mediaElements) {
+            val expandedUrl = media["expanded_url"]?.jsonPrimitive?.contentOrNull ?: continue
+            val match = tweetUrlPattern.find(expandedUrl)
+            if (match != null) {
+                val sourceId = match.groupValues[1]
+                if (sourceId != currentTweetId) {
+                    return sourceId
+                }
+            }
+        }
+        return null
     }
 
     private fun parseTweetElement(
