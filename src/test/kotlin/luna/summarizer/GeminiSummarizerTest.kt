@@ -329,6 +329,9 @@ class GeminiSummarizerTest {
                     when {
                         request.url.encodedPath.endsWith("/interactions") && request.method.value == "POST" -> {
                             assertEquals("test-key", request.url.parameters["key"])
+                            val body = request.body.toByteArray().decodeToString()
+                            assertTrue(body.contains("zh-TW"))
+                            assertTrue(body.contains("TL;DR:"))
                             respond(
                                 content = """{"id": "int-123", "status": "in_progress"}""",
                                 status = HttpStatusCode.OK,
