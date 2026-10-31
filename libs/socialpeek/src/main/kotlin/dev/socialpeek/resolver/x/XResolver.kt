@@ -7,6 +7,7 @@ import dev.socialpeek.network.SocialPeekHttpClient
 import dev.socialpeek.resolver.PlatformResolver
 import dev.socialpeek.util.UrlSanitizer
 import kotlinx.serialization.json.*
+import kotlin.coroutines.cancellation.CancellationException
 
 class XResolver : PlatformResolver {
     override val platform: Platform = Platform.X
@@ -30,12 +31,12 @@ class XResolver : PlatformResolver {
     override suspend fun resolve(
         url: String,
         client: SocialPeekHttpClient,
-    ): PeekPost = resolve(url, client, depth = 0)
+    ): PeekPost = resolve(url, client, allowCrossEmbedFallback = true)
 
     internal suspend fun resolve(
         url: String,
         client: SocialPeekHttpClient,
-        depth: Int,
+        allowCrossEmbedFallback: Boolean,
     ): PeekPost {
         val match =
             tweetUrlPattern.find(url)
@@ -47,6 +48,8 @@ class XResolver : PlatformResolver {
         val responseText =
             try {
                 client.get(syndicationUrl)
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
                 throw PostNotFoundException(url, e.message)
             }
@@ -70,16 +73,18 @@ class XResolver : PlatformResolver {
         val quotedPost =
             if (directQuotedPost != null) {
                 directQuotedPost
-            } else if (depth == 0) {
+            } else if (allowCrossEmbedFallback) {
                 val sourceTweetId = extractSourceTweetId(rootElement, tweetId)
                 if (sourceTweetId != null) {
                     try {
                         resolve(
                             url = "https://x.com/i/status/$sourceTweetId",
                             client = client,
-                            depth = depth + 1,
+                            allowCrossEmbedFallback = false,
                         )
-                    } catch (e: Exception) {
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (_: Exception) {
                         null
                     }
                 } else {
@@ -121,21 +126,22 @@ class XResolver : PlatformResolver {
         rootElement: JsonObject,
         currentTweetId: String,
     ): String? {
-        val mediaElements = mutableListOf<JsonObject>()
-        rootElement["mediaDetails"]?.jsonArray?.forEach {
-            if (it is JsonObject) mediaElements.add(it)
-        }
-        rootElement["entities"]?.jsonObject?.get("media")?.jsonArray?.forEach {
-            if (it is JsonObject) mediaElements.add(it)
-        }
+        val mediaArrays =
+            listOfNotNull(
+                rootElement["mediaDetails"] as? JsonArray,
+                (rootElement["entities"] as? JsonObject)?.get("media") as? JsonArray,
+            )
 
-        for (media in mediaElements) {
-            val expandedUrl = media["expanded_url"]?.jsonPrimitive?.contentOrNull ?: continue
-            val match = tweetUrlPattern.find(expandedUrl)
-            if (match != null) {
-                val sourceId = match.groupValues[1]
-                if (sourceId != currentTweetId) {
-                    return sourceId
+        for (array in mediaArrays) {
+            for (element in array) {
+                val mediaObj = element as? JsonObject ?: continue
+                val expandedUrl = mediaObj["expanded_url"]?.jsonPrimitive?.contentOrNull ?: continue
+                val match = tweetUrlPattern.find(expandedUrl)
+                if (match != null) {
+                    val sourceId = match.groupValues[1]
+                    if (sourceId != currentTweetId) {
+                        return sourceId
+                    }
                 }
             }
         }
