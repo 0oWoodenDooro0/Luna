@@ -36,3 +36,15 @@ _Avoid_: Reverse history search, boundary walk, message scraper
 The preprocessing stage that purges slash commands, custom emojis, system events, and ambient third-party bots from a conversation slice while preserving short human conversational turns and media attachments.
 _Avoid_: Sanitizer, text cleaner, regex scrubber
 
+**Adaptive Video Processing**:
+The strategy of automatically selecting between Gemini's static processing mode (for short videos <= 5m) and agentic processing mode (for long videos > 5m) to balance time-to-first-token against token budget.
+_Avoid_: Dynamic mode switcher, video mode decider
+
+**Agentic Video Understanding**:
+Gemini's dynamic video comprehension mode where the model independently navigates the timeline and inspects audio, visual frames, or transcripts on demand via internal steps, cutting long-video token consumption by up to 88%.
+_Avoid_: Agent loop, autonomous video watcher
+
+**Audience Feedback Injection**:
+The independent extraction of YouTube top-level comments and viewer reactions via the YouTube Data API to supplement video multimodal understanding in the summary prompt.
+_Avoid_: Comment scraping, comment crawling
+
