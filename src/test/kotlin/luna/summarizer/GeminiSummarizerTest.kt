@@ -419,4 +419,81 @@ class GeminiSummarizerTest {
             assertIs<SummaryResult.Error.Timeout>(result)
             assertTrue(result.message.contains("timed out", ignoreCase = true))
         }
+
+    @Test
+    fun `returns Error when static Gemini response contains only emojis or whitespaces`() =
+        runTest {
+            val responseJson =
+                """
+                {
+                    "candidates": [
+                        {
+                            "content": {
+                                "parts": [
+                                    { "text": "  📝👍🎉  " }
+                                ]
+                            }
+                        }
+                    ]
+                }
+                """.trimIndent()
+
+            val mockEngine =
+                MockEngine {
+                    respond(
+                        content = responseJson,
+                        status = HttpStatusCode.OK,
+                        headers = headersOf(HttpHeaders.ContentType, "application/json"),
+                    )
+                }
+
+            val summarizer =
+                GeminiSummarizer(
+                    config = GeminiConfig(apiKey = "test-key"),
+                    httpClient = createTestClient(mockEngine),
+                )
+
+            val result = summarizer.summarize("Some text")
+            assertIs<SummaryResult.Error.Generic>(result)
+            assertTrue(result.message.contains("empty or sanitized to blank", ignoreCase = true))
+        }
+
+    @Test
+    fun `returns Error when agentic interaction response outputText contains only emojis or whitespaces`() =
+        runTest {
+            val mockEngine =
+                MockEngine { request ->
+                    if (request.url.encodedPath.endsWith("/interactions")) {
+                        respond(
+                            content = """{"id": "int-emoji-only", "status": "in_progress"}""",
+                            status = HttpStatusCode.OK,
+                            headers = headersOf(HttpHeaders.ContentType, "application/json"),
+                        )
+                    } else {
+                        respond(
+                            content = """{"id": "int-emoji-only", "status": "completed", "outputText": "   📝🎉   "}""",
+                            status = HttpStatusCode.OK,
+                            headers = headersOf(HttpHeaders.ContentType, "application/json"),
+                        )
+                    }
+                }
+
+            val summarizer =
+                GeminiSummarizer(
+                    config = GeminiConfig(apiKey = "test-key"),
+                    httpClient = createTestClient(mockEngine),
+                    pollingDelayMs = 1L,
+                )
+
+            val input =
+                SummaryInput(
+                    content = "Video",
+                    videoUri = "https://www.youtube.com/watch?v=emojiVideo",
+                    videoDurationSeconds = 600L,
+                )
+
+            val result = summarizer.summarize(input)
+            assertIs<SummaryResult.Error.Generic>(result)
+            assertTrue(result.message.contains("empty or sanitized to blank", ignoreCase = true))
+        }
 }

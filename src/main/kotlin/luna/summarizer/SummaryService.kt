@@ -251,7 +251,9 @@ class SummaryService(
             when (result) {
                 is SummaryResult.Success -> {
                     statusCache[event.messageId] = SummaryStatus.DONE
-                    val textToSend = truncateForDiscord(result.text)
+                    val textToSend =
+                        truncateForDiscord(result.text).takeIf { it.isNotBlank() }
+                            ?: FALLBACK_EMPTY_SUMMARY_MESSAGE
                     replySender(message, textToSend)
                     JsonLogger.log(
                         layer = "SUMMARY",
@@ -386,6 +388,7 @@ class SummaryService(
         val DEFAULT_INACTIVITY_GAP = 15.minutes
         val MAX_INACTIVITY_GAP = DEFAULT_INACTIVITY_GAP
         const val DEFAULT_MAX_CHARACTER_BUDGET = 20000
+        const val FALLBACK_EMPTY_SUMMARY_MESSAGE = "抱歉，AI 無法為此內容生成有效摘要，請嘗試提供更多上下文或選擇其他內容。"
 
         fun resolveMaxHistoryMessages(env: Map<String, String> = System.getenv()): Int =
             env["SUMMARY_MAX_HISTORY_MESSAGES"]

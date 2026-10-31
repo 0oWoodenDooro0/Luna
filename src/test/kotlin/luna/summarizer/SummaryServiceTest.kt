@@ -1847,4 +1847,42 @@ class SummaryServiceTest {
             kotlin.test.assertNotNull(sentReply)
             assertTrue(sentReply.contains("超過 2 小時上限"))
         }
+
+    @Test
+    fun `Summary Reaction sends friendly fallback message when Gemini returns blank or whitespace text`() =
+        runTest {
+            val summarizer = mockk<GeminiSummarizer>()
+            var sentReply: String? = null
+
+            val targetMsg =
+                createMockMessage(
+                    3003L,
+                    "alice",
+                    "Some short video or text",
+                )
+
+            val service =
+                SummaryService(
+                    summarizer = summarizer,
+                    replySender = { _, content -> sentReply = content },
+                )
+
+            coEvery { summarizer.summarize(any<SummaryInput>()) } returns SummaryResult.Success("")
+
+            val user = mockk<User>()
+            every { user.isBot } returns false
+
+            val event = mockk<ReactionAddEvent>()
+            every { event.emoji } returns ReactionEmoji.Unicode("📝")
+            every { event.userId } returns Snowflake(55L)
+            every { event.messageId } returns targetMsg.id
+            coEvery { event.getUserOrNull() } returns user
+            coEvery { event.getMessageOrNull() } returns targetMsg
+
+            service.handleReaction(event)
+
+            kotlin.test.assertNotNull(sentReply)
+            assertTrue(sentReply.isNotBlank(), "Sent reply must not be empty or blank")
+            assertTrue(sentReply.contains("無法為此內容生成有效摘要"))
+        }
 }
