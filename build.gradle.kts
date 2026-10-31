@@ -7,6 +7,12 @@ plugins {
 
 subprojects {
     apply(plugin = "org.jmailen.kotlinter")
+
+    tasks.withType<Test> {
+        filter {
+            isFailOnNoMatchingTests = false
+        }
+    }
 }
 
 group = "luna"
@@ -58,6 +64,9 @@ kotlin {
 tasks.test {
     useJUnitPlatform()
     systemProperty("net.bytebuddy.experimental", "true")
+    filter {
+        isFailOnNoMatchingTests = false
+    }
 }
 
 tasks.jar {

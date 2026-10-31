@@ -27,3 +27,8 @@ Luna is a multi-project Gradle monorepo (`:libs:socialpeek`, `:libs:curtly`, and
 
 - **Decouple parallel vertical slices**: When decomposing pipeline features into parallel agent worktrees (or subagents), vertical slices must not contend on the same monolithic service file. Isolate distinct pipeline stages into independent collaborator components (e.g., `DialogueNoiseFilter`, `ContextUrlResolver`) or establish explicit interface seams in trunk tickets before scheduling parallel branches.
 
+## 5. Kotlin Test Naming & Observability
+
+- **JVM-safe test identifiers**: While Kotlin allows spaces in backticked test method names, class bytecode strictly forbids JVM-illegal characters: `<`, `>`, `:`, `"`, `/`, `\`, `|`, `?`, `*`. Never use mathematical comparison symbols (e.g., `<= 300` or `> 300`) in test function names; use natural descriptive phrases instead (e.g., `when duration is at most 300 seconds`).
+- **Observable fallback degraded states**: Fail-open fallback routines (such as degrading rich Data API video resolution to basic oEmbed, or defaulting URL resolution to channel chat history) must emit descriptive warning or debug logs with the underlying cause, preventing silent failure black holes during operations.
+

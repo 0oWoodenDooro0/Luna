@@ -36,6 +36,7 @@ Luna 是一款結合 **Discord 機器人** 與 **Ktor Web 控制台** 的現代�
 | `PORT` | Web 伺服器通訊埠 | 選填 (預設：`8080`) |
 | `GEMINI_API_KEY` | Google Gemini API 金鑰 (用於反應觸發 AI 摘要) | 選填 (如：`AIzaSy...`) |
 | `GEMINI_MODEL` | Gemini 模型名稱 | 選填 (預設：`gemini-1.5-flash`) |
+| `YOUTUBE_API_KEY` | YouTube Data API v3 金鑰 (用於獲取影片時長與觀眾留言，未設定則平滑降級為 oEmbed 模式) | 選填 (如：`AIzaSy...`) |
 | `SUMMARY_EMOJI` | 觸發 AI 摘要的 Emoji | 選填 (預設：`📝`) |
 | `SUMMARY_MAX_HISTORY_MESSAGES` | AI 摘要回溯擷取的對話上下文訊息上限 | 選填 (預設：`50`，有效範圍 1-100) |
 | `SUMMARY_INACTIVITY_GAP_MINUTES` | AI 摘要歷史回溯中斷的閒置時間間隔 (分鐘) | 選填 (預設：`15`) |

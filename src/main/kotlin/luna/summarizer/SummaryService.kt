@@ -197,7 +197,11 @@ class SummaryService(
 
         val summaryInput =
             if (primaryUrl != null) {
-                val post = runCatching { peekResolver(primaryUrl) }.getOrNull()
+                val post =
+                    runCatching { peekResolver(primaryUrl) }
+                        .onFailure { e ->
+                            logger.warn("Failed to resolve URL $primaryUrl via peekResolver, falling back to message context", e)
+                        }.getOrNull()
                 if (post != null) {
                     val durationSeconds = post.rawData["durationSeconds"]?.toLongOrNull()
                     if (post.platform == Platform.YOUTUBE && durationSeconds != null && durationSeconds > 7200L) {
@@ -231,6 +235,7 @@ class SummaryService(
                         videoDurationSeconds = durationSeconds,
                     )
                 } else {
+                    logger.debug("No post resolved for primary URL {}, summarizing message context directly", primaryUrl)
                     SummaryInput(
                         content = formattedContent,
                         url = primaryUrl,
