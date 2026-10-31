@@ -79,4 +79,163 @@ class YouTubeResolverTest {
                 resolver.resolve("https://www.youtube.com/watch?v=00000000000", client)
             }
         }
+
+    @Test
+    fun `resolve should query YouTube Data API when apiKey is provided, parsing duration and comments`() =
+        runTest {
+            val resolverWithKey = YouTubeResolver(apiKey = "TEST_API_KEY")
+
+            val videosJson =
+                """
+                {
+                  "items": [
+                    {
+                      "snippet": {
+                        "title": "Rick Astley - Never Gonna Give You Up",
+                        "channelTitle": "RickAstleyVEVO",
+                        "channelId": "UCuAXFkgsw1L7xaCfnd5JJOw"
+                      },
+                      "contentDetails": {
+                        "duration": "PT3M33S"
+                      }
+                    }
+                  ]
+                }
+                """.trimIndent()
+
+            val commentsJson =
+                """
+                {
+                  "items": [
+                    {
+                      "snippet": {
+                        "topLevelComment": {
+                          "snippet": {
+                            "authorDisplayName": "Viewer1",
+                            "textDisplay": "This song will never get old!",
+                            "likeCount": 12500
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "snippet": {
+                        "topLevelComment": {
+                          "snippet": {
+                            "authorDisplayName": "Viewer2",
+                            "textDisplay": "A true masterpiece.",
+                            "likeCount": 850
+                          }
+                        }
+                      }
+                    }
+                  ]
+                }
+                """.trimIndent()
+
+            val client =
+                createMockHttpClient { request ->
+                    when {
+                        request.url.encodedPath.contains("/videos") -> {
+                            assertTrue(request.url.parameters["key"] == "TEST_API_KEY")
+                            assertTrue(request.url.parameters["id"] == "dQw4w9WgXcQ")
+                            jsonResponse(videosJson)
+                        }
+
+                        request.url.encodedPath.contains("/commentThreads") -> {
+                            assertTrue(request.url.parameters["key"] == "TEST_API_KEY")
+                            assertTrue(request.url.parameters["videoId"] == "dQw4w9WgXcQ")
+                            jsonResponse(commentsJson)
+                        }
+
+                        else -> {
+                            jsonResponse("Not found", status = HttpStatusCode.NotFound)
+                        }
+                    }
+                }
+
+            val post = resolverWithKey.resolve("https://www.youtube.com/watch?v=dQw4w9WgXcQ", client)
+
+            assertEquals("Rick Astley - Never Gonna Give You Up", post.title)
+            assertEquals("RickAstleyVEVO", post.author.displayName)
+            assertEquals("213", post.rawData["durationSeconds"])
+            assertEquals(2, post.comments.size)
+            assertEquals("Viewer1", post.comments[0].author)
+            assertEquals("This song will never get old!", post.comments[0].content)
+            assertEquals(12500L, post.comments[0].score)
+            assertEquals("Viewer2", post.comments[1].author)
+            assertEquals("A true masterpiece.", post.comments[1].content)
+            assertEquals(850L, post.comments[1].score)
+        }
+
+    @Test
+    fun `resolve should fallback to oEmbed when Data API returns 403 quota exceeded`() =
+        runTest {
+            val resolverWithKey = YouTubeResolver(apiKey = "EXHAUSTED_KEY")
+            val oembedJson =
+                """
+                {
+                    "title": "Fallback Oembed Title",
+                    "author_name": "Fallback Creator",
+                    "author_url": "https://www.youtube.com/@FallbackCreator"
+                }
+                """.trimIndent()
+
+            val client =
+                createMockHttpClient { request ->
+                    if (request.url.encodedPath.contains("/videos")) {
+                        jsonResponse("Quota Exceeded", status = HttpStatusCode.Forbidden)
+                    } else if (request.url.host.contains("youtube.com") && request.url.encodedPath.contains("/oembed")) {
+                        jsonResponse(oembedJson)
+                    } else {
+                        jsonResponse("Not Found", status = HttpStatusCode.NotFound)
+                    }
+                }
+
+            val post = resolverWithKey.resolve("https://www.youtube.com/watch?v=dQw4w9WgXcQ", client)
+
+            assertEquals("Fallback Oembed Title", post.title)
+            assertEquals("Fallback Creator", post.author.displayName)
+            assertTrue(post.comments.isEmpty())
+            assertTrue(post.rawData.isEmpty())
+        }
+
+    @Test
+    fun `resolve should return video info with empty comments when commentThreads fails`() =
+        runTest {
+            val resolverWithKey = YouTubeResolver(apiKey = "TEST_API_KEY")
+
+            val videosJson =
+                """
+                {
+                  "items": [
+                    {
+                      "snippet": {
+                        "title": "Video With Comments Disabled",
+                        "channelTitle": "Creator",
+                        "channelId": "UC123"
+                      },
+                      "contentDetails": {
+                        "duration": "PT1M0S"
+                      }
+                    }
+                  ]
+                }
+                """.trimIndent()
+
+            val client =
+                createMockHttpClient { request ->
+                    when {
+                        request.url.encodedPath.contains("/videos") -> jsonResponse(videosJson)
+                        request.url.encodedPath.contains("/commentThreads") -> jsonResponse("Comments Disabled", status = HttpStatusCode.Forbidden)
+                        else -> jsonResponse("Not found", status = HttpStatusCode.NotFound)
+                    }
+                }
+
+            val post = resolverWithKey.resolve("https://www.youtube.com/watch?v=dQw4w9WgXcQ", client)
+
+            assertEquals("Video With Comments Disabled", post.title)
+            assertEquals("60", post.rawData["durationSeconds"])
+            assertTrue(post.comments.isEmpty())
+        }
 }
