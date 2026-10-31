@@ -19,4 +19,11 @@ Luna is a multi-project Gradle monorepo (`:libs:socialpeek`, `:libs:curtly`, and
 ## 3. Discord User Context Preservation
 
 - **Preserve user commentary**: When processing messages that combine external URLs with user comments or annotations, do not discard user commentary in favor of extracted third-party link text. Combine user annotations into the processing pipeline context.
+- **Bot boundary disambiguation**: When backtracking or slicing chat history, distinguish between the bot's own workflow markers (`isBotSummaryMessage` checking for `TL;DR:` or previous summary markers) and third-party bots. Third-party bot messages must be filtered from dialogue input rather than terminating history backtracking.
+- **Media attachment context**: Messages with blank text must be preserved in conversation context if they carry `attachments`, ensuring multimodal references remain available in the dialogue context.
 - **Discord message limits**: All outgoing Discord messages and reply builders must account for Discord's 2,000-character payload limit, truncating gracefully with trailing ellipsis (`...`) before invocation.
+
+## 4. Agent Worktree & Pipeline Seam Isolation
+
+- **Decouple parallel vertical slices**: When decomposing pipeline features into parallel agent worktrees (or subagents), vertical slices must not contend on the same monolithic service file. Isolate distinct pipeline stages into independent collaborator components (e.g., `DialogueNoiseFilter`, `ContextUrlResolver`) or establish explicit interface seams in trunk tickets before scheduling parallel branches.
+

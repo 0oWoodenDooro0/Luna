@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
 set -eo pipefail
 
-echo "==> Running pre-commit guardrail: lintKotlin..."
-./gradlew lintKotlin --daemon
+echo "==> Running pre-commit guardrail: lintKotlin and test..."
+./gradlew lintKotlin test --daemon

@@ -460,21 +460,17 @@ class SummaryServiceTest {
         type: MessageType = MessageType.Default,
         stickers: List<StickerItem> = emptyList(),
         attachments: Set<Attachment> = emptySet(),
-    ): Message {
-        val author = mockk<User>()
-        every { author.username } returns username
-        every { author.isBot } returns isBot
-
-        val msg = mockk<Message>()
-        every { msg.id } returns Snowflake(id)
-        every { msg.author } returns author
-        every { msg.content } returns content
-        every { msg.timestamp } returns timestamp
-        every { msg.type } returns type
-        every { msg.stickers } returns stickers
-        every { msg.attachments } returns attachments
-        return msg
-    }
+    ): Message =
+        SummaryTestFixtures.createMockMessage(
+            id = id,
+            username = username,
+            content = content,
+            isBot = isBot,
+            timestamp = timestamp,
+            type = type,
+            stickers = stickers,
+            attachments = attachments,
+        )
 
     @Test
     fun `retrieves preceding messages and formats them chronologically with username prefix`() =

@@ -24,3 +24,15 @@ _Avoid_: LLM agent, chatbot, AI wrapper
 A social media post that embeds and references another underlying post, with or without author commentary.
 _Avoid_: Quote-tweet, retweet with comment, nested tweet
 
+**Conversation Slice**:
+The bounded chronological sequence of messages leading up to a target message, collected to provide conversational context for a Summary Reaction.
+_Avoid_: Chat chunk, message window, backscroll buffer
+
+**Dual-Boundary Backtracking**:
+The history traversal algorithm that walks backward from the reaction target message up to 20 messages, halting if an inactivity gap exceeding 15 minutes or a previous bot summary is encountered.
+_Avoid_: Reverse history search, boundary walk, message scraper
+
+**Dialogue Noise Filter**:
+The preprocessing stage that purges slash commands, custom emojis, system events, and ambient third-party bots from a conversation slice while preserving short human conversational turns and media attachments.
+_Avoid_: Sanitizer, text cleaner, regex scrubber
+
