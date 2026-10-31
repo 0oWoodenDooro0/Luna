@@ -34,6 +34,12 @@ Luna 是一款結合 **Discord 機器人** 與 **Ktor Web 控制台** 的現代�
 | `DISCORD_REDIRECT_URI` | OAuth2 重導向網址 | 選填 (預設：`http://localhost:8080/api/auth/discord/callback`) |
 | `BASE_URL` | 短網址基底網域 | 選填 (預設：`http://localhost:8080/s/`) |
 | `PORT` | Web 伺服器通訊埠 | 選填 (預設：`8080`) |
+| `GEMINI_API_KEY` | Google Gemini API 金鑰 (用於反應觸發 AI 摘要) | 選填 (如：`AIzaSy...`) |
+| `GEMINI_MODEL` | Gemini 模型名稱 | 選填 (預設：`gemini-1.5-flash`) |
+| `SUMMARY_EMOJI` | 觸發 AI 摘要的 Emoji | 選填 (預設：`📝`) |
+| `SUMMARY_MAX_HISTORY_MESSAGES` | AI 摘要回溯擷取的對話上下文訊息上限 | 選填 (預設：`50`，有效範圍 1-100) |
+| `SUMMARY_INACTIVITY_GAP_MINUTES` | AI 摘要歷史回溯中斷的閒置時間間隔 (分鐘) | 選填 (預設：`15`) |
+| `SUMMARY_MAX_CHARACTER_BUDGET` | AI 摘要歷史訊息累計內容字元保護上限 | 選填 (預設：`20000`) |
 
 ---
 
