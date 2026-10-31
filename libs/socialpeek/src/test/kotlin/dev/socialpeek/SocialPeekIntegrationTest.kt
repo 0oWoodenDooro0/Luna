@@ -5,6 +5,7 @@ import dev.socialpeek.model.PeekPost
 import dev.socialpeek.model.Platform
 import dev.socialpeek.resolver.bilibili.BilibiliResolver
 import dev.socialpeek.resolver.facebook.FacebookResolver
+import dev.socialpeek.resolver.generic.GenericWebResolver
 import dev.socialpeek.resolver.instagram.InstagramResolver
 import dev.socialpeek.resolver.reddit.RedditResolver
 import dev.socialpeek.resolver.threads.ThreadsResolver
@@ -29,10 +30,10 @@ class SocialPeekIntegrationTest {
         }
 
     @Test
-    fun `default client should support all 7 platforms`() {
+    fun `default client should support all standard platforms including generic fallback`() {
         val client = SocialPeek.defaultClient
 
-        assertEquals(7, client.resolvers.size)
+        assertEquals(8, client.resolvers.size)
         assertTrue(client.resolvers.any { it is FacebookResolver })
         assertTrue(client.resolvers.any { it is BilibiliResolver })
         assertTrue(client.resolvers.any { it is XResolver })
@@ -40,6 +41,7 @@ class SocialPeekIntegrationTest {
         assertTrue(client.resolvers.any { it is ThreadsResolver })
         assertTrue(client.resolvers.any { it is YouTubeResolver })
         assertTrue(client.resolvers.any { it is RedditResolver })
+        assertTrue(client.resolvers.any { it is GenericWebResolver })
 
         // Check resolver routing
         assertEquals(
@@ -60,7 +62,8 @@ class SocialPeekIntegrationTest {
         assertEquals(Platform.YOUTUBE, client.findResolver("https://www.youtube.com/live/SyG1rbuHB9A")?.platform)
         assertEquals(Platform.REDDIT, client.findResolver("https://redd.it/1cdefgh")?.platform)
         assertEquals(Platform.REDDIT, client.findResolver("https://www.reddit.com/r/google_antigravity/s/7GwvvFKRsE")?.platform)
-        assertNull(client.findResolver("https://randomwebsite.com/article/1"))
+        assertEquals(Platform.GENERIC, client.findResolver("https://randomwebsite.com/article/1")?.platform)
+        assertNull(client.findResolver("ftp://randomwebsite.com/article/1"))
     }
 
     @Test

@@ -7,6 +7,7 @@ import dev.socialpeek.network.SocialPeekHttpClient
 import dev.socialpeek.resolver.PlatformResolver
 import dev.socialpeek.resolver.bilibili.BilibiliResolver
 import dev.socialpeek.resolver.facebook.FacebookResolver
+import dev.socialpeek.resolver.generic.GenericWebResolver
 import dev.socialpeek.resolver.instagram.InstagramResolver
 import dev.socialpeek.resolver.reddit.RedditResolver
 import dev.socialpeek.resolver.threads.ThreadsResolver
@@ -28,6 +29,7 @@ class SocialPeekClient(
                 ThreadsResolver(),
                 YouTubeResolver(),
                 RedditResolver(),
+                GenericWebResolver(),
             )
     }
 
