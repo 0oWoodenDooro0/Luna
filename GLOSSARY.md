@@ -19,3 +19,8 @@ _Avoid_: Web scraper, raw HTML extractor, crawler
 **Gemini Summarizer**:
 The AI client service that formats prompts and invokes the Google Gemini API to produce structured, emoji-free text summaries.
 _Avoid_: LLM agent, chatbot, AI wrapper
+
+**Quoted Post**:
+A social media post that embeds and references another underlying post, with or without author commentary.
+_Avoid_: Quote-tweet, retweet with comment, nested tweet
+
