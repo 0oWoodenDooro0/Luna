@@ -160,10 +160,38 @@ data class GeminiInteractionRequest(
 )
 
 @Serializable
+data class GeminiInteractionStepContent(
+    val type: String? = null,
+    val text: String? = null,
+)
+
+@Serializable
+data class GeminiInteractionStep(
+    val type: String? = null,
+    val content: List<GeminiInteractionStepContent>? = null,
+)
+
+@Serializable
 data class GeminiInteractionResponse(
     val id: String? = null,
     val status: String? = null,
     @SerialName("output_text")
     val outputText: String? = null,
+    val steps: List<GeminiInteractionStep>? = null,
     val error: GeminiApiErrorDetails? = null,
-)
+) {
+    fun extractOutputText(): String {
+        val stepText =
+            steps
+                ?.filter { it.type == "model_output" }
+                ?.flatMap { it.content ?: emptyList() }
+                ?.mapNotNull { it.text }
+                ?.joinToString("\n")
+                ?.trim()
+
+        if (!stepText.isNullOrBlank()) {
+            return stepText
+        }
+        return outputText?.trim() ?: ""
+    }
+}

@@ -174,9 +174,9 @@ class GeminiSummarizer(
             }
 
             val statusResponse = response.body<GeminiInteractionResponse>()
-            if (statusResponse.status == "completed" || !statusResponse.outputText.isNullOrBlank()) {
-                val text = statusResponse.outputText ?: ""
-                val sanitized = EmojiSanitizer.stripEmojis(text).trim()
+            val rawOutput = statusResponse.extractOutputText()
+            if (statusResponse.status == "completed" || rawOutput.isNotBlank()) {
+                val sanitized = EmojiSanitizer.stripEmojis(rawOutput).trim()
                 if (sanitized.isBlank()) {
                     return SummaryResult.Error.Generic("Gemini summary output is empty or sanitized to blank")
                 }

@@ -496,4 +496,67 @@ class GeminiSummarizerTest {
             assertIs<SummaryResult.Error.Generic>(result)
             assertTrue(result.message.contains("empty or sanitized to blank", ignoreCase = true))
         }
+
+    @Test
+    fun `extracts summary text from interactions steps model_output structure`() =
+        runTest {
+            val responseJson =
+                """
+                {
+                    "id": "v1_test_steps",
+                    "status": "completed",
+                    "steps": [
+                        {
+                            "type": "thought",
+                            "signature": "thought-sig"
+                        },
+                        {
+                            "type": "model_output",
+                            "content": [
+                                {
+                                    "type": "text",
+                                    "text": "TL;DR: Extract from steps succeeded\n\n核心重點:\n• Point 1"
+                                }
+                            ]
+                        }
+                    ]
+                }
+                """.trimIndent()
+
+            val mockEngine =
+                MockEngine { request ->
+                    if (request.url.encodedPath.endsWith("/interactions")) {
+                        respond(
+                            content = """{"id": "v1_test_steps", "status": "in_progress"}""",
+                            status = HttpStatusCode.OK,
+                            headers = headersOf(HttpHeaders.ContentType, "application/json"),
+                        )
+                    } else {
+                        respond(
+                            content = responseJson,
+                            status = HttpStatusCode.OK,
+                            headers = headersOf(HttpHeaders.ContentType, "application/json"),
+                        )
+                    }
+                }
+
+            val summarizer =
+                GeminiSummarizer(
+                    config = GeminiConfig(apiKey = "test-key"),
+                    httpClient = createTestClient(mockEngine),
+                    pollingDelayMs = 1L,
+                )
+
+            val input =
+                SummaryInput(
+                    content = "Video",
+                    videoUri = "https://www.youtube.com/watch?v=stepsVideo",
+                    videoDurationSeconds = 600L,
+                )
+
+            val result = summarizer.summarize(input)
+            assertIs<SummaryResult.Success>(result)
+            assertTrue(result.text.contains("TL;DR: Extract from steps succeeded"))
+            assertTrue(result.text.contains("核心重點:"))
+        }
 }
