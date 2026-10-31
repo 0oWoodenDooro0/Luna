@@ -169,11 +169,7 @@ class GenericWebResolver : PlatformResolver {
             if (text.isNotBlank()) return text
         }
 
-        val paragraphs =
-            doc
-                .select("p")
-                .map { cleanWhitespace(it.text()) }
-                .filter { it.isNotBlank() }
+        val paragraphs = extractParagraphs(doc)
         if (paragraphs.isNotEmpty()) {
             return paragraphs.joinToString("\n\n")
         }
@@ -184,17 +180,19 @@ class GenericWebResolver : PlatformResolver {
     private fun extractCleanText(element: Element): String {
         val clone = element.clone()
         clone.select("script, style, noscript, nav, footer, header").remove()
-        val pTags =
-            clone
-                .select("p")
-                .map { cleanWhitespace(it.text()) }
-                .filter { it.isNotBlank() }
+        val pTags = extractParagraphs(clone)
         return if (pTags.isNotEmpty()) {
             pTags.joinToString("\n\n")
         } else {
             cleanWhitespace(clone.text())
         }
     }
+
+    private fun extractParagraphs(element: Element): List<String> =
+        element
+            .select("p")
+            .map { cleanWhitespace(it.text()) }
+            .filter { it.isNotBlank() }
 
     private fun cleanWhitespace(text: String): String =
         text

@@ -60,6 +60,14 @@ class SocialPeekClient(
     fun canResolve(url: String): Boolean = findResolver(url) != null
 
     /**
+     * Checks if any registered social media resolver (excluding generic web fallback) can handle this [url].
+     */
+    fun canResolveSocial(url: String): Boolean {
+        val resolver = findResolver(url) ?: return false
+        return resolver.platform != dev.socialpeek.model.Platform.GENERIC
+    }
+
+    /**
      * Finds a matching resolver for the given [url], or null if none match.
      */
     fun findResolver(url: String): PlatformResolver? = resolvers.firstOrNull { it.canResolve(url) }

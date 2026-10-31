@@ -120,7 +120,8 @@ suspend fun main() {
 
     // Register Reaction-Triggered Summary Service
     val geminiSummarizer = GeminiSummarizer()
-    SummaryService.register(kord, SummaryService(summarizer = geminiSummarizer))
+    val summaryService = SummaryService(summarizer = geminiSummarizer)
+    summaryService.register(kord)
 
     kord.on<ChatInputCommandInteractionCreateEvent> {
         val commandName = interaction.command.rootName

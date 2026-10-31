@@ -12,12 +12,47 @@ import dev.socialpeek.SocialPeek
 import dev.socialpeek.model.PeekPost
 import luna.core.JsonLogger
 import org.slf4j.LoggerFactory
-import java.util.concurrent.ConcurrentHashMap
+import java.util.Collections
+import java.util.LinkedHashMap
 
 enum class SummaryStatus {
     IN_PROGRESS,
     DONE,
     FAILED,
+}
+
+/**
+ * Thread-safe bounded LRU cache to prevent unbounded memory growth over long bot lifecycles.
+ */
+class BoundedStatusCache(
+    private val maxEntries: Int = 1000,
+) {
+    private val map =
+        Collections.synchronizedMap(
+            object : LinkedHashMap<Snowflake, SummaryStatus>(maxEntries, 0.75f, true) {
+                override fun removeEldestEntry(eldest: MutableMap.MutableEntry<Snowflake, SummaryStatus>?): Boolean = size > maxEntries
+            },
+        )
+
+    fun putIfAbsent(
+        key: Snowflake,
+        value: SummaryStatus,
+    ): SummaryStatus? = map.putIfAbsent(key, value)
+
+    operator fun get(key: Snowflake): SummaryStatus? = map[key]
+
+    operator fun set(
+        key: Snowflake,
+        value: SummaryStatus,
+    ) {
+        map[key] = value
+    }
+
+    fun remove(key: Snowflake): SummaryStatus? = map.remove(key)
+
+    fun clear() {
+        map.clear()
+    }
 }
 
 class SummaryService(
@@ -35,13 +70,13 @@ class SummaryService(
     val configuredEmoji: String? = System.getenv("SUMMARY_EMOJI")?.takeIf { it.isNotBlank() },
 ) {
     private val logger = LoggerFactory.getLogger(SummaryService::class.java)
-    private val statusCache = ConcurrentHashMap<Snowflake, SummaryStatus>()
+    private val statusCache = BoundedStatusCache()
 
     fun register(kord: Kord) {
         kord.on<ReactionAddEvent> {
             handleReaction(this)
         }
-        logger.info("SummaryService registered successfully with trigger emoji: {}", configuredEmoji ?: DEFAULT_EMOJI)
+        logger.info("SummaryService registered successfully with Summary Reaction emoji: {}", configuredEmoji ?: DEFAULT_EMOJI)
     }
 
     fun isSummaryEmoji(emoji: ReactionEmoji): Boolean {
@@ -53,7 +88,6 @@ class SummaryService(
             }
         }
         return name == DEFAULT_EMOJI ||
-            name == MEMO_UNICODE ||
             name.equals(":memo:", ignoreCase = true) ||
             name.equals("memo", ignoreCase = true)
     }
@@ -134,9 +168,16 @@ class SummaryService(
             if (url != null) {
                 val post = runCatching { peekResolver(url) }.getOrNull()
                 if (post != null) {
+                    val commentary = message.content.replace(url, "").trim()
                     val postContent = post.content.ifBlank { message.content }
+                    val combinedContent =
+                        if (commentary.isNotBlank() && post.content.isNotBlank()) {
+                            "使用者附註: $commentary\n\n內容:\n$postContent"
+                        } else {
+                            postContent
+                        }
                     SummaryInput(
-                        content = postContent,
+                        content = combinedContent,
                         title = post.title,
                         comments = post.comments.map { it.content },
                         url = url,
@@ -174,7 +215,8 @@ class SummaryService(
                 }
 
                 is SummaryResult.Error -> {
-                    statusCache[event.messageId] = SummaryStatus.FAILED
+                    // Evict from cache on transient errors to allow retry
+                    statusCache.remove(event.messageId)
                     logger.warn("Summarization failed for message {}: {}", event.messageId, result.message)
                     JsonLogger.error(
                         layer = "SUMMARY",
@@ -190,7 +232,8 @@ class SummaryService(
                 }
             }
         } catch (e: Exception) {
-            statusCache[event.messageId] = SummaryStatus.FAILED
+            // Evict from cache on unexpected exceptions to allow retry
+            statusCache.remove(event.messageId)
             logger.error("Unexpected error in summary pipeline for message {}", event.messageId, e)
             JsonLogger.error(
                 layer = "SUMMARY",
@@ -204,16 +247,8 @@ class SummaryService(
 
     companion object {
         const val DEFAULT_EMOJI = "📝"
-        const val MEMO_UNICODE = "\uD83D\uDCDD"
         const val DISCORD_MAX_MESSAGE_LENGTH = 2000
 
-        private val URL_REGEX = Regex("""https?://[^\s<>"']+""")
-
-        fun register(
-            kord: Kord,
-            service: SummaryService = SummaryService(),
-        ) {
-            service.register(kord)
-        }
+        val URL_REGEX = Regex("""https?://[^\s<>"']+""")
     }
 }

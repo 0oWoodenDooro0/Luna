@@ -89,7 +89,7 @@ object SocialPreviewService {
             logger.info("Detected URLs in message {}: {}", message.id, urls)
 
             for (url in urls) {
-                val canResolve = SocialPeek.canResolve(url)
+                val canResolve = SocialPeek.canResolveSocial(url)
                 logger.info("Checking URL [{}]: canResolve={}", url, canResolve)
 
                 if (canResolve) {

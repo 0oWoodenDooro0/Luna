@@ -304,7 +304,8 @@ class SummaryServiceTest {
             coVerify(exactly = 1) { summarizer.summarize(any<SummaryInput>()) }
             val input = capturedInput
             kotlin.test.assertNotNull(input)
-            assertEquals("Kotlin 2.0 brings K2 compiler with huge performance improvements.", input.content)
+            assertTrue(input.content.contains("Check out this thread:  it is awesome"))
+            assertTrue(input.content.contains("Kotlin 2.0 brings K2 compiler with huge performance improvements."))
             assertEquals("Exciting Kotlin Features", input.title)
             assertEquals(
                 listOf("Build times are much faster!", "Smart cast improvements are great."),
@@ -435,6 +436,13 @@ class SummaryServiceTest {
             service.handleReaction(event)
 
             assertEquals(0, repliesSent)
-            assertEquals(SummaryStatus.FAILED, service.getStatus(messageId))
+            // Error is evicted from cache to allow subsequent retry
+            assertEquals(null, service.getStatus(messageId))
+
+            // Confirm subsequent reaction retries
+            coEvery { summarizer.summarize(any<SummaryInput>()) } returns SummaryResult.Success("TL;DR: Retry succeeded")
+            service.handleReaction(event)
+            assertEquals(1, repliesSent)
+            assertEquals(SummaryStatus.DONE, service.getStatus(messageId))
         }
 }

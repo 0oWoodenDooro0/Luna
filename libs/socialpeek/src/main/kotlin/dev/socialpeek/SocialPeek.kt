@@ -30,6 +30,11 @@ object SocialPeek {
     fun canResolve(url: String): Boolean = defaultClient.canResolve(url)
 
     /**
+     * Checks if the default client can resolve the given [url] via a dedicated social platform resolver.
+     */
+    fun canResolveSocial(url: String): Boolean = defaultClient.canResolveSocial(url)
+
+    /**
      * Convenience method to clean a URL without making a network request.
      */
     fun cleanUrl(url: String): String = UrlSanitizer.clean(url)

@@ -28,9 +28,7 @@ sealed class SummaryResult {
      */
     data class Success(
         val text: String,
-    ) : SummaryResult() {
-        val content: String get() = text
-    }
+    ) : SummaryResult()
 
     /**
      * Error result from summarization.
