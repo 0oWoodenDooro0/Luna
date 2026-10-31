@@ -141,3 +141,29 @@ data class GeminiApiErrorDetails(
     val message: String? = null,
     val status: String? = null,
 )
+
+@Serializable
+data class GeminiInteractionInput(
+    val type: String,
+    val text: String? = null,
+    val uri: String? = null,
+    @SerialName("mime_type")
+    val mimeType: String? = null,
+    val processing: String? = null,
+)
+
+@Serializable
+data class GeminiInteractionRequest(
+    val model: String,
+    val input: List<GeminiInteractionInput>,
+    val background: Boolean = true,
+)
+
+@Serializable
+data class GeminiInteractionResponse(
+    val id: String? = null,
+    val status: String? = null,
+    @SerialName("output_text")
+    val outputText: String? = null,
+    val error: GeminiApiErrorDetails? = null,
+)

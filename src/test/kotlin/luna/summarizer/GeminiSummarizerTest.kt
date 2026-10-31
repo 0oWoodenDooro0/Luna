@@ -319,4 +319,104 @@ class GeminiSummarizerTest {
             assertIs<SummaryResult.Error.Generic>(result)
             assertTrue(result.message.contains("candidates", ignoreCase = true))
         }
+
+    @Test
+    fun `invokes interactions endpoint and polls until completion when agentic mode is selected`() =
+        runTest {
+            var callCount = 0
+            val mockEngine =
+                MockEngine { request ->
+                    when {
+                        request.url.encodedPath.endsWith("/interactions") && request.method.value == "POST" -> {
+                            assertEquals("test-key", request.url.parameters["key"])
+                            respond(
+                                content = """{"id": "int-123", "status": "in_progress"}""",
+                                status = HttpStatusCode.OK,
+                                headers = headersOf(HttpHeaders.ContentType, "application/json"),
+                            )
+                        }
+
+                        request.url.encodedPath.contains("/interactions/int-123") && request.method.value == "GET" -> {
+                            callCount++
+                            if (callCount == 1) {
+                                respond(
+                                    content = """{"id": "int-123", "status": "in_progress"}""",
+                                    status = HttpStatusCode.OK,
+                                    headers = headersOf(HttpHeaders.ContentType, "application/json"),
+                                )
+                            } else {
+                                respond(
+                                    content = """{"id": "int-123", "status": "completed", "output_text": "TL;DR: Summary of long video\n\n核心重點:\n• Arg 1"}""",
+                                    status = HttpStatusCode.OK,
+                                    headers = headersOf(HttpHeaders.ContentType, "application/json"),
+                                )
+                            }
+                        }
+
+                        else -> {
+                            respond("Not found", status = HttpStatusCode.NotFound)
+                        }
+                    }
+                }
+
+            val summarizer =
+                GeminiSummarizer(
+                    config = GeminiConfig(apiKey = "test-key"),
+                    httpClient = createTestClient(mockEngine),
+                    pollingDelayMs = 1L,
+                )
+
+            val input =
+                SummaryInput(
+                    content = "Detailed lecture",
+                    videoUri = "https://www.youtube.com/watch?v=longTalk",
+                    videoDurationSeconds = 1800L,
+                )
+
+            val result = summarizer.summarize(input)
+            assertIs<SummaryResult.Success>(result)
+            assertTrue(result.text.contains("TL;DR: Summary of long video"))
+            assertTrue(result.text.contains("核心重點:"))
+            assertEquals(2, callCount)
+        }
+
+    @Test
+    fun `returns Timeout error when interactions polling exceeds max attempts`() =
+        runTest {
+            val mockEngine =
+                MockEngine { request ->
+                    if (request.url.encodedPath.endsWith("/interactions")) {
+                        respond(
+                            content = """{"id": "int-timeout", "status": "in_progress"}""",
+                            status = HttpStatusCode.OK,
+                            headers = headersOf(HttpHeaders.ContentType, "application/json"),
+                        )
+                    } else {
+                        respond(
+                            content = """{"id": "int-timeout", "status": "in_progress"}""",
+                            status = HttpStatusCode.OK,
+                            headers = headersOf(HttpHeaders.ContentType, "application/json"),
+                        )
+                    }
+                }
+
+            val summarizer =
+                GeminiSummarizer(
+                    config = GeminiConfig(apiKey = "test-key"),
+                    httpClient = createTestClient(mockEngine),
+                    pollingDelayMs = 1L,
+                    maxPollingAttempts = 3,
+                )
+
+            val input =
+                SummaryInput(
+                    content = "Stuck video",
+                    videoUri = "https://www.youtube.com/watch?v=stuckVideo",
+                    videoDurationSeconds = 1200L,
+                )
+
+            val result = summarizer.summarize(input)
+            assertIs<SummaryResult.Error.Timeout>(result)
+            assertTrue(result.message.contains("timed out", ignoreCase = true))
+        }
 }
