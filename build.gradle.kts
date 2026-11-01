@@ -16,7 +16,7 @@ subprojects {
 }
 
 group = "luna"
-version = "2.0.0"
+version = "2.1.0"
 
 application {
     mainClass.set("luna.core.MainKt")

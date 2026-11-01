@@ -21,6 +21,9 @@ Luna 是一款基於 Kotlin、Kord 與 Ktor 開發的現代化 Discord 機器人
   - 向上回溯收集對話脈絡（上限預設 50 則，字元預算上限 20,000 字）。
   - 自動偵測閒置時間間隔（預設 15 分鐘）與前次摘要記錄，精準切分話題。
 - **對話雜訊過濾 (Dialogue Noise Filter)**：過濾斜線指令、第三方機器人噪音、自訂表情符號與系統事件，保留人類對話實質內容。
+- **聊天圖片多模態理解 (Chat Image Multimodal Understanding)**：
+  - 自動擷取回溯視窗內的 Discord 圖片附件與 CDN 連結（支援最多 3 張、單圖 10MB、嚴格 MIME 驗證）。
+  - 保留發言者發圖脈絡，並與 YouTube 影音摘要無縫共存與優雅降級。
 - **YouTube 多模態深度摘要**：
   - **自適應影音處理 (Adaptive Video Processing)**：短影片採用靜態處理，長影片自動切換為 Gemini Agentic 模式以節省高達 88% token 消耗。
   - **影片重點提示 (Video Focus Prompting)**：引導模型提取影像與音訊關鍵論點。
@@ -60,7 +63,7 @@ Luna 是一款基於 Kotlin、Kord 與 Ktor 開發的現代化 Discord 機器人
 | `BASE_URL` | 短網址基底網域 | `http://localhost:8080/s/` |
 | `PORT` | Web 伺服器通訊埠 | `8080` |
 | `GEMINI_API_KEY` | Google Gemini API 金鑰 (用於 AI 摘要) | `AIzaSy...` |
-| `GEMINI_MODEL` | Gemini 模型名稱 | `gemini-1.5-flash` |
+| `GEMINI_MODEL` | Gemini 模型名稱 | `gemini-3.5-flash-lite` |
 | `YOUTUBE_API_KEY` | YouTube Data API v3 金鑰 (用於長度、留言與描述) | `AIzaSy...` (若未設定則平滑降級) |
 | `SUMMARY_EMOJI` | 觸發 AI 摘要的 Emoji | `📝` |
 | `SUMMARY_MAX_HISTORY_MESSAGES` | AI 摘要回溯訊息數上限 (1-100) | `50` |
@@ -264,7 +267,7 @@ Luna 採用 Gradle 多專案 Monorepo 架構，整合核心應用程式、外掛
 ### 📦 模組說明 (Modules)
 
 1. **Luna 根應用程式 (`:`)**
-   - **用途**：Luna 核心主程式與外掛容器 (Application version: `2.0.0`, group: `luna`)。
+   - **用途**：Luna 核心主程式與外掛容器 (Application version: `2.1.0`, group: `luna`)。
    - **進入點**：`luna.core.MainKt`。
    - **架構**：
      - `core/`：Luna Host 生命週期、Ktor 伺服器啟動、Kord 機器人初始化、資料庫連線池與結構化日誌。
