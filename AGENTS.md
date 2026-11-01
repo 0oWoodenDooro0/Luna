@@ -23,3 +23,7 @@ Single-context repository layout (`GLOSSARY.md` and `docs/adr/`). See `docs/agen
 ### Coding standards
 
 Judgement calls for daemon state bounds, transient error eviction, and library boundaries. See `CODING_STANDARDS.md`.
+
+## Verification
+
+Run `./gradlew lintKotlin test` (or `./gradlew check`) to verify code style and test suite. The repo uses `org.jmailen.kotlinter` (`lintKotlin`).
