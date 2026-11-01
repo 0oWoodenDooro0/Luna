@@ -67,6 +67,32 @@ class DialogueNoiseFilterTest {
     }
 
     @Test
+    fun `retains messages with image attachments even when content is solely custom emojis`() {
+        val attachment = mockk<Attachment>()
+        val emojiOnlyMsg = createMockMessage(1L, "alice", "<:custom_pepe:123456789>", attachments = setOf(attachment))
+        val multiEmojiMsg = createMockMessage(2L, "bob", "<a:party_blob:98765> <:cat:123>", attachments = setOf(attachment))
+
+        assertFalse(filter.isNoiseMessage(emojiOnlyMsg))
+        assertFalse(filter.isNoiseMessage(multiEmojiMsg))
+    }
+
+    @Test
+    fun `retains messages with image attachments even when stickers are present and text is blank`() {
+        val attachment = mockk<Attachment>()
+        val stickerItem = mockk<StickerItem>()
+        val stickerWithAttachmentMsg =
+            createMockMessage(
+                id = 1L,
+                username = "alice",
+                content = "",
+                stickers = listOf(stickerItem),
+                attachments = setOf(attachment),
+            )
+
+        assertFalse(filter.isNoiseMessage(stickerWithAttachmentMsg))
+    }
+
+    @Test
     fun `retains short human conversational turns`() {
         val plusOne = createMockMessage(1L, "alice", "+1")
         val lol = createMockMessage(2L, "bob", "lol")

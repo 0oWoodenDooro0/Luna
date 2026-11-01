@@ -36,14 +36,15 @@ open class DialogueNoiseFilter {
             return true
         }
 
-        // Exclude messages consisting solely of stickers
+        val hasAttachments = runCatching { message.attachments }.getOrNull()?.isNotEmpty() == true
+
+        // Exclude messages consisting solely of stickers (unless attachments are present)
         val hasStickers = runCatching { message.stickers }.getOrNull()?.isNotEmpty() == true
-        if (hasStickers && isBlankOrCustomEmojiOnly(message.content)) {
+        if (hasStickers && !hasAttachments && isBlankOrCustomEmojiOnly(message.content)) {
             return true
         }
 
         // Exclude empty, blank, or solely custom graphic emojis without text (unless attachments are present)
-        val hasAttachments = runCatching { message.attachments }.getOrNull()?.isNotEmpty() == true
         if (!hasAttachments && isBlankOrCustomEmojiOnly(message.content)) {
             return true
         }

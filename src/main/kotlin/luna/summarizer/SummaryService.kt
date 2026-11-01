@@ -186,16 +186,38 @@ class SummaryService(
             }
         val primaryUrl = allMessages.asReversed().firstNotNullOfOrNull { msg -> URL_REGEX.find(msg.content)?.value }
 
+        val messagesWithImages = allMessages.map { msg -> msg to extractImageAttachments(msg) }
+        val sliceImageAttachments = messagesWithImages.flatMap { it.second }
+
         val formattedContent =
             if (precedingMessages.isNotEmpty()) {
-                allMessages.joinToString("\n") { msg ->
-                    "[${msg.author?.username ?: "Unknown"}]: ${msg.content}"
+                var imageIndex = 1
+                messagesWithImages.joinToString("\n") { (msg, images) ->
+                    val author = msg.author?.username ?: "Unknown"
+                    if (images.isNotEmpty()) {
+                        val markers =
+                            images.map { img ->
+                                val idx = imageIndex++
+                                if (!img.filename.isNullOrBlank()) {
+                                    "[附帶圖片 $idx: ${img.filename}]"
+                                } else {
+                                    "[附帶圖片 $idx]"
+                                }
+                            }
+                        val markersText = markers.joinToString(" ")
+                        val trimmedContent = msg.content.trim()
+                        if (trimmedContent.isNotEmpty()) {
+                            "[$author]: $trimmedContent $markersText"
+                        } else {
+                            "[$author]: $markersText"
+                        }
+                    } else {
+                        "[$author]: ${msg.content}"
+                    }
                 }
             } else {
                 message.content
             }
-
-        val targetImageAttachments = extractImageAttachments(message)
 
         val summaryInput =
             if (primaryUrl != null) {
@@ -235,20 +257,20 @@ class SummaryService(
                         url = primaryUrl,
                         videoUri = if (post.platform == Platform.YOUTUBE) (post.cleanUrl.ifBlank { primaryUrl }) else null,
                         videoDurationSeconds = durationSeconds,
-                        imageAttachments = targetImageAttachments,
+                        imageAttachments = sliceImageAttachments,
                     )
                 } else {
                     logger.debug("No post resolved for primary URL {}, summarizing message context directly", primaryUrl)
                     SummaryInput(
                         content = formattedContent,
                         url = primaryUrl,
-                        imageAttachments = targetImageAttachments,
+                        imageAttachments = sliceImageAttachments,
                     )
                 }
             } else {
                 SummaryInput(
                     content = formattedContent,
-                    imageAttachments = targetImageAttachments,
+                    imageAttachments = sliceImageAttachments,
                 )
             }
 
@@ -387,12 +409,15 @@ class SummaryService(
         val attachments = runCatching { message.attachments }.getOrElse { emptySet() }
         if (attachments.isEmpty()) return emptyList()
         return attachments.mapNotNull { attachment ->
-            val resolvedMimeType = resolveImageMimeType(attachment.contentType, attachment.filename)
+            val contentType = runCatching { attachment.contentType }.getOrNull()
+            val filename = runCatching { attachment.filename }.getOrNull()
+            val resolvedMimeType = resolveImageMimeType(contentType, filename)
             if (resolvedMimeType != null) {
+                val url = runCatching { attachment.url }.getOrNull() ?: return@mapNotNull null
                 ChatImageAttachment(
-                    url = attachment.url,
+                    url = url,
                     mimeType = resolvedMimeType,
-                    filename = attachment.filename,
+                    filename = filename,
                 )
             } else {
                 null
