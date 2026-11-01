@@ -26,3 +26,5 @@ Judgement calls for daemon state bounds, transient error eviction, and library b
 ## Verification
 
 Run `./gradlew lintKotlin test` (or `./gradlew check`) to verify code style and test suite. The repo uses `org.jmailen.kotlinter` (`lintKotlin`).
+
+Before pushing or marking a PR ready, also run `docker build -t luna:ci-test .` to ensure full parity with CI (`.github/workflows/ci.yml`).
