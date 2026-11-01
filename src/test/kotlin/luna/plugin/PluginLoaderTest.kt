@@ -179,4 +179,58 @@ class PluginLoaderTest {
             assertFalse(initialized, "Plugin listed in plugins.disabled should not be initialized")
             assertEquals(0, loader.plugins.size)
         }
+
+    @Test
+    fun `plugin loader skips disabled plugins when configured via PLUGINS_DISABLED env variable`() =
+        runTest {
+            var initialized = false
+            val plugin =
+                object : LunaPlugin {
+                    override val name: String = "social-preview"
+
+                    override suspend fun initialize(context: PluginContext) {
+                        initialized = true
+                    }
+                }
+
+            val loader = PluginLoader(plugins = listOf(plugin))
+            val context =
+                DefaultPluginContext(
+                    kord = mockk(relaxed = true),
+                    routing = mockk(relaxed = true),
+                    database = mockk(relaxed = true),
+                    configMap = mapOf("PLUGINS_DISABLED" to "undercover, social-preview"),
+                )
+
+            loader.initializePlugins(context)
+            assertFalse(initialized, "Plugin listed in PLUGINS_DISABLED should not be initialized")
+            assertEquals(0, loader.plugins.size)
+        }
+
+    @Test
+    fun `plugin loader skips disabled plugins when configured via PLUGINS_NAME_ENABLED false`() =
+        runTest {
+            var initialized = false
+            val plugin =
+                object : LunaPlugin {
+                    override val name: String = "social-preview"
+
+                    override suspend fun initialize(context: PluginContext) {
+                        initialized = true
+                    }
+                }
+
+            val loader = PluginLoader(plugins = listOf(plugin))
+            val context =
+                DefaultPluginContext(
+                    kord = mockk(relaxed = true),
+                    routing = mockk(relaxed = true),
+                    database = mockk(relaxed = true),
+                    configMap = mapOf("PLUGINS_SOCIAL_PREVIEW_ENABLED" to "false"),
+                )
+
+            loader.initializePlugins(context)
+            assertFalse(initialized, "Plugin disabled via PLUGINS_SOCIAL_PREVIEW_ENABLED should not be initialized")
+            assertEquals(0, loader.plugins.size)
+        }
 }

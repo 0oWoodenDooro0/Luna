@@ -98,10 +98,13 @@ class PluginLoader(
         plugin: LunaPlugin,
         context: PluginContext,
     ): Boolean {
+        val envKey = "PLUGINS_${plugin.name.replace('-', '_').uppercase()}_ENABLED"
         val specificEnabled =
             runCatching {
                 context.config<Boolean>("plugins.${plugin.name}.enabled")
                     ?: context.config<String>("plugins.${plugin.name}.enabled")?.toBooleanStrictOrNull()
+                    ?: context.config<Boolean>(envKey)
+                    ?: context.config<String>(envKey)?.toBooleanStrictOrNull()
                     ?: context.config<Boolean>("plugins.${plugin.name}")
                     ?: context.config<String>("plugins.${plugin.name}")?.toBooleanStrictOrNull()
             }.getOrNull()
@@ -109,9 +112,10 @@ class PluginLoader(
 
         val disabledList =
             runCatching {
-                context
-                    .config<String>("plugins.disabled")
-                    ?.split(",")
+                (
+                    context.config<String>("plugins.disabled")
+                        ?: context.config<String>("PLUGINS_DISABLED")
+                )?.split(",")
                     ?.map { it.trim().lowercase() }
             }.getOrNull() ?: emptyList()
         if (plugin.name.lowercase() in disabledList) return false
