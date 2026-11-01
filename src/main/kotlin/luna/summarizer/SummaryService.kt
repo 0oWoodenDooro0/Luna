@@ -248,7 +248,28 @@ class SummaryService(
                     }
                 }
             } else {
-                message.content
+                if (sliceImageAttachments.isNotEmpty()) {
+                    var singleMsgImageIndex = 1
+                    val markers =
+                        sliceImageAttachments.map { img ->
+                            val idx = singleMsgImageIndex++
+                            if (!img.filename.isNullOrBlank()) {
+                                "[附帶圖片 $idx: ${img.filename}]"
+                            } else {
+                                "[附帶圖片 $idx]"
+                            }
+                        }
+                    val markersText = markers.joinToString(" ")
+                    val trimmedContent = message.content.trim()
+                    val author = message.author?.username ?: "Unknown"
+                    if (trimmedContent.isNotEmpty()) {
+                        "[$author]: $trimmedContent $markersText"
+                    } else {
+                        "[$author]: $markersText"
+                    }
+                } else {
+                    message.content
+                }
             }
 
         val summaryInput =
@@ -268,7 +289,7 @@ class SummaryService(
 
                     val postContent = post.content.ifBlank { "" }.trim()
                     val combinedContent =
-                        if (precedingMessages.isEmpty()) {
+                        if (precedingMessages.isEmpty() && sliceImageAttachments.isEmpty()) {
                             val commentary = message.content.replace(primaryUrl, "").trim()
                             if (commentary.isNotBlank() && postContent.isNotBlank()) {
                                 "使用者附註: $commentary\n\n內容:\n$postContent"
@@ -308,29 +329,32 @@ class SummaryService(
 
         try {
             logger.info("Executing Gemini summarization for message {}", event.messageId)
+            var currentInput = summaryInput
             var result =
                 try {
-                    summarizer.summarize(summaryInput)
+                    summarizer.summarize(currentInput)
                 } catch (e: Exception) {
-                    if (summaryInput.imageAttachments.isNotEmpty()) {
+                    if (currentInput.imageAttachments.isNotEmpty()) {
                         logger.warn(
                             "Unexpected exception during multimodal summarization for message {}: {}. Retrying with text-only fallback.",
                             event.messageId,
                             e.message,
                         )
-                        summarizer.summarize(summaryInput.copy(imageAttachments = emptyList()))
+                        currentInput = currentInput.copy(imageAttachments = emptyList())
+                        summarizer.summarize(currentInput)
                     } else {
                         throw e
                     }
                 }
 
-            if (result is SummaryResult.Error && summaryInput.imageAttachments.isNotEmpty()) {
+            if (result is SummaryResult.Error && currentInput.imageAttachments.isNotEmpty()) {
                 logger.warn(
                     "Multimodal summarization with images failed for message {}: {}. Retrying with text-only fallback.",
                     event.messageId,
                     result.message,
                 )
-                result = summarizer.summarize(summaryInput.copy(imageAttachments = emptyList()))
+                currentInput = currentInput.copy(imageAttachments = emptyList())
+                result = summarizer.summarize(currentInput)
             }
 
             when (result) {
@@ -465,6 +489,10 @@ class SummaryService(
         val attachments = runCatching { message.attachments }.getOrElse { emptySet() }
         if (attachments.isEmpty()) return emptyList()
         return attachments.mapNotNull { attachment ->
+            val size = runCatching { attachment.size }.getOrNull()
+            if (size != null && size > DEFAULT_MAX_IMAGE_BYTES) {
+                return@mapNotNull null
+            }
             val contentType = runCatching { attachment.contentType }.getOrNull()
             val filename = runCatching { attachment.filename }.getOrNull()
             val resolvedMimeType = resolveImageMimeType(contentType, filename)
@@ -493,6 +521,7 @@ class SummaryService(
         val DEFAULT_INACTIVITY_GAP = 15.minutes
         val MAX_INACTIVITY_GAP = DEFAULT_INACTIVITY_GAP
         const val DEFAULT_MAX_CHARACTER_BUDGET = 20000
+        const val DEFAULT_MAX_IMAGE_BYTES = 10 * 1024 * 1024
         const val FALLBACK_EMPTY_SUMMARY_MESSAGE = "抱歉，AI 無法為此內容生成有效摘要，請嘗試提供更多上下文或選擇其他內容。"
 
         val SUPPORTED_IMAGE_MIME_TYPES =
@@ -517,14 +546,7 @@ class SummaryService(
                 return normalizedContentType
             }
 
-            val extension = filename?.substringAfterLast('.', "")?.lowercase().orEmpty()
-            return when (extension) {
-                "jpg", "jpeg" -> "image/jpeg"
-                "png" -> "image/png"
-                "webp" -> "image/webp"
-                "gif" -> "image/gif"
-                else -> null
-            }
+            return null
         }
 
         fun resolveMaxHistoryMessages(env: Map<String, String> = System.getenv()): Int =

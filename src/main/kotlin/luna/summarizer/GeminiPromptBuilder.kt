@@ -55,8 +55,6 @@ object GeminiPromptBuilder {
             "（若為多人對話討論或包含各方意見，以 2 至 3 點客觀總結不同發言者的主要看法、爭議焦點或共識結論；若為單一貼文且無對話/留言時可省略，若有外部社群留言則以社群觀點呈現）\n\n" +
             "5. 長度限制：內容必須精簡扼要，整體篇幅不可超過 Discord 訊息上限（請控制在 1500 字元以內）。若對話篇幅較長，請自動過濾無關之寒暄或離題閒聊，聚焦於實質論點與結論發展。"
 
-    const val IMAGE_SYSTEM_INSTRUCTION: String = CHAT_IMAGE_SYSTEM_INSTRUCTION
-
     const val VIDEO_AND_IMAGE_SYSTEM_INSTRUCTION: String =
         "你是一個專業的影音與多模態內容摘要助理。請結合多模態影片理解（視覺畫面、口述語音、操作展示等）、所附對話圖片（視覺證據、文字擷取/OCR、圖表、日誌等）與對話/創作者資訊進行結構化摘要。\n" +
             "請務必嚴格遵守以下所有規則：\n" +

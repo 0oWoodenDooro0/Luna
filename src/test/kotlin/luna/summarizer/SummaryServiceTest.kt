@@ -2132,11 +2132,13 @@ class SummaryServiceTest {
         url: String,
         contentType: String?,
         filename: String = "file",
+        size: Int = 1024,
     ): Attachment {
         val attachment = mockk<Attachment>()
         every { attachment.url } returns url
         every { attachment.contentType } returns contentType
         every { attachment.filename } returns filename
+        every { attachment.size } returns size
         return attachment
     }
 
@@ -2192,7 +2194,9 @@ class SummaryServiceTest {
 
             val input = capturedInput
             kotlin.test.assertNotNull(input)
-            assertEquals("Check out these two screenshots", input.content)
+            assertTrue(input.content.contains("[alice]: Check out these two screenshots"))
+            assertTrue(input.content.contains("[附帶圖片 1: photo.png]"))
+            assertTrue(input.content.contains("[附帶圖片 2: diagram.jpg]"))
             assertEquals(2, input.imageAttachments.size)
             assertEquals("https://cdn.discordapp.com/attachments/123/456/photo.png", input.imageAttachments[0].url)
             assertEquals("image/png", input.imageAttachments[0].mimeType)
@@ -2842,6 +2846,66 @@ class SummaryServiceTest {
             val fallbackInput = capturedInputs.firstOrNull()
             kotlin.test.assertNotNull(fallbackInput)
             assertTrue(fallbackInput.imageAttachments.isEmpty())
-            assertEquals("Discussion with problematic image attachment", fallbackInput.content)
+            assertTrue(fallbackInput.content.contains("[alice]: Discussion with problematic image attachment"))
+            assertTrue(fallbackInput.content.contains("[附帶圖片 1: photo.png]"))
+        }
+
+    @Test
+    fun `excludes oversized image attachments exceeding 10MB`() =
+        runTest {
+            val service = SummaryService()
+            val smallImg = createMockAttachment("https://cdn.discordapp.com/small.png", "image/png", "small.png", size = 5 * 1024 * 1024)
+            val oversizedImg = createMockAttachment("https://cdn.discordapp.com/large.png", "image/png", "large.png", size = 15 * 1024 * 1024)
+
+            val msg = createMockMessage(7001L, "alice", "Check image sizes", attachments = setOf(smallImg, oversizedImg))
+            val extracted = service.extractImageAttachments(msg)
+
+            assertEquals(1, extracted.size)
+            assertEquals("https://cdn.discordapp.com/small.png", extracted.first().url)
+        }
+
+    @Test
+    fun `strictly discards attachments with non-image or missing MIME type even with image extension`() {
+        assertEquals(null, SummaryService.resolveImageMimeType("application/octet-stream", "fake.png"))
+        assertEquals(null, SummaryService.resolveImageMimeType(null, "photo.jpg"))
+        assertEquals(null, SummaryService.resolveImageMimeType("application/pdf", "document.png"))
+        assertEquals("image/png", SummaryService.resolveImageMimeType("image/png", "photo.png"))
+        assertEquals("image/jpeg", SummaryService.resolveImageMimeType("image/jpeg; charset=utf-8", "photo.jpeg"))
+    }
+
+    @Test
+    fun `does not perform duplicate fallback retry when exception fallback returns error`() =
+        runTest {
+            val summarizer = mockk<GeminiSummarizer>()
+            val img = createMockAttachment("https://cdn.discordapp.com/attachments/1/photo.png", "image/png", "photo.png")
+            val targetMsg = createMockMessage(id = 7101L, username = "alice", content = "Test message", attachments = setOf(img))
+
+            val service = SummaryService(summarizer = summarizer, replySender = { _, _ -> })
+
+            // First call throws exception
+            coEvery {
+                summarizer.summarize(match<SummaryInput> { it.imageAttachments.isNotEmpty() })
+            } throws RuntimeException("Connection dropped")
+
+            // Second call (fallback) returns Error result
+            coEvery {
+                summarizer.summarize(match<SummaryInput> { it.imageAttachments.isEmpty() })
+            } returns SummaryResult.Error.Generic("Text summary failed")
+
+            val user = mockk<User>()
+            every { user.isBot } returns false
+
+            val event = mockk<ReactionAddEvent>()
+            every { event.emoji } returns ReactionEmoji.Unicode("📝")
+            every { event.userId } returns Snowflake(55L)
+            every { event.messageId } returns targetMsg.id
+            coEvery { event.getUserOrNull() } returns user
+            coEvery { event.getMessageOrNull() } returns targetMsg
+
+            service.handleReaction(event)
+
+            // Verify exactly 1 multimodal attempt and exactly 1 fallback attempt (no second duplicate fallback)
+            coVerify(exactly = 1) { summarizer.summarize(match<SummaryInput> { it.imageAttachments.isNotEmpty() }) }
+            coVerify(exactly = 1) { summarizer.summarize(match<SummaryInput> { it.imageAttachments.isEmpty() }) }
         }
 }
