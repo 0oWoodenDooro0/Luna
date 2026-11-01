@@ -78,6 +78,7 @@ class SummaryService(
     val maxCharacterBudget: Int = resolveMaxCharacterBudget(),
     val maxImages: Int = resolveMaxImages(),
     private val noiseFilter: DialogueNoiseFilter = DialogueNoiseFilter(),
+    private val imageResolver: ChatImageResolver = ChatImageResolver(),
     private val historyFetcher: suspend (message: Message, limit: Int) -> List<Message> = { message, limit ->
         message.channel
             .getMessagesBefore(message.id, limit = limit)
@@ -485,29 +486,7 @@ class SummaryService(
         return acceptedPreceding.toList()
     }
 
-    fun extractImageAttachments(message: Message): List<ChatImageAttachment> {
-        val attachments = runCatching { message.attachments }.getOrElse { emptySet() }
-        if (attachments.isEmpty()) return emptyList()
-        return attachments.mapNotNull { attachment ->
-            val size = runCatching { attachment.size }.getOrNull()
-            if (size != null && size > DEFAULT_MAX_IMAGE_BYTES) {
-                return@mapNotNull null
-            }
-            val contentType = runCatching { attachment.contentType }.getOrNull()
-            val filename = runCatching { attachment.filename }.getOrNull()
-            val resolvedMimeType = resolveImageMimeType(contentType, filename)
-            if (resolvedMimeType != null) {
-                val url = runCatching { attachment.url }.getOrNull() ?: return@mapNotNull null
-                ChatImageAttachment(
-                    url = url,
-                    mimeType = resolvedMimeType,
-                    filename = filename,
-                )
-            } else {
-                null
-            }
-        }
-    }
+    fun extractImageAttachments(message: Message): List<ChatImageAttachment> = imageResolver.extractImageAttachments(message)
 
     fun isBotSummaryMessage(message: Message): Boolean = noiseFilter.isBotSummaryMessage(message)
 
@@ -521,33 +500,15 @@ class SummaryService(
         val DEFAULT_INACTIVITY_GAP = 15.minutes
         val MAX_INACTIVITY_GAP = DEFAULT_INACTIVITY_GAP
         const val DEFAULT_MAX_CHARACTER_BUDGET = 20000
-        const val DEFAULT_MAX_IMAGE_BYTES = 10 * 1024 * 1024
+        const val DEFAULT_MAX_IMAGE_BYTES = ChatImageResolver.DEFAULT_MAX_IMAGE_BYTES
         const val FALLBACK_EMPTY_SUMMARY_MESSAGE = "抱歉，AI 無法為此內容生成有效摘要，請嘗試提供更多上下文或選擇其他內容。"
 
-        val SUPPORTED_IMAGE_MIME_TYPES =
-            setOf(
-                "image/jpeg",
-                "image/png",
-                "image/webp",
-                "image/gif",
-            )
+        val SUPPORTED_IMAGE_MIME_TYPES = ChatImageResolver.SUPPORTED_IMAGE_MIME_TYPES
 
         fun resolveImageMimeType(
             contentType: String?,
             filename: String? = null,
-        ): String? {
-            val normalizedContentType =
-                contentType
-                    ?.substringBefore(';')
-                    ?.trim()
-                    ?.lowercase()
-
-            if (normalizedContentType != null && normalizedContentType in SUPPORTED_IMAGE_MIME_TYPES) {
-                return normalizedContentType
-            }
-
-            return null
-        }
+        ): String? = ChatImageResolver.resolveImageMimeType(contentType, filename)
 
         fun resolveMaxHistoryMessages(env: Map<String, String> = System.getenv()): Int =
             env["SUMMARY_MAX_HISTORY_MESSAGES"]
