@@ -27,6 +27,7 @@ import dev.socialpeek.SocialPeek
 import dev.socialpeek.model.Media
 import dev.socialpeek.model.PeekPost
 import dev.socialpeek.model.Platform
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.firstOrNull
 import luna.core.JsonLogger
 import org.slf4j.LoggerFactory
@@ -51,11 +52,12 @@ object SocialPreviewService {
     fun register(
         kord: Kord,
         settingsStorage: PreviewSettingsStorage,
+        scope: CoroutineScope = safeScope(kord),
     ) {
         logger.info("SocialPreviewService registered successfully!")
 
         // Listen to messages for auto preview
-        kord.on<MessageCreateEvent> {
+        kord.on<MessageCreateEvent>(scope = scope) {
             val author = message.author ?: return@on
             if (author.isBot) return@on
 
