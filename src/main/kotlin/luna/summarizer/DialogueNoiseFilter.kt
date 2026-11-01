@@ -4,7 +4,38 @@ import dev.kord.common.entity.MessageType
 import dev.kord.common.entity.Snowflake
 import dev.kord.core.Kord
 import dev.kord.core.entity.Message
-import java.util.concurrent.ConcurrentHashMap
+import org.slf4j.LoggerFactory
+import java.util.Collections
+import java.util.LinkedHashMap
+
+/**
+ * Thread-safe bounded LRU cache for webhook verification to avoid unbounded daemon memory growth.
+ */
+class BoundedWebhookCache(
+    private val maxEntries: Int = 1000,
+) {
+    private val map =
+        Collections.synchronizedMap(
+            object : LinkedHashMap<Snowflake, Boolean>(maxEntries, 0.75f, true) {
+                override fun removeEldestEntry(eldest: MutableMap.MutableEntry<Snowflake, Boolean>?): Boolean = size > maxEntries
+            },
+        )
+
+    operator fun get(key: Snowflake): Boolean? = map[key]
+
+    operator fun set(
+        key: Snowflake,
+        value: Boolean,
+    ) {
+        map[key] = value
+    }
+
+    fun remove(key: Snowflake): Boolean? = map.remove(key)
+
+    fun clear() {
+        map.clear()
+    }
+}
 
 /**
  * Encapsulates dialogue noise filtering and message boundary checks for conversation slices.
@@ -12,8 +43,9 @@ import java.util.concurrent.ConcurrentHashMap
 open class DialogueNoiseFilter(
     private val isLunaWebhook: (suspend (Snowflake) -> Boolean)? = null,
     kord: Kord? = null,
-    val webhookCache: ConcurrentHashMap<Snowflake, Boolean> = ConcurrentHashMap(),
+    val webhookCache: BoundedWebhookCache = BoundedWebhookCache(),
 ) {
+    private val logger = LoggerFactory.getLogger(DialogueNoiseFilter::class.java)
     private var kordInstance: Kord? = kord
 
     fun setKord(kord: Kord) {
@@ -33,10 +65,21 @@ open class DialogueNoiseFilter(
         val currentKord = kordInstance
         val isLuna =
             if (hook != null) {
-                runCatching { hook(webhookId) }.getOrDefault(false)
+                try {
+                    hook(webhookId)
+                } catch (e: Exception) {
+                    logger.warn("Transient error verifying webhook {} via hook: {}", webhookId, e.message)
+                    return false
+                }
             } else if (currentKord != null) {
-                val webhook = runCatching { currentKord.getWebhookOrNull(webhookId) }.getOrNull()
-                webhook != null && (webhook.creatorId == currentKord.selfId || webhook.name == "Luna Preview")
+                val webhook =
+                    try {
+                        currentKord.getWebhookOrNull(webhookId)
+                    } catch (e: Exception) {
+                        logger.warn("Transient error retrieving webhook {} from Discord REST: {}", webhookId, e.message)
+                        return false
+                    }
+                webhook != null && (webhook.creatorId == currentKord.selfId || webhook.name == LUNA_PREVIEW_WEBHOOK_NAME)
             } else {
                 false
             }
@@ -44,8 +87,9 @@ open class DialogueNoiseFilter(
         return isLuna
     }
 
-    open fun isBotSummaryMessage(message: Message): Boolean {
-        if (runCatching { message.webhookId }.getOrNull() != null) {
+    open suspend fun isBotSummaryMessage(message: Message): Boolean {
+        val webhookId = runCatching { message.webhookId }.getOrNull()
+        if (webhookId != null && isLunaWebhook(webhookId)) {
             return false
         }
         return message.author?.isBot == true &&
@@ -125,6 +169,7 @@ open class DialogueNoiseFilter(
     }
 
     companion object {
+        const val LUNA_PREVIEW_WEBHOOK_NAME = "Luna Preview"
         val CUSTOM_EMOJI_REGEX = Regex("""<a?:[a-zA-Z0-9_]+:\d+>""")
     }
 }

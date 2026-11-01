@@ -159,6 +159,7 @@ class SummarizerPlugin(
                 maxHistoryMessages = historyLimit,
                 inactivityGap = gap,
                 maxCharacterBudget = characterBudget,
+                kord = context.kord,
             )
         this.summaryService = service
 

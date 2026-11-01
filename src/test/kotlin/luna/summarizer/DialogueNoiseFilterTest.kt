@@ -11,25 +11,27 @@ import org.junit.jupiter.api.Test
 import java.util.concurrent.atomic.AtomicInteger
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 class DialogueNoiseFilterTest {
     private val filter = DialogueNoiseFilter()
 
     @Test
-    fun `identifies bot summary messages by prefix or keywords`() {
-        val tldrMsg = createMockMessage(1L, "luna", "TL;DR: discussion summary", isBot = true)
-        val keypointsMsg = createMockMessage(2L, "luna", "重點摘要: some points", isBot = true)
-        val prevSummaryMsg = createMockMessage(3L, "luna", "Previous summary of discussion", isBot = true)
-        val normalBotMsg = createMockMessage(4L, "musicbot", "Now playing: track 1", isBot = true)
-        val humanMsgWithTldr = createMockMessage(5L, "alice", "TL;DR: my human opinion", isBot = false)
+    fun `identifies bot summary messages by prefix or keywords`() =
+        runTest {
+            val tldrMsg = createMockMessage(1L, "luna", "TL;DR: discussion summary", isBot = true)
+            val keypointsMsg = createMockMessage(2L, "luna", "重點摘要: some points", isBot = true)
+            val prevSummaryMsg = createMockMessage(3L, "luna", "Previous summary of discussion", isBot = true)
+            val normalBotMsg = createMockMessage(4L, "musicbot", "Now playing: track 1", isBot = true)
+            val humanMsgWithTldr = createMockMessage(5L, "alice", "TL;DR: my human opinion", isBot = false)
 
-        assertTrue(filter.isBotSummaryMessage(tldrMsg))
-        assertTrue(filter.isBotSummaryMessage(keypointsMsg))
-        assertTrue(filter.isBotSummaryMessage(prevSummaryMsg))
-        assertFalse(filter.isBotSummaryMessage(normalBotMsg))
-        assertFalse(filter.isBotSummaryMessage(humanMsgWithTldr))
-    }
+            assertTrue(filter.isBotSummaryMessage(tldrMsg))
+            assertTrue(filter.isBotSummaryMessage(keypointsMsg))
+            assertTrue(filter.isBotSummaryMessage(prevSummaryMsg))
+            assertFalse(filter.isBotSummaryMessage(normalBotMsg))
+            assertFalse(filter.isBotSummaryMessage(humanMsgWithTldr))
+        }
 
     @Test
     fun `identifies commands as noise`() =
@@ -213,15 +215,47 @@ class DialogueNoiseFilterTest {
         }
 
     @Test
-    fun `does not identify webhook messages as bot summaries even if starting with prefix`() {
-        val webhookTldr =
-            createMockMessage(
-                id = 1L,
-                username = "Alice",
-                content = "TL;DR: discussion summary",
-                isBot = true,
-                webhookId = Snowflake(100L),
-            )
-        assertFalse(filter.isBotSummaryMessage(webhookTldr))
-    }
+    fun `does not cache transient exceptions from kord webhook query`() =
+        runTest {
+            val kordMock = mockk<dev.kord.core.Kord>()
+            val resourcesMock = mockk<dev.kord.core.ClientResources>()
+            val strategyMock = mockk<dev.kord.core.supplier.EntitySupplyStrategy<*>>()
+            io.mockk.every { resourcesMock.defaultStrategy } returns strategyMock
+            io.mockk.every { kordMock.resources } returns resourcesMock
+
+            val lunaWebhookId = Snowflake(100L)
+            io.mockk.coEvery { kordMock.getWebhookOrNull(lunaWebhookId) } throws RuntimeException("Discord 503 Service Unavailable")
+
+            val customFilter = DialogueNoiseFilter(kord = kordMock)
+            val msg = createMockMessage(1L, "Alice", "Msg 1", isBot = true, webhookId = lunaWebhookId)
+
+            assertTrue(customFilter.isNoiseMessage(msg))
+            assertNull(customFilter.webhookCache[lunaWebhookId])
+        }
+
+    @Test
+    fun `does not identify verified luna webhook messages as bot summaries even if starting with prefix`() =
+        runTest {
+            val lunaWebhookId = Snowflake(100L)
+            filter.webhookCache[lunaWebhookId] = true
+            val webhookTldr =
+                createMockMessage(
+                    id = 1L,
+                    username = "Alice",
+                    content = "TL;DR: discussion summary",
+                    isBot = true,
+                    webhookId = lunaWebhookId,
+                )
+            assertFalse(filter.isBotSummaryMessage(webhookTldr))
+
+            val thirdPartyWebhookTldr =
+                createMockMessage(
+                    id = 2L,
+                    username = "github",
+                    content = "TL;DR: discussion summary",
+                    isBot = true,
+                    webhookId = Snowflake(999L),
+                )
+            assertTrue(filter.isBotSummaryMessage(thirdPartyWebhookTldr))
+        }
 }

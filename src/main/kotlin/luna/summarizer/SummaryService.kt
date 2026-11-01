@@ -98,9 +98,6 @@ class SummaryService(
             kord = kord,
         )
 
-    val webhookCache: java.util.concurrent.ConcurrentHashMap<dev.kord.common.entity.Snowflake, Boolean>
-        get() = noiseFilter.webhookCache
-
     fun register(kord: Kord) {
         this.kordInstance = kord
         noiseFilter.setKord(kord)
@@ -506,7 +503,7 @@ class SummaryService(
 
     fun extractImageAttachments(message: Message): List<ChatImageAttachment> = imageResolver.extractImageAttachments(message)
 
-    fun isBotSummaryMessage(message: Message): Boolean = noiseFilter.isBotSummaryMessage(message)
+    suspend fun isBotSummaryMessage(message: Message): Boolean = noiseFilter.isBotSummaryMessage(message)
 
     suspend fun isNoiseMessage(message: Message): Boolean = noiseFilter.isNoiseMessage(message)
 
