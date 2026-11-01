@@ -14,6 +14,20 @@ enum class VideoProcessingMode(
 }
 
 /**
+ * Image attachment from a chat message provided for multimodal summarization.
+ *
+ * @property url Signed CDN HTTPS URL of the image attachment.
+ * @property mimeType MIME type of the image (e.g. `image/jpeg`, `image/png`, `image/webp`, `image/gif`).
+ * @property filename Optional original filename of the image attachment.
+ */
+@Serializable
+data class ChatImageAttachment(
+    val url: String,
+    val mimeType: String,
+    val filename: String? = null,
+)
+
+/**
  * Input content provided for AI summarization.
  *
  * @property content The main textual content or message body.
@@ -22,6 +36,7 @@ enum class VideoProcessingMode(
  * @property url Optional source URL.
  * @property videoUri Optional video URI for multimodal video understanding.
  * @property videoDurationSeconds Optional video duration in seconds for adaptive mode selection.
+ * @property imageAttachments Optional list of chat image attachments for multimodal visual understanding.
  */
 data class SummaryInput(
     val content: String,
@@ -30,6 +45,7 @@ data class SummaryInput(
     val url: String? = null,
     val videoUri: String? = null,
     val videoDurationSeconds: Long? = null,
+    val imageAttachments: List<ChatImageAttachment> = emptyList(),
 )
 
 /**

@@ -7,10 +7,10 @@ import kotlin.test.assertTrue
 
 class GeminiConfigTest {
     @Test
-    fun `defaults model to gemini-1_5-flash when not specified`() {
+    fun `defaults model to gemini-3_5-flash-lite when not specified`() {
         val config = GeminiConfig(apiKey = "test-api-key")
         assertEquals("test-api-key", config.apiKey)
-        assertEquals("gemini-1.5-flash", config.model)
+        assertEquals("gemini-3.5-flash-lite", config.model)
         assertTrue(config.isConfigured)
     }
 
@@ -31,11 +31,11 @@ class GeminiConfigTest {
     fun `fromEnv falls back to default model when GEMINI_MODEL is absent or blank`() {
         val env = mapOf("GEMINI_API_KEY" to "env-key-123")
         val config = GeminiConfig.fromEnv(env)
-        assertEquals("gemini-1.5-flash", config.model)
+        assertEquals("gemini-3.5-flash-lite", config.model)
 
         val envBlank = mapOf("GEMINI_API_KEY" to "env-key-123", "GEMINI_MODEL" to "  ")
         val configBlank = GeminiConfig.fromEnv(envBlank)
-        assertEquals("gemini-1.5-flash", configBlank.model)
+        assertEquals("gemini-3.5-flash-lite", configBlank.model)
     }
 
     @Test
@@ -49,6 +49,6 @@ class GeminiConfigTest {
         val envConfig = GeminiConfig.fromEnv(emptyMap<String, String>())
         assertFalse(envConfig.isConfigured)
         assertEquals("", envConfig.apiKey)
-        assertEquals("gemini-1.5-flash", envConfig.model)
+        assertEquals("gemini-3.5-flash-lite", envConfig.model)
     }
 }

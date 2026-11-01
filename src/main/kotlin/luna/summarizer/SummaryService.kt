@@ -76,6 +76,7 @@ class SummaryService(
     val maxHistoryMessages: Int = resolveMaxHistoryMessages(),
     val inactivityGap: Duration = resolveInactivityGap(),
     val maxCharacterBudget: Int = resolveMaxCharacterBudget(),
+    val maxImages: Int = resolveMaxImages(),
     private val noiseFilter: DialogueNoiseFilter = DialogueNoiseFilter(),
     private val historyFetcher: suspend (message: Message, limit: Int) -> List<Message> = { message, limit ->
         message.channel
@@ -186,13 +187,89 @@ class SummaryService(
             }
         val primaryUrl = allMessages.asReversed().firstNotNullOfOrNull { msg -> URL_REGEX.find(msg.content)?.value }
 
+        val targetImages = extractImageAttachments(message)
+        val retainedTargetImages = targetImages.take(maxImages)
+        val remainingCapacity = kotlin.math.max(0, maxImages - retainedTargetImages.size)
+
+        val precedingMessagesWithImages = precedingMessages.map { msg -> msg to extractImageAttachments(msg) }
+        val retainedPrecedingByMessage = mutableMapOf<Snowflake, List<ChatImageAttachment>>()
+        var capacityLeft = remainingCapacity
+
+        for ((msg, images) in precedingMessagesWithImages.asReversed()) {
+            if (capacityLeft <= 0 || images.isEmpty()) {
+                retainedPrecedingByMessage[msg.id] = emptyList()
+                continue
+            }
+            if (images.size <= capacityLeft) {
+                retainedPrecedingByMessage[msg.id] = images
+                capacityLeft -= images.size
+            } else {
+                retainedPrecedingByMessage[msg.id] = images.takeLast(capacityLeft)
+                capacityLeft = 0
+            }
+        }
+
+        val messagesWithImages =
+            allMessages.map { msg ->
+                val retained =
+                    if (msg.id == message.id) {
+                        retainedTargetImages
+                    } else {
+                        retainedPrecedingByMessage[msg.id].orEmpty()
+                    }
+                msg to retained
+            }
+        val sliceImageAttachments = messagesWithImages.flatMap { it.second }
+
         val formattedContent =
             if (precedingMessages.isNotEmpty()) {
-                allMessages.joinToString("\n") { msg ->
-                    "[${msg.author?.username ?: "Unknown"}]: ${msg.content}"
+                var imageIndex = 1
+                messagesWithImages.joinToString("\n") { (msg, images) ->
+                    val author = msg.author?.username ?: "Unknown"
+                    if (images.isNotEmpty()) {
+                        val markers =
+                            images.map { img ->
+                                val idx = imageIndex++
+                                if (!img.filename.isNullOrBlank()) {
+                                    "[附帶圖片 $idx: ${img.filename}]"
+                                } else {
+                                    "[附帶圖片 $idx]"
+                                }
+                            }
+                        val markersText = markers.joinToString(" ")
+                        val trimmedContent = msg.content.trim()
+                        if (trimmedContent.isNotEmpty()) {
+                            "[$author]: $trimmedContent $markersText"
+                        } else {
+                            "[$author]: $markersText"
+                        }
+                    } else {
+                        "[$author]: ${msg.content}"
+                    }
                 }
             } else {
-                message.content
+                if (sliceImageAttachments.isNotEmpty()) {
+                    var singleMsgImageIndex = 1
+                    val markers =
+                        sliceImageAttachments.map { img ->
+                            val idx = singleMsgImageIndex++
+                            if (!img.filename.isNullOrBlank()) {
+                                "[附帶圖片 $idx: ${img.filename}]"
+                            } else {
+                                "[附帶圖片 $idx]"
+                            }
+                        }
+                    val markersText = markers.joinToString(" ")
+                    val trimmedContent = message.content.trim()
+                    val author = message.author?.username ?: "Unknown"
+                    if (trimmedContent.isNotEmpty()) {
+                        "[$author]: $trimmedContent $markersText"
+                    } else {
+                        "[$author]: $markersText"
+                    }
+                } else {
+                    message.content
+                }
             }
 
         val summaryInput =
@@ -212,7 +289,7 @@ class SummaryService(
 
                     val postContent = post.content.ifBlank { "" }.trim()
                     val combinedContent =
-                        if (precedingMessages.isEmpty()) {
+                        if (precedingMessages.isEmpty() && sliceImageAttachments.isEmpty()) {
                             val commentary = message.content.replace(primaryUrl, "").trim()
                             if (commentary.isNotBlank() && postContent.isNotBlank()) {
                                 "使用者附註: $commentary\n\n內容:\n$postContent"
@@ -233,21 +310,53 @@ class SummaryService(
                         url = primaryUrl,
                         videoUri = if (post.platform == Platform.YOUTUBE) (post.cleanUrl.ifBlank { primaryUrl }) else null,
                         videoDurationSeconds = durationSeconds,
+                        imageAttachments = sliceImageAttachments,
                     )
                 } else {
                     logger.debug("No post resolved for primary URL {}, summarizing message context directly", primaryUrl)
                     SummaryInput(
                         content = formattedContent,
                         url = primaryUrl,
+                        imageAttachments = sliceImageAttachments,
                     )
                 }
             } else {
-                SummaryInput(content = formattedContent)
+                SummaryInput(
+                    content = formattedContent,
+                    imageAttachments = sliceImageAttachments,
+                )
             }
 
         try {
             logger.info("Executing Gemini summarization for message {}", event.messageId)
-            val result = summarizer.summarize(summaryInput)
+            var currentInput = summaryInput
+            var result =
+                try {
+                    summarizer.summarize(currentInput)
+                } catch (e: Exception) {
+                    if (currentInput.imageAttachments.isNotEmpty()) {
+                        logger.warn(
+                            "Unexpected exception during multimodal summarization for message {}: {}. Retrying with text-only fallback.",
+                            event.messageId,
+                            e.message,
+                        )
+                        currentInput = currentInput.copy(imageAttachments = emptyList())
+                        summarizer.summarize(currentInput)
+                    } else {
+                        throw e
+                    }
+                }
+
+            if (result is SummaryResult.Error && currentInput.imageAttachments.isNotEmpty()) {
+                logger.warn(
+                    "Multimodal summarization with images failed for message {}: {}. Retrying with text-only fallback.",
+                    event.messageId,
+                    result.message,
+                )
+                currentInput = currentInput.copy(imageAttachments = emptyList())
+                result = summarizer.summarize(currentInput)
+            }
+
             when (result) {
                 is SummaryResult.Success -> {
                     statusCache[event.messageId] = SummaryStatus.DONE
@@ -376,6 +485,30 @@ class SummaryService(
         return acceptedPreceding.toList()
     }
 
+    fun extractImageAttachments(message: Message): List<ChatImageAttachment> {
+        val attachments = runCatching { message.attachments }.getOrElse { emptySet() }
+        if (attachments.isEmpty()) return emptyList()
+        return attachments.mapNotNull { attachment ->
+            val size = runCatching { attachment.size }.getOrNull()
+            if (size != null && size > DEFAULT_MAX_IMAGE_BYTES) {
+                return@mapNotNull null
+            }
+            val contentType = runCatching { attachment.contentType }.getOrNull()
+            val filename = runCatching { attachment.filename }.getOrNull()
+            val resolvedMimeType = resolveImageMimeType(contentType, filename)
+            if (resolvedMimeType != null) {
+                val url = runCatching { attachment.url }.getOrNull() ?: return@mapNotNull null
+                ChatImageAttachment(
+                    url = url,
+                    mimeType = resolvedMimeType,
+                    filename = filename,
+                )
+            } else {
+                null
+            }
+        }
+    }
+
     fun isBotSummaryMessage(message: Message): Boolean = noiseFilter.isBotSummaryMessage(message)
 
     fun isNoiseMessage(message: Message): Boolean = noiseFilter.isNoiseMessage(message)
@@ -388,7 +521,33 @@ class SummaryService(
         val DEFAULT_INACTIVITY_GAP = 15.minutes
         val MAX_INACTIVITY_GAP = DEFAULT_INACTIVITY_GAP
         const val DEFAULT_MAX_CHARACTER_BUDGET = 20000
+        const val DEFAULT_MAX_IMAGE_BYTES = 10 * 1024 * 1024
         const val FALLBACK_EMPTY_SUMMARY_MESSAGE = "抱歉，AI 無法為此內容生成有效摘要，請嘗試提供更多上下文或選擇其他內容。"
+
+        val SUPPORTED_IMAGE_MIME_TYPES =
+            setOf(
+                "image/jpeg",
+                "image/png",
+                "image/webp",
+                "image/gif",
+            )
+
+        fun resolveImageMimeType(
+            contentType: String?,
+            filename: String? = null,
+        ): String? {
+            val normalizedContentType =
+                contentType
+                    ?.substringBefore(';')
+                    ?.trim()
+                    ?.lowercase()
+
+            if (normalizedContentType != null && normalizedContentType in SUPPORTED_IMAGE_MIME_TYPES) {
+                return normalizedContentType
+            }
+
+            return null
+        }
 
         fun resolveMaxHistoryMessages(env: Map<String, String> = System.getenv()): Int =
             env["SUMMARY_MAX_HISTORY_MESSAGES"]
@@ -408,6 +567,14 @@ class SummaryService(
                 ?.toIntOrNull()
                 ?.takeIf { it > 0 }
                 ?: DEFAULT_MAX_CHARACTER_BUDGET
+
+        const val DEFAULT_MAX_IMAGES = 10
+
+        fun resolveMaxImages(env: Map<String, String> = System.getenv()): Int =
+            env["SUMMARY_MAX_IMAGES"]
+                ?.toIntOrNull()
+                ?.takeIf { it > 0 }
+                ?: DEFAULT_MAX_IMAGES
 
         val URL_REGEX = Regex("""https?://[^\s<>"']+""")
     }

@@ -4,7 +4,7 @@ package luna.summarizer
  * Configuration for Google Gemini Summarizer API.
  *
  * @property apiKey Google Gemini API key.
- * @property model Model identifier to use for summarization (defaults to `gemini-1.5-flash`).
+ * @property model Model identifier to use for summarization (defaults to `gemini-3.5-flash-lite`).
  * @property baseUrl Base URL for Google Generative Language API.
  */
 data class GeminiConfig(
@@ -16,7 +16,7 @@ data class GeminiConfig(
         get() = apiKey.isNotBlank()
 
     companion object {
-        const val DEFAULT_MODEL = "gemini-1.5-flash"
+        const val DEFAULT_MODEL = "gemini-3.5-flash-lite"
         const val DEFAULT_BASE_URL = "https://generativelanguage.googleapis.com"
 
         fun fromEnv(env: Map<String, String> = System.getenv()): GeminiConfig {
