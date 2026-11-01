@@ -19,9 +19,12 @@ import io.mockk.mockk
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.test.runTest
+import java.util.concurrent.atomic.AtomicInteger
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertNotNull
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 import kotlin.time.Duration.Companion.minutes
 import kotlin.time.Instant
@@ -460,6 +463,7 @@ class SummaryServiceTest {
         type: MessageType = MessageType.Default,
         stickers: List<StickerItem> = emptyList(),
         attachments: Set<Attachment> = emptySet(),
+        webhookId: Snowflake? = null,
     ): Message =
         SummaryTestFixtures.createMockMessage(
             id = id,
@@ -470,6 +474,7 @@ class SummaryServiceTest {
             type = type,
             stickers = stickers,
             attachments = attachments,
+            webhookId = webhookId,
         )
 
     @Test
@@ -2907,5 +2912,222 @@ class SummaryServiceTest {
             // Verify exactly 1 multimodal attempt and exactly 1 fallback attempt (no second duplicate fallback)
             coVerify(exactly = 1) { summarizer.summarize(match<SummaryInput> { it.imageAttachments.isNotEmpty() }) }
             coVerify(exactly = 1) { summarizer.summarize(match<SummaryInput> { it.imageAttachments.isEmpty() }) }
+        }
+
+    @Test
+    fun `reacting to a Luna Webhook Replacement message triggers link extraction, Gemini summarizer, and message reply`() =
+        runTest {
+            val lunaWebhookId = Snowflake(777L)
+            val summarizer = mockk<GeminiSummarizer>()
+            val post =
+                PeekPost(
+                    id = "post-webhook-1",
+                    originalUrl = "https://example.com/post",
+                    cleanUrl = "https://example.com/post",
+                    platform = Platform.GENERIC,
+                    title = "Sample Clean Post",
+                    content = "Extracted article body",
+                    author = Author(username = "author_name"),
+                )
+            val peekResolver: suspend (String) -> PeekPost? = { post }
+
+            var repliedMessage: Message? = null
+            var replyContent: String? = null
+            val replySender: suspend (Message, String) -> Unit = { msg, text ->
+                repliedMessage = msg
+                replyContent = text
+            }
+
+            val service =
+                SummaryService(
+                    summarizer = summarizer,
+                    peekResolver = peekResolver,
+                    replySender = replySender,
+                    isLunaWebhook = { it == lunaWebhookId },
+                )
+
+            val targetMsg =
+                createMockMessage(
+                    id = 8001L,
+                    username = "MasqueradedAlice",
+                    content = "Cleaned post link https://example.com/post",
+                    isBot = true,
+                    webhookId = lunaWebhookId,
+                )
+
+            coEvery {
+                summarizer.summarize(any<SummaryInput>())
+            } returns SummaryResult.Success("TL;DR summary of clean post")
+
+            val user = mockk<User>()
+            every { user.isBot } returns false
+
+            val event = mockk<ReactionAddEvent>()
+            every { event.emoji } returns ReactionEmoji.Unicode("📝")
+            every { event.userId } returns Snowflake(55L)
+            every { event.messageId } returns targetMsg.id
+            coEvery { event.getUserOrNull() } returns user
+            coEvery { event.getMessageOrNull() } returns targetMsg
+
+            service.handleReaction(event)
+
+            coVerify(exactly = 1) { summarizer.summarize(match<SummaryInput> { it.url == "https://example.com/post" }) }
+            assertEquals(targetMsg, repliedMessage)
+            assertEquals("TL;DR summary of clean post", replyContent)
+            assertEquals(SummaryStatus.DONE, service.getStatus(targetMsg.id))
+        }
+
+    @Test
+    fun `author attribution in dialogue log uses the masqueraded user's username`() =
+        runTest {
+            val lunaWebhookId = Snowflake(777L)
+            val summarizer = mockk<GeminiSummarizer>()
+            var capturedInput: SummaryInput? = null
+            coEvery {
+                summarizer.summarize(any<SummaryInput>())
+            } answers {
+                capturedInput = firstArg<SummaryInput>()
+                SummaryResult.Success("Slice summary")
+            }
+
+            val baseTime = Instant.fromEpochMilliseconds(1700000000000L)
+            val webhookMsg =
+                createMockMessage(
+                    id = 8101L,
+                    username = "MasqueradedBob",
+                    content = "Interesting discussion context",
+                    isBot = true,
+                    webhookId = lunaWebhookId,
+                    timestamp = baseTime,
+                )
+            val targetMsg =
+                createMockMessage(
+                    id = 8102L,
+                    username = "Charlie",
+                    content = "Agreed with the above",
+                    isBot = false,
+                    timestamp = baseTime + 1.minutes,
+                )
+
+            val service =
+                SummaryService(
+                    summarizer = summarizer,
+                    replySender = { _, _ -> },
+                    historyFetcher = { _, _ -> listOf(webhookMsg) },
+                    isLunaWebhook = { it == lunaWebhookId },
+                )
+
+            val user = mockk<User>()
+            every { user.isBot } returns false
+
+            val event = mockk<ReactionAddEvent>()
+            every { event.emoji } returns ReactionEmoji.Unicode("📝")
+            every { event.userId } returns Snowflake(55L)
+            every { event.messageId } returns targetMsg.id
+            coEvery { event.getUserOrNull() } returns user
+            coEvery { event.getMessageOrNull() } returns targetMsg
+
+            service.handleReaction(event)
+
+            coVerify(exactly = 1) { summarizer.summarize(any<SummaryInput>()) }
+            assertNotNull(capturedInput)
+            assertTrue(capturedInput.content.contains("[MasqueradedBob]: Interesting discussion context"))
+            assertTrue(capturedInput.content.contains("[Charlie]: Agreed with the above"))
+        }
+
+    @Test
+    fun `reacting to a third-party webhook message is rejected as noise and does not trigger summarization`() =
+        runTest {
+            val summarizer = mockk<GeminiSummarizer>()
+            var replyCalled = false
+            val service =
+                SummaryService(
+                    summarizer = summarizer,
+                    replySender = { _, _ -> replyCalled = true },
+                    isLunaWebhook = { it == Snowflake(777L) },
+                )
+
+            val thirdPartyMsg =
+                createMockMessage(
+                    id = 8201L,
+                    username = "GitHubNotifier",
+                    content = "Commit pushed https://example.com/repo",
+                    isBot = true,
+                    webhookId = Snowflake(999L),
+                )
+
+            val user = mockk<User>()
+            every { user.isBot } returns false
+
+            val event = mockk<ReactionAddEvent>()
+            every { event.emoji } returns ReactionEmoji.Unicode("📝")
+            every { event.userId } returns Snowflake(55L)
+            every { event.messageId } returns thirdPartyMsg.id
+            coEvery { event.getUserOrNull() } returns user
+            coEvery { event.getMessageOrNull() } returns thirdPartyMsg
+
+            service.handleReaction(event)
+
+            coVerify(exactly = 0) { summarizer.summarize(any<SummaryInput>()) }
+            assertFalse(replyCalled)
+            assertNull(service.getStatus(thirdPartyMsg.id))
+        }
+
+    @Test
+    fun `in-memory caching works and does not make duplicate queries for the same webhook ID`() =
+        runTest {
+            val lunaWebhookId = Snowflake(777L)
+            val queryCount = AtomicInteger(0)
+            val summarizer = mockk<GeminiSummarizer>()
+            coEvery { summarizer.summarize(any<SummaryInput>()) } returns SummaryResult.Success("Summary")
+
+            val service =
+                SummaryService(
+                    summarizer = summarizer,
+                    replySender = { _, _ -> },
+                    isLunaWebhook = { id ->
+                        queryCount.incrementAndGet()
+                        id == lunaWebhookId
+                    },
+                )
+
+            val msg1 =
+                createMockMessage(
+                    id = 8301L,
+                    username = "Alice",
+                    content = "Post 1 https://example.com/1",
+                    isBot = true,
+                    webhookId = lunaWebhookId,
+                )
+            val msg2 =
+                createMockMessage(
+                    id = 8302L,
+                    username = "Alice",
+                    content = "Post 2 https://example.com/2",
+                    isBot = true,
+                    webhookId = lunaWebhookId,
+                )
+
+            val user = mockk<User>()
+            every { user.isBot } returns false
+
+            val event1 = mockk<ReactionAddEvent>()
+            every { event1.emoji } returns ReactionEmoji.Unicode("📝")
+            every { event1.userId } returns Snowflake(55L)
+            every { event1.messageId } returns msg1.id
+            coEvery { event1.getUserOrNull() } returns user
+            coEvery { event1.getMessageOrNull() } returns msg1
+
+            val event2 = mockk<ReactionAddEvent>()
+            every { event2.emoji } returns ReactionEmoji.Unicode("📝")
+            every { event2.userId } returns Snowflake(55L)
+            every { event2.messageId } returns msg2.id
+            coEvery { event2.getUserOrNull() } returns user
+            coEvery { event2.getMessageOrNull() } returns msg2
+
+            service.handleReaction(event1)
+            service.handleReaction(event2)
+
+            assertEquals(1, queryCount.get())
         }
 }

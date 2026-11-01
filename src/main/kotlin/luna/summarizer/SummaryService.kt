@@ -77,7 +77,7 @@ class SummaryService(
     val inactivityGap: Duration = resolveInactivityGap(),
     val maxCharacterBudget: Int = resolveMaxCharacterBudget(),
     val maxImages: Int = resolveMaxImages(),
-    private val noiseFilter: DialogueNoiseFilter = DialogueNoiseFilter(),
+    noiseFilter: DialogueNoiseFilter? = null,
     private val imageResolver: ChatImageResolver = ChatImageResolver(),
     private val historyFetcher: suspend (message: Message, limit: Int) -> List<Message> = { message, limit ->
         message.channel
@@ -85,11 +85,25 @@ class SummaryService(
             .toList()
             .reversed()
     },
+    val isLunaWebhook: (suspend (Snowflake) -> Boolean)? = null,
+    kord: Kord? = null,
 ) {
     private val logger = LoggerFactory.getLogger(SummaryService::class.java)
     private val statusCache = BoundedStatusCache()
+    private var kordInstance: Kord? = kord
+
+    val noiseFilter: DialogueNoiseFilter =
+        noiseFilter ?: DialogueNoiseFilter(
+            isLunaWebhook = isLunaWebhook,
+            kord = kord,
+        )
+
+    val webhookCache: java.util.concurrent.ConcurrentHashMap<dev.kord.common.entity.Snowflake, Boolean>
+        get() = noiseFilter.webhookCache
 
     fun register(kord: Kord) {
+        this.kordInstance = kord
+        noiseFilter.setKord(kord)
         kord.on<ReactionAddEvent> {
             handleReaction(this)
         }
@@ -118,6 +132,7 @@ class SummaryService(
 
     fun clearCache() {
         statusCache.clear()
+        noiseFilter.clearWebhookCache()
     }
 
     fun truncateForDiscord(
@@ -490,7 +505,7 @@ class SummaryService(
 
     fun isBotSummaryMessage(message: Message): Boolean = noiseFilter.isBotSummaryMessage(message)
 
-    fun isNoiseMessage(message: Message): Boolean = noiseFilter.isNoiseMessage(message)
+    suspend fun isNoiseMessage(message: Message): Boolean = noiseFilter.isNoiseMessage(message)
 
     companion object {
         const val DEFAULT_EMOJI = "📝"

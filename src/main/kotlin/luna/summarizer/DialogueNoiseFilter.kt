@@ -1,27 +1,71 @@
 package luna.summarizer
 
 import dev.kord.common.entity.MessageType
+import dev.kord.common.entity.Snowflake
+import dev.kord.core.Kord
 import dev.kord.core.entity.Message
+import java.util.concurrent.ConcurrentHashMap
 
 /**
  * Encapsulates dialogue noise filtering and message boundary checks for conversation slices.
  */
-open class DialogueNoiseFilter {
-    open fun isBotSummaryMessage(message: Message): Boolean =
-        message.author?.isBot == true &&
+open class DialogueNoiseFilter(
+    private val isLunaWebhook: (suspend (Snowflake) -> Boolean)? = null,
+    kord: Kord? = null,
+    val webhookCache: ConcurrentHashMap<Snowflake, Boolean> = ConcurrentHashMap(),
+) {
+    private var kordInstance: Kord? = kord
+
+    fun setKord(kord: Kord) {
+        this.kordInstance = kord
+    }
+
+    fun clearWebhookCache() {
+        webhookCache.clear()
+    }
+
+    open suspend fun isLunaWebhook(webhookId: Snowflake): Boolean {
+        val cached = webhookCache[webhookId]
+        if (cached != null) {
+            return cached
+        }
+        val hook = isLunaWebhook
+        val currentKord = kordInstance
+        val isLuna =
+            if (hook != null) {
+                runCatching { hook(webhookId) }.getOrDefault(false)
+            } else if (currentKord != null) {
+                val webhook = runCatching { currentKord.getWebhookOrNull(webhookId) }.getOrNull()
+                webhook != null && (webhook.creatorId == currentKord.selfId || webhook.name == "Luna Preview")
+            } else {
+                false
+            }
+        webhookCache[webhookId] = isLuna
+        return isLuna
+    }
+
+    open fun isBotSummaryMessage(message: Message): Boolean {
+        if (runCatching { message.webhookId }.getOrNull() != null) {
+            return false
+        }
+        return message.author?.isBot == true &&
             (
                 message.content.startsWith("TL;DR:") || message.content.startsWith("TL;DR") || message.content.contains("重點摘要") ||
                     message.content.contains("Previous summary")
             )
+    }
 
-    open fun isNoiseMessage(message: Message): Boolean {
-        // Exclude bot or missing author
-        if (message.author == null || message.author?.isBot == true) {
+    open suspend fun isNoiseMessage(message: Message): Boolean {
+        val webhookId = runCatching { message.webhookId }.getOrNull()
+        val isLuna = webhookId != null && isLunaWebhook(webhookId)
+
+        // Exclude unknown or third-party webhooks
+        if (webhookId != null && !isLuna) {
             return true
         }
 
-        // Exclude webhooks
-        if (runCatching { message.webhookId }.getOrNull() != null) {
+        // Exclude bot or missing author (unless it's a Luna Webhook Replacement)
+        if (message.author == null || (!isLuna && message.author?.isBot == true)) {
             return true
         }
 
