@@ -3130,4 +3130,435 @@ class SummaryServiceTest {
 
             assertEquals(1, queryCount.get())
         }
+
+    @Test
+    fun `multi-message conversation retains preceding Luna Webhook Replacement message with URL and formats transcript with author attribution`() =
+        runTest {
+            val lunaWebhookId = Snowflake(777L)
+            val summarizer = mockk<GeminiSummarizer>()
+            var capturedInput: SummaryInput? = null
+            var resolvedUrl: String? = null
+
+            val post =
+                PeekPost(
+                    id = "post-article-1",
+                    originalUrl = "https://example.com/luna-post",
+                    cleanUrl = "https://example.com/luna-post",
+                    platform = Platform.GENERIC,
+                    title = "Deep Dive Article",
+                    content = "Comprehensive guide on distributed systems and event ordering.",
+                    author = Author(username = "lead_author"),
+                    comments = listOf(Comment(author = "TechLead", content = "Great architectural breakdown.")),
+                )
+            val peekResolver: suspend (String) -> PeekPost? = { url ->
+                resolvedUrl = url
+                post
+            }
+
+            var repliedMessage: Message? = null
+            var replyContent: String? = null
+            val replySender: suspend (Message, String) -> Unit = { msg, text ->
+                repliedMessage = msg
+                replyContent = text
+            }
+
+            val baseTime = Instant.parse("2026-10-31T10:00:00Z")
+            val webhookMsg =
+                createMockMessage(
+                    id = 9001L,
+                    username = "OriginalAuthor",
+                    content = "Here is the cleaned link https://example.com/luna-post",
+                    isBot = true,
+                    webhookId = lunaWebhookId,
+                    timestamp = baseTime,
+                )
+            val userMsg1 =
+                createMockMessage(
+                    id = 9002L,
+                    username = "Bob",
+                    content = "This looks very informative!",
+                    isBot = false,
+                    timestamp = baseTime + 1.minutes,
+                )
+            val targetMsg =
+                createMockMessage(
+                    id = 9003L,
+                    username = "Charlie",
+                    content = "Could someone summarize the key takeaways?",
+                    isBot = false,
+                    timestamp = baseTime + 2.minutes,
+                )
+
+            val service =
+                SummaryService(
+                    summarizer = summarizer,
+                    peekResolver = peekResolver,
+                    replySender = replySender,
+                    historyFetcher = { _, _ -> listOf(webhookMsg, userMsg1) },
+                    isLunaWebhook = { it == lunaWebhookId },
+                )
+
+            coEvery {
+                summarizer.summarize(any<SummaryInput>())
+            } answers {
+                capturedInput = firstArg<SummaryInput>()
+                SummaryResult.Success("TL;DR: Summary of discussion and article")
+            }
+
+            val user = mockk<User>()
+            every { user.isBot } returns false
+
+            val event = mockk<ReactionAddEvent>()
+            every { event.emoji } returns ReactionEmoji.Unicode("📝")
+            every { event.userId } returns Snowflake(55L)
+            every { event.messageId } returns targetMsg.id
+            coEvery { event.getUserOrNull() } returns user
+            coEvery { event.getMessageOrNull() } returns targetMsg
+
+            // Verify a: The Luna Webhook message is retained in precedingMessages
+            val precedingMessages = service.retrievePrecedingMessages(targetMsg)
+            assertEquals(listOf(webhookMsg, userMsg1), precedingMessages)
+
+            service.handleReaction(event)
+
+            coVerify(exactly = 1) { summarizer.summarize(any<SummaryInput>()) }
+            val input = capturedInput
+            assertNotNull(input)
+
+            // Verify b: The dialogue transcript formatted for Gemini includes [OriginalAuthor]: ... with clean content
+            assertTrue(input.content.contains("[OriginalAuthor]: Here is the cleaned link https://example.com/luna-post"))
+            assertTrue(input.content.contains("[Bob]: This looks very informative!"))
+            assertTrue(input.content.contains("[Charlie]: Could someone summarize the key takeaways?"))
+
+            // Verify c: The primaryUrl is extracted from preceding Webhook Replacement message and passed to peekResolver
+            assertEquals("https://example.com/luna-post", resolvedUrl)
+            assertEquals("https://example.com/luna-post", input.url)
+
+            // Verify d: Summarizer receives combined dialogue and post content
+            assertTrue(input.content.contains("Comprehensive guide on distributed systems and event ordering."))
+            assertEquals("Deep Dive Article", input.title)
+            assertEquals(listOf("Great architectural breakdown."), input.comments)
+            assertEquals(targetMsg, repliedMessage)
+            assertEquals("TL;DR: Summary of discussion and article", replyContent)
+            assertEquals(SummaryStatus.DONE, service.getStatus(targetMsg.id))
+        }
+
+    @Test
+    fun `conversation slice history with mixed messages includes Luna Webhook and excludes third-party webhooks`() =
+        runTest {
+            val lunaWebhookId = Snowflake(777L)
+            val thirdPartyWebhookId = Snowflake(999L)
+            val summarizer = mockk<GeminiSummarizer>()
+            var capturedInput: SummaryInput? = null
+            var resolvedUrl: String? = null
+
+            val post =
+                PeekPost(
+                    id = "post-proposal-1",
+                    originalUrl = "https://example.com/proposal",
+                    cleanUrl = "https://example.com/proposal",
+                    platform = Platform.GENERIC,
+                    title = "Proposal v2",
+                    content = "Detailed engineering proposal for review.",
+                    author = Author(username = "bob"),
+                )
+
+            val baseTime = Instant.parse("2026-10-31T10:00:00Z")
+            val msg1 =
+                createMockMessage(
+                    id = 9101L,
+                    username = "Alice",
+                    content = "Starting our daily sync",
+                    isBot = false,
+                    timestamp = baseTime,
+                )
+            val githubBot =
+                createMockMessage(
+                    id = 9102L,
+                    username = "GitHub",
+                    content = "[repo:main] 1 new commit pushed by octocat https://github.com/repo/commit/123",
+                    isBot = true,
+                    webhookId = thirdPartyWebhookId,
+                    timestamp = baseTime + 1.minutes,
+                )
+            val lunaWebhook =
+                createMockMessage(
+                    id = 9103L,
+                    username = "Bob",
+                    content = "Shared the updated proposal https://example.com/proposal",
+                    isBot = true,
+                    webhookId = lunaWebhookId,
+                    timestamp = baseTime + 2.minutes,
+                )
+            val msg2 =
+                createMockMessage(
+                    id = 9104L,
+                    username = "Charlie",
+                    content = "Reviewing the proposal now",
+                    isBot = false,
+                    timestamp = baseTime + 3.minutes,
+                )
+            val targetMsg =
+                createMockMessage(
+                    id = 9105L,
+                    username = "Dave",
+                    content = "Let's summarize our discussion points",
+                    isBot = false,
+                    timestamp = baseTime + 4.minutes,
+                )
+
+            val service =
+                SummaryService(
+                    summarizer = summarizer,
+                    peekResolver = { url ->
+                        resolvedUrl = url
+                        post
+                    },
+                    replySender = { _, _ -> },
+                    historyFetcher = { _, _ -> listOf(msg1, githubBot, lunaWebhook, msg2) },
+                    isLunaWebhook = { it == lunaWebhookId },
+                )
+
+            coEvery {
+                summarizer.summarize(any<SummaryInput>())
+            } answers {
+                capturedInput = firstArg<SummaryInput>()
+                SummaryResult.Success("TL;DR: Proposal discussion summary")
+            }
+
+            val user = mockk<User>()
+            every { user.isBot } returns false
+
+            val event = mockk<ReactionAddEvent>()
+            every { event.emoji } returns ReactionEmoji.Unicode("📝")
+            every { event.userId } returns Snowflake(55L)
+            every { event.messageId } returns targetMsg.id
+            coEvery { event.getUserOrNull() } returns user
+            coEvery { event.getMessageOrNull() } returns targetMsg
+
+            // Verify precedingMessages excludes third-party webhook and includes Luna webhook and humans
+            val precedingMessages = service.retrievePrecedingMessages(targetMsg)
+            assertEquals(listOf(msg1, lunaWebhook, msg2), precedingMessages)
+            assertFalse(precedingMessages.contains(githubBot))
+
+            service.handleReaction(event)
+
+            coVerify(exactly = 1) { summarizer.summarize(any<SummaryInput>()) }
+            val input = capturedInput
+            assertNotNull(input)
+
+            // Verify dialogue transcript contains human and Luna Webhook messages
+            assertTrue(input.content.contains("[Alice]: Starting our daily sync"))
+            assertTrue(input.content.contains("[Bob]: Shared the updated proposal https://example.com/proposal"))
+            assertTrue(input.content.contains("[Charlie]: Reviewing the proposal now"))
+            assertTrue(input.content.contains("[Dave]: Let's summarize our discussion points"))
+
+            // Verify third-party webhook is completely omitted from the dialogue prompt
+            assertFalse(input.content.contains("GitHub"))
+            assertFalse(input.content.contains("[repo:main]"))
+            assertFalse(input.content.contains("octocat"))
+            assertFalse(input.content.contains("https://github.com/repo/commit/123"))
+
+            // Verify URL picked up is from Luna Webhook, not third-party webhook
+            assertEquals("https://example.com/proposal", resolvedUrl)
+            assertEquals("https://example.com/proposal", input.url)
+            assertTrue(input.content.contains("Detailed engineering proposal for review."))
+        }
+
+    @Test
+    fun `history backtracking halts at prior bot summary message even when preceding messages include webhooks`() =
+        runTest {
+            val lunaWebhookId = Snowflake(777L)
+            val summarizer = mockk<GeminiSummarizer>()
+            var capturedInput: SummaryInput? = null
+            var resolvedUrl: String? = null
+
+            val post =
+                PeekPost(
+                    id = "post-new-1",
+                    originalUrl = "https://example.com/new",
+                    cleanUrl = "https://example.com/new",
+                    platform = Platform.GENERIC,
+                    title = "New Link Title",
+                    content = "New Link Content",
+                    author = Author(username = "bob"),
+                )
+
+            val baseTime = Instant.parse("2026-10-31T10:00:00Z")
+            val msg0 =
+                createMockMessage(
+                    id = 9201L,
+                    username = "Alice",
+                    content = "Old discussion before previous summary",
+                    isBot = false,
+                    timestamp = baseTime,
+                )
+            val oldWebhook =
+                createMockMessage(
+                    id = 9202L,
+                    username = "Bob",
+                    content = "Old webhook link https://example.com/old",
+                    isBot = true,
+                    webhookId = lunaWebhookId,
+                    timestamp = baseTime + 1.minutes,
+                )
+            val botSummary =
+                createMockMessage(
+                    id = 9203L,
+                    username = "LunaBot",
+                    content = "TL;DR: Earlier topic summarized",
+                    isBot = true,
+                    webhookId = null,
+                    timestamp = baseTime + 2.minutes,
+                )
+            val lunaWebhook =
+                createMockMessage(
+                    id = 9204L,
+                    username = "Bob",
+                    content = "New discussion link https://example.com/new",
+                    isBot = true,
+                    webhookId = lunaWebhookId,
+                    timestamp = baseTime + 4.minutes,
+                )
+            val msg1 =
+                createMockMessage(
+                    id = 9205L,
+                    username = "Charlie",
+                    content = "Discussing the new link",
+                    isBot = false,
+                    timestamp = baseTime + 5.minutes,
+                )
+            val targetMsg =
+                createMockMessage(
+                    id = 9206L,
+                    username = "Dave",
+                    content = "Summarize the new discussion",
+                    isBot = false,
+                    timestamp = baseTime + 6.minutes,
+                )
+
+            val service =
+                SummaryService(
+                    summarizer = summarizer,
+                    peekResolver = { url ->
+                        resolvedUrl = url
+                        post
+                    },
+                    replySender = { _, _ -> },
+                    historyFetcher = { _, _ -> listOf(msg0, oldWebhook, botSummary, lunaWebhook, msg1) },
+                    isLunaWebhook = { it == lunaWebhookId },
+                )
+
+            coEvery {
+                summarizer.summarize(any<SummaryInput>())
+            } answers {
+                capturedInput = firstArg<SummaryInput>()
+                SummaryResult.Success("TL;DR: Summary of new topic")
+            }
+
+            val user = mockk<User>()
+            every { user.isBot } returns false
+
+            val event = mockk<ReactionAddEvent>()
+            every { event.emoji } returns ReactionEmoji.Unicode("📝")
+            every { event.userId } returns Snowflake(55L)
+            every { event.messageId } returns targetMsg.id
+            coEvery { event.getUserOrNull() } returns user
+            coEvery { event.getMessageOrNull() } returns targetMsg
+
+            // Verify history backtracking stopped at bot summary without crashing on webhook entries
+            val precedingMessages = service.retrievePrecedingMessages(targetMsg)
+            assertEquals(listOf(lunaWebhook, msg1), precedingMessages)
+
+            service.handleReaction(event)
+
+            coVerify(exactly = 1) { summarizer.summarize(any<SummaryInput>()) }
+            val input = capturedInput
+            assertNotNull(input)
+
+            // Verify dialogue includes only the slice after the prior summary
+            assertTrue(input.content.contains("[Bob]: New discussion link https://example.com/new"))
+            assertTrue(input.content.contains("[Charlie]: Discussing the new link"))
+            assertTrue(input.content.contains("[Dave]: Summarize the new discussion"))
+
+            // Verify prior messages and summary are omitted
+            assertFalse(input.content.contains("Old discussion before previous summary"))
+            assertFalse(input.content.contains("Old webhook link"))
+            assertFalse(input.content.contains("https://example.com/old"))
+            assertFalse(input.content.contains("TL;DR: Earlier topic summarized"))
+
+            assertEquals("https://example.com/new", resolvedUrl)
+            assertEquals("https://example.com/new", input.url)
+        }
+
+    @Test
+    fun `history backtracking does not falsely halt on Luna Webhook Replacement message starting with TL DR`() =
+        runTest {
+            val lunaWebhookId = Snowflake(777L)
+            val summarizer = mockk<GeminiSummarizer>()
+            var capturedInput: SummaryInput? = null
+
+            val baseTime = Instant.parse("2026-10-31T10:00:00Z")
+            val msg0 =
+                createMockMessage(
+                    id = 9301L,
+                    username = "Alice",
+                    content = "Earlier context before webhook",
+                    isBot = false,
+                    timestamp = baseTime,
+                )
+            val webhookWithTldr =
+                createMockMessage(
+                    id = 9302L,
+                    username = "Bob",
+                    content = "TL;DR: check out this release https://example.com/rel",
+                    isBot = true,
+                    webhookId = lunaWebhookId,
+                    timestamp = baseTime + 1.minutes,
+                )
+            val targetMsg =
+                createMockMessage(
+                    id = 9303L,
+                    username = "Charlie",
+                    content = "Thoughts on this?",
+                    isBot = false,
+                    timestamp = baseTime + 2.minutes,
+                )
+
+            val service =
+                SummaryService(
+                    summarizer = summarizer,
+                    historyFetcher = { _, _ -> listOf(msg0, webhookWithTldr) },
+                    isLunaWebhook = { it == lunaWebhookId },
+                    replySender = { _, _ -> },
+                )
+
+            coEvery {
+                summarizer.summarize(any<SummaryInput>())
+            } answers {
+                capturedInput = firstArg<SummaryInput>()
+                SummaryResult.Success("TL;DR: Summary")
+            }
+
+            val user = mockk<User>()
+            every { user.isBot } returns false
+
+            val event = mockk<ReactionAddEvent>()
+            every { event.emoji } returns ReactionEmoji.Unicode("📝")
+            every { event.userId } returns Snowflake(55L)
+            every { event.messageId } returns targetMsg.id
+            coEvery { event.getUserOrNull() } returns user
+            coEvery { event.getMessageOrNull() } returns targetMsg
+
+            val precedingMessages = service.retrievePrecedingMessages(targetMsg)
+            assertEquals(listOf(msg0, webhookWithTldr), precedingMessages)
+
+            service.handleReaction(event)
+
+            val input = capturedInput
+            assertNotNull(input)
+            assertTrue(input.content.contains("[Alice]: Earlier context before webhook"))
+            assertTrue(input.content.contains("[Bob]: TL;DR: check out this release https://example.com/rel"))
+            assertTrue(input.content.contains("[Charlie]: Thoughts on this?"))
+        }
 }

@@ -194,7 +194,7 @@ class SummaryService(
             return
         }
 
-        val precedingMessages = retrieveContextMessages(message).filterNot { isNoiseMessage(it) }
+        val precedingMessages = retrievePrecedingMessages(message)
         val allMessages =
             if (precedingMessages.isNotEmpty()) {
                 precedingMessages + message
@@ -425,7 +425,10 @@ class SummaryService(
         }
     }
 
-    private suspend fun retrieveContextMessages(targetMessage: Message): List<Message> {
+    internal suspend fun retrievePrecedingMessages(targetMessage: Message): List<Message> =
+        retrieveContextMessages(targetMessage).filterNot { isNoiseMessage(it) }
+
+    internal suspend fun retrieveContextMessages(targetMessage: Message): List<Message> {
         val rawHistory =
             runCatching {
                 historyFetcher(targetMessage, maxHistoryMessages)
