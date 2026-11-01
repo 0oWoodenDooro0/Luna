@@ -72,3 +72,11 @@ _Avoid_: Global state, service locator, environment container
 A stateless, framework-independent utility library residing in `libs/` that is shared across two or more plugins (such as SocialPeek) or targeted for standalone external distribution.
 _Avoid_: Helper module, common plugin, shared code
 
+**Chat Image Attachment**:
+An image file (`image/jpeg`, `image/png`, `image/webp`, `image/gif`) attached to a Discord message within a Conversation Slice, ingested as visual context for the Summary Pipeline.
+_Avoid_: Picture upload, chat photo, message media
+
+**CDN Direct Ingestion**:
+The multimodal delivery strategy of passing Discord's signed CDN attachment URL directly to Gemini API's `file_data.file_uri`, avoiding server-side binary proxying.
+_Avoid_: Direct URL passing, Discord CDN proxy, raw URL injection
+
