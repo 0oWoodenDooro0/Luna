@@ -69,6 +69,8 @@ object UrlSanitizer {
                     "share_session_id",
                     "share_tag",
                     "unique_k",
+                    "trackid",
+                    "track_id",
                 ),
             Platform.YOUTUBE to
                 setOf(

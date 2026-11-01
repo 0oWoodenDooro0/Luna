@@ -51,6 +51,15 @@ class UrlSanitizerTest {
     }
 
     @Test
+    fun `Bilibili trackid parameter should be removed`() {
+        val raw = "https://www.bilibili.com/video/BV1CMb46XET4/?trackid=web_pegasus_0.router-web-pegasus-2479516-gfll4.1793496578378.999"
+        val clean = UrlSanitizer.clean(raw)
+        assertEquals("https://www.bilibili.com/video/BV1CMb46XET4/", clean)
+        assertTrue(UrlSanitizer.hasTrackingParams(raw))
+        assertFalse(UrlSanitizer.hasTrackingParams(clean))
+    }
+
+    @Test
     fun `4 YouTube functional parameter preservation tests`() {
         // youtu.be short link: si removed, t=45s preserved
         val rawShort = "https://youtu.be/dQw4w9WgXcQ?si=abc123xyz&t=45s"
