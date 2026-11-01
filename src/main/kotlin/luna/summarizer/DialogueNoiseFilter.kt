@@ -1,27 +1,115 @@
 package luna.summarizer
 
 import dev.kord.common.entity.MessageType
+import dev.kord.common.entity.Snowflake
+import dev.kord.core.Kord
 import dev.kord.core.entity.Message
+import org.slf4j.LoggerFactory
+import java.util.Collections
+import java.util.LinkedHashMap
+
+/**
+ * Thread-safe bounded LRU cache for webhook verification to avoid unbounded daemon memory growth.
+ */
+class BoundedWebhookCache(
+    private val maxEntries: Int = 1000,
+) {
+    private val map =
+        Collections.synchronizedMap(
+            object : LinkedHashMap<Snowflake, Boolean>(maxEntries, 0.75f, true) {
+                override fun removeEldestEntry(eldest: MutableMap.MutableEntry<Snowflake, Boolean>?): Boolean = size > maxEntries
+            },
+        )
+
+    operator fun get(key: Snowflake): Boolean? = map[key]
+
+    operator fun set(
+        key: Snowflake,
+        value: Boolean,
+    ) {
+        map[key] = value
+    }
+
+    fun remove(key: Snowflake): Boolean? = map.remove(key)
+
+    fun clear() {
+        map.clear()
+    }
+}
 
 /**
  * Encapsulates dialogue noise filtering and message boundary checks for conversation slices.
  */
-open class DialogueNoiseFilter {
-    open fun isBotSummaryMessage(message: Message): Boolean =
-        message.author?.isBot == true &&
+open class DialogueNoiseFilter(
+    private val isLunaWebhook: (suspend (Snowflake) -> Boolean)? = null,
+    kord: Kord? = null,
+    val webhookCache: BoundedWebhookCache = BoundedWebhookCache(),
+) {
+    private val logger = LoggerFactory.getLogger(DialogueNoiseFilter::class.java)
+    private var kordInstance: Kord? = kord
+
+    fun setKord(kord: Kord) {
+        this.kordInstance = kord
+    }
+
+    fun clearWebhookCache() {
+        webhookCache.clear()
+    }
+
+    open suspend fun isLunaWebhook(webhookId: Snowflake): Boolean {
+        val cached = webhookCache[webhookId]
+        if (cached != null) {
+            return cached
+        }
+        val hook = isLunaWebhook
+        val currentKord = kordInstance
+        val isLuna =
+            if (hook != null) {
+                try {
+                    hook(webhookId)
+                } catch (e: Exception) {
+                    logger.warn("Transient error verifying webhook {} via hook: {}", webhookId, e.message)
+                    return false
+                }
+            } else if (currentKord != null) {
+                val webhook =
+                    try {
+                        currentKord.getWebhookOrNull(webhookId)
+                    } catch (e: Exception) {
+                        logger.warn("Transient error retrieving webhook {} from Discord REST: {}", webhookId, e.message)
+                        return false
+                    }
+                webhook != null && (webhook.creatorId == currentKord.selfId || webhook.name == LUNA_PREVIEW_WEBHOOK_NAME)
+            } else {
+                false
+            }
+        webhookCache[webhookId] = isLuna
+        return isLuna
+    }
+
+    open suspend fun isBotSummaryMessage(message: Message): Boolean {
+        val webhookId = runCatching { message.webhookId }.getOrNull()
+        if (webhookId != null && isLunaWebhook(webhookId)) {
+            return false
+        }
+        return message.author?.isBot == true &&
             (
                 message.content.startsWith("TL;DR:") || message.content.startsWith("TL;DR") || message.content.contains("重點摘要") ||
                     message.content.contains("Previous summary")
             )
+    }
 
-    open fun isNoiseMessage(message: Message): Boolean {
-        // Exclude bot or missing author
-        if (message.author == null || message.author?.isBot == true) {
+    open suspend fun isNoiseMessage(message: Message): Boolean {
+        val webhookId = runCatching { message.webhookId }.getOrNull()
+        val isLuna = webhookId != null && isLunaWebhook(webhookId)
+
+        // Exclude unknown or third-party webhooks
+        if (webhookId != null && !isLuna) {
             return true
         }
 
-        // Exclude webhooks
-        if (runCatching { message.webhookId }.getOrNull() != null) {
+        // Exclude bot or missing author (unless it's a Luna Webhook Replacement)
+        if (message.author == null || (!isLuna && message.author?.isBot == true)) {
             return true
         }
 
@@ -81,6 +169,7 @@ open class DialogueNoiseFilter {
     }
 
     companion object {
+        const val LUNA_PREVIEW_WEBHOOK_NAME = "Luna Preview"
         val CUSTOM_EMOJI_REGEX = Regex("""<a?:[a-zA-Z0-9_]+:\d+>""")
     }
 }

@@ -77,7 +77,7 @@ class SummaryService(
     val inactivityGap: Duration = resolveInactivityGap(),
     val maxCharacterBudget: Int = resolveMaxCharacterBudget(),
     val maxImages: Int = resolveMaxImages(),
-    private val noiseFilter: DialogueNoiseFilter = DialogueNoiseFilter(),
+    noiseFilter: DialogueNoiseFilter? = null,
     private val imageResolver: ChatImageResolver = ChatImageResolver(),
     private val historyFetcher: suspend (message: Message, limit: Int) -> List<Message> = { message, limit ->
         message.channel
@@ -85,11 +85,22 @@ class SummaryService(
             .toList()
             .reversed()
     },
+    val isLunaWebhook: (suspend (Snowflake) -> Boolean)? = null,
+    kord: Kord? = null,
 ) {
     private val logger = LoggerFactory.getLogger(SummaryService::class.java)
     private val statusCache = BoundedStatusCache()
+    private var kordInstance: Kord? = kord
+
+    val noiseFilter: DialogueNoiseFilter =
+        noiseFilter ?: DialogueNoiseFilter(
+            isLunaWebhook = isLunaWebhook,
+            kord = kord,
+        )
 
     fun register(kord: Kord) {
+        this.kordInstance = kord
+        noiseFilter.setKord(kord)
         kord.on<ReactionAddEvent> {
             handleReaction(this)
         }
@@ -118,6 +129,7 @@ class SummaryService(
 
     fun clearCache() {
         statusCache.clear()
+        noiseFilter.clearWebhookCache()
     }
 
     fun truncateForDiscord(
@@ -179,7 +191,7 @@ class SummaryService(
             return
         }
 
-        val precedingMessages = retrieveContextMessages(message).filterNot { isNoiseMessage(it) }
+        val precedingMessages = retrievePrecedingMessages(message)
         val allMessages =
             if (precedingMessages.isNotEmpty()) {
                 precedingMessages + message
@@ -410,7 +422,10 @@ class SummaryService(
         }
     }
 
-    private suspend fun retrieveContextMessages(targetMessage: Message): List<Message> {
+    internal suspend fun retrievePrecedingMessages(targetMessage: Message): List<Message> =
+        retrieveContextMessages(targetMessage).filterNot { isNoiseMessage(it) }
+
+    internal suspend fun retrieveContextMessages(targetMessage: Message): List<Message> {
         val rawHistory =
             runCatching {
                 historyFetcher(targetMessage, maxHistoryMessages)
@@ -488,9 +503,9 @@ class SummaryService(
 
     fun extractImageAttachments(message: Message): List<ChatImageAttachment> = imageResolver.extractImageAttachments(message)
 
-    fun isBotSummaryMessage(message: Message): Boolean = noiseFilter.isBotSummaryMessage(message)
+    suspend fun isBotSummaryMessage(message: Message): Boolean = noiseFilter.isBotSummaryMessage(message)
 
-    fun isNoiseMessage(message: Message): Boolean = noiseFilter.isNoiseMessage(message)
+    suspend fun isNoiseMessage(message: Message): Boolean = noiseFilter.isNoiseMessage(message)
 
     companion object {
         const val DEFAULT_EMOJI = "📝"
