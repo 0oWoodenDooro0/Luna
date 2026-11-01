@@ -2,9 +2,8 @@
 
 ## Monorepo modules
 
-- `src/main/kotlin/luna/`: Discord bot daemon, including event listeners (`listener/`), AI summarization pipeline (`summarizer/`), and HTTP dashboard (`web/`).
+- `src/main/kotlin/luna/`: Discord bot daemon, including host orchestrator (`plugin/`, `core/`), first-party plugins (`curtly/`, `preview/`, `summarizer/`, `undercover/`).
 - `libs/socialpeek/`: Multi-platform social media post and video metadata resolver library.
-- `libs/curtly/`: Lightweight URL shortening and analytics engine.
 
 ## Agent skills
 
