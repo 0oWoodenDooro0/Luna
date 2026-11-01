@@ -56,3 +56,19 @@ _Avoid_: Video prompt tweak, YouTube prompt tuning
 The extraction and sanitization of video description metadata (including author-provided outlines, summaries, and timestamp markers) to serve as semantic prior context in the summary pipeline.
 _Avoid_: Description scraping, info grabbing
 
+**Luna Host (Luna Core)**:
+The central runtime container and infrastructure orchestrator responsible for configuration loading, database connection pooling, Ktor server bootstrapping, Kord bot lifecycle, and plugin discovery.
+_Avoid_: Main app, bot core, runner
+
+**Luna Plugin**:
+An isolated, self-contained business module implementing the plugin lifecycle, encapsulating Discord commands, event listeners, and optional Ktor Web routes without directly depending on peer plugins.
+_Avoid_: Bot addon, extension script, sub-feature
+
+**Plugin Context**:
+The unified runtime boundary injected by Luna Host into each plugin during initialization, providing managed access to Kord, Ktor Routing, the database, and type-safe plugin configurations.
+_Avoid_: Global state, service locator, environment container
+
+**Shared Library**:
+A stateless, framework-independent utility library residing in `libs/` that is shared across two or more plugins (such as SocialPeek) or targeted for standalone external distribution.
+_Avoid_: Helper module, common plugin, shared code
+
