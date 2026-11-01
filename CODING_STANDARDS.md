@@ -30,5 +30,6 @@ Luna is a multi-project Gradle monorepo (`:libs:socialpeek`, `:libs:curtly`, and
 ## 5. Kotlin Test Naming & Observability
 
 - **JVM-safe test identifiers**: While Kotlin allows spaces in backticked test method names, class bytecode strictly forbids JVM-illegal characters: `<`, `>`, `:`, `"`, `/`, `\`, `|`, `?`, `*`. Never use mathematical comparison symbols (e.g., `<= 300` or `> 300`) in test function names; use natural descriptive phrases instead (e.g., `when duration is at most 300 seconds`).
+- **Prompt assertion decoupling**: Integration tests (such as `SummaryServiceTest`) must assert service-level coordination, input propagation, and boundary limits rather than asserting exhaustive verbatim substrings of prompt templates or instructions. Exact prompt wording, markdown headers, and structural instructions must be tested in isolation within dedicated prompt builder unit tests (e.g., `GeminiPromptBuilderTest`) to prevent prompt iterations from causing widespread test fragility across the codebase.
 - **Observable fallback degraded states**: Fail-open fallback routines (such as degrading rich Data API video resolution to basic oEmbed, or defaulting URL resolution to channel chat history) must emit descriptive warning or debug logs with the underlying cause, preventing silent failure black holes during operations.
 
