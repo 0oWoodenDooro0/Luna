@@ -195,6 +195,8 @@ class SummaryService(
                 message.content
             }
 
+        val targetImageAttachments = extractImageAttachments(message)
+
         val summaryInput =
             if (primaryUrl != null) {
                 val post =
@@ -233,16 +235,21 @@ class SummaryService(
                         url = primaryUrl,
                         videoUri = if (post.platform == Platform.YOUTUBE) (post.cleanUrl.ifBlank { primaryUrl }) else null,
                         videoDurationSeconds = durationSeconds,
+                        imageAttachments = targetImageAttachments,
                     )
                 } else {
                     logger.debug("No post resolved for primary URL {}, summarizing message context directly", primaryUrl)
                     SummaryInput(
                         content = formattedContent,
                         url = primaryUrl,
+                        imageAttachments = targetImageAttachments,
                     )
                 }
             } else {
-                SummaryInput(content = formattedContent)
+                SummaryInput(
+                    content = formattedContent,
+                    imageAttachments = targetImageAttachments,
+                )
             }
 
         try {
@@ -376,6 +383,23 @@ class SummaryService(
         return acceptedPreceding.toList()
     }
 
+    fun extractImageAttachments(message: Message): List<ChatImageAttachment> {
+        val attachments = runCatching { message.attachments }.getOrElse { emptySet() }
+        if (attachments.isEmpty()) return emptyList()
+        return attachments.mapNotNull { attachment ->
+            val resolvedMimeType = resolveImageMimeType(attachment.contentType, attachment.filename)
+            if (resolvedMimeType != null) {
+                ChatImageAttachment(
+                    url = attachment.url,
+                    mimeType = resolvedMimeType,
+                    filename = attachment.filename,
+                )
+            } else {
+                null
+            }
+        }
+    }
+
     fun isBotSummaryMessage(message: Message): Boolean = noiseFilter.isBotSummaryMessage(message)
 
     fun isNoiseMessage(message: Message): Boolean = noiseFilter.isNoiseMessage(message)
@@ -389,6 +413,38 @@ class SummaryService(
         val MAX_INACTIVITY_GAP = DEFAULT_INACTIVITY_GAP
         const val DEFAULT_MAX_CHARACTER_BUDGET = 20000
         const val FALLBACK_EMPTY_SUMMARY_MESSAGE = "抱歉，AI 無法為此內容生成有效摘要，請嘗試提供更多上下文或選擇其他內容。"
+
+        val SUPPORTED_IMAGE_MIME_TYPES =
+            setOf(
+                "image/jpeg",
+                "image/png",
+                "image/webp",
+                "image/gif",
+            )
+
+        fun resolveImageMimeType(
+            contentType: String?,
+            filename: String? = null,
+        ): String? {
+            val normalizedContentType =
+                contentType
+                    ?.substringBefore(';')
+                    ?.trim()
+                    ?.lowercase()
+
+            if (normalizedContentType != null && normalizedContentType in SUPPORTED_IMAGE_MIME_TYPES) {
+                return normalizedContentType
+            }
+
+            val extension = filename?.substringAfterLast('.', "")?.lowercase().orEmpty()
+            return when (extension) {
+                "jpg", "jpeg" -> "image/jpeg"
+                "png" -> "image/png"
+                "webp" -> "image/webp"
+                "gif" -> "image/gif"
+                else -> null
+            }
+        }
 
         fun resolveMaxHistoryMessages(env: Map<String, String> = System.getenv()): Int =
             env["SUMMARY_MAX_HISTORY_MESSAGES"]

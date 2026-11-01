@@ -361,4 +361,121 @@ class GeminiPromptBuilderTest {
         assertNotNull(sysText)
         assertEquals(GeminiPromptBuilder.SYSTEM_INSTRUCTION, sysText)
     }
+
+    @Test
+    fun `buildRequest includes fileData parts for chat image attachments with direct HTTPS URI and MIME type`() {
+        val image1 =
+            ChatImageAttachment(
+                url = "https://cdn.discordapp.com/attachments/123/456/screenshot.png",
+                mimeType = "image/png",
+                filename = "screenshot.png",
+            )
+        val image2 =
+            ChatImageAttachment(
+                url = "https://cdn.discordapp.com/attachments/123/789/diagram.jpeg",
+                mimeType = "image/jpeg",
+                filename = "diagram.jpeg",
+            )
+        val input =
+            SummaryInput(
+                content = "Please analyze these architecture diagrams",
+                imageAttachments = listOf(image1, image2),
+            )
+        val request = GeminiPromptBuilder.buildRequest(input)
+
+        val userParts = request.contents.first().parts
+        assertEquals(3, userParts.size) // 2 image fileData parts + 1 text part
+
+        val part1 = userParts[0].fileData
+        assertNotNull(part1)
+        assertEquals("https://cdn.discordapp.com/attachments/123/456/screenshot.png", part1.fileUri)
+        assertEquals("image/png", part1.mimeType)
+
+        val part2 = userParts[1].fileData
+        assertNotNull(part2)
+        assertEquals("https://cdn.discordapp.com/attachments/123/789/diagram.jpeg", part2.fileUri)
+        assertEquals("image/jpeg", part2.mimeType)
+
+        val textPart = userParts[2].text
+        assertNotNull(textPart)
+        assertContains(textPart, "Please analyze these architecture diagrams")
+        assertContains(textPart, "Visual Focus Prompting")
+
+        val serialized = json.encodeToString(request)
+        assertContains(serialized, "\"file_uri\":\"https://cdn.discordapp.com/attachments/123/456/screenshot.png\"")
+        assertContains(serialized, "\"mime_type\":\"image/png\"")
+    }
+
+    @Test
+    fun `chat image system instruction specifies Taiwanese Traditional Chinese, zero emojis, and standard 3-section format`() {
+        val instruction = GeminiPromptBuilder.CHAT_IMAGE_SYSTEM_INSTRUCTION
+
+        assertContains(instruction, "台灣繁體中文")
+        assertContains(instruction, "zh-TW")
+        assertContains(instruction, "TL;DR:")
+        assertContains(instruction, "核心重點:")
+        assertContains(instruction, "參與者觀點:")
+        assertContains(instruction, "Emoji")
+        assertContains(instruction, "Visual Focus Prompting")
+
+        assertFalse(EmojiSanitizer.containsEmoji(instruction), "Chat image system instruction should not contain emojis")
+    }
+
+    @Test
+    fun `visual focus prompting instructions direct model to interpret OCR, code, error logs, diagrams, UI states, or photos into TLDR and core points`() {
+        val instruction = GeminiPromptBuilder.CHAT_IMAGE_SYSTEM_INSTRUCTION
+
+        assertContains(instruction, "視覺證據")
+        assertContains(instruction, "OCR")
+        assertContains(instruction, "程式碼")
+        assertContains(instruction, "錯誤")
+        assertContains(instruction, "架構圖")
+        assertContains(instruction, "介面")
+        assertContains(instruction, "照片")
+        assertContains(instruction, "TL;DR")
+        assertContains(instruction, "核心重點")
+    }
+
+    @Test
+    fun `buildSystemInstruction returns chat image system instruction when image attachments are present and videoUri is absent`() {
+        val input =
+            SummaryInput(
+                content = "Error log screenshot",
+                imageAttachments =
+                    listOf(
+                        ChatImageAttachment(
+                            url = "https://cdn.discordapp.com/attachments/1/2/err.webp",
+                            mimeType = "image/webp",
+                        ),
+                    ),
+            )
+        val sysInstruction = GeminiPromptBuilder.buildSystemInstruction(input)
+        assertEquals(GeminiPromptBuilder.CHAT_IMAGE_SYSTEM_INSTRUCTION, sysInstruction)
+    }
+
+    @Test
+    fun `buildUserPrompt formats chat images with Visual Focus Prompting instructions`() {
+        val input =
+            SummaryInput(
+                content = "[alice]: Here is the server stack trace\n[bob]: Checking logs",
+                imageAttachments =
+                    listOf(
+                        ChatImageAttachment(
+                            url = "https://cdn.discordapp.com/attachments/1/2/log.png",
+                            mimeType = "image/png",
+                            filename = "log.png",
+                        ),
+                    ),
+            )
+        val prompt = GeminiPromptBuilder.buildUserPrompt(input)
+
+        assertContains(prompt, "[alice]: Here is the server stack trace")
+        assertContains(prompt, "Visual Focus Prompting")
+        assertContains(prompt, "視覺證據")
+        assertContains(prompt, "OCR")
+        assertContains(prompt, "程式碼")
+        assertContains(prompt, "錯誤")
+        assertContains(prompt, "TL;DR")
+        assertContains(prompt, "核心重點")
+    }
 }

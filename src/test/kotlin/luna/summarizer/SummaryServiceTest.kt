@@ -2127,4 +2127,208 @@ class SummaryServiceTest {
             assertTrue(sentReply.isNotBlank(), "Sent reply must not be empty or blank")
             assertTrue(sentReply.contains("無法為此內容生成有效摘要"))
         }
+
+    private fun createMockAttachment(
+        url: String,
+        contentType: String?,
+        filename: String = "file",
+    ): Attachment {
+        val attachment = mockk<Attachment>()
+        every { attachment.url } returns url
+        every { attachment.contentType } returns contentType
+        every { attachment.filename } returns filename
+        return attachment
+    }
+
+    @Test
+    fun `Summary Reaction on target message with image attachments extracts images and passes to SummaryInput`() =
+        runTest {
+            val summarizer = mockk<GeminiSummarizer>()
+            var capturedInput: SummaryInput? = null
+
+            val imgAttachment1 =
+                createMockAttachment(
+                    url = "https://cdn.discordapp.com/attachments/123/456/photo.png",
+                    contentType = "image/png",
+                    filename = "photo.png",
+                )
+            val imgAttachment2 =
+                createMockAttachment(
+                    url = "https://cdn.discordapp.com/attachments/123/789/diagram.jpg",
+                    contentType = "image/jpeg",
+                    filename = "diagram.jpg",
+                )
+
+            val targetMsg =
+                createMockMessage(
+                    id = 4001L,
+                    username = "alice",
+                    content = "Check out these two screenshots",
+                    attachments = setOf(imgAttachment1, imgAttachment2),
+                )
+
+            val service =
+                SummaryService(
+                    summarizer = summarizer,
+                    replySender = { _, _ -> },
+                )
+
+            coEvery { summarizer.summarize(any<SummaryInput>()) } answers {
+                capturedInput = firstArg()
+                SummaryResult.Success("TL;DR: Summary of images")
+            }
+
+            val user = mockk<User>()
+            every { user.isBot } returns false
+
+            val event = mockk<ReactionAddEvent>()
+            every { event.emoji } returns ReactionEmoji.Unicode("📝")
+            every { event.userId } returns Snowflake(55L)
+            every { event.messageId } returns targetMsg.id
+            coEvery { event.getUserOrNull() } returns user
+            coEvery { event.getMessageOrNull() } returns targetMsg
+
+            service.handleReaction(event)
+
+            val input = capturedInput
+            kotlin.test.assertNotNull(input)
+            assertEquals("Check out these two screenshots", input.content)
+            assertEquals(2, input.imageAttachments.size)
+            assertEquals("https://cdn.discordapp.com/attachments/123/456/photo.png", input.imageAttachments[0].url)
+            assertEquals("image/png", input.imageAttachments[0].mimeType)
+            assertEquals("photo.png", input.imageAttachments[0].filename)
+            assertEquals("https://cdn.discordapp.com/attachments/123/789/diagram.jpg", input.imageAttachments[1].url)
+            assertEquals("image/jpeg", input.imageAttachments[1].mimeType)
+            assertEquals("diagram.jpg", input.imageAttachments[1].filename)
+        }
+
+    @Test
+    fun `Summary Reaction on target message filters out non-image attachments like pdf, zip, txt`() =
+        runTest {
+            val summarizer = mockk<GeminiSummarizer>()
+            var capturedInput: SummaryInput? = null
+
+            val validImage =
+                createMockAttachment(
+                    url = "https://cdn.discordapp.com/attachments/123/111/screen.webp",
+                    contentType = "image/webp",
+                    filename = "screen.webp",
+                )
+            val pdfAttachment =
+                createMockAttachment(
+                    url = "https://cdn.discordapp.com/attachments/123/222/document.pdf",
+                    contentType = "application/pdf",
+                    filename = "document.pdf",
+                )
+            val zipAttachment =
+                createMockAttachment(
+                    url = "https://cdn.discordapp.com/attachments/123/333/archive.zip",
+                    contentType = "application/zip",
+                    filename = "archive.zip",
+                )
+            val textAttachment =
+                createMockAttachment(
+                    url = "https://cdn.discordapp.com/attachments/123/444/log.txt",
+                    contentType = "text/plain",
+                    filename = "log.txt",
+                )
+            val gifImage =
+                createMockAttachment(
+                    url = "https://cdn.discordapp.com/attachments/123/555/animation.gif",
+                    contentType = "image/gif",
+                    filename = "animation.gif",
+                )
+
+            val targetMsg =
+                createMockMessage(
+                    id = 4002L,
+                    username = "bob",
+                    content = "Here are the files and screenshots",
+                    attachments = setOf(validImage, pdfAttachment, zipAttachment, textAttachment, gifImage),
+                )
+
+            val service =
+                SummaryService(
+                    summarizer = summarizer,
+                    replySender = { _, _ -> },
+                )
+
+            coEvery { summarizer.summarize(any<SummaryInput>()) } answers {
+                capturedInput = firstArg()
+                SummaryResult.Success("TL;DR: Summary of mixed attachments")
+            }
+
+            val user = mockk<User>()
+            every { user.isBot } returns false
+
+            val event = mockk<ReactionAddEvent>()
+            every { event.emoji } returns ReactionEmoji.Unicode("📝")
+            every { event.userId } returns Snowflake(55L)
+            every { event.messageId } returns targetMsg.id
+            coEvery { event.getUserOrNull() } returns user
+            coEvery { event.getMessageOrNull() } returns targetMsg
+
+            service.handleReaction(event)
+
+            val input = capturedInput
+            kotlin.test.assertNotNull(input)
+            // Only image/webp and image/gif should be retained
+            assertEquals(2, input.imageAttachments.size)
+            assertEquals("https://cdn.discordapp.com/attachments/123/111/screen.webp", input.imageAttachments[0].url)
+            assertEquals("image/webp", input.imageAttachments[0].mimeType)
+            assertEquals("https://cdn.discordapp.com/attachments/123/555/animation.gif", input.imageAttachments[1].url)
+            assertEquals("image/gif", input.imageAttachments[1].mimeType)
+        }
+
+    @Test
+    fun `Summary Reaction on target message with image attachment and empty text still passes image to SummaryInput`() =
+        runTest {
+            val summarizer = mockk<GeminiSummarizer>()
+            var capturedInput: SummaryInput? = null
+
+            val imgAttachment =
+                createMockAttachment(
+                    url = "https://cdn.discordapp.com/attachments/123/999/isolated.png",
+                    contentType = "image/png",
+                    filename = "isolated.png",
+                )
+
+            val targetMsg =
+                createMockMessage(
+                    id = 4003L,
+                    username = "charlie",
+                    content = "",
+                    attachments = setOf(imgAttachment),
+                )
+
+            val service =
+                SummaryService(
+                    summarizer = summarizer,
+                    replySender = { _, _ -> },
+                )
+
+            coEvery { summarizer.summarize(any<SummaryInput>()) } answers {
+                capturedInput = firstArg()
+                SummaryResult.Success("TL;DR: Visual summary")
+            }
+
+            val user = mockk<User>()
+            every { user.isBot } returns false
+
+            val event = mockk<ReactionAddEvent>()
+            every { event.emoji } returns ReactionEmoji.Unicode("📝")
+            every { event.userId } returns Snowflake(55L)
+            every { event.messageId } returns targetMsg.id
+            coEvery { event.getUserOrNull() } returns user
+            coEvery { event.getMessageOrNull() } returns targetMsg
+
+            service.handleReaction(event)
+
+            coVerify(exactly = 1) { summarizer.summarize(any<SummaryInput>()) }
+            val input = capturedInput
+            kotlin.test.assertNotNull(input)
+            assertEquals(1, input.imageAttachments.size)
+            assertEquals("https://cdn.discordapp.com/attachments/123/999/isolated.png", input.imageAttachments[0].url)
+            assertEquals("image/png", input.imageAttachments[0].mimeType)
+        }
 }
