@@ -76,6 +76,7 @@ class SummaryService(
     val maxHistoryMessages: Int = resolveMaxHistoryMessages(),
     val inactivityGap: Duration = resolveInactivityGap(),
     val maxCharacterBudget: Int = resolveMaxCharacterBudget(),
+    val maxImages: Int = resolveMaxImages(),
     private val noiseFilter: DialogueNoiseFilter = DialogueNoiseFilter(),
     private val historyFetcher: suspend (message: Message, limit: Int) -> List<Message> = { message, limit ->
         message.channel
@@ -186,7 +187,38 @@ class SummaryService(
             }
         val primaryUrl = allMessages.asReversed().firstNotNullOfOrNull { msg -> URL_REGEX.find(msg.content)?.value }
 
-        val messagesWithImages = allMessages.map { msg -> msg to extractImageAttachments(msg) }
+        val targetImages = extractImageAttachments(message)
+        val retainedTargetImages = targetImages.take(maxImages)
+        val remainingCapacity = kotlin.math.max(0, maxImages - retainedTargetImages.size)
+
+        val precedingMessagesWithImages = precedingMessages.map { msg -> msg to extractImageAttachments(msg) }
+        val retainedPrecedingByMessage = mutableMapOf<Snowflake, List<ChatImageAttachment>>()
+        var capacityLeft = remainingCapacity
+
+        for ((msg, images) in precedingMessagesWithImages.asReversed()) {
+            if (capacityLeft <= 0 || images.isEmpty()) {
+                retainedPrecedingByMessage[msg.id] = emptyList()
+                continue
+            }
+            if (images.size <= capacityLeft) {
+                retainedPrecedingByMessage[msg.id] = images
+                capacityLeft -= images.size
+            } else {
+                retainedPrecedingByMessage[msg.id] = images.takeLast(capacityLeft)
+                capacityLeft = 0
+            }
+        }
+
+        val messagesWithImages =
+            allMessages.map { msg ->
+                val retained =
+                    if (msg.id == message.id) {
+                        retainedTargetImages
+                    } else {
+                        retainedPrecedingByMessage[msg.id].orEmpty()
+                    }
+                msg to retained
+            }
         val sliceImageAttachments = messagesWithImages.flatMap { it.second }
 
         val formattedContent =
@@ -276,7 +308,31 @@ class SummaryService(
 
         try {
             logger.info("Executing Gemini summarization for message {}", event.messageId)
-            val result = summarizer.summarize(summaryInput)
+            var result =
+                try {
+                    summarizer.summarize(summaryInput)
+                } catch (e: Exception) {
+                    if (summaryInput.imageAttachments.isNotEmpty()) {
+                        logger.warn(
+                            "Unexpected exception during multimodal summarization for message {}: {}. Retrying with text-only fallback.",
+                            event.messageId,
+                            e.message,
+                        )
+                        summarizer.summarize(summaryInput.copy(imageAttachments = emptyList()))
+                    } else {
+                        throw e
+                    }
+                }
+
+            if (result is SummaryResult.Error && summaryInput.imageAttachments.isNotEmpty()) {
+                logger.warn(
+                    "Multimodal summarization with images failed for message {}: {}. Retrying with text-only fallback.",
+                    event.messageId,
+                    result.message,
+                )
+                result = summarizer.summarize(summaryInput.copy(imageAttachments = emptyList()))
+            }
+
             when (result) {
                 is SummaryResult.Success -> {
                     statusCache[event.messageId] = SummaryStatus.DONE
@@ -489,6 +545,14 @@ class SummaryService(
                 ?.toIntOrNull()
                 ?.takeIf { it > 0 }
                 ?: DEFAULT_MAX_CHARACTER_BUDGET
+
+        const val DEFAULT_MAX_IMAGES = 10
+
+        fun resolveMaxImages(env: Map<String, String> = System.getenv()): Int =
+            env["SUMMARY_MAX_IMAGES"]
+                ?.toIntOrNull()
+                ?.takeIf { it > 0 }
+                ?: DEFAULT_MAX_IMAGES
 
         val URL_REGEX = Regex("""https?://[^\s<>"']+""")
     }

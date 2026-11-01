@@ -2605,4 +2605,243 @@ class SummaryServiceTest {
             assertEquals("https://cdn.discordapp.com/attachments/3/40/preview.jpeg", input.imageAttachments[1].url)
             assertEquals("image/jpeg", input.imageAttachments[1].mimeType)
         }
+
+    @Test
+    fun `resolves configurable maxImages from environment with defaults and overrides`() {
+        assertEquals(10, SummaryService.resolveMaxImages(emptyMap()))
+        assertEquals(5, SummaryService.resolveMaxImages(mapOf("SUMMARY_MAX_IMAGES" to "5")))
+        assertEquals(15, SummaryService.resolveMaxImages(mapOf("SUMMARY_MAX_IMAGES" to "15")))
+        assertEquals(10, SummaryService.resolveMaxImages(mapOf("SUMMARY_MAX_IMAGES" to "0")))
+        assertEquals(10, SummaryService.resolveMaxImages(mapOf("SUMMARY_MAX_IMAGES" to "-5")))
+        assertEquals(10, SummaryService.resolveMaxImages(mapOf("SUMMARY_MAX_IMAGES" to "invalid")))
+    }
+
+    @Test
+    fun `truncates images exceeding maxImages preserving target message images and filling newest preceding images`() =
+        runTest {
+            val summarizer = mockk<GeminiSummarizer>()
+            var capturedInput: SummaryInput? = null
+
+            val baseTime = Instant.parse("2026-10-31T10:00:00Z")
+
+            // Create 12 total images across 4 messages
+            val img1A = createMockAttachment("https://cdn.discordapp.com/1/img1a.png", "image/png", "1a.png")
+            val img1B = createMockAttachment("https://cdn.discordapp.com/1/img1b.png", "image/png", "1b.png")
+            val img1C = createMockAttachment("https://cdn.discordapp.com/1/img1c.png", "image/png", "1c.png")
+
+            val img2A = createMockAttachment("https://cdn.discordapp.com/2/img2a.png", "image/png", "2a.png")
+            val img2B = createMockAttachment("https://cdn.discordapp.com/2/img2b.png", "image/png", "2b.png")
+            val img2C = createMockAttachment("https://cdn.discordapp.com/2/img2c.png", "image/png", "2c.png")
+
+            val img3A = createMockAttachment("https://cdn.discordapp.com/3/img3a.png", "image/png", "3a.png")
+            val img3B = createMockAttachment("https://cdn.discordapp.com/3/img3b.png", "image/png", "3b.png")
+            val img3C = createMockAttachment("https://cdn.discordapp.com/3/img3c.png", "image/png", "3c.png")
+
+            val targetImg1 = createMockAttachment("https://cdn.discordapp.com/t/t1.png", "image/png", "t1.png")
+            val targetImg2 = createMockAttachment("https://cdn.discordapp.com/t/t2.png", "image/png", "t2.png")
+            val targetImg3 = createMockAttachment("https://cdn.discordapp.com/t/t3.png", "image/png", "t3.png")
+
+            val msg1 = createMockMessage(6001L, "alice", "Oldest message with 3 images", timestamp = baseTime, attachments = setOf(img1A, img1B, img1C))
+            val msg2 =
+                createMockMessage(6002L, "bob", "Middle message with 3 images", timestamp = baseTime + 1.minutes, attachments = setOf(img2A, img2B, img2C))
+            val msg3 =
+                createMockMessage(
+                    6003L,
+                    "charlie",
+                    "Newest preceding message with 3 images",
+                    timestamp = baseTime + 2.minutes,
+                    attachments = setOf(img3A, img3B, img3C),
+                )
+            val targetMsg =
+                createMockMessage(
+                    6004L,
+                    "dave",
+                    "Target message with 3 images",
+                    timestamp = baseTime + 3.minutes,
+                    attachments = setOf(targetImg1, targetImg2, targetImg3),
+                )
+
+            // Total 12 images, budget is 7 images:
+            // Target message has 3 images -> all 3 retained.
+            // Remaining capacity = 7 - 3 = 4 images.
+            // msg3 (newest preceding) has 3 images -> all 3 retained (remaining: 1).
+            // msg2 has 3 images -> newest 1 image retained (img2C) (remaining: 0).
+            // msg1 has 3 images -> 0 retained.
+            val service =
+                SummaryService(
+                    summarizer = summarizer,
+                    maxImages = 7,
+                    historyFetcher = { _, _ -> listOf(msg1, msg2, msg3) },
+                    replySender = { _, _ -> },
+                )
+
+            coEvery { summarizer.summarize(any<SummaryInput>()) } answers {
+                capturedInput = firstArg()
+                SummaryResult.Success("TL;DR: Summary of truncated images")
+            }
+
+            val user = mockk<User>()
+            every { user.isBot } returns false
+
+            val event = mockk<ReactionAddEvent>()
+            every { event.emoji } returns ReactionEmoji.Unicode("📝")
+            every { event.userId } returns Snowflake(55L)
+            every { event.messageId } returns targetMsg.id
+            coEvery { event.getUserOrNull() } returns user
+            coEvery { event.getMessageOrNull() } returns targetMsg
+
+            service.handleReaction(event)
+
+            val input = capturedInput
+            kotlin.test.assertNotNull(input)
+
+            // Verify imageAttachments size and chronological ordering:
+            // img2C, img3A, img3B, img3C, targetImg1, targetImg2, targetImg3
+            assertEquals(7, input.imageAttachments.size)
+            assertEquals("https://cdn.discordapp.com/2/img2c.png", input.imageAttachments[0].url)
+            assertEquals("https://cdn.discordapp.com/3/img3a.png", input.imageAttachments[1].url)
+            assertEquals("https://cdn.discordapp.com/3/img3b.png", input.imageAttachments[2].url)
+            assertEquals("https://cdn.discordapp.com/3/img3c.png", input.imageAttachments[3].url)
+            assertEquals("https://cdn.discordapp.com/t/t1.png", input.imageAttachments[4].url)
+            assertEquals("https://cdn.discordapp.com/t/t2.png", input.imageAttachments[5].url)
+            assertEquals("https://cdn.discordapp.com/t/t3.png", input.imageAttachments[6].url)
+
+            // Verify formatted text has markers only for retained images, re-indexed chronologically:
+            val expectedContent =
+                """
+                [alice]: Oldest message with 3 images
+                [bob]: Middle message with 3 images [附帶圖片 1: 2c.png]
+                [charlie]: Newest preceding message with 3 images [附帶圖片 2: 3a.png] [附帶圖片 3: 3b.png] [附帶圖片 4: 3c.png]
+                [dave]: Target message with 3 images [附帶圖片 5: t1.png] [附帶圖片 6: t2.png] [附帶圖片 7: t3.png]
+                """.trimIndent()
+            assertEquals(expectedContent, input.content)
+        }
+
+    @Test
+    fun `truncates images when target message alone exceeds maxImages budget`() =
+        runTest {
+            val summarizer = mockk<GeminiSummarizer>()
+            var capturedInput: SummaryInput? = null
+
+            val baseTime = Instant.parse("2026-10-31T10:00:00Z")
+            val precedingImg = createMockAttachment("https://cdn.discordapp.com/p/prec.png", "image/png", "prec.png")
+            val msg1 = createMockMessage(6101L, "alice", "Preceding message", timestamp = baseTime, attachments = setOf(precedingImg))
+
+            // 12 images on target message
+            val targetAttachments =
+                (1..12).map { i ->
+                    createMockAttachment("https://cdn.discordapp.com/t/$i.png", "image/png", "$i.png")
+                }
+            val targetMsg =
+                createMockMessage(
+                    6102L,
+                    "bob",
+                    "Target with 12 images",
+                    timestamp = baseTime + 1.minutes,
+                    attachments = targetAttachments.toSet(),
+                )
+
+            val service =
+                SummaryService(
+                    summarizer = summarizer,
+                    maxImages = 10,
+                    historyFetcher = { _, _ -> listOf(msg1) },
+                    replySender = { _, _ -> },
+                )
+
+            coEvery { summarizer.summarize(any<SummaryInput>()) } answers {
+                capturedInput = firstArg()
+                SummaryResult.Success("TL;DR: Summary of target images")
+            }
+
+            val user = mockk<User>()
+            every { user.isBot } returns false
+
+            val event = mockk<ReactionAddEvent>()
+            every { event.emoji } returns ReactionEmoji.Unicode("📝")
+            every { event.userId } returns Snowflake(55L)
+            every { event.messageId } returns targetMsg.id
+            coEvery { event.getUserOrNull() } returns user
+            coEvery { event.getMessageOrNull() } returns targetMsg
+
+            service.handleReaction(event)
+
+            val input = capturedInput
+            kotlin.test.assertNotNull(input)
+
+            // Target retains first 10, preceding is omitted
+            assertEquals(10, input.imageAttachments.size)
+            (0 until 10).forEach { i ->
+                assertEquals("https://cdn.discordapp.com/t/${i + 1}.png", input.imageAttachments[i].url)
+            }
+
+            // msg1 has no marker
+            assertFalse(input.content.contains("prec.png"))
+            // targetMsg has markers 1 through 10, but not 11 or 12
+            assertTrue(input.content.contains("[附帶圖片 1: 1.png]"))
+            assertTrue(input.content.contains("[附帶圖片 10: 10.png]"))
+            assertFalse(input.content.contains("11.png"))
+            assertFalse(input.content.contains("12.png"))
+        }
+
+    @Test
+    fun `gracefully falls back to text-only summarization when multimodal summary with images fails`() =
+        runTest {
+            val summarizer = mockk<GeminiSummarizer>()
+            var replyCaptured: String? = null
+            val capturedInputs = mutableListOf<SummaryInput>()
+
+            val img = createMockAttachment("https://cdn.discordapp.com/attachments/1/photo.png", "image/png", "photo.png")
+            val targetMsg =
+                createMockMessage(
+                    id = 6201L,
+                    username = "alice",
+                    content = "Discussion with problematic image attachment",
+                    attachments = setOf(img),
+                )
+
+            val service =
+                SummaryService(
+                    summarizer = summarizer,
+                    replySender = { _, content -> replyCaptured = content },
+                )
+
+            // First call (with images) fails with ApiError
+            coEvery {
+                summarizer.summarize(match<SummaryInput> { it.imageAttachments.isNotEmpty() })
+            } returns SummaryResult.Error.ApiError(400, "Gemini could not download image from CDN")
+
+            // Second call (fallback without images) succeeds
+            coEvery {
+                summarizer.summarize(match<SummaryInput> { it.imageAttachments.isEmpty() })
+            } answers {
+                capturedInputs.add(firstArg())
+                SummaryResult.Success("TL;DR: Graceful text fallback summary succeeded")
+            }
+
+            val user = mockk<User>()
+            every { user.isBot } returns false
+
+            val event = mockk<ReactionAddEvent>()
+            every { event.emoji } returns ReactionEmoji.Unicode("📝")
+            every { event.userId } returns Snowflake(55L)
+            every { event.messageId } returns targetMsg.id
+            coEvery { event.getUserOrNull() } returns user
+            coEvery { event.getMessageOrNull() } returns targetMsg
+
+            service.handleReaction(event)
+
+            // Verify summarizer was called twice: once with images, once without
+            coVerify(exactly = 1) { summarizer.summarize(match<SummaryInput> { it.imageAttachments.isNotEmpty() }) }
+            coVerify(exactly = 1) { summarizer.summarize(match<SummaryInput> { it.imageAttachments.isEmpty() }) }
+
+            // Verify user received fallback summary and statusCache is updated to DONE
+            assertEquals("TL;DR: Graceful text fallback summary succeeded", replyCaptured)
+            assertEquals(SummaryStatus.DONE, service.getStatus(targetMsg.id))
+
+            val fallbackInput = capturedInputs.firstOrNull()
+            kotlin.test.assertNotNull(fallbackInput)
+            assertTrue(fallbackInput.imageAttachments.isEmpty())
+            assertEquals("Discussion with problematic image attachment", fallbackInput.content)
+        }
 }
