@@ -45,6 +45,7 @@ dependencies {
 
     // Serialization & Ktor Client
     implementation(libs.kotlinx.serialization.json)
+    implementation(libs.kotlinx.html.jvm)
     implementation(libs.ktor.client.core)
     implementation(libs.ktor.client.cio)
     implementation(libs.ktor.client.content.negotiation)
