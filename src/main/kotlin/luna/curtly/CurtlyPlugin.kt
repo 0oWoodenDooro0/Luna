@@ -26,8 +26,8 @@ class CurtlyPlugin(
         val rawBaseUrl =
             context.config<String>("curtly.baseUrl")
                 ?: context.config<String>("curtly.baseurl")
+                ?: context.config<String>("BASE_URL")
                 ?: context.config<String>("baseUrl")
-                ?: System.getenv("BASE_URL")
                 ?: "http://localhost:8080/s/"
 
         val baseUrl =

@@ -50,15 +50,28 @@ class PluginLoader(
     /**
      * Initializes all discovered plugins with the provided [context].
      * Discovers plugins via [loadPlugins] if not already loaded.
+     * Skips plugins that are disabled via configuration (e.g. `plugins.<name>.enabled: false` or `plugins.disabled`).
      */
     suspend fun initializePlugins(context: PluginContext) {
         if (!discovered) {
             loadPlugins()
         }
 
+        val enabledPlugins = mutableListOf<LunaPlugin>()
         for (plugin in _plugins) {
+            if (!isPluginEnabled(plugin, context)) {
+                JsonLogger.log(
+                    layer = "PLUGIN",
+                    component = "PluginLoader",
+                    operation = "skipPlugin",
+                    data = mapOf("plugin" to plugin.name, "reason" to "disabled_by_config"),
+                )
+                continue
+            }
+
             try {
                 plugin.initialize(context)
+                enabledPlugins.add(plugin)
                 JsonLogger.log(
                     layer = "PLUGIN",
                     component = "PluginLoader",
@@ -76,6 +89,34 @@ class PluginLoader(
                 throw IllegalStateException("Failed to initialize plugin '${plugin.name}': ${e.message}", e)
             }
         }
+
+        _plugins.clear()
+        _plugins.addAll(enabledPlugins)
+    }
+
+    private fun isPluginEnabled(
+        plugin: LunaPlugin,
+        context: PluginContext,
+    ): Boolean {
+        val specificEnabled =
+            runCatching {
+                context.config<Boolean>("plugins.${plugin.name}.enabled")
+                    ?: context.config<String>("plugins.${plugin.name}.enabled")?.toBooleanStrictOrNull()
+                    ?: context.config<Boolean>("plugins.${plugin.name}")
+                    ?: context.config<String>("plugins.${plugin.name}")?.toBooleanStrictOrNull()
+            }.getOrNull()
+        if (specificEnabled == false) return false
+
+        val disabledList =
+            runCatching {
+                context
+                    .config<String>("plugins.disabled")
+                    ?.split(",")
+                    ?.map { it.trim().lowercase() }
+            }.getOrNull() ?: emptyList()
+        if (plugin.name.lowercase() in disabledList) return false
+
+        return true
     }
 
     /**

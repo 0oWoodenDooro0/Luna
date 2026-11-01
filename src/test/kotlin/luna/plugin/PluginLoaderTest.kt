@@ -5,6 +5,7 @@ import kotlinx.coroutines.test.runTest
 import org.junit.jupiter.api.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 class PluginLoaderTest {
@@ -123,5 +124,59 @@ class PluginLoaderTest {
                     loader.initializePlugins(context)
                 }
             assertTrue(exception.message!!.contains("broken-plugin"))
+        }
+
+    @Test
+    fun `plugin loader skips disabled plugins when configured via plugins dot name dot enabled false`() =
+        runTest {
+            var initialized = false
+            val plugin =
+                object : LunaPlugin {
+                    override val name: String = "optional-plugin"
+
+                    override suspend fun initialize(context: PluginContext) {
+                        initialized = true
+                    }
+                }
+
+            val loader = PluginLoader(plugins = listOf(plugin))
+            val context =
+                DefaultPluginContext(
+                    kord = mockk(relaxed = true),
+                    routing = mockk(relaxed = true),
+                    database = mockk(relaxed = true),
+                    configMap = mapOf("plugins.optional-plugin.enabled" to false),
+                )
+
+            loader.initializePlugins(context)
+            assertFalse(initialized, "Disabled plugin should not be initialized")
+            assertEquals(0, loader.plugins.size, "Disabled plugin should be removed from active plugins")
+        }
+
+    @Test
+    fun `plugin loader skips disabled plugins when listed in plugins dot disabled`() =
+        runTest {
+            var initialized = false
+            val plugin =
+                object : LunaPlugin {
+                    override val name: String = "feature-x"
+
+                    override suspend fun initialize(context: PluginContext) {
+                        initialized = true
+                    }
+                }
+
+            val loader = PluginLoader(plugins = listOf(plugin))
+            val context =
+                DefaultPluginContext(
+                    kord = mockk(relaxed = true),
+                    routing = mockk(relaxed = true),
+                    database = mockk(relaxed = true),
+                    configMap = mapOf("plugins.disabled" to "feature-y, feature-x, feature-z"),
+                )
+
+            loader.initializePlugins(context)
+            assertFalse(initialized, "Plugin listed in plugins.disabled should not be initialized")
+            assertEquals(0, loader.plugins.size)
         }
 }

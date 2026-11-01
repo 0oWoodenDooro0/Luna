@@ -61,13 +61,11 @@ class SummarizerPlugin(
             context.config<String>("GEMINI_API_KEY")
                 ?: context.config<String>("gemini.apiKey")
                 ?: context.config<String>("gemini.api_key")
-                ?: System.getenv("GEMINI_API_KEY")
                 ?: ""
 
         val model =
             context.config<String>("GEMINI_MODEL")?.takeIf { it.isNotBlank() }
                 ?: context.config<String>("gemini.model")?.takeIf { it.isNotBlank() }
-                ?: System.getenv("GEMINI_MODEL")?.takeIf { it.isNotBlank() }
                 ?: GeminiConfig.DEFAULT_MODEL
 
         val baseUrl =
@@ -78,14 +76,12 @@ class SummarizerPlugin(
         val emoji =
             context.config<String>("SUMMARY_EMOJI")?.takeIf { it.isNotBlank() }
                 ?: context.config<String>("summary.emoji")?.takeIf { it.isNotBlank() }
-                ?: System.getenv("SUMMARY_EMOJI")?.takeIf { it.isNotBlank() }
                 ?: SummaryService.DEFAULT_EMOJI
 
         val youtubeApiKey =
             context.config<String>("YOUTUBE_API_KEY")?.takeIf { it.isNotBlank() }
                 ?: context.config<String>("youtube.apiKey")?.takeIf { it.isNotBlank() }
                 ?: context.config<String>("youtube.api_key")?.takeIf { it.isNotBlank() }
-                ?: System.getenv("YOUTUBE_API_KEY")?.takeIf { it.isNotBlank() }
 
         val historyLimit =
             context.config<Int>("SUMMARY_MAX_HISTORY_MESSAGES")?.coerceIn(1, 100)
