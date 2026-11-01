@@ -28,6 +28,7 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.longOrNull
 import kotlinx.serialization.json.put
+import luna.curtly.adapter.curtlyRouting
 import java.net.URLEncoder
 
 @Serializable
@@ -35,6 +36,22 @@ data class UserSession(
     val userId: String,
     val username: String,
 )
+
+fun Routing.curtlyRouting(
+    curtlyService: luna.curtly.engine.CurtlyService,
+    userStorage: UserStorage,
+    baseUrl: String = "http://localhost:8080/s/",
+) {
+    this.curtlyRouting(curtlyService, userStorage, baseUrl)
+}
+
+fun Routing.curtlyRouting(
+    curtlyService: luna.curtly.engine.CurtlyService,
+    authService: AuthService,
+    baseUrl: String = "http://localhost:8080/s/",
+) {
+    this.curtlyRouting(curtlyService, authService, baseUrl)
+}
 
 fun Routing.curtlyRouting(
     curtlyService: CurtlyService,
