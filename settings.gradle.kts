@@ -3,9 +3,8 @@ plugins {
 }
 rootProject.name = "Luna"
 
-include(":libs:socialpeek", ":libs:curtly")
+include(":libs:socialpeek")
 project(":libs:socialpeek").projectDir = file("libs/socialpeek")
-project(":libs:curtly").projectDir = file("libs/curtly")
 
 dependencyResolutionManagement {
     repositoriesMode.set(RepositoriesMode.PREFER_SETTINGS)

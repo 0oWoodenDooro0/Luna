@@ -30,6 +30,53 @@ class UndercoverPlugin(
         undercoverCommand.register(kord)
         revealCommand.register(kord)
 
+        // Attach slash command interaction listener to context.kord
+        try {
+            kord.on<dev.kord.core.event.interaction.ChatInputCommandInteractionCreateEvent> {
+                val commandName = interaction.command.rootName
+                val matchedCommand =
+                    when (commandName) {
+                        undercoverCommand.name -> undercoverCommand
+                        revealCommand.name -> revealCommand
+                        else -> null
+                    }
+                if (matchedCommand != null) {
+                    val userId = interaction.user.id.toString()
+                    val options = interaction.command.options.mapValues { it.value.toString() }
+                    try {
+                        matchedCommand.handle(interaction)
+                        luna.core.JsonLogger.log(
+                            layer = "COMMAND",
+                            component = matchedCommand.javaClass.simpleName,
+                            operation = "handle",
+                            data =
+                                mapOf(
+                                    "userId" to userId,
+                                    "command" to commandName,
+                                    "options" to options,
+                                ),
+                        )
+                    } catch (e: Exception) {
+                        luna.core.JsonLogger.error(
+                            layer = "COMMAND",
+                            component = matchedCommand.javaClass.simpleName,
+                            operation = "handle",
+                            data =
+                                mapOf(
+                                    "userId" to userId,
+                                    "command" to commandName,
+                                    "options" to options,
+                                ),
+                            errorMessage = e.message,
+                        )
+                        throw e
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            logger.warn("Could not attach chat input command interaction listener to Kord: {}", e.message)
+        }
+
         // Attach select menu interaction listener for undercover_vote to context.kord
         try {
             kord.on<SelectMenuInteractionCreateEvent> {
