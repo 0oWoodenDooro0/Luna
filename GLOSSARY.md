@@ -80,3 +80,7 @@ _Avoid_: Picture upload, chat photo, message media
 The multimodal delivery strategy of passing Discord's signed CDN attachment URL directly to Gemini API's `file_data.file_uri`, avoiding server-side binary proxying.
 _Avoid_: Direct URL passing, Discord CDN proxy, raw URL injection
 
+**Webhook Replacement**:
+A Discord message dispatched by Luna via a managed channel webhook masquerading as the original author to display clean tracking-free URLs and rich social media previews after deleting the original message.
+_Avoid_: Masquerade message, proxy message, fake user post
+
