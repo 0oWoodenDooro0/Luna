@@ -1,6 +1,6 @@
 # 🌕 Luna Curtly - 短網址與數據分析系統
 
-Luna 是一款結合 **Discord 機器人** 與 **Ktor Web 控制台** 的現代化短網址服務。基於內部 Monorepo 子模組 [Curtly](file:///libs/curtly) 短網址引擎庫與 [SocialPeek](file:///libs/socialpeek) 社群貼文解析庫開發，支援 **Discord OAuth2 一鍵登入**、短網址個人化管理與多維度點擊數據分析。
+Luna 是一款結合 **Discord 機器人** 與 **Ktor Web 控制台** 的現代化短網址服務。基於插件化短網址引擎 [Curtly](file:///src/main/kotlin/luna/curtly) 與內部 Monorepo 子模組 [SocialPeek](file:///libs/socialpeek) 社群貼文解析庫開發，支援 **Discord OAuth2 一鍵登入**、短網址個人化管理與多維度點擊數據分析。
 
 ---
 

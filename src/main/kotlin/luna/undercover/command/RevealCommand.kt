@@ -42,9 +42,12 @@ class RevealCommand : Command {
 
         UndercoverManager.activeGames.remove(guildId)
 
+        val fullContent = "$voteResultText\n解答揭曉！這次的臥底是：<@${game.spy}> 🕵️‍♂️"
+        val safeContent = if (fullContent.length > 2000) fullContent.take(1997) + "..." else fullContent
+
         val response = interaction.deferPublicResponse()
         response.respond {
-            content = "$voteResultText\n解答揭曉！這次的臥底是：<@${game.spy}> 🕵️‍♂️"
+            content = safeContent
         }
     }
 }

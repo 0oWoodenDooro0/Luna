@@ -45,13 +45,11 @@ dependencies {
 
     // Serialization & Ktor Client
     implementation(libs.kotlinx.serialization.json)
+    implementation(libs.kotlinx.html.jvm)
     implementation(libs.ktor.client.core)
     implementation(libs.ktor.client.cio)
     implementation(libs.ktor.client.content.negotiation)
     implementation(libs.ktor.serialization.kotlinx.json)
-
-    // Curtly URL Shortener Library
-    implementation(project(":libs:curtly"))
 
     // SocialPeek Social Post Resolver Library
     implementation(project(":libs:socialpeek"))
