@@ -91,7 +91,15 @@ tasks.register("installGitHooks") {
                 .directory(projectDir)
                 .start()
                 .waitFor()
+            val preCommit = file(".githooks/pre-commit")
+            if (preCommit.exists() && !preCommit.canExecute()) {
+                preCommit.setExecutable(true)
+            }
             logger.lifecycle("Configured git core.hooksPath to .githooks")
         }
     }
+}
+
+tasks.named("compileKotlin") {
+    dependsOn("installGitHooks")
 }

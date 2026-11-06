@@ -56,6 +56,20 @@ object SummaryTestFixtures {
         return embed
     }
 
+    fun createMockAttachment(
+        url: String,
+        contentType: String?,
+        filename: String = "file",
+        size: Int = 1024,
+    ): Attachment {
+        val attachment = mockk<Attachment>()
+        every { attachment.url } returns url
+        every { attachment.contentType } returns contentType
+        every { attachment.filename } returns filename
+        every { attachment.size } returns size
+        return attachment
+    }
+
     fun createMockReactionEvent(
         targetMessage: Message,
         emoji: ReactionEmoji = ReactionEmoji.Unicode("📝"),
