@@ -15,4 +15,29 @@ data class McpOAuthConfig(
 
     val isAuthEnabled: Boolean
         get() = requireAuth || !clientSecret.isNullOrBlank() || !staticAuthToken.isNullOrBlank()
+
+    fun toServerConfig(
+        port: Int = McpServerConfig.DEFAULT_PORT,
+        dbPath: String = McpServerConfig.DEFAULT_DB_PATH,
+    ): McpServerConfig =
+        McpServerConfig(
+            port = port,
+            dbPath = dbPath,
+            publicBaseUrl = normalizedBaseUrl,
+            clientId = clientId,
+            clientSecret = clientSecret,
+            staticAuthToken = staticAuthToken,
+            requireAuth = requireAuth,
+        )
+
+    companion object {
+        fun fromServerConfig(serverConfig: McpServerConfig): McpOAuthConfig =
+            McpOAuthConfig(
+                publicBaseUrl = serverConfig.publicBaseUrl,
+                clientId = serverConfig.clientId,
+                clientSecret = serverConfig.clientSecret,
+                staticAuthToken = serverConfig.staticAuthToken,
+                requireAuth = serverConfig.requireAuth,
+            )
+    }
 }

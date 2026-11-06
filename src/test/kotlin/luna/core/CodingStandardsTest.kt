@@ -179,11 +179,13 @@ class CodingStandardsTest {
         projectRoot
             .walkTopDown()
             .filter { dir ->
+                val relPath = dir.relativeTo(projectRoot).path
                 dir.isDirectory &&
                     dir.name == "kotlin" &&
                     dir.parentFile?.name == parentDirName &&
-                    !dir.path.contains("${File.separator}build${File.separator}") &&
-                    !dir.path.contains("${File.separator}.")
+                    !relPath.contains("${File.separator}build${File.separator}") &&
+                    !relPath.contains("${File.separator}.") &&
+                    !relPath.startsWith(".")
             }.toList()
 
     private fun findClosingBraceIndex(str: String): Int {
