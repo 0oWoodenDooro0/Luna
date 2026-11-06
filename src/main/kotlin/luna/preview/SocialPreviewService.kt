@@ -73,11 +73,7 @@ object SocialPreviewService {
             logger.debug("Received message: author={}, content={}", author.username, content)
 
             if (content.isBlank()) {
-                logger.warn(
-                    "Received message with empty content from {}. If you sent text, please ensure " +
-                        "'Message Content Intent' is enabled in Discord Developer Portal!",
-                    author.username,
-                )
+                logger.debug("Received message with empty content from {}, skipping preview check", author.username)
                 return@on
             }
 
@@ -89,11 +85,11 @@ object SocialPreviewService {
                     .toList()
             if (urls.isEmpty()) return@on
 
-            logger.info("Detected URLs in message {}: {}", message.id, urls)
+            logger.debug("Detected URLs in message {}: {}", message.id, urls)
 
             for (url in urls) {
                 val canResolve = SocialPeek.canResolveSocial(url)
-                logger.info("Checking URL [{}]: canResolve={}", url, canResolve)
+                logger.debug("Checking URL [{}]: canResolve={}", url, canResolve)
 
                 if (canResolve) {
                     processUrl(url, message, guildId, settingsStorage)
@@ -111,7 +107,7 @@ object SocialPreviewService {
         settingsStorage: PreviewSettingsStorage,
     ) {
         try {
-            logger.info("Resolving URL via SocialPeek: {}", url)
+            logger.debug("Resolving URL via SocialPeek: {}", url)
             val post = SocialPeek.peekOrNull(url)
             if (post == null) {
                 logger.warn("SocialPeek returned null for URL: {}", url)
@@ -120,7 +116,7 @@ object SocialPreviewService {
 
             // Check if this specific platform is disabled in the guild
             if (guildId != null && !settingsStorage.isPlatformEnabled(guildId, post.platform)) {
-                logger.info("Preview for platform {} is disabled in guild {}", post.platform, guildId)
+                logger.debug("Preview for platform {} is disabled in guild {}", post.platform, guildId)
                 return
             }
 
