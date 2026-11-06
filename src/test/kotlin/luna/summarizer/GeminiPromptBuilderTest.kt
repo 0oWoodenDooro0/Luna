@@ -606,4 +606,64 @@ class GeminiPromptBuilderTest {
         assertContains(serialized, "\"file_uri\":\"https://cdn.discordapp.com/attachments/10/20/diag1.png\"")
         assertContains(serialized, "\"file_uri\":\"https://cdn.discordapp.com/attachments/10/30/diag2.jpeg\"")
     }
+
+    @Test
+    fun `formatExpandedDialogue formats sections with distinct labeled headers`() {
+        val earlier = "[alice]: Previous context discussion\n[bob]: Agree with earlier points"
+        val current = "[alice]: Current topic question\n[charlie]: Final consensus"
+
+        val formatted = GeminiPromptBuilder.formatExpandedDialogue(earlier, current)
+
+        val expected =
+            """
+            |[前置歷史背景]
+            |[alice]: Previous context discussion
+            |[bob]: Agree with earlier points
+            |
+            |[當前核心討論]
+            |[alice]: Current topic question
+            |[charlie]: Final consensus
+            """.trimMargin()
+
+        assertEquals(expected, formatted)
+        assertTrue(formatted.startsWith("[前置歷史背景]"))
+        assertContains(formatted, "[當前核心討論]")
+    }
+
+    @Test
+    fun `buildUserPrompt formats distinct labeled sections when earlierContext is present`() {
+        val input =
+            SummaryInput(
+                title = "Team Sync",
+                content = "[alice]: What should we deploy today?\n[bob]: Let's ship ticket 60.",
+                earlierContext = "[alice]: Planning ticket 60 scope\n[charlie]: Lookback and webhook summaries",
+            )
+        val prompt = GeminiPromptBuilder.buildUserPrompt(input)
+
+        assertContains(prompt, "標題：Team Sync")
+        assertContains(prompt, "內文：\n[前置歷史背景]")
+        assertContains(prompt, "[alice]: Planning ticket 60 scope")
+        assertContains(prompt, "[charlie]: Lookback and webhook summaries")
+        assertContains(prompt, "[當前核心討論]")
+        assertContains(prompt, "[alice]: What should we deploy today?")
+        assertContains(prompt, "[bob]: Let's ship ticket 60.")
+    }
+
+    @Test
+    fun `buildUserPrompt with video outline and earlierContext formats distinct sections in creator outline`() {
+        val input =
+            SummaryInput(
+                title = "Video RFC",
+                content = "00:00 Final conclusion",
+                videoUri = "https://www.youtube.com/watch?v=vid123",
+                earlierContext = "00:00 Initial discussion of architecture",
+            )
+        val prompt = GeminiPromptBuilder.buildUserPrompt(input)
+
+        assertContains(prompt, "標題：Video RFC")
+        assertContains(prompt, "創作者說明與大綱：\n[前置歷史背景]")
+        assertContains(prompt, "00:00 Initial discussion of architecture")
+        assertContains(prompt, "[當前核心討論]")
+        assertContains(prompt, "00:00 Final conclusion")
+    }
 }

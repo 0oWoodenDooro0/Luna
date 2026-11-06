@@ -2,7 +2,8 @@
 
 ## Monorepo modules
 
-- `src/main/kotlin/luna/`: Discord bot daemon, including host orchestrator (`plugin/`, `core/`), first-party plugins:
+- `src/main/kotlin/luna/`: Discord bot daemon, including host orchestrator (`plugin/`), first-party plugins:
+  - `core/`: Bot core infrastructure and cross-plugin shared memory state ([`LunaWebhookRegistry`](src/main/kotlin/luna/core/LunaWebhookRegistry.kt)).
   - `summarizer/`: Multi-modal AI summarization pipeline ([`SummaryService`](src/main/kotlin/luna/summarizer/SummaryService.kt), [`GeminiSummarizer`](src/main/kotlin/luna/summarizer/GeminiSummarizer.kt), [`GeminiPromptBuilder`](src/main/kotlin/luna/summarizer/GeminiPromptBuilder.kt), [`ChatImageResolver`](src/main/kotlin/luna/summarizer/ChatImageResolver.kt), [`DialogueNoiseFilter`](src/main/kotlin/luna/summarizer/DialogueNoiseFilter.kt)).
   - `curtly/`, `preview/`, `undercover/`: First-party feature plugins.
 - `libs/socialpeek/`: Multi-platform social media post and video metadata resolver library.
@@ -23,7 +24,7 @@ Single-context repository layout (`GLOSSARY.md` and `docs/adr/`). See `docs/agen
 
 ### Coding standards
 
-Judgement calls for daemon state bounds, transient error eviction, and library boundaries. See `CODING_STANDARDS.md`.
+Judgement calls for daemon state bounds, transient error eviction, and library boundaries. See `CODING_STANDARDS.md`. Mechanical rules (daemon state collections, assertion styles, test naming) are checked deterministically by [`CodingStandardsTest`](src/test/kotlin/luna/core/CodingStandardsTest.kt).
 
 ## Verification
 
@@ -31,6 +32,9 @@ Judgement calls for daemon state bounds, transient error eviction, and library b
   ```bash
   ./gradlew test --tests "luna.summarizer.*"
   ./gradlew test --tests "luna.summarizer.SummaryServiceTest"
+  ./gradlew test --tests "luna.summarizer.SummaryServiceWebhookTest"
+  ./gradlew test --tests "luna.summarizer.SummaryServiceLookbackTest"
+  ./gradlew test --tests "luna.core.CodingStandardsTest"
   ```
-- **Pre-commit / Pre-PR check**: Run `./gradlew lintKotlin test` (or `./gradlew check`) to verify code style and test suite across all modules. The repo uses `org.jmailen.kotlinter` (`lintKotlin`).
+- **Pre-commit / Pre-PR check**: Run `./gradlew lintKotlin test` (or `./gradlew check`) to verify code style and test suite across all modules. Pre-commit hooks in `.githooks/` run this automatically.
 - **CI parity**: Before pushing or marking a PR ready, also run `docker build -t luna:ci-test .` to ensure full parity with CI (`.github/workflows/ci.yml`).
