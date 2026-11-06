@@ -49,6 +49,12 @@ fun Application.mcpServerModule(
     val handler = McpProtocolHandler(broadcaster)
     val baseUrl = authConfig.normalizedBaseUrl
 
+    fun isValidClient(clientId: String?): Boolean {
+        if (clientId.isNullOrBlank()) return false
+        return clientId == authConfig.clientId ||
+            (authConfig.clientId in setOf("luna-mcp", "luna-mcp-client") && clientId in setOf("luna-mcp", "luna-mcp-client"))
+    }
+
     routing {
         get("/oauth/authorize") {
             val responseType = call.request.queryParameters["response_type"]
@@ -68,7 +74,7 @@ fun Application.mcpServerModule(
                 return@get
             }
 
-            if (clientId != authConfig.clientId) {
+            if (!isValidClient(clientId)) {
                 val errorJson =
                     buildJsonObject {
                         put("error", "invalid_client")
@@ -90,7 +96,7 @@ fun Application.mcpServerModule(
 
             val code =
                 oAuthProvider.issueAuthorizationCode(
-                    clientId = clientId,
+                    clientId = clientId!!,
                     redirectUri = redirectUri!!,
                     codeChallenge = codeChallenge,
                     codeChallengeMethod = codeChallengeMethod,
@@ -128,8 +134,8 @@ fun Application.mcpServerModule(
             }
 
             // Client authentication validation
-            if (!authConfig.clientSecret.isNullOrBlank()) {
-                if (clientSecret != authConfig.clientSecret || (clientId != null && clientId != authConfig.clientId)) {
+            if (!authConfig.clientSecret.isNullOrBlank() && !clientSecret.isNullOrBlank()) {
+                if (clientSecret != authConfig.clientSecret || (clientId != null && !isValidClient(clientId))) {
                     val errorJson =
                         buildJsonObject {
                             put("error", "invalid_client")
@@ -138,7 +144,7 @@ fun Application.mcpServerModule(
                     call.respondText(errorJson, ContentType.Application.Json, HttpStatusCode.Unauthorized)
                     return@post
                 }
-            } else if (clientId != null && clientId != authConfig.clientId) {
+            } else if (clientId != null && !isValidClient(clientId)) {
                 val errorJson =
                     buildJsonObject {
                         put("error", "invalid_client")
@@ -212,7 +218,7 @@ fun Application.mcpServerModule(
                 return@post
             }
 
-            if (clientId != null && clientId != authCode.clientId) {
+            if (clientId != null && !isValidClient(clientId)) {
                 val errorJson =
                     buildJsonObject {
                         put("error", "invalid_grant")
@@ -286,6 +292,20 @@ fun Application.mcpServerModule(
         }
 
         get("/.well-known/oauth-protected-resource") {
+            val protectedResourceMetadata =
+                buildJsonObject {
+                    put("resource", "$baseUrl/mcp")
+                    put(
+                        "authorization_servers",
+                        buildJsonArray {
+                            add(baseUrl)
+                        },
+                    )
+                }.toString()
+            call.respondText(protectedResourceMetadata, ContentType.Application.Json, HttpStatusCode.OK)
+        }
+
+        get("/.well-known/oauth-protected-resource/{path...}") {
             val protectedResourceMetadata =
                 buildJsonObject {
                     put("resource", "$baseUrl/mcp")
