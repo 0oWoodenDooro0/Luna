@@ -331,15 +331,6 @@ object SocialPreviewService {
         return true
     }
 
-    internal suspend fun sendWebhookReplacement(
-        kord: Kord,
-        message: Message,
-        post: PeekPost,
-        targetUrl: String,
-        content: String,
-        mediaImageUrls: List<String>,
-    ): Boolean = executeWebhookReplacement(kord, message, post, targetUrl, content, mediaImageUrls)
-
     internal fun clearWebhookCache() {
         webhookCache.clear()
     }

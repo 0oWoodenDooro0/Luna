@@ -33,7 +33,16 @@ interface WebhookRegistry {
  * without making Discord REST API calls.
  */
 object LunaWebhookRegistry : WebhookRegistry {
-    private val webhookIds = ConcurrentHashMap.newKeySet<Snowflake>()
+    const val MAX_REGISTRY_ENTRIES = 2000
+
+    private val webhookIds: MutableSet<Snowflake> =
+        Collections.synchronizedSet(
+            Collections.newSetFromMap(
+                object : LinkedHashMap<Snowflake, Boolean>(MAX_REGISTRY_ENTRIES, 0.75f, true) {
+                    override fun removeEldestEntry(eldest: MutableMap.MutableEntry<Snowflake, Boolean>?): Boolean = size > MAX_REGISTRY_ENTRIES
+                },
+            ),
+        )
 
     override fun register(webhookId: Snowflake) {
         webhookIds.add(webhookId)

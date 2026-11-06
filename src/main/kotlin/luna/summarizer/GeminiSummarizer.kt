@@ -403,7 +403,7 @@ class GeminiSummarizer(
                                     modelContent = candidateContent ?: GeminiContent(role = "model", parts = parts),
                                     toolName = functionCall.name,
                                     toolResponseContent = toolOutput,
-                                    tools = activeTools,
+                                    tools = null,
                                 )
                             }
                         } else {

@@ -907,7 +907,7 @@ class SummaryService(
         fun resolveMaxLookbackMessages(env: Map<String, String> = System.getenv()): Int =
             env["SUMMARY_MAX_LOOKBACK_MESSAGES"]
                 ?.toIntOrNull()
-                ?.coerceIn(1, 50)
+                ?.coerceIn(1, DEFAULT_MAX_LOOKBACK_MESSAGES)
                 ?: DEFAULT_MAX_LOOKBACK_MESSAGES
 
         fun resolveMaxImages(env: Map<String, String> = System.getenv()): Int =

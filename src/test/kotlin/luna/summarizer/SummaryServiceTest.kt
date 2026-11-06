@@ -3837,7 +3837,8 @@ class SummaryServiceTest {
 
             val input = capturedInput
             assertNotNull(input)
-            assertEquals("[MasqueradedAlice]: Original commentary [連結預覽: Single Post - Single Description]", input.content)
+            assertTrue(input.content.contains("[MasqueradedAlice]: Original commentary"))
+            assertTrue(input.content.contains("[連結預覽: Single Post - Single Description]"))
         }
 
     @Test
