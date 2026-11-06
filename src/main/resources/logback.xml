@@ -17,7 +17,7 @@
         </encoder>
     </appender>
 
-    <root level="INFO">
+    <root level="${LOG_LEVEL:-INFO}">
         <appender-ref ref="STDOUT" />
         <appender-ref ref="JSON_FILE" />
     </root>
