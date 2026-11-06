@@ -52,23 +52,61 @@ Luna 是一款基於 Kotlin、Kord 與 Ktor 開發的現代化 Discord 機器人
 
 ## 🛠️ 環境變數設定 (Environment Variables)
 
-啟動 Luna 之前，請設定以下環境變數（或於專案根目錄 `.env` / `application.yml` 中配置）：
+Luna 與獨立運行的 MCP 伺服器支援分層組態配置（優先順序：`application.yml` 預留位置 > 系統環境變數 > 根目錄 `.env` 檔案）。所有敏感憑證（如 Token、Secret、API Key）在系統啟動日誌中皆會自動遮蔽為 `******`。
 
-| 環境變數 | 說明 | 預設值 / 範例 |
-| :--- | :--- | :--- |
-| `DISCORD_TOKEN` | Discord 機器人 Token (**必填**) | `MTEyM...` |
-| `DISCORD_CLIENT_ID` | Discord Application ID (OAuth2 登入用，**必填**) | `123456789012345678` |
-| `DISCORD_CLIENT_SECRET` | Discord Client Secret (OAuth2 登入用，**必填**) | `xxxxxx` |
-| `DISCORD_REDIRECT_URI` | OAuth2 重導向網址 | `http://localhost:8080/api/auth/discord/callback` |
-| `BASE_URL` | 短網址基底網域 | `http://localhost:8080/s/` |
-| `PORT` | Web 伺服器通訊埠 | `8080` |
-| `GEMINI_API_KEY` | Google Gemini API 金鑰 (用於 AI 摘要) | `AIzaSy...` |
-| `GEMINI_MODEL` | Gemini 模型名稱 | `gemini-3.5-flash-lite` |
-| `YOUTUBE_API_KEY` | YouTube Data API v3 金鑰 (用於長度、留言與描述) | `AIzaSy...` (若未設定則平滑降級) |
-| `SUMMARY_EMOJI` | 觸發 AI 摘要的 Emoji | `📝` |
-| `SUMMARY_MAX_HISTORY_MESSAGES` | AI 摘要回溯訊息數上限 (1-100) | `50` |
-| `SUMMARY_INACTIVITY_GAP_MINUTES` | AI 摘要歷史回溯閒置中斷時間 (分鐘) | `15` |
-| `SUMMARY_MAX_CHARACTER_BUDGET` | AI 摘要歷史訊息累計字元上限 | `20000` |
+啟動前請參考 [`.env.example`](file:///home/user/IdeaProjects/Luna/.env.example) 於專案根目錄建立 `.env` 檔案。以下為完整五大邏輯分層變數目錄：
+
+### 1. Luna Host 核心與認證 (Core Host)
+
+| 環境變數 | 狀態 | 預設值 | 說明與邊界限制 |
+| :--- | :---: | :--- | :--- |
+| `DISCORD_TOKEN` | **必填** | *(無)* | Discord 機器人 Token（由 Discord Developer Portal 取得）。啟動日誌中自動遮蔽。 |
+| `DISCORD_CLIENT_ID` | **必填** | *(無)* | Discord Application / Client ID（OAuth2 登入用）。支援別名 `DISCORD_APP_ID`。 |
+| `DISCORD_CLIENT_SECRET` | **必填** | *(無)* | Discord OAuth2 Client Secret（Web 控制台授權換證用）。啟動日誌中自動遮蔽。 |
+| `DISCORD_REDIRECT_URI` | 選填 | `http://localhost:8080/api/auth/discord/callback` | OAuth2 重導向回呼網址。若未提供則依 `BASE_URL` 自動推導。需與 Developer Portal 設定一致。 |
+| `PORT` | 選填 | `8080` | Web 控制台與 HTTP 伺服器監聽通訊埠。有效範圍整數 `1-65535`，超出時快速失敗。 |
+
+### 2. Curtly 短網址服務與 Web 控制台 (Curtly URL Shortener)
+
+| 環境變數 | 狀態 | 預設值 | 說明與邊界限制 |
+| :--- | :---: | :--- | :--- |
+| `BASE_URL` | 選填 | `http://localhost:8080/s/` | 短網址對外公開基底網域前綴（如 `https://yourdomain.com/s/`）。亦支援雙命名空間 `curtly.baseUrl` 或 `PLUGINS_CURTLY_BASE_URL`。 |
+
+### 3. AI 摘要與多模態管線 (Summarizer & Multimodal Pipeline)
+
+| 環境變數 | 狀態 | 預設值 | 說明與邊界限制 |
+| :--- | :---: | :--- | :--- |
+| `GEMINI_API_KEY` | 選填 | *(無)* | Google Gemini API 金鑰（由 Google AI Studio 取得）。若未設定則停用 AI 摘要。啟動日誌中自動遮蔽。 |
+| `GEMINI_MODEL` | 選填 | `gemini-3.5-flash-lite` | Google Gemini 模型名稱。 |
+| `YOUTUBE_API_KEY` | 選填 | *(無)* | YouTube Data API v3 金鑰（用於抓取影片時長、章節與評論）。未設定時自動平滑降級為 oEmbed 模式。啟動日誌中自動遮蔽。 |
+| `SUMMARY_EMOJI` | 選填 | `📝` | 觸發 AI 摘要工作流程的 Discord Reaction 表情符號。 |
+| `SUMMARY_MAX_HISTORY_MESSAGES` | 選填 | `50` | 雙邊界歷史回溯訊息數上限。有效範圍整數 `1-100`（對齊 Discord 單頁 REST API 限制）。 |
+| `SUMMARY_INACTIVITY_GAP_MINUTES` | 選填 | `15` | 歷史回溯話題閒置中斷時間門檻（分鐘，需大於 0）。超過此間隔視為新話題起點停止回溯。 |
+| `SUMMARY_MAX_CHARACTER_BUDGET` | 選填 | `20000` | 歷史對話累計字元上限保護（需大於 0），防止 Prompt 膨脹或惡意洗版。 |
+| `SUMMARY_MAX_LOOKBACK_MESSAGES` | 選填 | `20` | 即時上下文回溯訊息數量上限。有效範圍整數 `1-20`。 |
+| `SUMMARY_MAX_IMAGES` | 選填 | `10` | 聊天圖片多模態理解擷取圖片數上限（需大於 0）。超出上限時優先選取切片內最新圖片。 |
+
+### 4. 外掛生命週期管理 (Plugin Lifecycle & Management)
+
+| 環境變數 | 狀態 | 預設值 | 說明與邊界限制 |
+| :--- | :---: | :--- | :--- |
+| `PLUGINS_DISABLED` | 選填 | *(無)* | 整批停用的外掛模組清單，以逗號分隔（如 `undercover,curtly`，不區分大小寫）。 |
+| `PLUGINS_CURTLY_ENABLED` | 選填 | `true` | Curtly 短網址與控制台外掛獨立開關（設為 `false` 停用）。 |
+| `PLUGINS_SOCIAL_PREVIEW_ENABLED` | 選填 | `true` | Social Preview 社群貼文解析外掛獨立開關（設為 `false` 停用）。 |
+| `PLUGINS_SUMMARIZER_ENABLED` | 選填 | `true` | Summarizer AI 摘要外掛獨立開關（設為 `false` 停用）。 |
+| `PLUGINS_UNDERCOVER_ENABLED` | 選填 | `true` | Undercover 誰是臥底文字派對遊戲外掛獨立開關（設為 `false` 停用）。 |
+
+### 5. 獨立 MCP 伺服器 (Decoupled MCP Server - `:mcp-server`)
+
+| 環境變數 | 狀態 | 預設值 | 說明與邊界限制 |
+| :--- | :---: | :--- | :--- |
+| `MCP_PORT` | 選填 | `8081` | MCP HTTP / SSE 伺服器通訊埠。有效範圍整數 `1-65535`，超出時快速失敗。 |
+| `MCP_DB_PATH` | 選填 | `./data/urls.db` | MCP 伺服器存取之 SQLite 資料庫檔案路徑（與 Curtly 共享）。在 Docker 中為 `/app/data/urls.db`。 |
+| `MCP_PUBLIC_BASE_URL` | 選填 | `https://woodendoor.website` | MCP 伺服器對外公開基底網址，用於 OAuth 2.0 端點探索與客戶端重導向。 |
+| `MCP_OAUTH_CLIENT_ID` | 選填 | `luna-mcp-client` | MCP OAuth 2.0 Client ID。Token 交換時必須相符。 |
+| `MCP_OAUTH_CLIENT_SECRET` | 選填 | *(無)* | MCP OAuth 2.0 Client Secret。機密客戶端驗證金鑰（支援 PKCE 流程）。啟動日誌中自動遮蔽。 |
+| `MCP_AUTH_TOKEN` | 選填 | *(無)* | 靜態 Bearer 認證權杖。提供時可跳過 OAuth2 直接以 Bearer Header 呼叫。啟動日誌中自動遮蔽。 |
+| `MCP_REQUIRE_AUTH` | 選填 | `false` | 是否強制要求 MCP 端點身份驗證。若為 `true`，必須提供 Client Secret 或 Bearer Token 其中之一。 |
 
 ---
 
@@ -95,21 +133,39 @@ cp .env.example .env
 ```
 編輯 `.env` 並填入您的 Discord Token 等設定：
 ```env
+# 核心必填憑證 (Section 1)
 DISCORD_TOKEN=你的_DISCORD_TOKEN
 DISCORD_CLIENT_ID=你的_DISCORD_CLIENT_ID
 DISCORD_CLIENT_SECRET=你的_DISCORD_CLIENT_SECRET
+
+# 基礎網路與回呼設定
 DISCORD_REDIRECT_URI=http://localhost:8080/api/auth/discord/callback
 BASE_URL=http://localhost:8080/s/
 PORT=8080
+
+# AI 摘要金鑰 (Section 3，選填)
 GEMINI_API_KEY=你的_GEMINI_API_KEY
 YOUTUBE_API_KEY=你的_YOUTUBE_API_KEY
+
+# 獨立 MCP 伺服器 (Section 5，選填)
+MCP_PORT=8081
+MCP_DB_PATH=./data/urls.db
+MCP_PUBLIC_BASE_URL=https://woodendoor.website
+MCP_OAUTH_CLIENT_ID=luna-mcp-client
 ```
 
 ---
 
 ### 方法 A：使用 Docker Compose 啟動（推薦）
 
-專案內建 [`docker-compose.yml`](file:///home/user/IdeaProjects/Luna/docker-compose.yml)，能自動讀取 `.env` 並掛載 `./data` 磁區保存 SQLite 資料庫與日誌。
+專案內建 [`docker-compose.yml`](file:///home/user/IdeaProjects/Luna/docker-compose.yml)，透過單一專案根目錄 [`.env`](file:///home/user/IdeaProjects/Luna/.env.example) 統一傳遞參數給主機器人與獨立 MCP 伺服器雙容器服務，並自動掛載 `./data` 磁區以持久保存 SQLite 資料庫與日誌：
+
+- **雙容器服務架構 (Dual Services)**：
+  - `luna` (`luna-bot`)：Luna 主機器人與 Web 服務容器。讀取 Section 1–4 變數（Discord 認證、Web 埠、Gemini / YouTube 金鑰、外掛開關），並將 HTTP 伺服器埠映射至主機 `${PORT:-8080}:8080`。
+  - `mcp-server` (`luna-mcp-server`)：獨立運行的 Model Context Protocol 伺服器容器。讀取 Section 5 變數（`MCP_PORT`、`MCP_DB_PATH`、`MCP_PUBLIC_BASE_URL`、`MCP_OAUTH_CLIENT_ID`、`MCP_AUTH_TOKEN` 等），並將 MCP HTTP/SSE 埠映射至主機 `${MCP_PORT:-8081}:8081`。容器宣告 `depends_on: [luna]` 依賴主服務。
+- **統一環境變數傳遞 (.env Parameter Passing)**：
+  - 兩個容器皆宣告 `env_file: - .env`，由專案根目錄 `.env` 統一注入環境變數，實現單一設定檔同時管理主機與 MCP 伺服器，無需維護多份組態。
+  - 兩個容器皆掛載 `./data:/app/data`，共享同一 SQLite 資料庫（`./data/urls.db`），確保 Curtly 短網址數據與 MCP 工具查詢資料完全同步且在重啟後持續保留。
 
 #### 1. 一鍵啟動
 ```bash
@@ -119,7 +175,14 @@ docker compose up -d
 #### 2. 常用維護指令
 - **檢視即時日誌**：
   ```bash
+  # 檢視所有服務即時日誌
   docker compose logs -f
+
+  # 僅檢視 Luna 主機器人日誌
+  docker compose logs -f luna
+
+  # 僅檢視獨立 MCP 伺服器日誌
+  docker compose logs -f mcp-server
   ```
 - **重新啟動服務**：
   ```bash
@@ -282,11 +345,19 @@ Luna 採用 Gradle 多專案 Monorepo 架構，整合核心應用程式、外掛
    - **功能**：支援 Threads、Bilibili、Reddit、YouTube、Facebook、X (Twitter)、Instagram 與 Generic Web 解析。
    - **發布**：支援獨立發布 MavenPublication (`socialpeek`)。
 
-3. **集中式版本目錄 (Version Catalog)**
+3. **獨立 MCP 伺服器模組 (`:mcp-server`)**
+   - **用途**：獨立運行的 Model Context Protocol (MCP) 伺服器，對外提供 AI Agent 短網址操作工具與數據查詢。
+   - **進入點**：`luna.mcp.server.McpServerMainKt`。
+   - **架構**：
+     - 支援 Streamable HTTP/SSE 傳輸協議與 MCP 標準工具端點。
+     - 整合 OAuth 2.0 PKCE 授權與靜態 Bearer Token 雙軌身分驗證。
+     - 獨立讀取環境變數與 `.env` 檔案，透過 SQLite 直接存取 Curtly 短網址資料庫。
+
+4. **集中式版本目錄 (Version Catalog)**
    - **位置**：`gradle/libs.versions.toml`。
    - **功能**：統一管理根專案與所有模組之依賴套件版本與 Gradle 外掛。
 
-### 📂 目錄結構
+### 📁 目錄結構
 
 ```text
 Luna/
@@ -301,6 +372,9 @@ Luna/
 │       ├── src/             # 模組原始碼與單元測試 (75 tests)
 │       ├── build.gradle.kts # 模組構建與 Maven 發布設定
 │       └── README.md        # SocialPeek 模組說明文件
+├── mcp-server/              # 獨立 MCP 伺服器模組 (:mcp-server)
+│   ├── src/                 # MCP 伺服器原始碼、OAuth 與工具測試
+│   └── build.gradle.kts     # 模組構建與應用程式打包設定
 ├── src/main/kotlin/luna/
 │   ├── core/                # Luna Host 基礎設施 (Main, Config, Database, JsonLogger, UserStorage)
 │   ├── plugin/              # 外掛系統核心 (LunaPlugin, PluginContext, PluginLoader)
