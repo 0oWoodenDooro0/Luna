@@ -74,7 +74,13 @@ class LunaHostTest {
             val loader = PluginLoader(plugins = listOf(testPlugin))
             val host =
                 LunaHost(
-                    customConfig = mapOf("PORT" to 0, "DISCORD_TOKEN" to "dummy_token"),
+                    customConfig =
+                        mapOf(
+                            "PORT" to 8080,
+                            "DISCORD_TOKEN" to "dummy_token",
+                            "DISCORD_CLIENT_ID" to "dummy_client_id",
+                            "DISCORD_CLIENT_SECRET" to "dummy_client_secret",
+                        ),
                     customDatabase = testDb,
                     pluginLoader = loader,
                     kordFactory = { mockKord },
