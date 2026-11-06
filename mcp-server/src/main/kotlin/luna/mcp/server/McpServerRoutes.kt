@@ -49,11 +49,7 @@ fun Application.mcpServerModule(
     val handler = McpProtocolHandler(broadcaster)
     val baseUrl = authConfig.normalizedBaseUrl
 
-    fun isValidClient(clientId: String?): Boolean {
-        if (clientId.isNullOrBlank()) return false
-        return clientId == authConfig.clientId ||
-            (authConfig.clientId in setOf("luna-mcp", "luna-mcp-client") && clientId in setOf("luna-mcp", "luna-mcp-client"))
-    }
+    fun isValidClient(clientId: String?): Boolean = !clientId.isNullOrBlank() && clientId == authConfig.clientId
 
     routing {
         get("/oauth/authorize") {
