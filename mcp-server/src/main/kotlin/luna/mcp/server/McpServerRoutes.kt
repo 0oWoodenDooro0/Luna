@@ -2,6 +2,7 @@ package luna.mcp.server
 
 import io.ktor.http.ContentType
 import io.ktor.http.HttpHeaders
+import io.ktor.http.HttpMethod
 import io.ktor.http.HttpStatusCode
 import io.ktor.serialization.kotlinx.json.json
 import io.ktor.server.application.Application
@@ -9,17 +10,21 @@ import io.ktor.server.application.ApplicationCall
 import io.ktor.server.application.ApplicationCallPipeline
 import io.ktor.server.application.install
 import io.ktor.server.plugins.contentnegotiation.ContentNegotiation
+import io.ktor.server.request.httpMethod
 import io.ktor.server.request.path
 import io.ktor.server.request.receiveParameters
 import io.ktor.server.request.receiveText
 import io.ktor.server.response.respond
 import io.ktor.server.response.respondRedirect
 import io.ktor.server.response.respondText
+import io.ktor.server.routing.delete
 import io.ktor.server.routing.get
+import io.ktor.server.routing.head
 import io.ktor.server.routing.post
 import io.ktor.server.routing.route
 import io.ktor.server.routing.routing
 import io.ktor.server.sse.SSE
+import io.ktor.server.sse.ServerSSESession
 import io.ktor.server.sse.sse
 import io.ktor.sse.ServerSentEvent
 import kotlinx.coroutines.channels.Channel
@@ -332,6 +337,11 @@ fun Application.mcpServerModule(
         route("/mcp") {
             intercept(ApplicationCallPipeline.Plugins) {
                 val call = this.context
+                if (call.request.httpMethod == HttpMethod.Options) {
+                    call.respond(HttpStatusCode.OK)
+                    finish()
+                    return@intercept
+                }
                 if (call.request.path().startsWith("/mcp") && !isRequestAuthorized(call)) {
                     call.response.headers.append(HttpHeaders.WWWAuthenticate, """Bearer error="invalid_token"""")
                     val errorJson =
@@ -344,23 +354,35 @@ fun Application.mcpServerModule(
                 }
             }
 
-            sse("/sse") {
+            suspend fun handleSseSession(session: ServerSSESession) {
                 val sessionId = UUID.randomUUID().toString()
                 val channel = Channel<String>(capacity = 64)
                 sessionManager.registerSession(sessionId, channel)
                 try {
-                    send(ServerSentEvent(data = "/mcp/messages?sessionId=$sessionId", event = "endpoint"))
+                    session.send(ServerSentEvent(data = "/mcp/messages?sessionId=$sessionId", event = "endpoint"))
                     for (message in channel) {
-                        send(ServerSentEvent(data = message, event = "message"))
+                        session.send(ServerSentEvent(data = message, event = "message"))
                     }
                 } finally {
                     sessionManager.removeSession(sessionId)
                 }
             }
 
-            post("/messages") {
-                val sessionId = call.request.queryParameters["sessionId"]
+            sse("/sse") {
+                handleSseSession(this)
+            }
+
+            sse {
+                handleSseSession(this)
+            }
+
+            suspend fun handleMessage(call: ApplicationCall) {
+                val sessionId = call.request.queryParameters["sessionId"] ?: call.request.headers["Mcp-Session-Id"]
                 val requestBody = call.receiveText()
+                if (requestBody.isBlank()) {
+                    call.respond(HttpStatusCode.NoContent)
+                    return
+                }
                 val responseString = handler.handle(requestBody)
 
                 if (responseString == null) {
@@ -371,6 +393,34 @@ fun Application.mcpServerModule(
                     }
                     call.respondText(responseString, ContentType.Application.Json, HttpStatusCode.OK)
                 }
+            }
+
+            post("/sse") {
+                handleMessage(call)
+            }
+
+            post("/messages") {
+                handleMessage(call)
+            }
+
+            post {
+                handleMessage(call)
+            }
+
+            head("/sse") {
+                call.respond(HttpStatusCode.OK)
+            }
+
+            head {
+                call.respond(HttpStatusCode.OK)
+            }
+
+            delete("/sse") {
+                call.respond(HttpStatusCode.OK)
+            }
+
+            delete {
+                call.respond(HttpStatusCode.OK)
             }
         }
     }

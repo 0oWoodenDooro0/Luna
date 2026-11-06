@@ -69,6 +69,10 @@ class McpProtocolHandler(
                 null
             }
 
+            "ping" -> {
+                JsonRpcResponse(id = request.id, result = buildJsonObject {})
+            }
+
             "tools/list" -> {
                 handleToolsList(request)
             }
@@ -78,10 +82,14 @@ class McpProtocolHandler(
             }
 
             else -> {
-                JsonRpcResponse(
-                    id = request.id,
-                    error = JsonRpcError(code = -32601, message = "Method not found: ${request.method}"),
-                )
+                if (request.id == null) {
+                    null
+                } else {
+                    JsonRpcResponse(
+                        id = request.id,
+                        error = JsonRpcError(code = -32601, message = "Method not found: ${request.method}"),
+                    )
+                }
             }
         }
 

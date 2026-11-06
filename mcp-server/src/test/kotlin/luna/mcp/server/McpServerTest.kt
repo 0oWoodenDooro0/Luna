@@ -6,6 +6,7 @@ import io.ktor.client.engine.mock.respond
 import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.client.plugins.sse.sse
 import io.ktor.client.request.get
+import io.ktor.client.request.head
 import io.ktor.client.request.post
 import io.ktor.client.request.setBody
 import io.ktor.client.statement.bodyAsText
@@ -397,5 +398,70 @@ class McpServerTest {
             val textJson = Json.parseToJsonElement(text).jsonObject
             assertEquals("no_channels_registered", textJson["status"]?.jsonPrimitive?.content)
             assertEquals(0, textJson["delivered_channels"]?.jsonPrimitive?.content?.toInt())
+        }
+
+    @Test
+    fun `POST mcp sse handles JSON-RPC initialize request directly`() =
+        testApplication {
+            val mockHttpClient = HttpClient(MockEngine { respond("{}", HttpStatusCode.NoContent) })
+            val broadcaster = DiscordWebhookBroadcaster(repository, mockHttpClient)
+            application {
+                mcpServerModule(broadcaster)
+            }
+
+            val request =
+                """{"jsonrpc":"2.0","id":10,"method":"initialize","params":{"protocolVersion":"2024-11-05"}}"""
+            val response =
+                client.post("/mcp/sse") {
+                    contentType(ContentType.Application.Json)
+                    setBody(request)
+                }
+
+            assertEquals(HttpStatusCode.OK, response.status)
+            val jsonResponse = Json.parseToJsonElement(response.bodyAsText()).jsonObject
+            assertEquals("2.0", jsonResponse["jsonrpc"]?.jsonPrimitive?.content)
+            assertEquals(10, jsonResponse["id"]?.jsonPrimitive?.content?.toInt())
+            val result = jsonResponse["result"]?.jsonObject
+            assertNotNull(result)
+            assertEquals("2024-11-05", result["protocolVersion"]?.jsonPrimitive?.content)
+        }
+
+    @Test
+    fun `POST mcp handles ping request`() =
+        testApplication {
+            val mockHttpClient = HttpClient(MockEngine { respond("{}", HttpStatusCode.NoContent) })
+            val broadcaster = DiscordWebhookBroadcaster(repository, mockHttpClient)
+            application {
+                mcpServerModule(broadcaster)
+            }
+
+            val request = """{"jsonrpc":"2.0","id":11,"method":"ping"}"""
+            val response =
+                client.post("/mcp") {
+                    contentType(ContentType.Application.Json)
+                    setBody(request)
+                }
+
+            assertEquals(HttpStatusCode.OK, response.status)
+            val jsonResponse = Json.parseToJsonElement(response.bodyAsText()).jsonObject
+            assertEquals("2.0", jsonResponse["jsonrpc"]?.jsonPrimitive?.content)
+            assertEquals(11, jsonResponse["id"]?.jsonPrimitive?.content?.toInt())
+            assertNotNull(jsonResponse["result"])
+        }
+
+    @Test
+    fun `HEAD mcp and HEAD mcp sse return 200 OK`() =
+        testApplication {
+            val mockHttpClient = HttpClient(MockEngine { respond("{}", HttpStatusCode.NoContent) })
+            val broadcaster = DiscordWebhookBroadcaster(repository, mockHttpClient)
+            application {
+                mcpServerModule(broadcaster)
+            }
+
+            val headSse = client.head("/mcp/sse")
+            assertEquals(HttpStatusCode.OK, headSse.status)
+
+            val headRoot = client.head("/mcp")
+            assertEquals(HttpStatusCode.OK, headRoot.status)
         }
 }
