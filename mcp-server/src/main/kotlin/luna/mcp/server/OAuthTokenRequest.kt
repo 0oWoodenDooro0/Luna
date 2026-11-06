@@ -10,4 +10,5 @@ data class OAuthTokenRequest(
     val clientId: String?,
     val clientSecret: String?,
     val codeVerifier: String?,
+    val refreshToken: String? = null,
 )

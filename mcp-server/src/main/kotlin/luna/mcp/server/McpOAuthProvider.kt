@@ -17,6 +17,7 @@ data class AuthorizationCode(
 
 data class AccessToken(
     val token: String,
+    val refreshToken: String,
     val clientId: String,
     val expiresAt: Long,
 )
@@ -37,6 +38,11 @@ class McpOAuthProvider(
     private val accessTokens: MutableMap<String, AccessToken> =
         object : LinkedHashMap<String, AccessToken>(maxTokens, 0.75f, true) {
             override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, AccessToken>?): Boolean = size > maxTokens
+        }
+
+    private val refreshTokens: MutableMap<String, String> =
+        object : LinkedHashMap<String, String>(maxTokens, 0.75f, true) {
+            override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, String>?): Boolean = size > maxTokens
         }
 
     fun isValidRedirectUri(redirectUri: String?): Boolean {
@@ -121,19 +127,55 @@ class McpOAuthProvider(
         val randomBytes = ByteArray(32)
         secureRandom.nextBytes(randomBytes)
         val token = "luna_at_" + Base64.getUrlEncoder().withoutPadding().encodeToString(randomBytes)
+        val refreshBytes = ByteArray(32)
+        secureRandom.nextBytes(refreshBytes)
+        val refreshToken = "luna_rt_" + Base64.getUrlEncoder().withoutPadding().encodeToString(refreshBytes)
         val expiresAt = System.currentTimeMillis() + (config.tokenExpirationSeconds * 1000L)
 
         val accessToken =
             AccessToken(
                 token = token,
+                refreshToken = refreshToken,
                 clientId = clientId,
                 expiresAt = expiresAt,
             )
 
         synchronized(lock) {
             accessTokens[token] = accessToken
+            refreshTokens[refreshToken] = token
         }
         return accessToken
+    }
+
+    fun refreshAccessToken(
+        refreshToken: String,
+        clientId: String?,
+    ): AccessToken? {
+        val oldToken = synchronized(lock) { refreshTokens[refreshToken] } ?: return null
+        val oldAccessToken = synchronized(lock) { accessTokens[oldToken] } ?: return null
+        if (clientId != null && clientId != oldAccessToken.clientId) {
+            return null
+        }
+
+        val randomBytes = ByteArray(32)
+        secureRandom.nextBytes(randomBytes)
+        val newToken = "luna_at_" + Base64.getUrlEncoder().withoutPadding().encodeToString(randomBytes)
+        val expiresAt = System.currentTimeMillis() + (config.tokenExpirationSeconds * 1000L)
+
+        val newAccessToken =
+            AccessToken(
+                token = newToken,
+                refreshToken = refreshToken,
+                clientId = oldAccessToken.clientId,
+                expiresAt = expiresAt,
+            )
+
+        synchronized(lock) {
+            accessTokens.remove(oldToken)
+            accessTokens[newToken] = newAccessToken
+            refreshTokens[refreshToken] = newToken
+        }
+        return newAccessToken
     }
 
     fun isValidAccessToken(token: String?): Boolean {

@@ -78,6 +78,11 @@ object OAuthTokenRequestParser {
                 ?: jsonBody?.get("code_verifier")?.let { (it as? JsonPrimitive)?.content }
                 ?: call.request.queryParameters["code_verifier"]
 
+        val refreshToken =
+            formParameters?.get("refresh_token")
+                ?: jsonBody?.get("refresh_token")?.let { (it as? JsonPrimitive)?.content }
+                ?: call.request.queryParameters["refresh_token"]
+
         return OAuthTokenRequest(
             grantType = grantType,
             code = code,
@@ -85,6 +90,7 @@ object OAuthTokenRequestParser {
             clientId = clientId,
             clientSecret = clientSecret,
             codeVerifier = codeVerifier,
+            refreshToken = refreshToken,
         )
     }
 }

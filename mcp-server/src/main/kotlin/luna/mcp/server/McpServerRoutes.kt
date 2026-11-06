@@ -115,12 +115,13 @@ fun Application.mcpServerModule(
             val clientId = tokenRequest.clientId
             val clientSecret = tokenRequest.clientSecret
             val codeVerifier = tokenRequest.codeVerifier
+            val refreshToken = tokenRequest.refreshToken
 
-            if (grantType != "authorization_code") {
+            if (grantType != "authorization_code" && grantType != "refresh_token") {
                 val errorJson =
                     buildJsonObject {
                         put("error", "unsupported_grant_type")
-                        put("error_description", "grant_type must be authorization_code")
+                        put("error_description", "grant_type must be authorization_code or refresh_token")
                     }.toString()
                 call.respondText(errorJson, ContentType.Application.Json, HttpStatusCode.BadRequest)
                 return@post
@@ -144,6 +145,39 @@ fun Application.mcpServerModule(
                         put("error_description", "Invalid client_id")
                     }.toString()
                 call.respondText(errorJson, ContentType.Application.Json, HttpStatusCode.BadRequest)
+                return@post
+            }
+
+            if (grantType == "refresh_token") {
+                if (refreshToken.isNullOrBlank()) {
+                    val errorJson =
+                        buildJsonObject {
+                            put("error", "invalid_request")
+                            put("error_description", "Missing refresh_token")
+                        }.toString()
+                    call.respondText(errorJson, ContentType.Application.Json, HttpStatusCode.BadRequest)
+                    return@post
+                }
+                val refreshed = oAuthProvider.refreshAccessToken(refreshToken, clientId)
+                if (refreshed == null) {
+                    val errorJson =
+                        buildJsonObject {
+                            put("error", "invalid_grant")
+                            put("error_description", "Invalid or expired refresh_token")
+                        }.toString()
+                    call.respondText(errorJson, ContentType.Application.Json, HttpStatusCode.BadRequest)
+                    return@post
+                }
+                call.response.headers.append(HttpHeaders.CacheControl, "no-store")
+                call.response.headers.append(HttpHeaders.Pragma, "no-cache")
+                val responseJson =
+                    buildJsonObject {
+                        put("access_token", refreshed.token)
+                        put("token_type", "Bearer")
+                        put("expires_in", authConfig.tokenExpirationSeconds)
+                        put("refresh_token", refreshed.refreshToken)
+                    }.toString()
+                call.respondText(responseJson, ContentType.Application.Json, HttpStatusCode.OK)
                 return@post
             }
 
@@ -211,6 +245,7 @@ fun Application.mcpServerModule(
                     put("access_token", issuedToken.token)
                     put("token_type", "Bearer")
                     put("expires_in", authConfig.tokenExpirationSeconds)
+                    put("refresh_token", issuedToken.refreshToken)
                 }.toString()
 
             call.respondText(responseJson, ContentType.Application.Json, HttpStatusCode.OK)
@@ -230,6 +265,7 @@ fun Application.mcpServerModule(
                     "grant_types_supported",
                     buildJsonArray {
                         add("authorization_code")
+                        add("refresh_token")
                     },
                 )
                 put(

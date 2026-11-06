@@ -58,7 +58,7 @@ class McpOAuthServerTest {
 
             val grantTypes = json["grant_types_supported"]?.jsonArray?.map { it.jsonPrimitive.content }
             assertNotNull(grantTypes)
-            assertEquals(listOf("authorization_code"), grantTypes)
+            assertEquals(listOf("authorization_code", "refresh_token"), grantTypes)
 
             val codeChallengeMethods = json["code_challenge_methods_supported"]?.jsonArray?.map { it.jsonPrimitive.content }
             assertNotNull(codeChallengeMethods)
@@ -707,5 +707,57 @@ class McpOAuthServerTest {
             assertEquals(HttpStatusCode.OK, response.status)
             val json = Json.parseToJsonElement(response.bodyAsText()).jsonObject
             assertEquals("2.0", json["jsonrpc"]?.jsonPrimitive?.content)
+        }
+
+    @Test
+    fun `POST oauth token returns refresh_token and supports grant_type refresh_token`() =
+        testApplication {
+            val broadcaster = DiscordWebhookBroadcaster(repository)
+            val authConfig = McpOAuthConfig(clientId = "luna-mcp-client")
+            val provider = McpOAuthProvider(authConfig)
+            application {
+                mcpServerModule(broadcaster = broadcaster, authConfig = authConfig, oAuthProvider = provider)
+            }
+
+            val code = provider.issueAuthorizationCode("luna-mcp-client", "https://oauth-redirect.googleusercontent.com/r/test", null, null)
+
+            val tokenResponse =
+                client.post("/oauth/token") {
+                    setBody(
+                        io.ktor.client.request.forms.FormDataContent(
+                            io.ktor.http.parameters {
+                                append("grant_type", "authorization_code")
+                                append("code", code)
+                                append("client_id", "luna-mcp-client")
+                                append("redirect_uri", "https://oauth-redirect.googleusercontent.com/r/test")
+                            },
+                        ),
+                    )
+                }
+
+            assertEquals(HttpStatusCode.OK, tokenResponse.status)
+            val tokenJson = Json.parseToJsonElement(tokenResponse.bodyAsText()).jsonObject
+            val accessToken = tokenJson["access_token"]?.jsonPrimitive?.content
+            val refreshToken = tokenJson["refresh_token"]?.jsonPrimitive?.content
+            assertNotNull(accessToken)
+            assertNotNull(refreshToken)
+
+            val refreshResponse =
+                client.post("/oauth/token") {
+                    setBody(
+                        io.ktor.client.request.forms.FormDataContent(
+                            io.ktor.http.parameters {
+                                append("grant_type", "refresh_token")
+                                append("refresh_token", refreshToken)
+                                append("client_id", "luna-mcp-client")
+                            },
+                        ),
+                    )
+                }
+
+            assertEquals(HttpStatusCode.OK, refreshResponse.status)
+            val refreshJson = Json.parseToJsonElement(refreshResponse.bodyAsText()).jsonObject
+            assertNotNull(refreshJson["access_token"]?.jsonPrimitive?.content)
+            assertEquals(refreshToken, refreshJson["refresh_token"]?.jsonPrimitive?.content)
         }
 }
