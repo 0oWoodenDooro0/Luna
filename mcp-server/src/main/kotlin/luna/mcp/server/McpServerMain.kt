@@ -16,10 +16,18 @@ object McpServerMain {
 
         val repository = McpWebhookRepository.create(dbPath)
         val broadcaster = DiscordWebhookBroadcaster(repository)
+        val authConfig = McpOAuthConfig()
+
+        logger.info(
+            "MCP server publicBaseUrl={}, clientId={}, authEnabled={}",
+            authConfig.publicBaseUrl,
+            authConfig.clientId,
+            authConfig.isAuthEnabled,
+        )
 
         val server =
             embeddedServer(CIO, port = port, host = "0.0.0.0") {
-                mcpServerModule(broadcaster)
+                mcpServerModule(broadcaster = broadcaster, authConfig = authConfig)
             }
 
         Runtime.getRuntime().addShutdownHook(
