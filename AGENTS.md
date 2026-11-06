@@ -7,6 +7,7 @@
   - `summarizer/`: Multi-modal AI summarization pipeline ([`SummaryService`](src/main/kotlin/luna/summarizer/SummaryService.kt), [`GeminiSummarizer`](src/main/kotlin/luna/summarizer/GeminiSummarizer.kt), [`GeminiPromptBuilder`](src/main/kotlin/luna/summarizer/GeminiPromptBuilder.kt), [`ChatImageResolver`](src/main/kotlin/luna/summarizer/ChatImageResolver.kt), [`DialogueNoiseFilter`](src/main/kotlin/luna/summarizer/DialogueNoiseFilter.kt)).
   - `curtly/`, `preview/`, `undercover/`: First-party feature plugins.
 - `libs/socialpeek/`: Multi-platform social media post and video metadata resolver library.
+- `mcp-server/`: Standalone Model Context Protocol (MCP) server for Google Gemini Apps integration. Completely decoupled from Discord bot runtime/tokens; communicates via shared SQLite `mcp_webhooks` table ([`McpServerApplication`](mcp-server/src/main/kotlin/luna/mcp/server/McpServerApplication.kt), [`McpServerRoutes`](mcp-server/src/main/kotlin/luna/mcp/server/McpServerRoutes.kt), [`DiscordWebhookBroadcaster`](mcp-server/src/main/kotlin/luna/mcp/server/DiscordWebhookBroadcaster.kt), [`DiscordMessageChunker`](mcp-server/src/main/kotlin/luna/mcp/server/DiscordMessageChunker.kt), [`McpOAuthProvider`](mcp-server/src/main/kotlin/luna/mcp/server/McpOAuthProvider.kt)).
 
 ## Agent skills
 
@@ -24,7 +25,11 @@ Single-context repository layout (`GLOSSARY.md` and `docs/adr/`). See `docs/agen
 
 ### Coding standards
 
-Judgement calls for daemon state bounds, transient error eviction, and library boundaries. See `CODING_STANDARDS.md`. Mechanical rules (daemon state collections, assertion styles, test naming) are checked deterministically by [`CodingStandardsTest`](src/test/kotlin/luna/core/CodingStandardsTest.kt).
+Judgement calls for daemon state bounds, transient error eviction, and library boundaries. See `CODING_STANDARDS.md`. Mechanical rules (daemon state collections, assertion styles, test naming, and Dockerfile subproject parity) are checked deterministically by [`CodingStandardsTest`](src/test/kotlin/luna/core/CodingStandardsTest.kt).
+
+### Library & dependency exploration
+
+Inspect library APIs and dependencies directly via their `build.gradle.kts` declarations and source/interface definitions rather than running shell classpath extraction scripts.
 
 ## Verification
 
@@ -35,6 +40,8 @@ Judgement calls for daemon state bounds, transient error eviction, and library b
   ./gradlew test --tests "luna.summarizer.SummaryServiceWebhookTest"
   ./gradlew test --tests "luna.summarizer.SummaryServiceLookbackTest"
   ./gradlew test --tests "luna.core.CodingStandardsTest"
+  ./gradlew :mcp-server:test
+  ./gradlew :libs:socialpeek:test
   ```
 - **Pre-commit / Pre-PR check**: Run `./gradlew lintKotlin test` (or `./gradlew check`) to verify code style and test suite across all modules. Pre-commit hooks in `.githooks/` run this automatically.
 - **CI parity**: Before pushing or marking a PR ready, also run `docker build -t luna:ci-test .` to ensure full parity with CI (`.github/workflows/ci.yml`).
