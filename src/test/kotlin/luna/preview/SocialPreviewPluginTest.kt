@@ -221,4 +221,47 @@ class SocialPreviewPluginTest {
             // Emitting message event should be safely consumed by the registered listener
             eventsFlow.emit(event)
         }
+
+    @Test
+    fun `initialize configures youtubeApiKey and peekClient from PluginContext`() =
+        runTest {
+            val db = createTestDb()
+            val eventsFlow = MutableSharedFlow<Event>()
+            val mockKord = createMockKord(eventsFlow)
+
+            val context =
+                DefaultPluginContext(
+                    kord = mockKord,
+                    routing = mockk(relaxed = true),
+                    database = db,
+                    configMap = mapOf("YOUTUBE_API_KEY" to "test-youtube-api-key"),
+                )
+
+            val plugin = SocialPreviewPlugin()
+            plugin.initialize(context)
+
+            assertEquals("test-youtube-api-key", plugin.youtubeApiKey)
+            assertNotNull(plugin.peekClient)
+        }
+
+    @Test
+    fun `initialize defaults youtubeApiKey to null when not configured`() =
+        runTest {
+            val db = createTestDb()
+            val eventsFlow = MutableSharedFlow<Event>()
+            val mockKord = createMockKord(eventsFlow)
+
+            val context =
+                DefaultPluginContext(
+                    kord = mockKord,
+                    routing = mockk(relaxed = true),
+                    database = db,
+                )
+
+            val plugin = SocialPreviewPlugin()
+            plugin.initialize(context)
+
+            assertEquals(null, plugin.youtubeApiKey)
+            assertNotNull(plugin.peekClient)
+        }
 }

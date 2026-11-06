@@ -56,6 +56,12 @@ class SummarizerPlugin(
     var maxCharacterBudget: Int = SummaryService.DEFAULT_MAX_CHARACTER_BUDGET
         internal set
 
+    var maxLookbackMessages: Int = SummaryService.DEFAULT_MAX_LOOKBACK_MESSAGES
+        internal set
+
+    var maxImages: Int = SummaryService.DEFAULT_MAX_IMAGES
+        internal set
+
     override suspend fun initialize(context: PluginContext) {
         val apiKey =
             context.config<String>("GEMINI_API_KEY")
@@ -106,10 +112,22 @@ class SummarizerPlugin(
                 ?: context.config<Int>("summary.maxCharacterBudget")?.takeIf { it > 0 }
                 ?: SummaryService.resolveMaxCharacterBudget()
 
+        val lookbackLimit =
+            context.config<Int>("SUMMARY_MAX_LOOKBACK_MESSAGES")?.coerceIn(1, SummaryService.DEFAULT_MAX_LOOKBACK_MESSAGES)
+                ?: context.config<Int>("summary.maxLookbackMessages")?.coerceIn(1, SummaryService.DEFAULT_MAX_LOOKBACK_MESSAGES)
+                ?: SummaryService.resolveMaxLookbackMessages()
+
+        val imagesLimit =
+            context.config<Int>("SUMMARY_MAX_IMAGES")?.takeIf { it > 0 }
+                ?: context.config<Int>("summary.maxImages")?.takeIf { it > 0 }
+                ?: SummaryService.resolveMaxImages()
+
         this.configuredEmoji = emoji
         this.maxHistoryMessages = historyLimit
         this.inactivityGap = gap
         this.maxCharacterBudget = characterBudget
+        this.maxLookbackMessages = lookbackLimit
+        this.maxImages = imagesLimit
 
         val geminiConfig =
             GeminiConfig(
@@ -159,6 +177,8 @@ class SummarizerPlugin(
                 maxHistoryMessages = historyLimit,
                 inactivityGap = gap,
                 maxCharacterBudget = characterBudget,
+                maxImages = imagesLimit,
+                maxLookbackMessages = lookbackLimit,
                 kord = context.kord,
             )
         this.summaryService = service

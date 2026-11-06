@@ -24,6 +24,7 @@ import dev.kord.rest.builder.message.allowedMentions
 import dev.kord.rest.builder.message.create.WebhookMessageCreateBuilder
 import dev.kord.rest.builder.message.embed
 import dev.socialpeek.SocialPeek
+import dev.socialpeek.SocialPeekClient
 import dev.socialpeek.model.Media
 import dev.socialpeek.model.PeekPost
 import dev.socialpeek.model.Platform
@@ -54,6 +55,7 @@ object SocialPreviewService {
         kord: Kord,
         settingsStorage: PreviewSettingsStorage,
         scope: CoroutineScope = safeScope(kord),
+        peekClient: SocialPeekClient = SocialPeek.defaultClient,
     ) {
         logger.info("SocialPreviewService registered successfully!")
 
@@ -88,11 +90,11 @@ object SocialPreviewService {
             logger.debug("Detected URLs in message {}: {}", message.id, urls)
 
             for (url in urls) {
-                val canResolve = SocialPeek.canResolveSocial(url)
+                val canResolve = peekClient.canResolveSocial(url)
                 logger.debug("Checking URL [{}]: canResolve={}", url, canResolve)
 
                 if (canResolve) {
-                    processUrl(url, message, guildId, settingsStorage)
+                    processUrl(url, message, guildId, settingsStorage, peekClient)
                     // Currently handle the first supported link per message to avoid spamming
                     break
                 }
@@ -105,10 +107,11 @@ object SocialPreviewService {
         originalMessage: Message,
         guildId: String?,
         settingsStorage: PreviewSettingsStorage,
+        peekClient: SocialPeekClient = SocialPeek.defaultClient,
     ) {
         try {
             logger.debug("Resolving URL via SocialPeek: {}", url)
-            val post = SocialPeek.peekOrNull(url)
+            val post = peekClient.peekOrNull(url)
             if (post == null) {
                 logger.warn("SocialPeek returned null for URL: {}", url)
                 return

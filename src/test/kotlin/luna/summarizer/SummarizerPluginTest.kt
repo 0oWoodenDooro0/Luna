@@ -65,6 +65,8 @@ class SummarizerPluginTest {
             assertEquals(SummaryService.DEFAULT_MAX_HISTORY_MESSAGES, plugin.maxHistoryMessages)
             assertEquals(SummaryService.DEFAULT_INACTIVITY_GAP, plugin.inactivityGap)
             assertEquals(SummaryService.DEFAULT_MAX_CHARACTER_BUDGET, plugin.maxCharacterBudget)
+            assertEquals(SummaryService.DEFAULT_MAX_LOOKBACK_MESSAGES, plugin.maxLookbackMessages)
+            assertEquals(SummaryService.DEFAULT_MAX_IMAGES, plugin.maxImages)
             assertNotNull(plugin.summarizer)
             assertNotNull(plugin.summaryService)
 
@@ -92,6 +94,8 @@ class SummarizerPluginTest {
                     "SUMMARY_MAX_HISTORY_MESSAGES" to 30,
                     "SUMMARY_INACTIVITY_GAP_MINUTES" to 20L,
                     "SUMMARY_MAX_CHARACTER_BUDGET" to 15000,
+                    "SUMMARY_MAX_LOOKBACK_MESSAGES" to 15,
+                    "SUMMARY_MAX_IMAGES" to 5,
                 )
 
             val context =
@@ -109,6 +113,8 @@ class SummarizerPluginTest {
             assertEquals(30, plugin.maxHistoryMessages)
             assertEquals(20.minutes, plugin.inactivityGap)
             assertEquals(15000, plugin.maxCharacterBudget)
+            assertEquals(15, plugin.maxLookbackMessages)
+            assertEquals(5, plugin.maxImages)
             assertNotNull(plugin.summarizer)
             assertNotNull(plugin.summaryService)
 

@@ -3,6 +3,7 @@ package luna.curtly
 import dev.kord.core.event.interaction.ChatInputCommandInteractionCreateEvent
 import dev.kord.core.on
 import luna.core.AuthService
+import luna.core.HttpDiscordOAuthClient
 import luna.core.JsonLogger
 import luna.core.UserStorage
 import luna.curtly.adapter.MyUrlsCommand
@@ -37,12 +38,31 @@ class CurtlyPlugin(
                 rawBaseUrl
             }
 
+        val redirectUri =
+            context.config<String>("DISCORD_REDIRECT_URI")?.takeIf { it.isNotBlank() }
+                ?: context.config<String>("curtly.redirectUri")?.takeIf { it.isNotBlank() }
+                ?: context.config<String>("curtly.redirect_uri")?.takeIf { it.isNotBlank() }
+
+        val discordClientId =
+            context.config<String>("DISCORD_CLIENT_ID")?.takeIf { it.isNotBlank() }
+                ?: context.config<String>("DISCORD_APP_ID")?.takeIf { it.isNotBlank() }
+                ?: context.config<String>("curtly.discordClientId")?.takeIf { it.isNotBlank() }
+                ?: context.config<String>("discord.clientId")?.takeIf { it.isNotBlank() }
+                ?: ""
+
+        val discordClientSecret =
+            context.config<String>("DISCORD_CLIENT_SECRET")?.takeIf { it.isNotBlank() }
+                ?: context.config<String>("curtly.discordClientSecret")?.takeIf { it.isNotBlank() }
+                ?: context.config<String>("discord.clientSecret")?.takeIf { it.isNotBlank() }
+                ?: ""
+
         // 1. Initialize URL & analytics tables in SQLite via context.database
         val storage = customStorage ?: ExposedUrlStorage(database = context.database, autoCreateTable = true)
         val service = customService ?: CurtlyService(storage = storage, baseUrl = baseUrl, enableAuditMode = true)
 
         val userStorage = UserStorage(context.database)
-        val authService = customAuthService ?: AuthService(userStorage)
+        val oauthClient = HttpDiscordOAuthClient(clientId = discordClientId, clientSecret = discordClientSecret)
+        val authService = customAuthService ?: AuthService(userStorage, discordOAuthClient = oauthClient)
 
         // 2. Register /shorten and /myurls commands via context.kord
         val shortenCommand = ShortenCommand(service)
@@ -136,6 +156,7 @@ class CurtlyPlugin(
             curtlyService = service,
             authService = authService,
             baseUrl = baseUrl,
+            redirectUri = redirectUri,
         )
     }
 }

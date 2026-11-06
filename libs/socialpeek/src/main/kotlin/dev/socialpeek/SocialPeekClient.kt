@@ -20,14 +20,14 @@ class SocialPeekClient(
     val httpClient: SocialPeekHttpClient = KtorSocialPeekHttpClient(),
 ) {
     companion object {
-        fun defaultResolvers(): List<PlatformResolver> =
+        fun defaultResolvers(youtubeApiKey: String? = null): List<PlatformResolver> =
             listOf(
                 FacebookResolver(),
                 BilibiliResolver(),
                 XResolver(),
                 InstagramResolver(),
                 ThreadsResolver(),
-                YouTubeResolver(),
+                YouTubeResolver(apiKey = youtubeApiKey),
                 RedditResolver(),
                 GenericWebResolver(),
             )
