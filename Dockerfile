@@ -8,6 +8,7 @@ WORKDIR /app
 COPY gradlew gradlew.bat settings.gradle.kts build.gradle.kts gradle.properties ./
 COPY gradle ./gradle
 COPY libs/socialpeek/build.gradle.kts ./libs/socialpeek/
+COPY mcp-server/build.gradle.kts ./mcp-server/
 
 # Make gradlew executable and fetch dependencies
 RUN chmod +x gradlew && ./gradlew dependencies --no-daemon || true
@@ -15,6 +16,7 @@ RUN chmod +x gradlew && ./gradlew dependencies --no-daemon || true
 # Copy source code
 COPY src ./src
 COPY libs ./libs
+COPY mcp-server ./mcp-server
 
 # Build the fat jar
 RUN ./gradlew jar --no-daemon
