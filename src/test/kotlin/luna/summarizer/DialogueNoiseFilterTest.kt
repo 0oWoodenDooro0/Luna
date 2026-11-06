@@ -143,6 +143,27 @@ class DialogueNoiseFilterTest {
         }
 
     @Test
+    fun `identifies luna webhook replacement messages as not noise even when author is null`() =
+        runTest {
+            val lunaWebhookId = Snowflake(100L)
+            val customFilter =
+                DialogueNoiseFilter(
+                    isLunaWebhook = { it == lunaWebhookId },
+                )
+            val webhookReplacementMsg =
+                createMockMessage(
+                    id = 10L,
+                    username = "Alice",
+                    content = "Clean url https://example.com/post",
+                    isBot = true,
+                    webhookId = lunaWebhookId,
+                )
+            io.mockk.every { webhookReplacementMsg.author } returns null
+
+            assertFalse(customFilter.isNoiseMessage(webhookReplacementMsg))
+        }
+
+    @Test
     fun `identifies third-party webhooks as noise`() =
         runTest {
             val lunaWebhookId = Snowflake(100L)

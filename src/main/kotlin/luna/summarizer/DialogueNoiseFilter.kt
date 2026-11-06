@@ -121,7 +121,7 @@ open class DialogueNoiseFilter(
         }
 
         // Exclude bot or missing author (unless it's a Luna Webhook Replacement)
-        if (message.author == null || (!isLuna && message.author?.isBot == true)) {
+        if (!isLuna && (message.author == null || message.author?.isBot == true)) {
             return true
         }
 

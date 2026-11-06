@@ -72,6 +72,79 @@ class SummaryServiceWebhookTest {
     ): Attachment = SummaryTestFixtures.createMockAttachment(url, contentType, filename, size)
 
     @Test
+    fun `reacting to a Luna Webhook Replacement message when author is null triggers summarization and formats username from data author`() =
+        runTest {
+            val lunaWebhookId = Snowflake(777L)
+            val summarizer = mockk<GeminiSummarizer>()
+            val post =
+                PeekPost(
+                    id = "post-webhook-null-author",
+                    originalUrl = "https://example.com/post",
+                    cleanUrl = "https://example.com/post",
+                    platform = Platform.GENERIC,
+                    title = "Sample Clean Post",
+                    content = "Extracted article body",
+                    author = Author(username = "author_name"),
+                )
+            val peekResolver: suspend (String) -> PeekPost? = { null }
+
+            var repliedMessage: Message? = null
+            var replyContent: String? = null
+            val replySender: suspend (Message, String) -> Unit = { msg, text ->
+                repliedMessage = msg
+                replyContent = text
+            }
+
+            val service =
+                SummaryService(
+                    summarizer = summarizer,
+                    peekResolver = peekResolver,
+                    replySender = replySender,
+                    isLunaWebhook = { it == lunaWebhookId },
+                )
+
+            val embed = SummaryTestFixtures.createMockEmbed(title = "Sample Clean Post", description = "Extracted article body")
+            val targetMsg =
+                SummaryTestFixtures.createMockMessage(
+                    id = 8001L,
+                    username = "MasqueradedAlice",
+                    content = "Cleaned post link https://example.com/post",
+                    isBot = true,
+                    webhookId = lunaWebhookId,
+                    embeds = listOf(embed),
+                    authorIsNull = true,
+                )
+
+            var capturedInput: SummaryInput? = null
+            coEvery {
+                summarizer.summarize(any<SummaryInput>())
+            } answers {
+                capturedInput = firstArg<SummaryInput>()
+                SummaryResult.Success("TL;DR summary of clean post")
+            }
+
+            val user = mockk<User>()
+            every { user.isBot } returns false
+
+            val event = mockk<ReactionAddEvent>()
+            every { event.emoji } returns ReactionEmoji.Unicode("📝")
+            every { event.userId } returns Snowflake(55L)
+            every { event.messageId } returns targetMsg.id
+            coEvery { event.getUserOrNull() } returns user
+            coEvery { event.getMessageOrNull() } returns targetMsg
+
+            service.handleReaction(event)
+
+            coVerify(exactly = 1) { summarizer.summarize(any<SummaryInput>()) }
+            assertEquals(targetMsg, repliedMessage)
+            assertEquals("TL;DR summary of clean post", replyContent)
+            assertEquals(SummaryStatus.DONE, service.getStatus(targetMsg.id))
+            val input = capturedInput
+            assertNotNull(input)
+            assertTrue(input.content.contains("[MasqueradedAlice]:"))
+        }
+
+    @Test
     fun `reacting to a Luna Webhook Replacement message triggers link extraction, Gemini summarizer, and message reply`() =
         runTest {
             val lunaWebhookId = Snowflake(777L)

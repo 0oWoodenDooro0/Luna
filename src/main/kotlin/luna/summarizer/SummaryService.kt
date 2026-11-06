@@ -240,7 +240,7 @@ class SummaryService(
             if (precedingMessages.isNotEmpty()) {
                 var imageIndex = 1
                 messagesWithImages.joinToString("\n") { (msg, images) ->
-                    val author = msg.author?.username ?: "Unknown"
+                    val author = resolveAuthorName(msg)
                     val embedText = formatEmbedPreviews(msg)
                     if (images.isNotEmpty()) {
                         val markers =
@@ -291,7 +291,7 @@ class SummaryService(
                         }
                     val markersText = markers.joinToString(" ")
                     val trimmedContent = message.content.trim()
-                    val author = message.author?.username ?: "Unknown"
+                    val author = resolveAuthorName(message)
                     val parts =
                         listOfNotNull(
                             trimmedContent.takeIf { it.isNotEmpty() },
@@ -305,7 +305,7 @@ class SummaryService(
                     }
                 } else if (embedText.isNotEmpty()) {
                     val trimmedContent = message.content.trim()
-                    val author = message.author?.username ?: "Unknown"
+                    val author = resolveAuthorName(message)
                     if (trimmedContent.isNotEmpty()) {
                         "[$author]: $trimmedContent $embedText"
                     } else {
@@ -798,7 +798,7 @@ class SummaryService(
         var imageIndex = startingImageIndex
         val formatted =
             messages.joinToString("\n") { msg ->
-                val author = msg.author?.username ?: "Unknown"
+                val author = resolveAuthorName(msg)
                 val embedText = formatEmbedPreviews(msg)
                 val images = imagesByMessage[msg.id] ?: extractImageAttachments(msg)
                 if (images.isNotEmpty()) {
@@ -857,6 +857,11 @@ class SummaryService(
     }
 
     fun extractImageAttachments(message: Message): List<ChatImageAttachment> = imageResolver.extractImageAttachments(message)
+
+    internal fun resolveAuthorName(message: Message): String =
+        message.author?.username
+            ?: runCatching { message.data.author.username }.getOrNull()
+            ?: "Unknown"
 
     suspend fun isBotSummaryMessage(message: Message): Boolean = noiseFilter.isBotSummaryMessage(message)
 
