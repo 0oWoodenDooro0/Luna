@@ -77,6 +77,7 @@ class SummaryService(
     val inactivityGap: Duration = resolveInactivityGap(),
     val maxCharacterBudget: Int = resolveMaxCharacterBudget(),
     val maxImages: Int = resolveMaxImages(),
+    val maxLookbackMessages: Int = resolveMaxLookbackMessages(),
     noiseFilter: DialogueNoiseFilter? = null,
     private val imageResolver: ChatImageResolver = ChatImageResolver(),
     private val historyFetcher: suspend (message: Message, limit: Int) -> List<Message> = { message, limit ->
@@ -191,7 +192,8 @@ class SummaryService(
             return
         }
 
-        val precedingMessages = retrievePrecedingMessages(message)
+        val (precedingMessagesRaw, unconsumedHistory) = retrieveContextMessagesWithHistory(message)
+        val precedingMessages = precedingMessagesRaw.filterNot { isNoiseMessage(it) }
         val allMessages =
             if (precedingMessages.isNotEmpty()) {
                 precedingMessages + message
@@ -360,23 +362,48 @@ class SummaryService(
                         content = formattedContent,
                         url = primaryUrl,
                         imageAttachments = sliceImageAttachments,
+                        tools = listOf(GeminiTools.FETCH_EARLIER_MESSAGES_TOOL),
                     )
                 }
             } else {
                 SummaryInput(
                     content = formattedContent,
                     imageAttachments = sliceImageAttachments,
+                    tools = listOf(GeminiTools.FETCH_EARLIER_MESSAGES_TOOL),
                 )
             }
 
         try {
             logger.info("Executing Gemini summarization for message {}", event.messageId)
-            var currentInput = summaryInput
+            val baselineInput = summaryInput
+            var currentInput = baselineInput
             var result =
                 try {
                     summarizer.summarize(currentInput)
                 } catch (e: Exception) {
-                    if (currentInput.imageAttachments.isNotEmpty()) {
+                    if (currentInput.tools != null) {
+                        logger.warn(
+                            "Gemini tool-enabled summarization failed for message {}: {}. Retrying with baseline fallback.",
+                            event.messageId,
+                            e.message,
+                        )
+                        currentInput = currentInput.copy(tools = null)
+                        try {
+                            summarizer.summarize(currentInput)
+                        } catch (e2: Exception) {
+                            if (currentInput.imageAttachments.isNotEmpty()) {
+                                logger.warn(
+                                    "Unexpected exception during multimodal summarization for message {}: {}. Retrying with text-only fallback.",
+                                    event.messageId,
+                                    e2.message,
+                                )
+                                currentInput = currentInput.copy(imageAttachments = emptyList())
+                                summarizer.summarize(currentInput)
+                            } else {
+                                throw e2
+                            }
+                        }
+                    } else if (currentInput.imageAttachments.isNotEmpty()) {
                         logger.warn(
                             "Unexpected exception during multimodal summarization for message {}: {}. Retrying with text-only fallback.",
                             event.messageId,
@@ -388,6 +415,110 @@ class SummaryService(
                         throw e
                     }
                 }
+
+            // Fallback if initial tool-enabled call returned Error
+            if (result is SummaryResult.Error && currentInput.tools != null) {
+                logger.warn(
+                    "Tool-enabled summarization returned error for message {}: {}. Falling back to baseline summary.",
+                    event.messageId,
+                    result.message,
+                )
+                currentInput = currentInput.copy(tools = null)
+                result =
+                    try {
+                        summarizer.summarize(currentInput)
+                    } catch (e: Exception) {
+                        if (currentInput.imageAttachments.isNotEmpty()) {
+                            currentInput = currentInput.copy(imageAttachments = emptyList())
+                            summarizer.summarize(currentInput)
+                        } else {
+                            throw e
+                        }
+                    }
+            }
+
+            // Orchestrate Two-Stage Context Lookback if Gemini invokes fetch_earlier_messages
+            if (result is SummaryResult.ToolCall) {
+                if (result.name == GeminiTools.FETCH_EARLIER_MESSAGES) {
+                    val reason = result.args["reason"] ?: ""
+                    logger.info(
+                        "Gemini invoked fetch_earlier_messages for message {}: reason='{}'",
+                        event.messageId,
+                        reason,
+                    )
+
+                    val continuation = result.continuation
+                    if (continuation != null) {
+                        val lookbackResult =
+                            try {
+                                val earliestBaseline = allMessages.first()
+                                val earlierMessages =
+                                    retrieveEarlierMessages(
+                                        earliestBaselineMessage = earliestBaseline,
+                                        fallbackHistory = unconsumedHistory,
+                                    )
+
+                                val toolResponse =
+                                    if (earlierMessages.isNotEmpty()) {
+                                        val (earlierTranscript, _) =
+                                            formatDialogueMessages(earlierMessages, startingImageIndex = 1)
+                                        val baselineTranscript =
+                                            if (precedingMessages.isNotEmpty()) {
+                                                formattedContent
+                                            } else {
+                                                formatDialogueMessages(allMessages, startingImageIndex = 1).first
+                                            }
+                                        GeminiPromptBuilder.formatExpandedDialogue(
+                                            earlierContent = earlierTranscript,
+                                            currentContent = baselineTranscript,
+                                        )
+                                    } else {
+                                        NO_FURTHER_HISTORY_MESSAGE
+                                    }
+
+                                continuation(toolResponse)
+                            } catch (e: Exception) {
+                                logger.warn(
+                                    "Exception during lookback continuation for message {}: {}. Falling back to baseline.",
+                                    event.messageId,
+                                    e.message,
+                                )
+                                SummaryResult.Error.Generic("Lookback continuation failed: ${e.message}", cause = e)
+                            }
+
+                        // Enforce Single Lookback Limit (strictly at most 1 round)
+                        if (lookbackResult is SummaryResult.Success) {
+                            result = lookbackResult
+                        } else {
+                            logger.warn(
+                                "Lookback continuation failed or exceeded round limit for message {}: {}. Falling back to baseline summary without tools.",
+                                event.messageId,
+                                lookbackResult,
+                            )
+                            currentInput = baselineInput.copy(tools = null)
+                            result =
+                                try {
+                                    summarizer.summarize(currentInput)
+                                } catch (e: Exception) {
+                                    if (currentInput.imageAttachments.isNotEmpty()) {
+                                        currentInput = currentInput.copy(imageAttachments = emptyList())
+                                        summarizer.summarize(currentInput)
+                                    } else {
+                                        throw e
+                                    }
+                                }
+                        }
+                    } else {
+                        logger.warn("No continuation provided for tool call on message {}, falling back to baseline summary", event.messageId)
+                        currentInput = baselineInput.copy(tools = null)
+                        result = summarizer.summarize(currentInput)
+                    }
+                } else {
+                    logger.warn("Unhandled tool call {} for message {}, falling back to baseline summary", result.name, event.messageId)
+                    currentInput = baselineInput.copy(tools = null)
+                    result = summarizer.summarize(currentInput)
+                }
+            }
 
             if (result is SummaryResult.Error && currentInput.imageAttachments.isNotEmpty()) {
                 logger.warn(
@@ -402,8 +533,9 @@ class SummaryService(
             when (result) {
                 is SummaryResult.Success -> {
                     statusCache[event.messageId] = SummaryStatus.DONE
+                    val sanitized = EmojiSanitizer.stripEmojis(result.text).trim()
                     val textToSend =
-                        truncateForDiscord(result.text).takeIf { it.isNotBlank() }
+                        truncateForDiscord(sanitized).takeIf { it.isNotBlank() }
                             ?: FALLBACK_EMPTY_SUMMARY_MESSAGE
                     replySender(message, textToSend)
                     JsonLogger.log(
@@ -457,10 +589,7 @@ class SummaryService(
         }
     }
 
-    internal suspend fun retrievePrecedingMessages(targetMessage: Message): List<Message> =
-        retrieveContextMessages(targetMessage).filterNot { isNoiseMessage(it) }
-
-    internal suspend fun retrieveContextMessages(targetMessage: Message): List<Message> {
+    internal suspend fun retrieveContextMessagesWithHistory(targetMessage: Message): Pair<List<Message>, List<Message>> {
         val rawHistory =
             runCatching {
                 historyFetcher(targetMessage, maxHistoryMessages)
@@ -470,7 +599,7 @@ class SummaryService(
             }
 
         if (rawHistory.isEmpty()) {
-            return emptyList()
+            return emptyList<Message>() to emptyList<Message>()
         }
 
         // Normalize to chronological order (oldest first, newest last)
@@ -497,6 +626,7 @@ class SummaryService(
         val acceptedPreceding = ArrayDeque<Message>()
         var referenceMessage = targetMessage
         var accumulatedLength = targetMessage.content.length
+        var stopIndex = -1
 
         for (i in chronological.lastIndex downTo 0) {
             val msg = chronological[i]
@@ -504,6 +634,7 @@ class SummaryService(
             // Stop if an earlier message sent by the bot containing a summary is encountered
             if (isBotSummaryMessage(msg)) {
                 logger.debug("Encountered bot summary message {}, stopping history backtracking", msg.id)
+                stopIndex = i
                 break
             }
 
@@ -515,6 +646,7 @@ class SummaryService(
 
             if (elapsed != null && elapsed > inactivityGap) {
                 logger.debug("Inactivity gap {} exceeds {}, stopping history backtracking", elapsed, inactivityGap)
+                stopIndex = i
                 break
             }
 
@@ -525,6 +657,7 @@ class SummaryService(
                     maxCharacterBudget,
                     msg.id,
                 )
+                stopIndex = i
                 break
             }
 
@@ -533,7 +666,176 @@ class SummaryService(
             referenceMessage = msg
         }
 
-        return acceptedPreceding.toList()
+        val unconsumed =
+            if (stopIndex >= 0) {
+                chronological.take(stopIndex + 1)
+            } else {
+                emptyList()
+            }
+
+        return acceptedPreceding.toList() to unconsumed
+    }
+
+    internal suspend fun retrieveContextMessages(targetMessage: Message): List<Message> = retrieveContextMessagesWithHistory(targetMessage).first
+
+    internal suspend fun retrievePrecedingMessages(targetMessage: Message): List<Message> =
+        retrieveContextMessages(targetMessage).filterNot { isNoiseMessage(it) }
+
+    internal suspend fun retrieveEarlierMessages(
+        earliestBaselineMessage: Message,
+        fallbackHistory: List<Message> = emptyList(),
+    ): List<Message> {
+        val fetchedHistory =
+            runCatching {
+                historyFetcher(earliestBaselineMessage, maxLookbackMessages)
+            }.getOrElse { e ->
+                logger.warn("Failed to fetch earlier message history for {}: {}", earliestBaselineMessage.id, e.message)
+                emptyList()
+            }
+
+        val normalizedFetched =
+            if (fetchedHistory.size >= 2) {
+                val firstTime = runCatching { fetchedHistory.first().timestamp }.getOrNull()
+                val lastTime = runCatching { fetchedHistory.last().timestamp }.getOrNull()
+                if (firstTime != null && lastTime != null && firstTime > lastTime) {
+                    fetchedHistory.reversed()
+                } else {
+                    val firstId = runCatching { fetchedHistory.first().id }.getOrNull()
+                    val lastId = runCatching { fetchedHistory.last().id }.getOrNull()
+                    if (firstId != null && lastId != null && firstId > lastId) {
+                        fetchedHistory.reversed()
+                    } else {
+                        fetchedHistory
+                    }
+                }
+            } else {
+                fetchedHistory
+            }
+
+        val candidateFromFetched =
+            normalizedFetched.filter { msg ->
+                val timeOrder =
+                    runCatching { msg.timestamp < earliestBaselineMessage.timestamp }.getOrNull()
+                if (timeOrder != null) {
+                    timeOrder
+                } else {
+                    msg.id != earliestBaselineMessage.id && msg.id.value < earliestBaselineMessage.id.value
+                }
+            }
+
+        val rawCandidates =
+            if (candidateFromFetched.isNotEmpty()) {
+                candidateFromFetched
+            } else {
+                fallbackHistory.filter { msg ->
+                    val timeOrder =
+                        runCatching { msg.timestamp < earliestBaselineMessage.timestamp }.getOrNull()
+                    if (timeOrder != null) {
+                        timeOrder
+                    } else {
+                        msg.id != earliestBaselineMessage.id && msg.id.value < earliestBaselineMessage.id.value
+                    }
+                }
+            }
+
+        if (rawCandidates.isEmpty()) {
+            return emptyList()
+        }
+
+        val acceptedEarlier = ArrayDeque<Message>()
+        val latestEarlier = rawCandidates.last()
+
+        if (isBotSummaryMessage(latestEarlier)) {
+            logger.debug("Encountered bot summary message {} at start of lookback, halting", latestEarlier.id)
+            return emptyList()
+        }
+
+        acceptedEarlier.addFirst(latestEarlier)
+        var referenceMessage = latestEarlier
+        var accumulatedLength = latestEarlier.content.length
+
+        for (i in rawCandidates.size - 2 downTo 0) {
+            if (acceptedEarlier.size >= maxLookbackMessages) {
+                logger.debug("Reached maximum lookback message limit {}", maxLookbackMessages)
+                break
+            }
+
+            val msg = rawCandidates[i]
+
+            if (isBotSummaryMessage(msg)) {
+                logger.debug("Encountered bot summary message {}, stopping lookback backtracking", msg.id)
+                break
+            }
+
+            val elapsed =
+                runCatching {
+                    referenceMessage.timestamp - msg.timestamp
+                }.getOrNull()
+
+            if (elapsed != null && elapsed > inactivityGap) {
+                logger.debug("Another inactivity gap {} exceeds {}, stopping lookback backtracking", elapsed, inactivityGap)
+                break
+            }
+
+            if (accumulatedLength + msg.content.length > maxCharacterBudget) {
+                logger.debug("Accumulated character budget exceeded in lookback with message {}", msg.id)
+                break
+            }
+
+            acceptedEarlier.addFirst(msg)
+            accumulatedLength += msg.content.length
+            referenceMessage = msg
+        }
+
+        return acceptedEarlier.filterNot { isNoiseMessage(it) }
+    }
+
+    internal fun formatDialogueMessages(
+        messages: List<Message>,
+        imagesByMessage: Map<Snowflake, List<ChatImageAttachment>> = emptyMap(),
+        startingImageIndex: Int = 1,
+    ): Pair<String, Int> {
+        var imageIndex = startingImageIndex
+        val formatted =
+            messages.joinToString("\n") { msg ->
+                val author = msg.author?.username ?: "Unknown"
+                val embedText = formatEmbedPreviews(msg)
+                val images = imagesByMessage[msg.id] ?: extractImageAttachments(msg)
+                if (images.isNotEmpty()) {
+                    val markers =
+                        images.map { img ->
+                            val idx = imageIndex++
+                            if (!img.filename.isNullOrBlank()) {
+                                "[附帶圖片 $idx: ${img.filename}]"
+                            } else {
+                                "[附帶圖片 $idx]"
+                            }
+                        }
+                    val markersText = markers.joinToString(" ")
+                    val trimmedContent = msg.content.trim()
+                    val parts =
+                        listOfNotNull(
+                            trimmedContent.takeIf { it.isNotEmpty() },
+                            embedText.takeIf { it.isNotEmpty() },
+                            markersText.takeIf { it.isNotEmpty() },
+                        )
+                    if (parts.isNotEmpty()) {
+                        "[$author]: ${parts.joinToString(" ")}"
+                    } else {
+                        "[$author]:"
+                    }
+                } else if (embedText.isNotEmpty()) {
+                    val trimmedContent = msg.content.trim()
+                    if (trimmedContent.isNotEmpty()) {
+                        "[$author]: $trimmedContent $embedText"
+                    } else {
+                        "[$author]: $embedText"
+                    }
+                } else {
+                    "[$author]: ${msg.content}"
+                }
+            }
+        return formatted to imageIndex
     }
 
     internal fun formatEmbedPreviews(message: Message): String {
@@ -598,6 +900,15 @@ class SummaryService(
                 ?: DEFAULT_MAX_CHARACTER_BUDGET
 
         const val DEFAULT_MAX_IMAGES = 10
+        const val DEFAULT_MAX_LOOKBACK_MESSAGES = 20
+        const val MAX_LOOKBACK_MESSAGES = DEFAULT_MAX_LOOKBACK_MESSAGES
+        const val NO_FURTHER_HISTORY_MESSAGE = "查無更早的歷史訊息。"
+
+        fun resolveMaxLookbackMessages(env: Map<String, String> = System.getenv()): Int =
+            env["SUMMARY_MAX_LOOKBACK_MESSAGES"]
+                ?.toIntOrNull()
+                ?.coerceIn(1, 50)
+                ?: DEFAULT_MAX_LOOKBACK_MESSAGES
 
         fun resolveMaxImages(env: Map<String, String> = System.getenv()): Int =
             env["SUMMARY_MAX_IMAGES"]

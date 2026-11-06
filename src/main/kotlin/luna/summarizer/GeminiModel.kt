@@ -44,6 +44,7 @@ data class ChatImageAttachment(
  * @property videoDurationSeconds Optional video duration in seconds for adaptive mode selection.
  * @property imageAttachments Optional list of chat image attachments for multimodal visual understanding.
  * @property tools Optional list of tool declarations provided for model function calling.
+ * @property earlierContext Optional preceding conversational background context from autonomous lookback.
  */
 data class SummaryInput(
     val content: String,
@@ -54,6 +55,7 @@ data class SummaryInput(
     val videoDurationSeconds: Long? = null,
     val imageAttachments: List<ChatImageAttachment> = emptyList(),
     val tools: List<GeminiTool>? = null,
+    val earlierContext: String? = null,
 )
 
 /**

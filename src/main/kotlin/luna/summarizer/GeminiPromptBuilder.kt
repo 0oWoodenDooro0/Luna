@@ -102,6 +102,14 @@ object GeminiPromptBuilder {
         }
     }
 
+    const val EARLIER_CONTEXT_HEADER = "[前置歷史背景]"
+    const val CURRENT_DISCUSSION_HEADER = "[當前核心討論]"
+
+    fun formatExpandedDialogue(
+        earlierContent: String,
+        currentContent: String,
+    ): String = "$EARLIER_CONTEXT_HEADER\n${earlierContent.trim()}\n\n$CURRENT_DISCUSSION_HEADER\n${currentContent.trim()}"
+
     fun buildUserPrompt(input: SummaryInput): String {
         val sb = StringBuilder()
         if (!input.title.isNullOrBlank()) {
@@ -111,8 +119,18 @@ object GeminiPromptBuilder {
             sb.append("來源網址：").append(input.url.trim()).append("\n")
         }
 
+        val contentText =
+            if (!input.earlierContext.isNullOrBlank()) {
+                formatExpandedDialogue(
+                    earlierContent = input.earlierContext,
+                    currentContent = input.content,
+                )
+            } else {
+                input.content.trim()
+            }
+
         if (!input.videoUri.isNullOrBlank()) {
-            sb.append("創作者說明與大綱：\n").append(input.content.trim())
+            sb.append("創作者說明與大綱：\n").append(contentText)
             appendComments(sb, input.comments)
             sb.append("\n\n【指示】：請運用多模態視覺與語音理解影片內容，將核心論點與操作展示提煉至「核心重點」（可標註時間戳記 [mm:ss]）。嚴格落實來源隔離：核心重點絕不可引用社群留言；")
             if (input.comments.isNotEmpty()) {
@@ -126,7 +144,7 @@ object GeminiPromptBuilder {
                 )
             }
         } else {
-            sb.append("內文：\n").append(input.content.trim())
+            sb.append("內文：\n").append(contentText)
             appendComments(sb, input.comments)
             if (input.imageAttachments.isNotEmpty()) {
                 sb.append(
