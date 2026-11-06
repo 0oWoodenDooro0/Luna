@@ -2,6 +2,12 @@ package luna.summarizer
 
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonNull
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 
 /**
  * Supported video processing modes for Gemini multimodal video understanding.
@@ -37,6 +43,7 @@ data class ChatImageAttachment(
  * @property videoUri Optional video URI for multimodal video understanding.
  * @property videoDurationSeconds Optional video duration in seconds for adaptive mode selection.
  * @property imageAttachments Optional list of chat image attachments for multimodal visual understanding.
+ * @property tools Optional list of tool declarations provided for model function calling.
  */
 data class SummaryInput(
     val content: String,
@@ -46,7 +53,42 @@ data class SummaryInput(
     val videoUri: String? = null,
     val videoDurationSeconds: Long? = null,
     val imageAttachments: List<ChatImageAttachment> = emptyList(),
+    val tools: List<GeminiTool>? = null,
 )
+
+/**
+ * Standard tool declarations for Gemini Function Calling.
+ */
+object GeminiTools {
+    const val FETCH_EARLIER_MESSAGES = "fetch_earlier_messages"
+
+    val FETCH_EARLIER_MESSAGES_DECLARATION =
+        GeminiFunctionDeclaration(
+            name = FETCH_EARLIER_MESSAGES,
+            description =
+                "Fetches earlier chat messages from the channel history when more conversational " +
+                    "context or background information is needed.",
+            parameters =
+                GeminiSchema(
+                    type = "OBJECT",
+                    description = "Parameters for fetch_earlier_messages tool",
+                    properties =
+                        mapOf(
+                            "reason" to
+                                GeminiSchema(
+                                    type = "STRING",
+                                    description = "Reason explaining why earlier context is requested.",
+                                ),
+                        ),
+                    required = listOf("reason"),
+                ),
+        )
+
+    val FETCH_EARLIER_MESSAGES_TOOL =
+        GeminiTool(
+            functionDeclarations = listOf(FETCH_EARLIER_MESSAGES_DECLARATION),
+        )
+}
 
 /**
  * Result returned by [GeminiSummarizer].
@@ -59,6 +101,21 @@ sealed class SummaryResult {
      */
     data class Success(
         val text: String,
+    ) : SummaryResult()
+
+    /**
+     * Tool call requested by Gemini during summarization.
+     *
+     * @property name Function name requested by the model (e.g. `fetch_earlier_messages`).
+     * @property args Parsed argument key-value map.
+     * @property rawArgs Raw JsonObject arguments.
+     * @property continuation Optional continuation function to resume summarization with tool response.
+     */
+    data class ToolCall(
+        val name: String,
+        val args: Map<String, String> = emptyMap(),
+        val rawArgs: JsonObject = JsonObject(emptyMap()),
+        val continuation: (suspend (String) -> SummaryResult)? = null,
     ) : SummaryResult()
 
     /**
@@ -102,7 +159,104 @@ data class GeminiGenerateContentRequest(
     val contents: List<GeminiContent>,
     val systemInstruction: GeminiContent? = null,
     val generationConfig: GeminiGenerationConfig? = null,
+    val tools: List<GeminiTool>? = null,
+    val toolConfig: GeminiToolConfig? = null,
 )
+
+@Serializable
+data class GeminiTool(
+    val functionDeclarations: List<GeminiFunctionDeclaration>? = null,
+    @SerialName("function_declarations")
+    val functionDeclarationsSnake: List<GeminiFunctionDeclaration>? = null,
+) {
+    val actualFunctionDeclarations: List<GeminiFunctionDeclaration>
+        get() = functionDeclarations ?: functionDeclarationsSnake ?: emptyList()
+}
+
+@Serializable
+data class GeminiFunctionDeclaration(
+    val name: String,
+    val description: String? = null,
+    val parameters: GeminiSchema? = null,
+)
+
+@Serializable
+data class GeminiSchema(
+    val type: String,
+    val description: String? = null,
+    val properties: Map<String, GeminiSchema>? = null,
+    val required: List<String>? = null,
+)
+
+@Serializable
+data class GeminiToolConfig(
+    val functionCallingConfig: GeminiFunctionCallingConfig? = null,
+)
+
+@Serializable
+data class GeminiFunctionCallingConfig(
+    val mode: String? = null,
+    val allowedFunctionNames: List<String>? = null,
+)
+
+@Serializable
+data class GeminiFunctionCall(
+    val name: String,
+    val args: JsonObject? = null,
+) {
+    val effectiveArgs: JsonObject
+        get() = args ?: JsonObject(emptyMap())
+
+    fun argsAsStrings(): Map<String, String> =
+        effectiveArgs.mapValues { (_, element) ->
+            if (element is JsonPrimitive) {
+                element.content
+            } else {
+                element.toString()
+            }
+        }
+}
+
+@Serializable
+data class GeminiFunctionResponse(
+    val name: String,
+    val response: JsonObject,
+) {
+    companion object {
+        fun of(
+            name: String,
+            content: String,
+        ): GeminiFunctionResponse =
+            GeminiFunctionResponse(
+                name = name,
+                response =
+                    buildJsonObject {
+                        put("name", name)
+                        put("content", content)
+                    },
+            )
+
+        fun of(
+            name: String,
+            responseData: Map<String, Any?>,
+        ): GeminiFunctionResponse =
+            GeminiFunctionResponse(
+                name = name,
+                response =
+                    buildJsonObject {
+                        for ((k, v) in responseData) {
+                            when (v) {
+                                is String -> put(k, v)
+                                is Number -> put(k, v)
+                                is Boolean -> put(k, v)
+                                null -> put(k, JsonNull)
+                                else -> put(k, v.toString())
+                            }
+                        }
+                    },
+            )
+    }
+}
 
 @Serializable
 data class GeminiContent(
@@ -124,7 +278,19 @@ data class GeminiPart(
     val text: String? = null,
     @SerialName("file_data")
     val fileData: GeminiFileData? = null,
-)
+    val functionCall: GeminiFunctionCall? = null,
+    @SerialName("function_call")
+    val functionCallSnake: GeminiFunctionCall? = null,
+    val functionResponse: GeminiFunctionResponse? = null,
+    @SerialName("function_response")
+    val functionResponseSnake: GeminiFunctionResponse? = null,
+) {
+    val actualFunctionCall: GeminiFunctionCall?
+        get() = functionCall ?: functionCallSnake
+
+    val actualFunctionResponse: GeminiFunctionResponse?
+        get() = functionResponse ?: functionResponseSnake
+}
 
 @Serializable
 data class GeminiGenerationConfig(

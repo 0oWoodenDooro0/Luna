@@ -407,6 +407,12 @@ class SummaryService(
                         errorMessage = result.message,
                     )
                 }
+
+                is SummaryResult.ToolCall -> {
+                    // Unhandled tool call in standard reaction pipeline
+                    statusCache.remove(event.messageId)
+                    logger.warn("Unhandled tool call received for message {}: {}", event.messageId, result.name)
+                }
             }
         } catch (e: Exception) {
             // Evict from cache on unexpected exceptions to allow retry

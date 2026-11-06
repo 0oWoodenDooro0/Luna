@@ -46,7 +46,10 @@ class GeminiSummarizer(
             ),
         )
 
-    suspend fun summarize(input: SummaryInput): SummaryResult {
+    suspend fun summarize(
+        input: SummaryInput,
+        tools: List<GeminiTool>? = input.tools,
+    ): SummaryResult {
         if (!config.isConfigured) {
             return SummaryResult.Error.MissingApiKey()
         }
@@ -64,12 +67,15 @@ class GeminiSummarizer(
         return if (mode == VideoProcessingMode.AGENTIC && !input.videoUri.isNullOrBlank()) {
             summarizeAgentic(input)
         } else {
-            summarizeStatic(input)
+            summarizeStatic(input, tools)
         }
     }
 
-    private suspend fun summarizeStatic(input: SummaryInput): SummaryResult {
-        val requestPayload = GeminiPromptBuilder.buildRequest(input)
+    private suspend fun summarizeStatic(
+        input: SummaryInput,
+        tools: List<GeminiTool>? = input.tools,
+    ): SummaryResult {
+        val requestPayload = GeminiPromptBuilder.buildRequest(input, tools)
         val endpoint = "${config.baseUrl.trimEnd('/')}/v1beta/models/${config.model}:generateContent?key=${config.apiKey}"
 
         return try {
@@ -79,7 +85,11 @@ class GeminiSummarizer(
                     setBody(requestPayload)
                 }
 
-            handleResponse(response)
+            handleResponse(
+                response = response,
+                originalRequest = requestPayload,
+                activeTools = tools,
+            )
         } catch (e: HttpRequestTimeoutException) {
             SummaryResult.Error.Timeout("Gemini API request timed out: ${e.message}", cause = e)
         } catch (e: SocketTimeoutException) {
@@ -89,6 +99,108 @@ class GeminiSummarizer(
         } catch (e: Exception) {
             SummaryResult.Error.Generic("Unexpected error invoking Gemini API: ${e.message}", cause = e)
         }
+    }
+
+    suspend fun executeToolResponse(
+        previousRequest: GeminiGenerateContentRequest,
+        modelContent: GeminiContent,
+        toolName: String,
+        toolResponseContent: String,
+        tools: List<GeminiTool>? = null,
+    ): SummaryResult {
+        if (!config.isConfigured) {
+            return SummaryResult.Error.MissingApiKey()
+        }
+
+        val updatedContents = previousRequest.contents.toMutableList()
+        updatedContents.add(modelContent)
+        updatedContents.add(
+            GeminiContent(
+                role = "function",
+                parts =
+                    listOf(
+                        GeminiPart(
+                            functionResponse =
+                                GeminiFunctionResponse.of(
+                                    name = toolName,
+                                    content = toolResponseContent,
+                                ),
+                        ),
+                    ),
+            ),
+        )
+
+        val nextRequest =
+            GeminiGenerateContentRequest(
+                contents = updatedContents,
+                systemInstruction = previousRequest.systemInstruction,
+                generationConfig = previousRequest.generationConfig,
+                tools = tools,
+                toolConfig = previousRequest.toolConfig,
+            )
+
+        val endpoint =
+            "${config.baseUrl.trimEnd('/')}/v1beta/models/${config.model}:generateContent?key=${config.apiKey}"
+
+        return try {
+            val response: HttpResponse =
+                httpClient.post(endpoint) {
+                    contentType(ContentType.Application.Json)
+                    setBody(nextRequest)
+                }
+
+            handleResponse(
+                response = response,
+                originalRequest = nextRequest,
+                activeTools = tools,
+            )
+        } catch (e: HttpRequestTimeoutException) {
+            SummaryResult.Error.Timeout("Gemini API request timed out: ${e.message}", cause = e)
+        } catch (e: SocketTimeoutException) {
+            SummaryResult.Error.Timeout("Gemini API socket timed out: ${e.message}", cause = e)
+        } catch (e: TimeoutCancellationException) {
+            SummaryResult.Error.Timeout("Gemini API coroutine timed out: ${e.message}", cause = e)
+        } catch (e: Exception) {
+            SummaryResult.Error.Generic("Unexpected error invoking Gemini API: ${e.message}", cause = e)
+        }
+    }
+
+    suspend fun summarizeWithTools(
+        input: SummaryInput,
+        tools: List<GeminiTool> = listOf(GeminiTools.FETCH_EARLIER_MESSAGES_TOOL),
+        maxTurns: Int = 3,
+        toolExecutor: suspend (name: String, args: Map<String, String>) -> String,
+    ): SummaryResult {
+        var result = summarize(input = input, tools = tools)
+        var turn = 0
+
+        while (result is SummaryResult.ToolCall && turn < maxTurns) {
+            val toolCall = result
+            val continuation =
+                toolCall.continuation
+                    ?: return SummaryResult.Error.Generic(
+                        "No continuation available for tool call: ${toolCall.name}",
+                    )
+
+            val toolOutput =
+                try {
+                    toolExecutor(toolCall.name, toolCall.args)
+                } catch (e: Exception) {
+                    return SummaryResult.Error.Generic(
+                        "Error executing tool '${toolCall.name}': ${e.message}",
+                        cause = e,
+                    )
+                }
+
+            result = continuation(toolOutput)
+            turn++
+        }
+
+        if (result is SummaryResult.ToolCall) {
+            return SummaryResult.Error.Generic("Exceeded maximum tool call turns ($maxTurns)")
+        }
+
+        return result
     }
 
     private suspend fun summarizeAgentic(input: SummaryInput): SummaryResult {
@@ -195,7 +307,11 @@ class GeminiSummarizer(
         return SummaryResult.Error.Timeout("Agentic video interaction timed out after $maxPollingAttempts attempts")
     }
 
-    private suspend fun handleResponse(response: HttpResponse): SummaryResult {
+    private suspend fun handleResponse(
+        response: HttpResponse,
+        originalRequest: GeminiGenerateContentRequest? = null,
+        activeTools: List<GeminiTool>? = null,
+    ): SummaryResult {
         when {
             response.status == HttpStatusCode.TooManyRequests -> {
                 val retryAfter = response.headers["Retry-After"]?.toLongOrNull()
@@ -248,15 +364,66 @@ class GeminiSummarizer(
                     return SummaryResult.Error.Generic("No summary candidates returned by Gemini")
                 }
 
+                val candidate = candidates.firstOrNull()
+                val candidateContent = candidate?.content
+                val parts = candidateContent?.parts ?: emptyList()
+
+                val functionCallPart = parts.firstOrNull { it.actualFunctionCall != null }
+                val functionCall = functionCallPart?.actualFunctionCall
+
+                if (functionCall != null) {
+                    if (functionCall.name.isBlank()) {
+                        return SummaryResult.Error.Generic("Malformed tool call: missing function name")
+                    }
+
+                    val declaredToolNames =
+                        activeTools
+                            ?.flatMap { it.actualFunctionDeclarations }
+                            ?.map { it.name }
+                            ?.toSet()
+
+                    if (declaredToolNames != null && declaredToolNames.isNotEmpty() && !declaredToolNames.contains(functionCall.name)) {
+                        return SummaryResult.Error.Generic("Unknown tool call requested by Gemini: ${functionCall.name}")
+                    }
+
+                    if (functionCall.name == GeminiTools.FETCH_EARLIER_MESSAGES) {
+                        val reason = functionCall.argsAsStrings()["reason"]
+                        if (reason.isNullOrBlank()) {
+                            return SummaryResult.Error.Generic(
+                                "Malformed tool call: missing required 'reason' parameter for ${functionCall.name}",
+                            )
+                        }
+                    }
+
+                    val continuation: (suspend (String) -> SummaryResult)? =
+                        if (originalRequest != null) {
+                            { toolOutput ->
+                                executeToolResponse(
+                                    previousRequest = originalRequest,
+                                    modelContent = candidateContent ?: GeminiContent(role = "model", parts = parts),
+                                    toolName = functionCall.name,
+                                    toolResponseContent = toolOutput,
+                                    tools = activeTools,
+                                )
+                            }
+                        } else {
+                            null
+                        }
+
+                    return SummaryResult.ToolCall(
+                        name = functionCall.name,
+                        args = functionCall.argsAsStrings(),
+                        rawArgs = functionCall.effectiveArgs,
+                        continuation = continuation,
+                    )
+                }
+
                 val rawText =
-                    candidates
-                        .firstOrNull()
-                        ?.content
-                        ?.parts
-                        ?.mapNotNull { it.text }
-                        ?.joinToString("\n")
-                        ?.trim()
-                if (rawText.isNullOrBlank()) {
+                    parts
+                        .mapNotNull { it.text }
+                        .joinToString("\n")
+                        .trim()
+                if (rawText.isBlank()) {
                     return SummaryResult.Error.Generic("Empty text in Gemini summary response")
                 }
 
@@ -274,6 +441,9 @@ class GeminiSummarizer(
     }
 
     companion object {
+        const val FETCH_EARLIER_MESSAGES = GeminiTools.FETCH_EARLIER_MESSAGES
+        val FETCH_EARLIER_MESSAGES_TOOL = GeminiTools.FETCH_EARLIER_MESSAGES_TOOL
+
         private val jsonParser =
             Json {
                 ignoreUnknownKeys = true
