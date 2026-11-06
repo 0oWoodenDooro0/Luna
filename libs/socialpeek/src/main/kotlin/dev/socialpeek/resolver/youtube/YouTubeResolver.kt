@@ -10,7 +10,7 @@ import kotlinx.serialization.json.*
 import java.time.Duration
 
 class YouTubeResolver(
-    private val apiKey: String? = System.getenv("YOUTUBE_API_KEY"),
+    private val apiKey: String? = null,
 ) : PlatformResolver {
     override val platform: Platform = Platform.YOUTUBE
 

@@ -27,14 +27,20 @@ interface DiscordOAuthClient {
 }
 
 class HttpDiscordOAuthClient(
-    private val clientIdProvider: () -> String = {
-        System.getenv("DISCORD_CLIENT_ID") ?: System.getenv("DISCORD_APP_ID") ?: ""
-    },
-    private val clientSecretProvider: () -> String = {
-        System.getenv("DISCORD_CLIENT_SECRET") ?: ""
-    },
+    private val clientIdProvider: () -> String,
+    private val clientSecretProvider: () -> String,
     private val httpClient: HttpClient = HttpClient.newHttpClient(),
 ) : DiscordOAuthClient {
+    constructor(
+        clientId: String = "",
+        clientSecret: String = "",
+        httpClient: HttpClient = HttpClient.newHttpClient(),
+    ) : this(
+        clientIdProvider = { clientId },
+        clientSecretProvider = { clientSecret },
+        httpClient = httpClient,
+    )
+
     override fun getAuthorizationUrl(redirectUri: String): String {
         val clientId = clientIdProvider()
         require(clientId.isNotBlank()) {

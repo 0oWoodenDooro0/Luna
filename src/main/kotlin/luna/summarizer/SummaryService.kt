@@ -72,7 +72,7 @@ class SummaryService(
             }
         }
     },
-    val configuredEmoji: String? = System.getenv("SUMMARY_EMOJI")?.takeIf { it.isNotBlank() },
+    val configuredEmoji: String? = null,
     val maxHistoryMessages: Int = resolveMaxHistoryMessages(),
     val inactivityGap: Duration = resolveInactivityGap(),
     val maxCharacterBudget: Int = resolveMaxCharacterBudget(),
@@ -885,20 +885,20 @@ class SummaryService(
             filename: String? = null,
         ): String? = ChatImageResolver.resolveImageMimeType(contentType, filename)
 
-        fun resolveMaxHistoryMessages(env: Map<String, String> = System.getenv()): Int =
+        fun resolveMaxHistoryMessages(env: Map<String, String> = emptyMap()): Int =
             env["SUMMARY_MAX_HISTORY_MESSAGES"]
                 ?.toIntOrNull()
                 ?.coerceIn(1, 100)
                 ?: DEFAULT_MAX_HISTORY_MESSAGES
 
-        fun resolveInactivityGap(env: Map<String, String> = System.getenv()): Duration =
+        fun resolveInactivityGap(env: Map<String, String> = emptyMap()): Duration =
             env["SUMMARY_INACTIVITY_GAP_MINUTES"]
                 ?.toLongOrNull()
                 ?.takeIf { it > 0 }
                 ?.minutes
                 ?: DEFAULT_INACTIVITY_GAP
 
-        fun resolveMaxCharacterBudget(env: Map<String, String> = System.getenv()): Int =
+        fun resolveMaxCharacterBudget(env: Map<String, String> = emptyMap()): Int =
             env["SUMMARY_MAX_CHARACTER_BUDGET"]
                 ?.toIntOrNull()
                 ?.takeIf { it > 0 }
@@ -909,13 +909,13 @@ class SummaryService(
         const val MAX_LOOKBACK_MESSAGES = DEFAULT_MAX_LOOKBACK_MESSAGES
         const val NO_FURTHER_HISTORY_MESSAGE = "查無更早的歷史訊息。"
 
-        fun resolveMaxLookbackMessages(env: Map<String, String> = System.getenv()): Int =
+        fun resolveMaxLookbackMessages(env: Map<String, String> = emptyMap()): Int =
             env["SUMMARY_MAX_LOOKBACK_MESSAGES"]
                 ?.toIntOrNull()
                 ?.coerceIn(1, DEFAULT_MAX_LOOKBACK_MESSAGES)
                 ?: DEFAULT_MAX_LOOKBACK_MESSAGES
 
-        fun resolveMaxImages(env: Map<String, String> = System.getenv()): Int =
+        fun resolveMaxImages(env: Map<String, String> = emptyMap()): Int =
             env["SUMMARY_MAX_IMAGES"]
                 ?.toIntOrNull()
                 ?.takeIf { it > 0 }

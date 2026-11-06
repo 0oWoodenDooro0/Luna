@@ -19,7 +19,7 @@ data class GeminiConfig(
         const val DEFAULT_MODEL = "gemini-3.5-flash-lite"
         const val DEFAULT_BASE_URL = "https://generativelanguage.googleapis.com"
 
-        fun fromEnv(env: Map<String, String> = System.getenv()): GeminiConfig {
+        fun fromEnv(env: Map<String, String> = emptyMap()): GeminiConfig {
             val key = env["GEMINI_API_KEY"]?.trim().orEmpty()
             val rawModel = env["GEMINI_MODEL"]?.trim()
             val model = if (!rawModel.isNullOrBlank()) rawModel else DEFAULT_MODEL

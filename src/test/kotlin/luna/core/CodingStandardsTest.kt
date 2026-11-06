@@ -184,8 +184,9 @@ class CodingStandardsTest {
                     dir.name == "kotlin" &&
                     dir.parentFile?.name == parentDirName &&
                     !relPath.contains("${File.separator}build${File.separator}") &&
-                    !relPath.contains("${File.separator}.") &&
-                    !relPath.startsWith(".")
+                    !relPath
+                        .split(File.separator)
+                        .any { it.startsWith(".") }
             }.toList()
 
     private fun findClosingBraceIndex(str: String): Int {
