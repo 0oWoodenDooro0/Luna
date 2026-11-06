@@ -104,6 +104,13 @@ class SocialPreviewPlugin(
             clientFactory?.invoke(apiKey) ?: if (!apiKey.isNullOrBlank()) {
                 SocialPeekClient(resolvers = SocialPeekClient.defaultResolvers(youtubeApiKey = apiKey))
             } else {
+                JsonLogger.log(
+                    layer = "PLUGIN",
+                    component = "SocialPreviewPlugin",
+                    operation = "initialize",
+                    data = mapOf("youtubeApiKey" to "not_configured", "mode" to "degraded_oembed"),
+                    status = "DEGRADED",
+                )
                 SocialPeek.defaultClient
             }
         this.peekClient = client
