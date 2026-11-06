@@ -18,8 +18,8 @@ COPY src ./src
 COPY libs ./libs
 COPY mcp-server ./mcp-server
 
-# Build the fat jar
-RUN ./gradlew jar --no-daemon
+# Build the fat jar and mcp-server distribution
+RUN ./gradlew jar :mcp-server:installDist --no-daemon
 
 # Stage 2: Runtime stage
 FROM eclipse-temurin:17-jre-jammy
@@ -30,13 +30,14 @@ RUN useradd -m -u 1000 luna && \
     mkdir -p /app/data && \
     chown -R luna:luna /app
 
-# Copy fat jar from builder stage
+# Copy fat jar and mcp-server from builder stage
 COPY --from=builder --chown=luna:luna /app/build/libs/Luna-*.jar /app/Luna.jar
+COPY --from=builder --chown=luna:luna /app/mcp-server/build/install/mcp-server /app/mcp-server
 
 USER luna
 
-# Expose default HTTP port
-EXPOSE 8080
+# Expose default HTTP ports
+EXPOSE 8080 8081
 
 # Expose volume for persistent SQLite database and logs
 VOLUME ["/app/data"]

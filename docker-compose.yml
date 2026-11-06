@@ -15,3 +15,20 @@ services:
     volumes:
       # 持久化保存 SQLite 資料庫 (urls.db) 與運行日誌 (logs/)
       - ./data:/app/data
+
+  mcp-server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: ghcr.io/0owoodendooro0/luna:latest
+    container_name: luna-mcp-server
+    restart: unless-stopped
+    entrypoint: ["/app/mcp-server/bin/mcp-server"]
+    ports:
+      - "${MCP_PORT:-8081}:8081"
+    env_file:
+      - .env
+    volumes:
+      - ./data:/app/data
+    depends_on:
+      - luna
