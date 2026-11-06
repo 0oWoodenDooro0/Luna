@@ -4,6 +4,8 @@ import dev.kord.common.entity.MessageType
 import dev.kord.common.entity.Snowflake
 import dev.kord.core.Kord
 import dev.kord.core.entity.Message
+import luna.core.LunaWebhookRegistry
+import luna.core.WebhookRegistry
 import org.slf4j.LoggerFactory
 import java.util.Collections
 import java.util.LinkedHashMap
@@ -30,7 +32,7 @@ class BoundedWebhookCache(
         map[key] = value
     }
 
-    fun remove(key: Snowflake): Boolean? = map.remove(key)
+    fun remove(key: Snowflake): Boolean = map.remove(key) != null
 
     fun clear() {
         map.clear()
@@ -44,6 +46,7 @@ open class DialogueNoiseFilter(
     private val isLunaWebhook: (suspend (Snowflake) -> Boolean)? = null,
     kord: Kord? = null,
     val webhookCache: BoundedWebhookCache = BoundedWebhookCache(),
+    val webhookRegistry: WebhookRegistry = LunaWebhookRegistry,
 ) {
     private val logger = LoggerFactory.getLogger(DialogueNoiseFilter::class.java)
     private var kordInstance: Kord? = kord
@@ -57,6 +60,11 @@ open class DialogueNoiseFilter(
     }
 
     open suspend fun isLunaWebhook(webhookId: Snowflake): Boolean {
+        // Fast, permissionless O(1) in-memory verification from LunaWebhookRegistry
+        if (webhookRegistry.contains(webhookId)) {
+            return true
+        }
+
         val cached = webhookCache[webhookId]
         if (cached != null) {
             return cached
@@ -79,7 +87,11 @@ open class DialogueNoiseFilter(
                         logger.warn("Transient error retrieving webhook {} from Discord REST: {}", webhookId, e.message)
                         return false
                     }
-                webhook != null && (webhook.creatorId == currentKord.selfId || webhook.name == LUNA_PREVIEW_WEBHOOK_NAME)
+                val verified = webhook != null && (webhook.creatorId == currentKord.selfId || webhook.name == LUNA_PREVIEW_WEBHOOK_NAME)
+                if (verified) {
+                    webhookRegistry.register(webhookId)
+                }
+                verified
             } else {
                 false
             }

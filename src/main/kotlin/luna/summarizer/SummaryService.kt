@@ -239,6 +239,7 @@ class SummaryService(
                 var imageIndex = 1
                 messagesWithImages.joinToString("\n") { (msg, images) ->
                     val author = msg.author?.username ?: "Unknown"
+                    val embedText = formatEmbedPreviews(msg)
                     if (images.isNotEmpty()) {
                         val markers =
                             images.map { img ->
@@ -251,16 +252,30 @@ class SummaryService(
                             }
                         val markersText = markers.joinToString(" ")
                         val trimmedContent = msg.content.trim()
-                        if (trimmedContent.isNotEmpty()) {
-                            "[$author]: $trimmedContent $markersText"
+                        val parts =
+                            listOfNotNull(
+                                trimmedContent.takeIf { it.isNotEmpty() },
+                                embedText.takeIf { it.isNotEmpty() },
+                                markersText.takeIf { it.isNotEmpty() },
+                            )
+                        if (parts.isNotEmpty()) {
+                            "[$author]: ${parts.joinToString(" ")}"
                         } else {
-                            "[$author]: $markersText"
+                            "[$author]:"
+                        }
+                    } else if (embedText.isNotEmpty()) {
+                        val trimmedContent = msg.content.trim()
+                        if (trimmedContent.isNotEmpty()) {
+                            "[$author]: $trimmedContent $embedText"
+                        } else {
+                            "[$author]: $embedText"
                         }
                     } else {
                         "[$author]: ${msg.content}"
                     }
                 }
             } else {
+                val embedText = formatEmbedPreviews(message)
                 if (sliceImageAttachments.isNotEmpty()) {
                     var singleMsgImageIndex = 1
                     val markers =
@@ -275,10 +290,24 @@ class SummaryService(
                     val markersText = markers.joinToString(" ")
                     val trimmedContent = message.content.trim()
                     val author = message.author?.username ?: "Unknown"
-                    if (trimmedContent.isNotEmpty()) {
-                        "[$author]: $trimmedContent $markersText"
+                    val parts =
+                        listOfNotNull(
+                            trimmedContent.takeIf { it.isNotEmpty() },
+                            embedText.takeIf { it.isNotEmpty() },
+                            markersText.takeIf { it.isNotEmpty() },
+                        )
+                    if (parts.isNotEmpty()) {
+                        "[$author]: ${parts.joinToString(" ")}"
                     } else {
-                        "[$author]: $markersText"
+                        "[$author]:"
+                    }
+                } else if (embedText.isNotEmpty()) {
+                    val trimmedContent = message.content.trim()
+                    val author = message.author?.username ?: "Unknown"
+                    if (trimmedContent.isNotEmpty()) {
+                        "[$author]: $trimmedContent $embedText"
+                    } else {
+                        "[$author]: $embedText"
                     }
                 } else {
                     message.content
@@ -499,6 +528,24 @@ class SummaryService(
         }
 
         return acceptedPreceding.toList()
+    }
+
+    internal fun formatEmbedPreviews(message: Message): String {
+        val embeds = runCatching { message.embeds }.getOrNull() ?: return ""
+        if (embeds.isEmpty()) return ""
+
+        val previews =
+            embeds.mapNotNull { embed ->
+                val title = embed.title?.trim()?.takeIf { it.isNotBlank() }
+                val desc = embed.description?.trim()?.takeIf { it.isNotBlank() }
+                when {
+                    title != null && desc != null -> "[連結預覽: $title - $desc]"
+                    title != null -> "[連結預覽: $title]"
+                    desc != null -> "[連結預覽: $desc]"
+                    else -> null
+                }
+            }
+        return previews.joinToString(" ")
     }
 
     fun extractImageAttachments(message: Message): List<ChatImageAttachment> = imageResolver.extractImageAttachments(message)

@@ -27,6 +27,7 @@ object SummaryTestFixtures {
         stickers: List<StickerItem> = emptyList(),
         attachments: Set<Attachment> = emptySet(),
         webhookId: Snowflake? = null,
+        embeds: List<dev.kord.core.entity.Embed> = emptyList(),
     ): Message {
         val author = mockk<User>()
         every { author.username } returns username
@@ -41,7 +42,18 @@ object SummaryTestFixtures {
         every { msg.stickers } returns stickers
         every { msg.attachments } returns attachments
         every { msg.webhookId } returns webhookId
+        every { msg.embeds } returns embeds
         return msg
+    }
+
+    fun createMockEmbed(
+        title: String? = null,
+        description: String? = null,
+    ): dev.kord.core.entity.Embed {
+        val embed = mockk<dev.kord.core.entity.Embed>()
+        every { embed.title } returns title
+        every { embed.description } returns description
+        return embed
     }
 
     fun createMockReactionEvent(

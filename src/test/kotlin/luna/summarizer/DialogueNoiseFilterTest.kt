@@ -6,7 +6,9 @@ import dev.kord.core.entity.Attachment
 import dev.kord.core.entity.StickerItem
 import io.mockk.mockk
 import kotlinx.coroutines.test.runTest
+import luna.core.LunaWebhookRegistry
 import luna.summarizer.SummaryTestFixtures.createMockMessage
+import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import java.util.concurrent.atomic.AtomicInteger
 import kotlin.test.assertEquals
@@ -16,6 +18,11 @@ import kotlin.test.assertTrue
 
 class DialogueNoiseFilterTest {
     private val filter = DialogueNoiseFilter()
+
+    @BeforeEach
+    fun setUp() {
+        LunaWebhookRegistry.clear()
+    }
 
     @Test
     fun `identifies bot summary messages by prefix or keywords`() =
@@ -257,5 +264,79 @@ class DialogueNoiseFilterTest {
                     webhookId = Snowflake(999L),
                 )
             assertTrue(filter.isBotSummaryMessage(thirdPartyWebhookTldr))
+        }
+
+    @Test
+    fun `identifies luna webhook immediately from LunaWebhookRegistry without querying kord or hook`() =
+        runTest {
+            val registeredWebhookId = Snowflake(888L)
+            luna.core.LunaWebhookRegistry.register(registeredWebhookId)
+
+            val kordMock = mockk<dev.kord.core.Kord>()
+            val resourcesMock = mockk<dev.kord.core.ClientResources>()
+            val strategyMock = mockk<dev.kord.core.supplier.EntitySupplyStrategy<*>>()
+            io.mockk.every { resourcesMock.defaultStrategy } returns strategyMock
+            io.mockk.every { kordMock.resources } returns resourcesMock
+
+            val filterWithRegistry = DialogueNoiseFilter(kord = kordMock)
+
+            val msg = createMockMessage(1L, "Alice", "Preview message", isBot = true, webhookId = registeredWebhookId)
+            assertFalse(filterWithRegistry.isNoiseMessage(msg))
+            assertTrue(filterWithRegistry.isLunaWebhook(registeredWebhookId))
+            io.mockk.coVerify(exactly = 0) { kordMock.getWebhookOrNull(any()) }
+        }
+
+    @Test
+    fun `registers verified webhook into LunaWebhookRegistry when resolved via Kord`() =
+        runTest {
+            val kordMock = mockk<dev.kord.core.Kord>()
+            val resourcesMock = mockk<dev.kord.core.ClientResources>()
+            val strategyMock = mockk<dev.kord.core.supplier.EntitySupplyStrategy<*>>()
+            io.mockk.every { resourcesMock.defaultStrategy } returns strategyMock
+            io.mockk.every { kordMock.resources } returns resourcesMock
+
+            val selfId = Snowflake(42L)
+            io.mockk.every { kordMock.selfId } returns selfId
+
+            val webhookId = Snowflake(777L)
+            val webhook = mockk<dev.kord.core.entity.Webhook>()
+            io.mockk.every { webhook.creatorId } returns selfId
+            io.mockk.every { webhook.name } returns "Luna Preview"
+            io.mockk.coEvery { kordMock.getWebhookOrNull(webhookId) } returns webhook
+
+            luna.core.LunaWebhookRegistry.clear()
+            assertFalse(luna.core.LunaWebhookRegistry.contains(webhookId))
+
+            val filter = DialogueNoiseFilter(kord = kordMock)
+            val msg = createMockMessage(1L, "Alice", "Preview", isBot = true, webhookId = webhookId)
+
+            assertFalse(filter.isNoiseMessage(msg))
+            assertTrue(luna.core.LunaWebhookRegistry.contains(webhookId))
+        }
+
+    @Test
+    fun `rejects third-party webhook as noise and does not add it to LunaWebhookRegistry`() =
+        runTest {
+            val kordMock = mockk<dev.kord.core.Kord>()
+            val resourcesMock = mockk<dev.kord.core.ClientResources>()
+            val strategyMock = mockk<dev.kord.core.supplier.EntitySupplyStrategy<*>>()
+            io.mockk.every { resourcesMock.defaultStrategy } returns strategyMock
+            io.mockk.every { kordMock.resources } returns resourcesMock
+
+            val selfId = Snowflake(42L)
+            io.mockk.every { kordMock.selfId } returns selfId
+
+            val thirdPartyId = Snowflake(9999L)
+            val webhook = mockk<dev.kord.core.entity.Webhook>()
+            io.mockk.every { webhook.creatorId } returns Snowflake(111L)
+            io.mockk.every { webhook.name } returns "CI Bot"
+            io.mockk.coEvery { kordMock.getWebhookOrNull(thirdPartyId) } returns webhook
+
+            luna.core.LunaWebhookRegistry.clear()
+            val filter = DialogueNoiseFilter(kord = kordMock)
+            val msg = createMockMessage(1L, "CI Bot", "Build failed", isBot = true, webhookId = thirdPartyId)
+
+            assertTrue(filter.isNoiseMessage(msg))
+            assertFalse(luna.core.LunaWebhookRegistry.contains(thirdPartyId))
         }
 }
