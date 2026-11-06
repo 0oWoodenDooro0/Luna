@@ -562,4 +562,698 @@ class GeminiSummarizerTest {
             assertTrue(result.text.contains("TL;DR: Extract from steps succeeded"))
             assertTrue(result.text.contains("核心重點:"))
         }
+
+    @Test
+    fun `serializes tool declaration schema with fetch_earlier_messages and reason parameter`() =
+        runTest {
+            var recordedBody: String? = null
+
+            val responseJson =
+                """
+                {
+                  "candidates": [
+                    {
+                      "content": {
+                        "parts": [
+                          { "text": "TL;DR:\n摘要完成\n\n核心重點:\n• 重點" }
+                        ]
+                      }
+                    }
+                  ]
+                }
+                """.trimIndent()
+
+            val mockEngine =
+                MockEngine { request ->
+                    recordedBody = request.body.toByteArray().decodeToString()
+                    respond(
+                        content = responseJson,
+                        status = HttpStatusCode.OK,
+                        headers = headersOf(HttpHeaders.ContentType, "application/json"),
+                    )
+                }
+
+            val summarizer =
+                GeminiSummarizer(
+                    config = GeminiConfig(apiKey = "test-key"),
+                    httpClient = createTestClient(mockEngine),
+                )
+
+            val input =
+                SummaryInput(
+                    content = "Discussion needing context",
+                    tools = listOf(GeminiTools.FETCH_EARLIER_MESSAGES_TOOL),
+                )
+            val result = summarizer.summarize(input)
+            assertIs<SummaryResult.Success>(result)
+
+            val body = recordedBody
+            kotlin.test.assertNotNull(body)
+            assertTrue(body.contains("tools"))
+            assertTrue(body.contains("fetch_earlier_messages"))
+            assertTrue(body.contains("functionDeclarations"))
+            assertTrue(body.contains("reason"))
+            assertTrue(body.contains("OBJECT"))
+        }
+
+    @Test
+    fun `omits tools field from serialized payload when no tools are configured`() =
+        runTest {
+            var recordedBody: String? = null
+
+            val responseJson =
+                """
+                {
+                  "candidates": [
+                    {
+                      "content": {
+                        "parts": [
+                          { "text": "TL;DR:\n一般摘要\n\n核心重點:\n• 重點" }
+                        ]
+                      }
+                    }
+                  ]
+                }
+                """.trimIndent()
+
+            val mockEngine =
+                MockEngine { request ->
+                    recordedBody = request.body.toByteArray().decodeToString()
+                    respond(
+                        content = responseJson,
+                        status = HttpStatusCode.OK,
+                        headers = headersOf(HttpHeaders.ContentType, "application/json"),
+                    )
+                }
+
+            val summarizer =
+                GeminiSummarizer(
+                    config = GeminiConfig(apiKey = "test-key"),
+                    httpClient = createTestClient(mockEngine),
+                )
+
+            val input = SummaryInput(content = "Plain text summarization")
+            val result = summarizer.summarize(input)
+            assertIs<SummaryResult.Success>(result)
+
+            val body = recordedBody
+            kotlin.test.assertNotNull(body)
+            assertFalse(body.contains("\"tools\""))
+        }
+
+    @Test
+    fun `parses functionCall from Gemini response candidate and returns ToolCall with arguments`() =
+        runTest {
+            val responseJson =
+                """
+                {
+                  "candidates": [
+                    {
+                      "content": {
+                        "role": "model",
+                        "parts": [
+                          {
+                            "functionCall": {
+                              "name": "fetch_earlier_messages",
+                              "args": {
+                                "reason": "Need earlier conversation to determine disagreement origin"
+                              }
+                            }
+                          }
+                        ]
+                      },
+                      "finishReason": "STOP"
+                    }
+                  ]
+                }
+                """.trimIndent()
+
+            val mockEngine =
+                MockEngine {
+                    respond(
+                        content = responseJson,
+                        status = HttpStatusCode.OK,
+                        headers = headersOf(HttpHeaders.ContentType, "application/json"),
+                    )
+                }
+
+            val summarizer =
+                GeminiSummarizer(
+                    config = GeminiConfig(apiKey = "test-key"),
+                    httpClient = createTestClient(mockEngine),
+                )
+
+            val input =
+                SummaryInput(
+                    content = "Recent message slice",
+                    tools = listOf(GeminiTools.FETCH_EARLIER_MESSAGES_TOOL),
+                )
+            val result = summarizer.summarize(input)
+
+            assertIs<SummaryResult.ToolCall>(result)
+            assertEquals("fetch_earlier_messages", result.name)
+            assertEquals("Need earlier conversation to determine disagreement origin", result.args["reason"])
+            kotlin.test.assertNotNull(result.continuation)
+        }
+
+    @Test
+    fun `multi-turn tool execution succeeds when continuation is invoked with earlier messages`() =
+        runTest {
+            var requestCount = 0
+            var continuationBody: String? = null
+
+            val toolCallResponse =
+                """
+                {
+                  "candidates": [
+                    {
+                      "content": {
+                        "role": "model",
+                        "parts": [
+                          {
+                            "functionCall": {
+                              "name": "fetch_earlier_messages",
+                              "args": {
+                                "reason": "Missing context"
+                              }
+                            }
+                          }
+                        ]
+                      }
+                    }
+                  ]
+                }
+                """.trimIndent()
+
+            val finalSummaryResponse =
+                """
+                {
+                  "candidates": [
+                    {
+                      "content": {
+                        "role": "model",
+                        "parts": [
+                          {
+                            "text": "TL;DR:\n完整脈絡繁體中文摘要\n\n核心重點:\n• 早期討論要點\n• 後續共識"
+                          }
+                        ]
+                      }
+                    }
+                  ]
+                }
+                """.trimIndent()
+
+            val mockEngine =
+                MockEngine { request ->
+                    requestCount++
+                    if (requestCount == 1) {
+                        respond(
+                            content = toolCallResponse,
+                            status = HttpStatusCode.OK,
+                            headers = headersOf(HttpHeaders.ContentType, "application/json"),
+                        )
+                    } else {
+                        continuationBody = request.body.toByteArray().decodeToString()
+                        respond(
+                            content = finalSummaryResponse,
+                            status = HttpStatusCode.OK,
+                            headers = headersOf(HttpHeaders.ContentType, "application/json"),
+                        )
+                    }
+                }
+
+            val summarizer =
+                GeminiSummarizer(
+                    config = GeminiConfig(apiKey = "test-key"),
+                    httpClient = createTestClient(mockEngine),
+                )
+
+            val input =
+                SummaryInput(
+                    content = "Later part of discussion",
+                    tools = listOf(GeminiTools.FETCH_EARLIER_MESSAGES_TOOL),
+                )
+
+            val initialResult = summarizer.summarize(input)
+            assertIs<SummaryResult.ToolCall>(initialResult)
+
+            val continuation = initialResult.continuation
+            kotlin.test.assertNotNull(continuation)
+
+            val earlierHistory = "User A: We should adopt Kotlin 2.0. User B: Agreed."
+            val finalResult = continuation.invoke(earlierHistory)
+
+            assertIs<SummaryResult.Success>(finalResult)
+            assertTrue(finalResult.text.contains("TL;DR:\n完整脈絡繁體中文摘要"))
+            assertEquals(2, requestCount)
+
+            val contBody = continuationBody
+            kotlin.test.assertNotNull(contBody)
+            assertTrue(contBody.contains("functionResponse"))
+            assertTrue(contBody.contains("fetch_earlier_messages"))
+            assertTrue(contBody.contains("User A: We should adopt Kotlin 2.0"))
+        }
+
+    @Test
+    fun `summarizeWithTools coordinates multi-turn tool interaction with executor automatically`() =
+        runTest {
+            var requestCount = 0
+            val toolCallResponse =
+                """
+                {
+                  "candidates": [
+                    {
+                      "content": {
+                        "role": "model",
+                        "parts": [
+                          {
+                            "functionCall": {
+                              "name": "fetch_earlier_messages",
+                              "args": {
+                                "reason": "Requires earlier history"
+                              }
+                            }
+                          }
+                        ]
+                      }
+                    }
+                  ]
+                }
+                """.trimIndent()
+
+            val finalSummaryResponse =
+                """
+                {
+                  "candidates": [
+                    {
+                      "content": {
+                        "parts": [
+                          {
+                            "text": "TL;DR:\n自動化多輪工具摘要成功\n\n核心重點:\n• 要點一\n• 要點二"
+                          }
+                        ]
+                      }
+                    }
+                  ]
+                }
+                """.trimIndent()
+
+            val mockEngine =
+                MockEngine {
+                    requestCount++
+                    val content = if (requestCount == 1) toolCallResponse else finalSummaryResponse
+                    respond(
+                        content = content,
+                        status = HttpStatusCode.OK,
+                        headers = headersOf(HttpHeaders.ContentType, "application/json"),
+                    )
+                }
+
+            val summarizer =
+                GeminiSummarizer(
+                    config = GeminiConfig(apiKey = "test-key"),
+                    httpClient = createTestClient(mockEngine),
+                )
+
+            val input = SummaryInput(content = "Initial chat slice")
+            var executorCalled = false
+
+            val result =
+                summarizer.summarizeWithTools(input) { name, args ->
+                    executorCalled = true
+                    assertEquals("fetch_earlier_messages", name)
+                    assertEquals("Requires earlier history", args["reason"])
+                    "Fetched earlier messages from channel"
+                }
+
+            assertIs<SummaryResult.Success>(result)
+            assertTrue(executorCalled)
+            assertTrue(result.text.contains("自動化多輪工具摘要成功"))
+            assertEquals(2, requestCount)
+        }
+
+    @Test
+    fun `summarizeWithTools returns Success directly when model produces text without tool calls`() =
+        runTest {
+            val directTextResponse =
+                """
+                {
+                  "candidates": [
+                    {
+                      "content": {
+                        "parts": [
+                          {
+                            "text": "TL;DR:\n直接產出摘要\n\n核心重點:\n• 重點一"
+                          }
+                        ]
+                      }
+                    }
+                  ]
+                }
+                """.trimIndent()
+
+            val mockEngine =
+                MockEngine {
+                    respond(
+                        content = directTextResponse,
+                        status = HttpStatusCode.OK,
+                        headers = headersOf(HttpHeaders.ContentType, "application/json"),
+                    )
+                }
+
+            val summarizer =
+                GeminiSummarizer(
+                    config = GeminiConfig(apiKey = "test-key"),
+                    httpClient = createTestClient(mockEngine),
+                )
+
+            var executorCalled = false
+            val result =
+                summarizer.summarizeWithTools(SummaryInput("Sufficient context")) { _, _ ->
+                    executorCalled = true
+                    "Unreached"
+                }
+
+            assertIs<SummaryResult.Success>(result)
+            assertFalse(executorCalled)
+            assertTrue(result.text.contains("直接產出摘要"))
+        }
+
+    @Test
+    fun `handles malformed tool response with blank function name gracefully`() =
+        runTest {
+            val malformedResponse =
+                """
+                {
+                  "candidates": [
+                    {
+                      "content": {
+                        "role": "model",
+                        "parts": [
+                          {
+                            "functionCall": {
+                              "name": "   ",
+                              "args": {}
+                            }
+                          }
+                        ]
+                      }
+                    }
+                  ]
+                }
+                """.trimIndent()
+
+            val mockEngine =
+                MockEngine {
+                    respond(
+                        content = malformedResponse,
+                        status = HttpStatusCode.OK,
+                        headers = headersOf(HttpHeaders.ContentType, "application/json"),
+                    )
+                }
+
+            val summarizer =
+                GeminiSummarizer(
+                    config = GeminiConfig(apiKey = "test-key"),
+                    httpClient = createTestClient(mockEngine),
+                )
+
+            val result =
+                summarizer.summarize(
+                    SummaryInput(
+                        content = "Chat",
+                        tools = listOf(GeminiTools.FETCH_EARLIER_MESSAGES_TOOL),
+                    ),
+                )
+            assertIs<SummaryResult.Error.Generic>(result)
+            assertTrue(result.message.contains("missing function name", ignoreCase = true))
+        }
+
+    @Test
+    fun `handles malformed tool response when required reason argument is missing`() =
+        runTest {
+            val missingReasonResponse =
+                """
+                {
+                  "candidates": [
+                    {
+                      "content": {
+                        "role": "model",
+                        "parts": [
+                          {
+                            "functionCall": {
+                              "name": "fetch_earlier_messages",
+                              "args": {}
+                            }
+                          }
+                        ]
+                      }
+                    }
+                  ]
+                }
+                """.trimIndent()
+
+            val mockEngine =
+                MockEngine {
+                    respond(
+                        content = missingReasonResponse,
+                        status = HttpStatusCode.OK,
+                        headers = headersOf(HttpHeaders.ContentType, "application/json"),
+                    )
+                }
+
+            val summarizer =
+                GeminiSummarizer(
+                    config = GeminiConfig(apiKey = "test-key"),
+                    httpClient = createTestClient(mockEngine),
+                )
+
+            val result =
+                summarizer.summarize(
+                    SummaryInput(
+                        content = "Chat",
+                        tools = listOf(GeminiTools.FETCH_EARLIER_MESSAGES_TOOL),
+                    ),
+                )
+            assertIs<SummaryResult.Error.Generic>(result)
+            assertTrue(result.message.contains("reason", ignoreCase = true))
+        }
+
+    @Test
+    fun `handles unknown tool call gracefully when model requests undeclared function`() =
+        runTest {
+            val unknownToolResponse =
+                """
+                {
+                  "candidates": [
+                    {
+                      "content": {
+                        "role": "model",
+                        "parts": [
+                          {
+                            "functionCall": {
+                              "name": "unsupported_shell_execute",
+                              "args": {
+                                "cmd": "ls"
+                              }
+                            }
+                          }
+                        ]
+                      }
+                    }
+                  ]
+                }
+                """.trimIndent()
+
+            val mockEngine =
+                MockEngine {
+                    respond(
+                        content = unknownToolResponse,
+                        status = HttpStatusCode.OK,
+                        headers = headersOf(HttpHeaders.ContentType, "application/json"),
+                    )
+                }
+
+            val summarizer =
+                GeminiSummarizer(
+                    config = GeminiConfig(apiKey = "test-key"),
+                    httpClient = createTestClient(mockEngine),
+                )
+
+            val result =
+                summarizer.summarize(
+                    SummaryInput(
+                        content = "Chat",
+                        tools = listOf(GeminiTools.FETCH_EARLIER_MESSAGES_TOOL),
+                    ),
+                )
+            assertIs<SummaryResult.Error.Generic>(result)
+            assertTrue(result.message.contains("Unknown tool call", ignoreCase = true))
+        }
+
+    @Test
+    fun `handles tool executor failure gracefully without throwing unhandled exceptions`() =
+        runTest {
+            val toolCallResponse =
+                """
+                {
+                  "candidates": [
+                    {
+                      "content": {
+                        "role": "model",
+                        "parts": [
+                          {
+                            "functionCall": {
+                              "name": "fetch_earlier_messages",
+                              "args": {
+                                "reason": "Need context"
+                              }
+                            }
+                          }
+                        ]
+                      }
+                    }
+                  ]
+                }
+                """.trimIndent()
+
+            val mockEngine =
+                MockEngine {
+                    respond(
+                        content = toolCallResponse,
+                        status = HttpStatusCode.OK,
+                        headers = headersOf(HttpHeaders.ContentType, "application/json"),
+                    )
+                }
+
+            val summarizer =
+                GeminiSummarizer(
+                    config = GeminiConfig(apiKey = "test-key"),
+                    httpClient = createTestClient(mockEngine),
+                )
+
+            val result =
+                summarizer.summarizeWithTools(SummaryInput("Chat")) { _, _ ->
+                    throw IllegalStateException("Discord gateway disconnected")
+                }
+
+            assertIs<SummaryResult.Error.Generic>(result)
+            assertTrue(result.message.contains("Discord gateway disconnected"))
+        }
+
+    @Test
+    fun `handles HTTP error during tool response continuation gracefully`() =
+        runTest {
+            var requestCount = 0
+            val toolCallResponse =
+                """
+                {
+                  "candidates": [
+                    {
+                      "content": {
+                        "role": "model",
+                        "parts": [
+                          {
+                            "functionCall": {
+                              "name": "fetch_earlier_messages",
+                              "args": {
+                                "reason": "Need context"
+                              }
+                            }
+                          }
+                        ]
+                      }
+                    }
+                  ]
+                }
+                """.trimIndent()
+
+            val mockEngine =
+                MockEngine {
+                    requestCount++
+                    if (requestCount == 1) {
+                        respond(
+                            content = toolCallResponse,
+                            status = HttpStatusCode.OK,
+                            headers = headersOf(HttpHeaders.ContentType, "application/json"),
+                        )
+                    } else {
+                        respond(
+                            content = "Internal Gemini error",
+                            status = HttpStatusCode.InternalServerError,
+                            headers = headersOf(HttpHeaders.ContentType, "text/plain"),
+                        )
+                    }
+                }
+
+            val summarizer =
+                GeminiSummarizer(
+                    config = GeminiConfig(apiKey = "test-key"),
+                    httpClient = createTestClient(mockEngine),
+                )
+
+            val initialResult =
+                summarizer.summarize(
+                    SummaryInput(
+                        content = "Chat",
+                        tools = listOf(GeminiTools.FETCH_EARLIER_MESSAGES_TOOL),
+                    ),
+                )
+            assertIs<SummaryResult.ToolCall>(initialResult)
+
+            val continuationResult = initialResult.continuation?.invoke("Earlier messages")
+            assertIs<SummaryResult.Error.ApiError>(continuationResult)
+            assertEquals(500, continuationResult.statusCode)
+        }
+
+    @Test
+    fun `handles maximum turn limit exceeded gracefully in summarizeWithTools`() =
+        runTest {
+            val endlessToolCallResponse =
+                """
+                {
+                  "candidates": [
+                    {
+                      "content": {
+                        "role": "model",
+                        "parts": [
+                          {
+                            "functionCall": {
+                              "name": "fetch_earlier_messages",
+                              "args": {
+                                "reason": "Need even more context"
+                              }
+                            }
+                          }
+                        ]
+                      }
+                    }
+                  ]
+                }
+                """.trimIndent()
+
+            val mockEngine =
+                MockEngine {
+                    respond(
+                        content = endlessToolCallResponse,
+                        status = HttpStatusCode.OK,
+                        headers = headersOf(HttpHeaders.ContentType, "application/json"),
+                    )
+                }
+
+            val summarizer =
+                GeminiSummarizer(
+                    config = GeminiConfig(apiKey = "test-key"),
+                    httpClient = createTestClient(mockEngine),
+                )
+
+            val result =
+                summarizer.summarizeWithTools(
+                    input = SummaryInput("Chat"),
+                    maxTurns = 2,
+                ) { _, _ -> "History batch" }
+
+            assertIs<SummaryResult.Error.Generic>(result)
+            assertTrue(result.message.contains("maximum tool call turns", ignoreCase = true))
+        }
 }

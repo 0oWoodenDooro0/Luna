@@ -137,7 +137,10 @@ object GeminiPromptBuilder {
         return sb.toString().trim()
     }
 
-    fun buildRequest(input: SummaryInput): GeminiGenerateContentRequest {
+    fun buildRequest(
+        input: SummaryInput,
+        tools: List<GeminiTool>? = input.tools,
+    ): GeminiGenerateContentRequest {
         val parts = mutableListOf<GeminiPart>()
         if (!input.videoUri.isNullOrBlank()) {
             val mode = resolveProcessingMode(input.videoDurationSeconds)
@@ -181,6 +184,7 @@ object GeminiPromptBuilder {
                     temperature = 0.2,
                     maxOutputTokens = 1024,
                 ),
+            tools = tools,
         )
     }
 }
