@@ -5,6 +5,7 @@ rootProject.name = "Luna"
 
 include(":libs:socialpeek")
 project(":libs:socialpeek").projectDir = file("libs/socialpeek")
+include("mcp-server")
 
 dependencyResolutionManagement {
     repositoriesMode.set(RepositoriesMode.PREFER_SETTINGS)

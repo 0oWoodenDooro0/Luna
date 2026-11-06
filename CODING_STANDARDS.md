@@ -21,7 +21,9 @@ Luna is a multi-project Gradle monorepo (`:libs:socialpeek`, `:libs:curtly`, and
 - **Preserve user commentary**: When processing messages that combine external URLs with user comments or annotations, do not discard user commentary in favor of extracted third-party link text. Combine user annotations into the processing pipeline context.
 - **Bot boundary disambiguation**: When backtracking or slicing chat history, distinguish between the bot's own workflow markers (`isBotSummaryMessage` checking for `TL;DR:` or previous summary markers) and third-party bots. Third-party bot messages must be filtered from dialogue input rather than terminating history backtracking.
 - **Media attachment context**: Messages with blank text must be preserved in conversation context if they carry `attachments`, ensuring multimodal references remain available in the dialogue context.
-- **Discord message limits**: All outgoing Discord messages and reply builders must account for Discord's 2,000-character payload limit, truncating gracefully with trailing ellipsis (`...`) before invocation.
+- **Discord message limits**: All outgoing Discord messages and reply builders must account for Discord's 2,000-character payload limit.
+  - **Conversational bot replies**: Direct channel replies and interactive command feedback must truncate gracefully with trailing ellipsis (`...`) before invocation.
+  - **Webhook broadcast & ingestion pipelines**: Automated broadcast, streaming, or LLM-generated document delivery (such as `DiscordWebhookBroadcaster`) must not truncate payload content; instead, sequentially chunk messages across paragraph (`\n\n`) and newline (`\n`) boundaries (`DiscordMessageChunker`) to preserve complete content.
 
 ## 4. Agent Worktree & Pipeline Seam Isolation
 

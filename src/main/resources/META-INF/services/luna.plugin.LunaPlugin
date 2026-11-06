@@ -2,3 +2,4 @@ luna.undercover.UndercoverPlugin
 luna.preview.SocialPreviewPlugin
 luna.summarizer.SummarizerPlugin
 luna.curtly.CurtlyPlugin
+luna.mcp.McpPlugin

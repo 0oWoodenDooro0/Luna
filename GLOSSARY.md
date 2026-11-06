@@ -84,3 +84,15 @@ _Avoid_: Direct URL passing, Discord CDN proxy, raw URL injection
 A Discord message dispatched by Luna via a managed channel webhook masquerading as the original author to display clean tracking-free URLs and rich social media previews after deleting the original message.
 _Avoid_: Masquerade message, proxy message, fake user post
 
+**Decoupled MCP Server**:
+The standalone service exposing the Model Context Protocol over HTTP Server-Sent Events to external AI agents (such as Google Gemini Apps) while maintaining zero compile-time or runtime dependencies on the Discord bot daemon or Discord Gateway.
+_Avoid_: Discord MCP bot, embedded bot MCP server
+
+**Channel Webhook Broadcast**:
+The asynchronous multi-channel fan-out mechanism where incoming agent messages are dispatched across all registered Discord incoming webhook endpoints.
+_Avoid_: Channel spammer, multi-bot poster
+
+**Embedded OAuth Provider**:
+The internal OAuth 2.1 authorization server integrated within the MCP service that advertises RFC 8414 metadata discovery and validates credentials without requiring a third-party identity service.
+_Avoid_: External auth server, Auth0 integration
+
