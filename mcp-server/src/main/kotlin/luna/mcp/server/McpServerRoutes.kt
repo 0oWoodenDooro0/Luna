@@ -108,68 +108,13 @@ fun Application.mcpServerModule(
         }
 
         post("/oauth/token") {
-            // Extract Basic Auth if present
-            val authHeader = call.request.headers[HttpHeaders.Authorization]
-            var basicClientId: String? = null
-            var basicClientSecret: String? = null
-            if (authHeader != null && authHeader.startsWith("Basic ", ignoreCase = true)) {
-                runCatching {
-                    val base64Credentials = authHeader.substring(6).trim()
-                    val decoded = String(Base64.getDecoder().decode(base64Credentials), StandardCharsets.UTF_8)
-                    val colonIndex = decoded.indexOf(':')
-                    if (colonIndex != -1) {
-                        basicClientId = decoded.substring(0, colonIndex)
-                        basicClientSecret = decoded.substring(colonIndex + 1)
-                    }
-                }
-            }
-
-            // Extract body parameters (form, json, query)
-            val rawBody = runCatching { call.receiveText() }.getOrDefault("")
-            val formParameters =
-                if (rawBody.isNotBlank() && !rawBody.trimStart().startsWith("{")) {
-                    runCatching { io.ktor.http.parseQueryString(rawBody) }.getOrNull()
-                } else {
-                    null
-                }
-            val jsonBody =
-                if (rawBody.trimStart().startsWith("{")) {
-                    runCatching { Json.parseToJsonElement(rawBody).jsonObject }.getOrNull()
-                } else {
-                    null
-                }
-
-            val grantType =
-                formParameters?.get("grant_type")
-                    ?: jsonBody?.get("grant_type")?.let { (it as? kotlinx.serialization.json.JsonPrimitive)?.content }
-                    ?: call.request.queryParameters["grant_type"]
-
-            val code =
-                formParameters?.get("code")
-                    ?: jsonBody?.get("code")?.let { (it as? kotlinx.serialization.json.JsonPrimitive)?.content }
-                    ?: call.request.queryParameters["code"]
-
-            val redirectUri =
-                formParameters?.get("redirect_uri")
-                    ?: jsonBody?.get("redirect_uri")?.let { (it as? kotlinx.serialization.json.JsonPrimitive)?.content }
-                    ?: call.request.queryParameters["redirect_uri"]
-
-            val clientId =
-                basicClientId
-                    ?: formParameters?.get("client_id")
-                    ?: jsonBody?.get("client_id")?.let { (it as? kotlinx.serialization.json.JsonPrimitive)?.content }
-                    ?: call.request.queryParameters["client_id"]
-
-            val clientSecret =
-                basicClientSecret
-                    ?: formParameters?.get("client_secret")
-                    ?: jsonBody?.get("client_secret")?.let { (it as? kotlinx.serialization.json.JsonPrimitive)?.content }
-                    ?: call.request.queryParameters["client_secret"]
-
-            val codeVerifier =
-                formParameters?.get("code_verifier")
-                    ?: jsonBody?.get("code_verifier")?.let { (it as? kotlinx.serialization.json.JsonPrimitive)?.content }
-                    ?: call.request.queryParameters["code_verifier"]
+            val tokenRequest = OAuthTokenRequestParser.parse(call)
+            val grantType = tokenRequest.grantType
+            val code = tokenRequest.code
+            val redirectUri = tokenRequest.redirectUri
+            val clientId = tokenRequest.clientId
+            val clientSecret = tokenRequest.clientSecret
+            val codeVerifier = tokenRequest.codeVerifier
 
             if (grantType != "authorization_code") {
                 val errorJson =

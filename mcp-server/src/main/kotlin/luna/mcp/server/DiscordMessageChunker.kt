@@ -3,6 +3,10 @@ package luna.mcp.server
 object DiscordMessageChunker {
     const val MAX_DISCORD_MESSAGE_LENGTH = 2000
 
+    /**
+     * Splits an outgoing message into sequential chunks within Discord's 2,000-character limit,
+     * preserving paragraph and line break boundaries (`\n`) wherever possible.
+     */
     fun chunk(
         message: String,
         maxChunkSize: Int = MAX_DISCORD_MESSAGE_LENGTH,
