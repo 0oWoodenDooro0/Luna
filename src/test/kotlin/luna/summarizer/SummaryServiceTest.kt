@@ -19,6 +19,7 @@ import io.mockk.mockk
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.test.runTest
+import org.junit.jupiter.api.BeforeEach
 import java.util.concurrent.atomic.AtomicInteger
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -30,6 +31,11 @@ import kotlin.time.Duration.Companion.minutes
 import kotlin.time.Instant
 
 class SummaryServiceTest {
+    @BeforeEach
+    fun setUp() {
+        luna.core.LunaWebhookRegistry.clear()
+    }
+
     @Test
     fun `isSummaryEmoji matches default memo emojis and custom configured emoji`() {
         val service = SummaryService(configuredEmoji = "⭐")
@@ -464,6 +470,7 @@ class SummaryServiceTest {
         stickers: List<StickerItem> = emptyList(),
         attachments: Set<Attachment> = emptySet(),
         webhookId: Snowflake? = null,
+        embeds: List<dev.kord.core.entity.Embed> = emptyList(),
     ): Message =
         SummaryTestFixtures.createMockMessage(
             id = id,
@@ -475,6 +482,7 @@ class SummaryServiceTest {
             stickers = stickers,
             attachments = attachments,
             webhookId = webhookId,
+            embeds = embeds,
         )
 
     @Test
@@ -3560,5 +3568,275 @@ class SummaryServiceTest {
             assertTrue(input.content.contains("[Alice]: Earlier context before webhook"))
             assertTrue(input.content.contains("[Bob]: TL;DR: check out this release https://example.com/rel"))
             assertTrue(input.content.contains("[Charlie]: Thoughts on this?"))
+        }
+
+    @Test
+    fun `conversation slice extracts embed title and description and formats dialogue turn preserving masqueraded author`() =
+        runTest {
+            val lunaWebhookId = Snowflake(777L)
+            luna.core.LunaWebhookRegistry.register(lunaWebhookId)
+
+            val summarizer = mockk<GeminiSummarizer>()
+            var capturedInput: SummaryInput? = null
+            coEvery {
+                summarizer.summarize(any<SummaryInput>())
+            } answers {
+                capturedInput = firstArg<SummaryInput>()
+                SummaryResult.Success("Slice summary")
+            }
+
+            val baseTime = Instant.fromEpochMilliseconds(1700000000000L)
+            val embed =
+                SummaryTestFixtures.createMockEmbed(
+                    title = "Kotlin 2.0 Released",
+                    description = "The K2 compiler is now stable and officially released.",
+                )
+            val webhookMsg =
+                createMockMessage(
+                    id = 8201L,
+                    username = "MasqueradedAlice",
+                    content = "Check this clean url: https://kotlinlang.org",
+                    isBot = true,
+                    webhookId = lunaWebhookId,
+                    timestamp = baseTime,
+                    embeds = listOf(embed),
+                )
+            val targetMsg =
+                createMockMessage(
+                    id = 8202L,
+                    username = "Bob",
+                    content = "This is huge news!",
+                    isBot = false,
+                    timestamp = baseTime + 1.minutes,
+                )
+
+            val service =
+                SummaryService(
+                    summarizer = summarizer,
+                    replySender = { _, _ -> },
+                    historyFetcher = { _, _ -> listOf(webhookMsg) },
+                    peekResolver = { null },
+                )
+
+            val event = SummaryTestFixtures.createMockReactionEvent(targetMsg)
+            service.handleReaction(event)
+
+            coVerify(exactly = 1) { summarizer.summarize(any<SummaryInput>()) }
+            val input = capturedInput
+            assertNotNull(input)
+            assertTrue(
+                input.content.contains(
+                    "[MasqueradedAlice]: Check this clean url: https://kotlinlang.org [連結預覽: Kotlin 2.0 Released - The K2 compiler is now stable and officially released.]",
+                ),
+            )
+            assertTrue(input.content.contains("[Bob]: This is huge news!"))
+        }
+
+    @Test
+    fun `dialogue turn formats embed with only title or only description correctly`() =
+        runTest {
+            val lunaWebhookId = Snowflake(777L)
+            luna.core.LunaWebhookRegistry.register(lunaWebhookId)
+
+            val summarizer = mockk<GeminiSummarizer>()
+            var capturedInput: SummaryInput? = null
+            coEvery {
+                summarizer.summarize(any<SummaryInput>())
+            } answers {
+                capturedInput = firstArg<SummaryInput>()
+                SummaryResult.Success("Slice summary")
+            }
+
+            val baseTime = Instant.fromEpochMilliseconds(1700000000000L)
+            val embedOnlyTitle = SummaryTestFixtures.createMockEmbed(title = "Only Title", description = null)
+            val embedOnlyDesc = SummaryTestFixtures.createMockEmbed(title = "", description = "Only Description")
+
+            val msg1 =
+                createMockMessage(
+                    id = 8301L,
+                    username = "Alice",
+                    content = "Message 1",
+                    isBot = true,
+                    webhookId = lunaWebhookId,
+                    timestamp = baseTime,
+                    embeds = listOf(embedOnlyTitle),
+                )
+            val msg2 =
+                createMockMessage(
+                    id = 8302L,
+                    username = "Bob",
+                    content = "Message 2",
+                    isBot = false,
+                    timestamp = baseTime + 1.minutes,
+                    embeds = listOf(embedOnlyDesc),
+                )
+            val targetMsg =
+                createMockMessage(
+                    id = 8303L,
+                    username = "Charlie",
+                    content = "Target message",
+                    isBot = false,
+                    timestamp = baseTime + 2.minutes,
+                )
+
+            val service =
+                SummaryService(
+                    summarizer = summarizer,
+                    replySender = { _, _ -> },
+                    historyFetcher = { _, _ -> listOf(msg1, msg2) },
+                    peekResolver = { null },
+                )
+
+            val event = SummaryTestFixtures.createMockReactionEvent(targetMsg)
+            service.handleReaction(event)
+
+            val input = capturedInput
+            assertNotNull(input)
+            assertTrue(input.content.contains("[Alice]: Message 1 [連結預覽: Only Title]"))
+            assertTrue(input.content.contains("[Bob]: Message 2 [連結預覽: Only Description]"))
+            assertTrue(input.content.contains("[Charlie]: Target message"))
+        }
+
+    @Test
+    fun `dialogue turn formats embed alongside image attachments in conversation slice`() =
+        runTest {
+            val lunaWebhookId = Snowflake(777L)
+            luna.core.LunaWebhookRegistry.register(lunaWebhookId)
+
+            val summarizer = mockk<GeminiSummarizer>()
+            var capturedInput: SummaryInput? = null
+            coEvery {
+                summarizer.summarize(any<SummaryInput>())
+            } answers {
+                capturedInput = firstArg<SummaryInput>()
+                SummaryResult.Success("Slice summary")
+            }
+
+            val baseTime = Instant.fromEpochMilliseconds(1700000000000L)
+            val embed = SummaryTestFixtures.createMockEmbed(title = "Preview Title", description = "Preview Desc")
+            val imageAttachment = mockk<Attachment>()
+            every { imageAttachment.contentType } returns "image/png"
+            every { imageAttachment.filename } returns "chart.png"
+            every { imageAttachment.size } returns 1024
+            every { imageAttachment.url } returns "https://cdn.example.com/chart.png"
+            every { imageAttachment.proxyUrl } returns "https://cdn.example.com/chart.png"
+
+            val msg1 =
+                createMockMessage(
+                    id = 8401L,
+                    username = "Alice",
+                    content = "Here is the update",
+                    isBot = true,
+                    webhookId = lunaWebhookId,
+                    timestamp = baseTime,
+                    attachments = setOf(imageAttachment),
+                    embeds = listOf(embed),
+                )
+            val targetMsg =
+                createMockMessage(
+                    id = 8402L,
+                    username = "Bob",
+                    content = "Looks good",
+                    isBot = false,
+                    timestamp = baseTime + 1.minutes,
+                )
+
+            val service =
+                SummaryService(
+                    summarizer = summarizer,
+                    replySender = { _, _ -> },
+                    historyFetcher = { _, _ -> listOf(msg1) },
+                    peekResolver = { null },
+                )
+
+            val event = SummaryTestFixtures.createMockReactionEvent(targetMsg)
+            service.handleReaction(event)
+
+            val input = capturedInput
+            assertNotNull(input)
+            assertTrue(input.content.contains("[Alice]: Here is the update [連結預覽: Preview Title - Preview Desc] [附帶圖片 1: chart.png]"))
+        }
+
+    @Test
+    fun `webhook registered in LunaWebhookRegistry is processed without calling Kord REST API`() =
+        runTest {
+            val lunaWebhookId = Snowflake(9999L)
+            luna.core.LunaWebhookRegistry.register(lunaWebhookId)
+
+            val kordMock = mockk<dev.kord.core.Kord>()
+            val resourcesMock = mockk<dev.kord.core.ClientResources>()
+            val strategyMock = mockk<dev.kord.core.supplier.EntitySupplyStrategy<*>>()
+            every { resourcesMock.defaultStrategy } returns strategyMock
+            every { kordMock.resources } returns resourcesMock
+
+            val summarizer = mockk<GeminiSummarizer>()
+            coEvery {
+                summarizer.summarize(any<SummaryInput>())
+            } returns SummaryResult.Success("Summary text")
+
+            val targetMsg =
+                createMockMessage(
+                    id = 8501L,
+                    username = "MasqueradedUser",
+                    content = "Post content",
+                    isBot = true,
+                    webhookId = lunaWebhookId,
+                )
+
+            var replyText: String? = null
+            val service =
+                SummaryService(
+                    summarizer = summarizer,
+                    replySender = { _, text -> replyText = text },
+                    kord = kordMock,
+                    peekResolver = { null },
+                )
+
+            val event = SummaryTestFixtures.createMockReactionEvent(targetMsg)
+            service.handleReaction(event)
+
+            assertEquals("Summary text", replyText)
+            io.mockk.coVerify(exactly = 0) { kordMock.getWebhookOrNull(any()) }
+        }
+
+    @Test
+    fun `single message reaction with embed formats preview in dialogue content`() =
+        runTest {
+            val lunaWebhookId = Snowflake(777L)
+            luna.core.LunaWebhookRegistry.register(lunaWebhookId)
+
+            val summarizer = mockk<GeminiSummarizer>()
+            var capturedInput: SummaryInput? = null
+            coEvery {
+                summarizer.summarize(any<SummaryInput>())
+            } answers {
+                capturedInput = firstArg<SummaryInput>()
+                SummaryResult.Success("Single message summary")
+            }
+
+            val embed = SummaryTestFixtures.createMockEmbed(title = "Single Post", description = "Single Description")
+            val targetMsg =
+                createMockMessage(
+                    id = 8601L,
+                    username = "MasqueradedAlice",
+                    content = "Original commentary",
+                    isBot = true,
+                    webhookId = lunaWebhookId,
+                    embeds = listOf(embed),
+                )
+
+            val service =
+                SummaryService(
+                    summarizer = summarizer,
+                    replySender = { _, _ -> },
+                    peekResolver = { null },
+                )
+
+            val event = SummaryTestFixtures.createMockReactionEvent(targetMsg)
+            service.handleReaction(event)
+
+            val input = capturedInput
+            assertNotNull(input)
+            assertEquals("[MasqueradedAlice]: Original commentary [連結預覽: Single Post - Single Description]", input.content)
         }
 }

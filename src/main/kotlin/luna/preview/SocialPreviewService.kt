@@ -30,6 +30,7 @@ import dev.socialpeek.model.Platform
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.firstOrNull
 import luna.core.JsonLogger
+import luna.core.LunaWebhookRegistry
 import org.slf4j.LoggerFactory
 import java.util.concurrent.ConcurrentHashMap
 
@@ -219,7 +220,7 @@ object SocialPreviewService {
      * Executes webhook message replacement: sends the message masquerading as the author
      * with tracking parameters removed and rich embeds attached, then deletes the original message.
      */
-    private suspend fun executeWebhookReplacement(
+    internal suspend fun executeWebhookReplacement(
         kord: Kord,
         message: Message,
         post: PeekPost,
@@ -259,6 +260,7 @@ object SocialPreviewService {
         }
 
         val webhookPair = getOrCreateWebhook(webhookChannel, kord) ?: return false
+        LunaWebhookRegistry.register(webhookPair.first.id)
 
         val member = if (rawGuildId != null) message.getAuthorAsMemberOrNull() else null
         val author = message.author
@@ -311,6 +313,7 @@ object SocialPreviewService {
             webhookCache.remove(webhookChannel.id)
             val retryPair = getOrCreateWebhook(webhookChannel, kord) ?: return false
             currentPair = retryPair
+            LunaWebhookRegistry.register(currentPair.first.id)
             currentPair.first.execute(
                 token = currentPair.second,
                 threadId = threadId,
@@ -328,7 +331,20 @@ object SocialPreviewService {
         return true
     }
 
-    private suspend fun getOrCreateWebhook(
+    internal suspend fun sendWebhookReplacement(
+        kord: Kord,
+        message: Message,
+        post: PeekPost,
+        targetUrl: String,
+        content: String,
+        mediaImageUrls: List<String>,
+    ): Boolean = executeWebhookReplacement(kord, message, post, targetUrl, content, mediaImageUrls)
+
+    internal fun clearWebhookCache() {
+        webhookCache.clear()
+    }
+
+    internal suspend fun getOrCreateWebhook(
         channel: CategorizableChannelBehavior,
         kord: Kord,
     ): Pair<WebhookBehavior, String>? {
@@ -337,6 +353,7 @@ object SocialPreviewService {
             val (id, token) = cached
             val webhook = runCatching { kord.getWebhookWithTokenOrNull(id, token) }.getOrNull()
             if (webhook != null) {
+                LunaWebhookRegistry.register(id)
                 return Pair(webhook, token)
             }
             webhookCache.remove(channel.id)
@@ -351,6 +368,7 @@ object SocialPreviewService {
 
         if (existing != null && existing.token != null) {
             webhookCache[channel.id] = existing.id to existing.token!!
+            LunaWebhookRegistry.register(existing.id)
             return Pair(existing, existing.token!!)
         }
 
@@ -362,6 +380,7 @@ object SocialPreviewService {
 
         if (created != null && created.token != null) {
             webhookCache[channel.id] = created.id to created.token!!
+            LunaWebhookRegistry.register(created.id)
             return Pair(created, created.token!!)
         }
 
