@@ -46,6 +46,7 @@ fun Application.mcpServerModule(
     authConfig: McpOAuthConfig = McpOAuthConfig(),
     clientRepository: McpClientRepository? = null,
     oAuthProvider: McpOAuthProvider = McpOAuthProvider(authConfig, clientRepository),
+    webhookRepository: McpWebhookRepository = broadcaster.repository,
 ) {
     if (clientRepository != null && oAuthProvider.clientRepository == null) {
         oAuthProvider.clientRepository = clientRepository
@@ -56,7 +57,7 @@ fun Application.mcpServerModule(
         json()
     }
 
-    val handler = McpProtocolHandler(broadcaster)
+    val handler = McpProtocolHandler(broadcaster, webhookRepository)
     val baseUrl = authConfig.normalizedBaseUrl
 
     fun isValidClient(clientId: String?): Boolean = oAuthProvider.isValidClientId(clientId)
@@ -396,6 +397,36 @@ fun Application.mcpServerModule(
             return oAuthProvider.isValidAccessToken(token)
         }
 
+        fun resolveClientId(call: ApplicationCall): String {
+            val queryClientId = call.request.queryParameters["clientId"] ?: call.request.queryParameters["client_id"]
+            if (!queryClientId.isNullOrBlank()) {
+                return queryClientId
+            }
+
+            val token = extractBearerToken(call)
+            if (token != null) {
+                val tokenClientId = oAuthProvider.getClientIdFromToken(token)
+                if (!tokenClientId.isNullOrBlank()) {
+                    return tokenClientId
+                }
+            }
+
+            val sessionId = call.request.queryParameters["sessionId"] ?: call.request.headers["Mcp-Session-Id"]
+            if (sessionId != null) {
+                val sessionClientId = sessionManager.getClientId(sessionId)
+                if (!sessionClientId.isNullOrBlank()) {
+                    return sessionClientId
+                }
+            }
+
+            val headerClientId = call.request.headers["Mcp-Client-Id"]
+            if (!headerClientId.isNullOrBlank()) {
+                return headerClientId
+            }
+
+            return authConfig.clientId.ifBlank { McpProtocolHandler.DEFAULT_CLIENT_ID }
+        }
+
         route("/mcp") {
             intercept(ApplicationCallPipeline.Plugins) {
                 val call = this.context
@@ -419,7 +450,8 @@ fun Application.mcpServerModule(
             suspend fun handleSseSession(session: ServerSSESession) {
                 val sessionId = UUID.randomUUID().toString()
                 val channel = Channel<String>(capacity = 64)
-                sessionManager.registerSession(sessionId, channel)
+                val clientId = resolveClientId(session.call)
+                sessionManager.registerSession(sessionId, channel, clientId)
                 try {
                     session.send(ServerSentEvent(data = "/mcp/messages?sessionId=$sessionId", event = "endpoint"))
                     for (message in channel) {
@@ -445,7 +477,8 @@ fun Application.mcpServerModule(
                     call.respond(HttpStatusCode.NoContent)
                     return
                 }
-                val responseString = handler.handle(requestBody)
+                val clientId = resolveClientId(call)
+                val responseString = handler.handle(requestBody, clientId)
 
                 if (responseString == null) {
                     call.respond(HttpStatusCode.Accepted)
