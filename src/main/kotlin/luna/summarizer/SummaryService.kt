@@ -99,7 +99,6 @@ class SummaryService(
         maxImages: Int = ConversationSliceCollector.DEFAULT_MAX_IMAGES,
         maxLookbackMessages: Int = ConversationSliceCollector.DEFAULT_MAX_LOOKBACK_MESSAGES,
         noiseFilter: DialogueNoiseFilter? = null,
-        imageResolver: Any? = null,
         historyFetcher: suspend (message: Message, limit: Int) -> List<Message> = { message, limit ->
             message.channel
                 .getMessagesBefore(message.id, limit = limit)
@@ -242,102 +241,7 @@ class SummaryService(
 
         try {
             logger.info("Executing Gemini summarization for message {}", event.messageId)
-            var currentInput = slice.summaryInput
-            var result: SummaryResult =
-                try {
-                    summarizer.summarize(currentInput)
-                } catch (e: Exception) {
-                    if (currentInput.imageAttachments.isNotEmpty()) {
-                        logger.warn(
-                            "Unexpected exception during multimodal summarization for message {}: {}. Retrying with text-only fallback.",
-                            event.messageId,
-                            e.message,
-                        )
-                        currentInput = currentInput.copy(imageAttachments = emptyList(), tools = null)
-                        try {
-                            summarizer.summarize(currentInput)
-                        } catch (e2: Exception) {
-                            SummaryResult.Error.Generic("Text-only fallback failed: ${e2.message}", cause = e2)
-                        }
-                    } else if (currentInput.tools != null) {
-                        logger.warn(
-                            "Gemini tool-enabled summarization failed for message {}: {}. Retrying with baseline fallback.",
-                            event.messageId,
-                            e.message,
-                        )
-                        currentInput = currentInput.copy(tools = null)
-                        try {
-                            summarizer.summarize(currentInput)
-                        } catch (e2: Exception) {
-                            throw e2
-                        }
-                    } else {
-                        throw e
-                    }
-                }
-
-            if (result is SummaryResult.Error) {
-                if (currentInput.imageAttachments.isNotEmpty()) {
-                    logger.warn(
-                        "Multimodal summarization with images failed for message {}: {}. Retrying with text-only fallback.",
-                        event.messageId,
-                        result.message,
-                    )
-                    currentInput = currentInput.copy(imageAttachments = emptyList(), tools = null)
-                    result =
-                        try {
-                            summarizer.summarize(currentInput)
-                        } catch (e: Exception) {
-                            SummaryResult.Error.Generic("Text-only fallback failed: ${e.message}", cause = e)
-                        }
-                } else if (currentInput.tools != null) {
-                    logger.warn(
-                        "Tool-enabled summarization returned error for message {}: {}. Falling back to baseline summary.",
-                        event.messageId,
-                        result.message,
-                    )
-                    currentInput = currentInput.copy(tools = null)
-                    result =
-                        try {
-                            summarizer.summarize(currentInput)
-                        } catch (e: Exception) {
-                            SummaryResult.Error.Generic("Baseline fallback failed: ${e.message}", cause = e)
-                        }
-                }
-            }
-
-            if (result is SummaryResult.ToolCall && result.name == GeminiTools.FETCH_EARLIER_MESSAGES) {
-                val reason = result.args["reason"] ?: ""
-                val continuation = result.continuation
-                if (continuation != null) {
-                    val toolResponse =
-                        slice.lookbackProvider?.invoke(reason)
-                            ?: ConversationSliceCollector.NO_FURTHER_HISTORY_MESSAGE
-                    val lookbackResult =
-                        try {
-                            continuation(toolResponse)
-                        } catch (e: Exception) {
-                            logger.warn("Continuation failed: {}", e.message)
-                            null
-                        }
-                    if (lookbackResult is SummaryResult.Success) {
-                        result = lookbackResult
-                    } else {
-                        currentInput = currentInput.copy(tools = null)
-                        result = summarizer.summarize(currentInput)
-                    }
-                }
-            }
-
-            if (result is SummaryResult.Error && currentInput.imageAttachments.isNotEmpty()) {
-                logger.warn(
-                    "Multimodal summarization with images failed for message {}: {}. Retrying with text-only fallback.",
-                    event.messageId,
-                    result.message,
-                )
-                currentInput = currentInput.copy(imageAttachments = emptyList())
-                result = summarizer.summarize(currentInput)
-            }
+            val result = summarizer.summarize(slice.summaryInput)
 
             when (result) {
                 is SummaryResult.Success -> {
@@ -397,67 +301,10 @@ class SummaryService(
         }
     }
 
-    suspend fun retrieveContextMessagesWithHistory(targetMessage: Message) = collector.retrieveContextMessagesWithHistory(targetMessage)
-
-    suspend fun retrieveContextMessages(targetMessage: Message) = collector.retrieveContextMessages(targetMessage)
-
-    suspend fun retrievePrecedingMessages(targetMessage: Message) = collector.retrievePrecedingMessages(targetMessage)
-
-    suspend fun retrieveEarlierMessages(
-        earliestBaselineMessage: Message,
-        fallbackHistory: List<Message> = emptyList(),
-    ) = collector.retrieveEarlierMessages(earliestBaselineMessage, fallbackHistory)
-
-    fun formatDialogueMessages(
-        messages: List<Message>,
-        imagesByMessage: Map<Snowflake, List<ChatImageAttachment>> = emptyMap(),
-        startingImageIndex: Int = 1,
-    ) = collector.formatDialogueMessages(messages, imagesByMessage, startingImageIndex)
-
-    fun formatEmbedPreviews(message: Message) = collector.formatEmbedPreviews(message)
-
-    fun extractImageAttachments(message: Message): List<ChatImageAttachment> = collector.extractImageAttachments(message)
-
-    fun resolveAuthorName(message: Message): String = collector.resolveAuthorName(message)
-
-    suspend fun isBotSummaryMessage(message: Message): Boolean = collector.isBotSummaryMessage(message)
-
-    suspend fun isNoiseMessage(message: Message): Boolean = collector.isNoiseMessage(message)
-
     companion object {
         const val DEFAULT_EMOJI = "📝"
         const val DISCORD_MAX_MESSAGE_LENGTH = 2000
         const val YOUTUBE_DURATION_EXCEEDED_MESSAGE = "此影片長度超過 2 小時上限，為避免運算逾時，請選擇較短的片段或精華進行摘要。"
         const val FALLBACK_EMPTY_SUMMARY_MESSAGE = "抱歉，AI 無法為此內容生成有效摘要，請嘗試提供更多上下文或選擇其他內容。"
-
-        const val DEFAULT_MAX_HISTORY_MESSAGES = ConversationSliceCollector.DEFAULT_MAX_HISTORY_MESSAGES
-        const val MAX_HISTORY_MESSAGES = DEFAULT_MAX_HISTORY_MESSAGES
-        val DEFAULT_INACTIVITY_GAP = ConversationSliceCollector.DEFAULT_INACTIVITY_GAP
-        val MAX_INACTIVITY_GAP = DEFAULT_INACTIVITY_GAP
-        const val DEFAULT_MAX_CHARACTER_BUDGET = ConversationSliceCollector.DEFAULT_MAX_CHARACTER_BUDGET
-        const val DEFAULT_MAX_IMAGE_BYTES = ConversationSliceCollector.DEFAULT_MAX_IMAGE_BYTES
-        const val DEFAULT_MAX_IMAGES = ConversationSliceCollector.DEFAULT_MAX_IMAGES
-        const val DEFAULT_MAX_LOOKBACK_MESSAGES = ConversationSliceCollector.DEFAULT_MAX_LOOKBACK_MESSAGES
-        const val MAX_LOOKBACK_MESSAGES = DEFAULT_MAX_LOOKBACK_MESSAGES
-        const val NO_FURTHER_HISTORY_MESSAGE = ConversationSliceCollector.NO_FURTHER_HISTORY_MESSAGE
-
-        val SUPPORTED_IMAGE_MIME_TYPES = ConversationSliceCollector.SUPPORTED_IMAGE_MIME_TYPES
-
-        fun resolveImageMimeType(
-            contentType: String?,
-            filename: String? = null,
-        ): String? = ConversationSliceCollector.resolveImageMimeType(contentType, filename)
-
-        fun resolveMaxHistoryMessages(env: Map<String, String> = emptyMap()): Int = ConversationSliceCollector.resolveMaxHistoryMessages(env)
-
-        fun resolveInactivityGap(env: Map<String, String> = emptyMap()): Duration = ConversationSliceCollector.resolveInactivityGap(env)
-
-        fun resolveMaxCharacterBudget(env: Map<String, String> = emptyMap()): Int = ConversationSliceCollector.resolveMaxCharacterBudget(env)
-
-        fun resolveMaxLookbackMessages(env: Map<String, String> = emptyMap()): Int = ConversationSliceCollector.resolveMaxLookbackMessages(env)
-
-        fun resolveMaxImages(env: Map<String, String> = emptyMap()): Int = ConversationSliceCollector.resolveMaxImages(env)
-
-        val URL_REGEX = ConversationSliceCollector.URL_REGEX
     }
 }

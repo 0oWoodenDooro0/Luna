@@ -761,19 +761,19 @@ class SummaryServiceTest {
 
     @Test
     fun `resolves configurable maxHistoryMessages from environment with bounds clamping`() {
-        assertEquals(50, SummaryService.resolveMaxHistoryMessages(emptyMap()))
-        assertEquals(25, SummaryService.resolveMaxHistoryMessages(mapOf("SUMMARY_MAX_HISTORY_MESSAGES" to "25")))
-        assertEquals(100, SummaryService.resolveMaxHistoryMessages(mapOf("SUMMARY_MAX_HISTORY_MESSAGES" to "500")))
-        assertEquals(1, SummaryService.resolveMaxHistoryMessages(mapOf("SUMMARY_MAX_HISTORY_MESSAGES" to "-5")))
-        assertEquals(50, SummaryService.resolveMaxHistoryMessages(mapOf("SUMMARY_MAX_HISTORY_MESSAGES" to "invalid")))
+        assertEquals(50, ConversationSliceCollector.resolveMaxHistoryMessages(emptyMap()))
+        assertEquals(25, ConversationSliceCollector.resolveMaxHistoryMessages(mapOf("SUMMARY_MAX_HISTORY_MESSAGES" to "25")))
+        assertEquals(100, ConversationSliceCollector.resolveMaxHistoryMessages(mapOf("SUMMARY_MAX_HISTORY_MESSAGES" to "500")))
+        assertEquals(1, ConversationSliceCollector.resolveMaxHistoryMessages(mapOf("SUMMARY_MAX_HISTORY_MESSAGES" to "-5")))
+        assertEquals(50, ConversationSliceCollector.resolveMaxHistoryMessages(mapOf("SUMMARY_MAX_HISTORY_MESSAGES" to "invalid")))
     }
 
     @Test
     fun `resolves configurable inactivityGap from environment`() {
-        assertEquals(15.minutes, SummaryService.resolveInactivityGap(emptyMap()))
-        assertEquals(30.minutes, SummaryService.resolveInactivityGap(mapOf("SUMMARY_INACTIVITY_GAP_MINUTES" to "30")))
-        assertEquals(15.minutes, SummaryService.resolveInactivityGap(mapOf("SUMMARY_INACTIVITY_GAP_MINUTES" to "-10")))
-        assertEquals(15.minutes, SummaryService.resolveInactivityGap(mapOf("SUMMARY_INACTIVITY_GAP_MINUTES" to "not-a-number")))
+        assertEquals(15.minutes, ConversationSliceCollector.resolveInactivityGap(emptyMap()))
+        assertEquals(30.minutes, ConversationSliceCollector.resolveInactivityGap(mapOf("SUMMARY_INACTIVITY_GAP_MINUTES" to "30")))
+        assertEquals(15.minutes, ConversationSliceCollector.resolveInactivityGap(mapOf("SUMMARY_INACTIVITY_GAP_MINUTES" to "-10")))
+        assertEquals(15.minutes, ConversationSliceCollector.resolveInactivityGap(mapOf("SUMMARY_INACTIVITY_GAP_MINUTES" to "not-a-number")))
     }
 
     @Test
@@ -2614,12 +2614,12 @@ class SummaryServiceTest {
 
     @Test
     fun `resolves configurable maxImages from environment with defaults and overrides`() {
-        assertEquals(10, SummaryService.resolveMaxImages(emptyMap()))
-        assertEquals(5, SummaryService.resolveMaxImages(mapOf("SUMMARY_MAX_IMAGES" to "5")))
-        assertEquals(15, SummaryService.resolveMaxImages(mapOf("SUMMARY_MAX_IMAGES" to "15")))
-        assertEquals(10, SummaryService.resolveMaxImages(mapOf("SUMMARY_MAX_IMAGES" to "0")))
-        assertEquals(10, SummaryService.resolveMaxImages(mapOf("SUMMARY_MAX_IMAGES" to "-5")))
-        assertEquals(10, SummaryService.resolveMaxImages(mapOf("SUMMARY_MAX_IMAGES" to "invalid")))
+        assertEquals(10, ConversationSliceCollector.resolveMaxImages(emptyMap()))
+        assertEquals(5, ConversationSliceCollector.resolveMaxImages(mapOf("SUMMARY_MAX_IMAGES" to "5")))
+        assertEquals(15, ConversationSliceCollector.resolveMaxImages(mapOf("SUMMARY_MAX_IMAGES" to "15")))
+        assertEquals(10, ConversationSliceCollector.resolveMaxImages(mapOf("SUMMARY_MAX_IMAGES" to "0")))
+        assertEquals(10, ConversationSliceCollector.resolveMaxImages(mapOf("SUMMARY_MAX_IMAGES" to "-5")))
+        assertEquals(10, ConversationSliceCollector.resolveMaxImages(mapOf("SUMMARY_MAX_IMAGES" to "invalid")))
     }
 
     @Test
@@ -2802,7 +2802,7 @@ class SummaryServiceTest {
                 createMockMessage(
                     id = 6201L,
                     username = "alice",
-                    content = "Discussion with problematic image attachment",
+                    content = "Discussion with image attachment",
                     attachments = setOf(img),
                 )
 
@@ -2812,17 +2812,11 @@ class SummaryServiceTest {
                     replySender = { _, content -> replyCaptured = content },
                 )
 
-            // First call (with images) fails with ApiError
             coEvery {
-                summarizer.summarize(match<SummaryInput> { it.imageAttachments.isNotEmpty() })
-            } returns SummaryResult.Error.ApiError(400, "Gemini could not download image from CDN")
-
-            // Second call (fallback without images) succeeds
-            coEvery {
-                summarizer.summarize(match<SummaryInput> { it.imageAttachments.isEmpty() })
+                summarizer.summarize(any<SummaryInput>(), any())
             } answers {
                 capturedInputs.add(firstArg())
-                SummaryResult.Success("TL;DR: Graceful text fallback summary succeeded")
+                SummaryResult.Success("TL;DR: Image discussion summary succeeded")
             }
 
             val user = mockk<User>()
@@ -2837,19 +2831,15 @@ class SummaryServiceTest {
 
             service.handleReaction(event)
 
-            // Verify summarizer was called twice: once with images, once without
-            coVerify(exactly = 1) { summarizer.summarize(match<SummaryInput> { it.imageAttachments.isNotEmpty() }) }
-            coVerify(exactly = 1) { summarizer.summarize(match<SummaryInput> { it.imageAttachments.isEmpty() }) }
+            coVerify(exactly = 1) { summarizer.summarize(any<SummaryInput>(), any()) }
 
-            // Verify user received fallback summary and statusCache is updated to DONE
-            assertEquals("TL;DR: Graceful text fallback summary succeeded", replyCaptured)
+            assertEquals("TL;DR: Image discussion summary succeeded", replyCaptured)
             assertEquals(SummaryStatus.DONE, service.getStatus(targetMsg.id))
 
-            val fallbackInput = capturedInputs.firstOrNull()
-            kotlin.test.assertNotNull(fallbackInput)
-            assertTrue(fallbackInput.imageAttachments.isEmpty())
-            assertTrue(fallbackInput.content.contains("[alice]: Discussion with problematic image attachment"))
-            assertTrue(fallbackInput.content.contains("[附帶圖片 1: photo.png]"))
+            val input = capturedInputs.firstOrNull()
+            kotlin.test.assertNotNull(input)
+            assertEquals(1, input.imageAttachments.size)
+            assertEquals("https://cdn.discordapp.com/attachments/1/photo.png", input.imageAttachments.first().url)
         }
 
     @Test
@@ -2860,7 +2850,7 @@ class SummaryServiceTest {
             val oversizedImg = createMockAttachment("https://cdn.discordapp.com/large.png", "image/png", "large.png", size = 15 * 1024 * 1024)
 
             val msg = createMockMessage(7001L, "alice", "Check image sizes", attachments = setOf(smallImg, oversizedImg))
-            val extracted = service.extractImageAttachments(msg)
+            val extracted = service.collector.extractImageAttachments(msg)
 
             assertEquals(1, extracted.size)
             assertEquals("https://cdn.discordapp.com/small.png", extracted.first().url)
@@ -2868,15 +2858,15 @@ class SummaryServiceTest {
 
     @Test
     fun `strictly discards attachments with non-image or missing MIME type even with image extension`() {
-        assertEquals(null, SummaryService.resolveImageMimeType("application/octet-stream", "fake.png"))
-        assertEquals(null, SummaryService.resolveImageMimeType(null, "photo.jpg"))
-        assertEquals(null, SummaryService.resolveImageMimeType("application/pdf", "document.png"))
-        assertEquals("image/png", SummaryService.resolveImageMimeType("image/png", "photo.png"))
-        assertEquals("image/jpeg", SummaryService.resolveImageMimeType("image/jpeg; charset=utf-8", "photo.jpeg"))
+        assertEquals(null, ConversationSliceCollector.resolveImageMimeType("application/octet-stream", "fake.png"))
+        assertEquals(null, ConversationSliceCollector.resolveImageMimeType(null, "photo.jpg"))
+        assertEquals(null, ConversationSliceCollector.resolveImageMimeType("application/pdf", "document.png"))
+        assertEquals("image/png", ConversationSliceCollector.resolveImageMimeType("image/png", "photo.png"))
+        assertEquals("image/jpeg", ConversationSliceCollector.resolveImageMimeType("image/jpeg; charset=utf-8", "photo.jpeg"))
     }
 
     @Test
-    fun `does not perform duplicate fallback retry when exception fallback returns error`() =
+    fun `handles summarizer error gracefully without crashing and evicts from status cache`() =
         runTest {
             val summarizer = mockk<GeminiSummarizer>()
             val img = createMockAttachment("https://cdn.discordapp.com/attachments/1/photo.png", "image/png", "photo.png")
@@ -2884,14 +2874,8 @@ class SummaryServiceTest {
 
             val service = SummaryService(summarizer = summarizer, replySender = { _, _ -> })
 
-            // First call throws exception
             coEvery {
-                summarizer.summarize(match<SummaryInput> { it.imageAttachments.isNotEmpty() })
-            } throws RuntimeException("Connection dropped")
-
-            // Second call (fallback) returns Error result
-            coEvery {
-                summarizer.summarize(match<SummaryInput> { it.imageAttachments.isEmpty() })
+                summarizer.summarize(any<SummaryInput>(), any())
             } returns SummaryResult.Error.Generic("Text summary failed")
 
             val user = mockk<User>()
@@ -2906,8 +2890,7 @@ class SummaryServiceTest {
 
             service.handleReaction(event)
 
-            // Verify exactly 1 multimodal attempt and exactly 1 fallback attempt (no second duplicate fallback)
-            coVerify(exactly = 1) { summarizer.summarize(match<SummaryInput> { it.imageAttachments.isNotEmpty() }) }
-            coVerify(exactly = 1) { summarizer.summarize(match<SummaryInput> { it.imageAttachments.isEmpty() }) }
+            coVerify(exactly = 1) { summarizer.summarize(any<SummaryInput>(), any()) }
+            kotlin.test.assertNull(service.getStatus(targetMsg.id))
         }
 }

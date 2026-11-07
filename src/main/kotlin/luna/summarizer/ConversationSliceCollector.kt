@@ -128,79 +128,14 @@ open class ConversationSliceCollector(
 
         val formattedContent =
             if (precedingMessages.isNotEmpty()) {
-                var imageIndex = 1
-                messagesWithImages.joinToString("\n") { (msg, images) ->
-                    val author = resolveAuthorName(msg)
-                    val embedText = formatEmbedPreviews(msg)
-                    if (images.isNotEmpty()) {
-                        val markers =
-                            images.map { img ->
-                                val idx = imageIndex++
-                                if (!img.filename.isNullOrBlank()) {
-                                    "[附帶圖片 $idx: ${img.filename}]"
-                                } else {
-                                    "[附帶圖片 $idx]"
-                                }
-                            }
-                        val markersText = markers.joinToString(" ")
-                        val trimmedContent = msg.content.trim()
-                        val parts =
-                            listOfNotNull(
-                                trimmedContent.takeIf { it.isNotEmpty() },
-                                embedText.takeIf { it.isNotEmpty() },
-                                markersText.takeIf { it.isNotEmpty() },
-                            )
-                        if (parts.isNotEmpty()) {
-                            "[$author]: ${parts.joinToString(" ")}"
-                        } else {
-                            "[$author]:"
-                        }
-                    } else if (embedText.isNotEmpty()) {
-                        val trimmedContent = msg.content.trim()
-                        if (trimmedContent.isNotEmpty()) {
-                            "[$author]: $trimmedContent $embedText"
-                        } else {
-                            "[$author]: $embedText"
-                        }
-                    } else {
-                        "[$author]: ${msg.content}"
-                    }
-                }
+                val allMessages = precedingMessages + message
+                val imagesMap = messagesWithImages.toMap().mapKeys { it.key.id }
+                val (formatted, _) = formatDialogueMessages(allMessages, imagesMap)
+                formatted
             } else {
                 val embedText = formatEmbedPreviews(message)
-                if (sliceImageAttachments.isNotEmpty()) {
-                    var singleMsgImageIndex = 1
-                    val markers =
-                        sliceImageAttachments.map { img ->
-                            val idx = singleMsgImageIndex++
-                            if (!img.filename.isNullOrBlank()) {
-                                "[附帶圖片 $idx: ${img.filename}]"
-                            } else {
-                                "[附帶圖片 $idx]"
-                            }
-                        }
-                    val markersText = markers.joinToString(" ")
-                    val trimmedContent = message.content.trim()
-                    val author = resolveAuthorName(message)
-                    val parts =
-                        listOfNotNull(
-                            trimmedContent.takeIf { it.isNotEmpty() },
-                            embedText.takeIf { it.isNotEmpty() },
-                            markersText.takeIf { it.isNotEmpty() },
-                        )
-                    if (parts.isNotEmpty()) {
-                        "[$author]: ${parts.joinToString(" ")}"
-                    } else {
-                        "[$author]:"
-                    }
-                } else if (embedText.isNotEmpty()) {
-                    val trimmedContent = message.content.trim()
-                    val author = resolveAuthorName(message)
-                    if (trimmedContent.isNotEmpty()) {
-                        "[$author]: $trimmedContent $embedText"
-                    } else {
-                        "[$author]: $embedText"
-                    }
+                if (sliceImageAttachments.isNotEmpty() || embedText.isNotEmpty()) {
+                    formatDialogueMessages(listOf(message), mapOf(message.id to sliceImageAttachments)).first
                 } else {
                     message.content
                 }

@@ -446,7 +446,7 @@ class SummaryServiceWebhookTest {
             coEvery { event.getMessageOrNull() } returns targetMsg
 
             // Verify a: The Luna Webhook message is retained in precedingMessages
-            val precedingMessages = service.retrievePrecedingMessages(targetMsg)
+            val precedingMessages = service.collector.retrievePrecedingMessages(targetMsg)
             assertEquals(listOf(webhookMsg, userMsg1), precedingMessages)
 
             service.handleReaction(event)
@@ -567,7 +567,7 @@ class SummaryServiceWebhookTest {
             coEvery { event.getMessageOrNull() } returns targetMsg
 
             // Verify precedingMessages excludes third-party webhook and includes Luna webhook and humans
-            val precedingMessages = service.retrievePrecedingMessages(targetMsg)
+            val precedingMessages = service.collector.retrievePrecedingMessages(targetMsg)
             assertEquals(listOf(msg1, lunaWebhook, msg2), precedingMessages)
             assertFalse(precedingMessages.contains(githubBot))
 
@@ -697,7 +697,7 @@ class SummaryServiceWebhookTest {
             coEvery { event.getMessageOrNull() } returns targetMsg
 
             // Verify history backtracking stopped at bot summary without crashing on webhook entries
-            val precedingMessages = service.retrievePrecedingMessages(targetMsg)
+            val precedingMessages = service.collector.retrievePrecedingMessages(targetMsg)
             assertEquals(listOf(lunaWebhook, msg1), precedingMessages)
 
             service.handleReaction(event)
@@ -780,7 +780,7 @@ class SummaryServiceWebhookTest {
             coEvery { event.getUserOrNull() } returns user
             coEvery { event.getMessageOrNull() } returns targetMsg
 
-            val precedingMessages = service.retrievePrecedingMessages(targetMsg)
+            val precedingMessages = service.collector.retrievePrecedingMessages(targetMsg)
             assertEquals(listOf(msg0, webhookWithTldr), precedingMessages)
 
             service.handleReaction(event)

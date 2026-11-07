@@ -80,7 +80,23 @@ open class GeminiSummarizer(
 
         val effectiveLookbackProvider = lookbackProvider ?: input.lookbackProvider
         if (effectiveLookbackProvider == null) {
-            return summarizeDirect(input, tools = input.tools)
+            val res =
+                try {
+                    summarizeDirect(input, tools = input.tools)
+                } catch (e: Exception) {
+                    if (input.imageAttachments.isNotEmpty()) {
+                        logger.warn("Multimodal summarization failed with exception: {}. Retrying text-only fallback.", e.message)
+                        retryBaseline(input.copy(imageAttachments = emptyList(), tools = null))
+                    } else {
+                        throw e
+                    }
+                }
+            return if (res is SummaryResult.Error && input.imageAttachments.isNotEmpty()) {
+                logger.warn("Multimodal summarization failed: {}. Retrying text-only fallback.", res.message)
+                retryBaseline(input.copy(imageAttachments = emptyList(), tools = null))
+            } else {
+                res
+            }
         }
 
         val baselineInput = input.copy(tools = null)

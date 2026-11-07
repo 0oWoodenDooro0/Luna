@@ -47,19 +47,19 @@ class SummarizerPlugin(
     var configuredEmoji: String = SummaryService.DEFAULT_EMOJI
         internal set
 
-    var maxHistoryMessages: Int = SummaryService.DEFAULT_MAX_HISTORY_MESSAGES
+    var maxHistoryMessages: Int = ConversationSliceCollector.DEFAULT_MAX_HISTORY_MESSAGES
         internal set
 
-    var inactivityGap: Duration = SummaryService.DEFAULT_INACTIVITY_GAP
+    var inactivityGap: Duration = ConversationSliceCollector.DEFAULT_INACTIVITY_GAP
         internal set
 
-    var maxCharacterBudget: Int = SummaryService.DEFAULT_MAX_CHARACTER_BUDGET
+    var maxCharacterBudget: Int = ConversationSliceCollector.DEFAULT_MAX_CHARACTER_BUDGET
         internal set
 
-    var maxLookbackMessages: Int = SummaryService.DEFAULT_MAX_LOOKBACK_MESSAGES
+    var maxLookbackMessages: Int = ConversationSliceCollector.DEFAULT_MAX_LOOKBACK_MESSAGES
         internal set
 
-    var maxImages: Int = SummaryService.DEFAULT_MAX_IMAGES
+    var maxImages: Int = ConversationSliceCollector.DEFAULT_MAX_IMAGES
         internal set
 
     override suspend fun initialize(context: PluginContext) {
@@ -92,7 +92,7 @@ class SummarizerPlugin(
         val historyLimit =
             context.config<Int>("SUMMARY_MAX_HISTORY_MESSAGES")?.coerceIn(1, 100)
                 ?: context.config<Int>("summary.maxHistoryMessages")?.coerceIn(1, 100)
-                ?: SummaryService.resolveMaxHistoryMessages()
+                ?: ConversationSliceCollector.resolveMaxHistoryMessages()
 
         val inactivityGapMinutes =
             context.config<Long>("SUMMARY_INACTIVITY_GAP_MINUTES")
@@ -104,23 +104,23 @@ class SummarizerPlugin(
             if (inactivityGapMinutes != null && inactivityGapMinutes > 0) {
                 inactivityGapMinutes.minutes
             } else {
-                SummaryService.resolveInactivityGap()
+                ConversationSliceCollector.resolveInactivityGap()
             }
 
         val characterBudget =
             context.config<Int>("SUMMARY_MAX_CHARACTER_BUDGET")?.takeIf { it > 0 }
                 ?: context.config<Int>("summary.maxCharacterBudget")?.takeIf { it > 0 }
-                ?: SummaryService.resolveMaxCharacterBudget()
+                ?: ConversationSliceCollector.resolveMaxCharacterBudget()
 
         val lookbackLimit =
-            context.config<Int>("SUMMARY_MAX_LOOKBACK_MESSAGES")?.coerceIn(1, SummaryService.DEFAULT_MAX_LOOKBACK_MESSAGES)
-                ?: context.config<Int>("summary.maxLookbackMessages")?.coerceIn(1, SummaryService.DEFAULT_MAX_LOOKBACK_MESSAGES)
-                ?: SummaryService.resolveMaxLookbackMessages()
+            context.config<Int>("SUMMARY_MAX_LOOKBACK_MESSAGES")?.coerceIn(1, ConversationSliceCollector.DEFAULT_MAX_LOOKBACK_MESSAGES)
+                ?: context.config<Int>("summary.maxLookbackMessages")?.coerceIn(1, ConversationSliceCollector.DEFAULT_MAX_LOOKBACK_MESSAGES)
+                ?: ConversationSliceCollector.resolveMaxLookbackMessages()
 
         val imagesLimit =
             context.config<Int>("SUMMARY_MAX_IMAGES")?.takeIf { it > 0 }
                 ?: context.config<Int>("summary.maxImages")?.takeIf { it > 0 }
-                ?: SummaryService.resolveMaxImages()
+                ?: ConversationSliceCollector.resolveMaxImages()
 
         this.configuredEmoji = emoji
         this.maxHistoryMessages = historyLimit

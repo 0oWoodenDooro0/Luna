@@ -62,11 +62,11 @@ class SummarizerPluginTest {
             plugin.initialize(context)
 
             assertEquals(SummaryService.DEFAULT_EMOJI, plugin.configuredEmoji)
-            assertEquals(SummaryService.DEFAULT_MAX_HISTORY_MESSAGES, plugin.maxHistoryMessages)
-            assertEquals(SummaryService.DEFAULT_INACTIVITY_GAP, plugin.inactivityGap)
-            assertEquals(SummaryService.DEFAULT_MAX_CHARACTER_BUDGET, plugin.maxCharacterBudget)
-            assertEquals(SummaryService.DEFAULT_MAX_LOOKBACK_MESSAGES, plugin.maxLookbackMessages)
-            assertEquals(SummaryService.DEFAULT_MAX_IMAGES, plugin.maxImages)
+            assertEquals(ConversationSliceCollector.DEFAULT_MAX_HISTORY_MESSAGES, plugin.maxHistoryMessages)
+            assertEquals(ConversationSliceCollector.DEFAULT_INACTIVITY_GAP, plugin.inactivityGap)
+            assertEquals(ConversationSliceCollector.DEFAULT_MAX_CHARACTER_BUDGET, plugin.maxCharacterBudget)
+            assertEquals(ConversationSliceCollector.DEFAULT_MAX_LOOKBACK_MESSAGES, plugin.maxLookbackMessages)
+            assertEquals(ConversationSliceCollector.DEFAULT_MAX_IMAGES, plugin.maxImages)
             assertNotNull(plugin.summarizer)
             assertNotNull(plugin.summaryService)
 
@@ -142,7 +142,7 @@ class SummarizerPluginTest {
                 )
             val highPlugin = SummarizerPlugin()
             highPlugin.initialize(highContext)
-            assertEquals(SummaryService.DEFAULT_MAX_LOOKBACK_MESSAGES, highPlugin.maxLookbackMessages)
+            assertEquals(ConversationSliceCollector.DEFAULT_MAX_LOOKBACK_MESSAGES, highPlugin.maxLookbackMessages)
 
             // Non-positive value (-5) clamped to 1
             val lowContext =
@@ -187,9 +187,9 @@ class SummarizerPluginTest {
             val plugin = SummarizerPlugin()
             plugin.initialize(context)
 
-            assertEquals(SummaryService.DEFAULT_MAX_IMAGES, plugin.maxImages)
-            assertEquals(SummaryService.DEFAULT_MAX_CHARACTER_BUDGET, plugin.maxCharacterBudget)
-            assertEquals(SummaryService.DEFAULT_INACTIVITY_GAP, plugin.inactivityGap)
+            assertEquals(ConversationSliceCollector.DEFAULT_MAX_IMAGES, plugin.maxImages)
+            assertEquals(ConversationSliceCollector.DEFAULT_MAX_CHARACTER_BUDGET, plugin.maxCharacterBudget)
+            assertEquals(ConversationSliceCollector.DEFAULT_INACTIVITY_GAP, plugin.inactivityGap)
             // History limit clamped to upper bound of 100
             assertEquals(100, plugin.maxHistoryMessages)
 

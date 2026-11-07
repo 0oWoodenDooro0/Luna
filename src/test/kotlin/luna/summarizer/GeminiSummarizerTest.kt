@@ -1403,4 +1403,241 @@ class GeminiSummarizerTest {
             assertIs<SummaryResult.Success>(result)
             assertTrue(result.text.contains("Baseline summary fallback"))
         }
+
+    @Test
+    fun `enforces single lookback limit by falling back to baseline summary when model attempts second tool call`() =
+        runTest {
+            var requestCount = 0
+            val toolCallResponse =
+                """
+                {
+                  "candidates": [
+                    {
+                      "content": {
+                        "role": "model",
+                        "parts": [
+                          {
+                            "functionCall": {
+                              "name": "fetch_earlier_messages",
+                              "args": { "reason": "Round 1" }
+                            }
+                          }
+                        ]
+                      }
+                    }
+                  ]
+                }
+                """.trimIndent()
+
+            val secondToolCallResponse =
+                """
+                {
+                  "candidates": [
+                    {
+                      "content": {
+                        "role": "model",
+                        "parts": [
+                          {
+                            "functionCall": {
+                              "name": "fetch_earlier_messages",
+                              "args": { "reason": "Round 2 attempt" }
+                            }
+                          }
+                        ]
+                      }
+                    }
+                  ]
+                }
+                """.trimIndent()
+
+            val baselineResponse =
+                """
+                {
+                  "candidates": [
+                    {
+                      "content": {
+                        "parts": [
+                          { "text": "TL;DR:\nBaseline summary after round limit" }
+                        ]
+                      }
+                    }
+                  ]
+                }
+                """.trimIndent()
+
+            val mockEngine =
+                MockEngine { request ->
+                    requestCount++
+                    val content =
+                        when (requestCount) {
+                            1 -> toolCallResponse
+                            2 -> secondToolCallResponse
+                            else -> baselineResponse
+                        }
+                    respond(
+                        content = content,
+                        status = HttpStatusCode.OK,
+                        headers = headersOf(HttpHeaders.ContentType, "application/json"),
+                    )
+                }
+
+            val summarizer =
+                GeminiSummarizer(
+                    config = GeminiConfig(apiKey = "test-key"),
+                    httpClient = createTestClient(mockEngine),
+                )
+
+            val input = SummaryInput(content = "Target conversation")
+            val result =
+                summarizer.summarize(input) { reason ->
+                    "Lookback response for $reason"
+                }
+
+            assertIs<SummaryResult.Success>(result)
+            assertTrue(result.text.contains("Baseline summary after round limit"))
+            assertEquals(3, requestCount)
+        }
+
+    @Test
+    fun `falls back gracefully to baseline summary when tool continuation throws exception`() =
+        runTest {
+            var requestCount = 0
+            val toolCallResponse =
+                """
+                {
+                  "candidates": [
+                    {
+                      "content": {
+                        "role": "model",
+                        "parts": [
+                          {
+                            "functionCall": {
+                              "name": "fetch_earlier_messages",
+                              "args": { "reason": "Need context" }
+                            }
+                          }
+                        ]
+                      }
+                    }
+                  ]
+                }
+                """.trimIndent()
+
+            val baselineResponse =
+                """
+                {
+                  "candidates": [
+                    {
+                      "content": {
+                        "parts": [
+                          { "text": "TL;DR:\nBaseline summary after continuation exception" }
+                        ]
+                      }
+                    }
+                  ]
+                }
+                """.trimIndent()
+
+            val mockEngine =
+                MockEngine { request ->
+                    requestCount++
+                    if (requestCount == 1) {
+                        respond(
+                            content = toolCallResponse,
+                            status = HttpStatusCode.OK,
+                            headers = headersOf(HttpHeaders.ContentType, "application/json"),
+                        )
+                    } else if (requestCount == 2) {
+                        throw HttpRequestTimeoutException("https://generativelanguage.googleapis.com", 30000L)
+                    } else {
+                        respond(
+                            content = baselineResponse,
+                            status = HttpStatusCode.OK,
+                            headers = headersOf(HttpHeaders.ContentType, "application/json"),
+                        )
+                    }
+                }
+
+            val summarizer =
+                GeminiSummarizer(
+                    config = GeminiConfig(apiKey = "test-key"),
+                    httpClient = createTestClient(mockEngine),
+                )
+
+            val input = SummaryInput(content = "Target conversation")
+            val result =
+                summarizer.summarize(input) { _ ->
+                    "Context data"
+                }
+
+            assertIs<SummaryResult.Success>(result)
+            assertTrue(result.text.contains("Baseline summary after continuation exception"))
+        }
+
+    @Test
+    fun `retries with text-only fallback when multimodal summarization with images fails with error`() =
+        runTest {
+            var requestCount = 0
+            var fallbackHadImages = true
+
+            val textFallbackResponse =
+                """
+                {
+                  "candidates": [
+                    {
+                      "content": {
+                        "parts": [
+                          { "text": "TL;DR:\nText-only fallback summary succeeded" }
+                        ]
+                      }
+                    }
+                  ]
+                }
+                """.trimIndent()
+
+            val mockEngine =
+                MockEngine { request ->
+                    requestCount++
+                    if (requestCount == 1) {
+                        respond(
+                            content = """{"error": {"code": 400, "message": "Failed to download image"}}""",
+                            status = HttpStatusCode.BadRequest,
+                            headers = headersOf(HttpHeaders.ContentType, "application/json"),
+                        )
+                    } else {
+                        val body = request.body.toByteArray().decodeToString()
+                        fallbackHadImages = body.contains("inlineData") || body.contains("fileData")
+                        respond(
+                            content = textFallbackResponse,
+                            status = HttpStatusCode.OK,
+                            headers = headersOf(HttpHeaders.ContentType, "application/json"),
+                        )
+                    }
+                }
+
+            val summarizer =
+                GeminiSummarizer(
+                    config = GeminiConfig(apiKey = "test-key"),
+                    httpClient = createTestClient(mockEngine),
+                )
+
+            val input =
+                SummaryInput(
+                    content = "Chat with image",
+                    imageAttachments =
+                        listOf(
+                            ChatImageAttachment(
+                                url = "https://example.com/test.png",
+                                mimeType = "image/png",
+                                filename = "test.png",
+                            ),
+                        ),
+                )
+
+            val result = summarizer.summarize(input)
+            assertIs<SummaryResult.Success>(result)
+            assertTrue(result.text.contains("Text-only fallback summary succeeded"))
+            assertEquals(2, requestCount)
+            assertFalse(fallbackHadImages)
+        }
 }
