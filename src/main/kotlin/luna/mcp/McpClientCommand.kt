@@ -29,6 +29,8 @@ class McpClientCommand(
                     }
                 }
                 subCommand("show", "Show your current MCP client ID and webhook quota usage") {}
+                subCommand("reset-secret", "Reset your MCP client secret") {}
+                subCommand("revoke", "Revoke your MCP client and delete all registered webhooks") {}
             }
             group("webhook", "Manage MCP channel webhooks") {
                 subCommand("add", "Add or auto-provision a Discord webhook for MCP") {
@@ -37,6 +39,11 @@ class McpClientCommand(
                     }
                     string("url", "Custom Discord Webhook URL (optional)") {
                         required = false
+                    }
+                }
+                subCommand("remove", "Remove a registered MCP webhook") {
+                    string("tag", "Tag name of the webhook to remove") {
+                        required = true
                     }
                 }
                 subCommand("list", "List all registered webhooks and quota usage") {}
@@ -57,9 +64,18 @@ class McpClientCommand(
                         handleClientShow(interaction)
                     }
 
+                    "reset-secret" -> {
+                        handleClientResetSecret(interaction)
+                    }
+
+                    "revoke" -> {
+                        handleClientRevoke(interaction)
+                    }
+
                     else -> {
                         interaction.respondEphemeral {
-                            content = "Unknown subcommand. Please use `/mcp client create` or `/mcp client show`."
+                            content =
+                                "Unknown subcommand. Please use `/mcp client create`, `/mcp client show`, `/mcp client reset-secret`, or `/mcp client revoke`."
                         }
                     }
                 }
@@ -71,7 +87,8 @@ class McpClientCommand(
 
             else -> {
                 interaction.respondEphemeral {
-                    content = "Unknown command. Please use `/mcp client create` or `/mcp client show`."
+                    content =
+                        "Unknown command. Please use `/mcp client create`, `/mcp client show`, `/mcp client reset-secret`, or `/mcp client revoke`."
                 }
             }
         }
@@ -171,6 +188,82 @@ class McpClientCommand(
 
         interaction.respondEphemeral {
             content = message.trimEnd()
+        }
+    }
+
+    private suspend fun handleClientResetSecret(interaction: ChatInputCommandInteraction) {
+        val userId = interaction.user.id.toString()
+        val client = clientRepository.findByUserId(userId)
+        if (client == null) {
+            interaction.respondEphemeral {
+                content =
+                    "ℹ️ 您尚未建立 MCP Client。\n" +
+                    "請先執行 `/mcp client create` 建立金鑰。"
+            }
+            return
+        }
+
+        val plainSecret = McpSecurity.generateClientSecret()
+        val salt = McpSecurity.generateSalt()
+        val secretHash = McpSecurity.hashSecret(plainSecret, salt)
+        val now = System.currentTimeMillis()
+
+        clientRepository.updateSecret(client.clientId, secretHash, salt, now)
+
+        val normalizedBaseUrl = publicBaseUrl.trimEnd('/')
+        val sseUrl = "$normalizedBaseUrl/mcp/sse"
+        val authUrl = "$normalizedBaseUrl/oauth/authorize"
+        val tokenUrl = "$normalizedBaseUrl/oauth/token"
+
+        val message =
+            buildString {
+                appendLine("⚠️ 密鑰已重設！舊密鑰與現有連線已全數失效。新密鑰僅顯示這一次，請在 Gemini 端重新填入設定！")
+                appendLine()
+                appendLine("- **Client ID**: `${client.clientId}`")
+                appendLine("- **Client Secret**: `$plainSecret`")
+                appendLine()
+                appendLine("**Gemini 串接設定資訊**：")
+                appendLine("- **Server SSE URL**: `$sseUrl`")
+                appendLine("- **Client ID**: `${client.clientId}`")
+                appendLine("- **Client Secret**: `$plainSecret`")
+                appendLine("- **Authorization URL**: `$authUrl`")
+                appendLine("- **Token URL**: `$tokenUrl`")
+            }
+
+        interaction.respondEphemeral {
+            content = message.trimEnd()
+        }
+    }
+
+    private suspend fun handleClientRevoke(interaction: ChatInputCommandInteraction) {
+        val userId = interaction.user.id.toString()
+        val client = clientRepository.findByUserId(userId)
+        if (client == null) {
+            interaction.respondEphemeral {
+                content =
+                    "ℹ️ 您尚未建立 MCP Client。\n" +
+                    "請先執行 `/mcp client create` 建立金鑰。"
+            }
+            return
+        }
+
+        val webhooks = webhookRepository.listByClientId(client.clientId)
+        for (wh in webhooks) {
+            if (wh.isAutoProvisioned) {
+                McpWebhookCommand.deleteDiscordWebhookSafely(
+                    kord = interaction.kord,
+                    webhookUrl = wh.webhookUrl,
+                    reason = "Deleted via /mcp client revoke",
+                    component = "McpClientCommand",
+                )
+            }
+        }
+
+        webhookRepository.deleteByClientId(client.clientId)
+        clientRepository.deleteClient(client.clientId)
+
+        interaction.respondEphemeral {
+            content = "✅ 已成功撤銷 Client ID (`${client.clientId}`) 及所有綁定之 Webhook。"
         }
     }
 
