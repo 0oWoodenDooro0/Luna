@@ -61,7 +61,7 @@ class McpPluginTest {
     }
 
     @Test
-    fun `initialize creates mcp webhooks table in database`() =
+    fun `initialize creates mcp tables in database`() =
         runTest {
             val db = createTestDb()
             val eventsFlow = MutableSharedFlow<Event>()
@@ -77,123 +77,30 @@ class McpPluginTest {
             val plugin = McpPlugin()
             plugin.initialize(context)
 
-            assertNotNull(plugin.storage)
-            assertNotNull(plugin.webhookCommand)
-            assertEquals("mcp-webhook", plugin.webhookCommand?.name)
+            assertNotNull(plugin.clientRepository)
+            assertNotNull(plugin.webhookRepository)
+            assertNotNull(plugin.clientCommand)
+            assertEquals("mcp", plugin.clientCommand?.name)
 
-            // Verify table was initialized in DB by querying and adding through storage
-            val guildId = "guild-test"
-            val channelId = "channel-test"
-            val webhookUrl = "https://discord.com/api/webhooks/123/abc"
-
-            plugin.storage!!.addWebhook(guildId, channelId, webhookUrl)
+            val webhookRecord =
+                McpWebhookRecord(
+                    id = "wh-1",
+                    clientId = "cli-1",
+                    tag = "general",
+                    webhookUrl = "https://discord.com/api/webhooks/123/abc",
+                    channelId = "channel-test",
+                    guildId = "guild-test",
+                    isAutoProvisioned = true,
+                    createdAt = System.currentTimeMillis(),
+                )
+            plugin.webhookRepository!!.addWebhook(webhookRecord)
 
             transaction(db) {
                 val rows = McpWebhooksTable.selectAll().toList()
                 assertEquals(1, rows.size)
-                assertEquals(guildId, rows.first()[McpWebhooksTable.guildId])
-                assertEquals(channelId, rows.first()[McpWebhooksTable.channelId])
-                assertEquals(webhookUrl, rows.first()[McpWebhooksTable.webhookUrl])
+                assertEquals("wh-1", rows.first()[McpWebhooksTable.id])
+                assertEquals("general", rows.first()[McpWebhooksTable.tag])
             }
-        }
-
-    @Test
-    fun `initialize registers mcp-webhook command on kord`() =
-        runTest {
-            val db = createTestDb()
-            val eventsFlow = MutableSharedFlow<Event>()
-            val mockKord = createMockKord(eventsFlow)
-
-            val mockCommand =
-                mockk<Command>(relaxed = true) {
-                    every { name } returns "mcp-webhook"
-                }
-
-            val context =
-                DefaultPluginContext(
-                    kord = mockKord,
-                    routing = mockk(relaxed = true),
-                    database = db,
-                )
-
-            val plugin = McpPlugin(commandFactory = { mockCommand })
-            plugin.initialize(context)
-
-            assertEquals(mockCommand, plugin.webhookCommand)
-            coVerify(exactly = 1) { mockCommand.register(mockKord) }
-        }
-
-    @Test
-    fun `initialize attaches slash command interaction handler for mcp-webhook`() =
-        runTest {
-            val db = createTestDb()
-            val eventsFlow = MutableSharedFlow<Event>()
-            val mockKord = createMockKord(eventsFlow)
-
-            val mockCommand =
-                mockk<Command>(relaxed = true) {
-                    every { name } returns "mcp-webhook"
-                }
-
-            val context =
-                DefaultPluginContext(
-                    kord = mockKord,
-                    routing = mockk(relaxed = true),
-                    database = db,
-                )
-
-            val plugin = McpPlugin(commandFactory = { mockCommand })
-            plugin.initialize(context)
-
-            val interaction =
-                mockk<ChatInputCommandInteraction>(relaxed = true) {
-                    every { command.rootName } returns "mcp-webhook"
-                    every { user.id } returns Snowflake(123456789L)
-                }
-            val event =
-                mockk<ChatInputCommandInteractionCreateEvent>(relaxed = true) {
-                    every { this@mockk.interaction } returns interaction
-                }
-
-            eventsFlow.emit(event)
-
-            coVerify(exactly = 1) { mockCommand.handle(interaction) }
-        }
-
-    @Test
-    fun `initialize ignores slash command interaction with different command root name`() =
-        runTest {
-            val db = createTestDb()
-            val eventsFlow = MutableSharedFlow<Event>()
-            val mockKord = createMockKord(eventsFlow)
-
-            val mockCommand =
-                mockk<Command>(relaxed = true) {
-                    every { name } returns "mcp-webhook"
-                }
-
-            val context =
-                DefaultPluginContext(
-                    kord = mockKord,
-                    routing = mockk(relaxed = true),
-                    database = db,
-                )
-
-            val plugin = McpPlugin(commandFactory = { mockCommand })
-            plugin.initialize(context)
-
-            val otherInteraction =
-                mockk<ChatInputCommandInteraction>(relaxed = true) {
-                    every { command.rootName } returns "preview"
-                }
-            val event =
-                mockk<ChatInputCommandInteractionCreateEvent>(relaxed = true) {
-                    every { this@mockk.interaction } returns otherInteraction
-                }
-
-            eventsFlow.emit(event)
-
-            coVerify(exactly = 0) { mockCommand.handle(any()) }
         }
 
     @Test
@@ -236,5 +143,41 @@ class McpPluginTest {
             eventsFlow.emit(event)
 
             coVerify(exactly = 1) { mockClientCommand.handle(interaction) }
+        }
+
+    @Test
+    fun `initialize ignores slash command interaction with different command root name`() =
+        runTest {
+            val db = createTestDb()
+            val eventsFlow = MutableSharedFlow<Event>()
+            val mockKord = createMockKord(eventsFlow)
+
+            val mockClientCommand =
+                mockk<Command>(relaxed = true) {
+                    every { name } returns "mcp"
+                }
+
+            val context =
+                DefaultPluginContext(
+                    kord = mockKord,
+                    routing = mockk(relaxed = true),
+                    database = db,
+                )
+
+            val plugin = McpPlugin(clientCommandFactory = { _, _, _ -> mockClientCommand })
+            plugin.initialize(context)
+
+            val otherInteraction =
+                mockk<ChatInputCommandInteraction>(relaxed = true) {
+                    every { command.rootName } returns "preview"
+                }
+            val event =
+                mockk<ChatInputCommandInteractionCreateEvent>(relaxed = true) {
+                    every { this@mockk.interaction } returns otherInteraction
+                }
+
+            eventsFlow.emit(event)
+
+            coVerify(exactly = 0) { mockClientCommand.handle(any()) }
         }
 }

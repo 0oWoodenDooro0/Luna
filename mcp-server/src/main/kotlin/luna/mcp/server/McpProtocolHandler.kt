@@ -208,6 +208,7 @@ class McpProtocolHandler(
                         add(kotlinx.serialization.json.JsonPrimitive(tag))
                     }
                 }
+                put("quota", "${tags.size}/$MAX_WEBHOOK_QUOTA")
                 put("count", tags.size)
                 put("maxQuota", MAX_WEBHOOK_QUOTA)
             }
@@ -220,9 +221,7 @@ class McpProtocolHandler(
         clientId: String,
     ): JsonRpcResponse {
         val arguments = request.params?.get("arguments")?.jsonObject
-        val content =
-            arguments?.get("content")?.jsonPrimitive?.content
-                ?: arguments?.get("message")?.jsonPrimitive?.content
+        val content = arguments?.get("content")?.jsonPrimitive?.content
         val target = arguments?.get("target")?.jsonPrimitive?.content
 
         if (content.isNullOrBlank() || target.isNullOrBlank()) {

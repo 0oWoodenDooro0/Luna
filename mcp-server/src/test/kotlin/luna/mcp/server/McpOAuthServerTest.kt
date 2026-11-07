@@ -277,6 +277,18 @@ class McpOAuthServerTest {
             val authConfig = McpOAuthConfig(requireAuth = true)
             val provider = McpOAuthProvider(config = authConfig, clientRepository = clientRepository)
             val clientId = "client-to-revoke"
+            val now = System.currentTimeMillis()
+            clientRepository.createClient(
+                McpClientRecord(
+                    clientId = clientId,
+                    userId = "user-to-revoke",
+                    clientName = "Revoke Test Client",
+                    secretHash = "dummy-hash",
+                    secretSalt = "dummy-salt",
+                    createdAt = now,
+                    updatedAt = now,
+                ),
+            )
             val issuedToken = provider.issueAccessToken(clientId)
 
             application {

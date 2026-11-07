@@ -398,11 +398,6 @@ fun Application.mcpServerModule(
         }
 
         fun resolveClientId(call: ApplicationCall): String {
-            val queryClientId = call.request.queryParameters["clientId"] ?: call.request.queryParameters["client_id"]
-            if (!queryClientId.isNullOrBlank()) {
-                return queryClientId
-            }
-
             val token = extractBearerToken(call)
             if (token != null) {
                 val tokenClientId = oAuthProvider.getClientIdFromToken(token)
@@ -419,9 +414,11 @@ fun Application.mcpServerModule(
                 }
             }
 
-            val headerClientId = call.request.headers["Mcp-Client-Id"]
-            if (!headerClientId.isNullOrBlank()) {
-                return headerClientId
+            if (!authConfig.isAuthEnabled) {
+                val queryClientId = call.request.queryParameters["clientId"] ?: call.request.queryParameters["client_id"]
+                if (!queryClientId.isNullOrBlank()) {
+                    return queryClientId
+                }
             }
 
             return authConfig.clientId.ifBlank { McpProtocolHandler.DEFAULT_CLIENT_ID }

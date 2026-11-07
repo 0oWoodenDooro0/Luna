@@ -20,6 +20,7 @@ data class AccessToken(
     val refreshToken: String,
     val clientId: String,
     val expiresAt: Long,
+    val issuedAt: Long = System.currentTimeMillis(),
 )
 
 class McpOAuthProvider(
@@ -227,6 +228,19 @@ class McpOAuthProvider(
             }
             return null
         }
+
+        val repo = clientRepository
+        if (repo != null && accessToken.clientId != config.clientId) {
+            val clientRecord = repo.findByClientId(accessToken.clientId)
+            if (clientRecord == null || accessToken.issuedAt < clientRecord.updatedAt) {
+                synchronized(lock) {
+                    accessTokens.remove(token)
+                    refreshTokens.remove(accessToken.refreshToken)
+                }
+                return null
+            }
+        }
+
         return accessToken.clientId
     }
 
