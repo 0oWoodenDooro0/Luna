@@ -139,9 +139,23 @@ class LunaHost(
     }
 
     companion object {
-        fun initDatabase(): Database {
-            File("data").mkdirs()
-            return Database.connect("jdbc:sqlite:data/urls.db", driver = "org.sqlite.JDBC")
+        fun initDatabase(dbPath: String = "data/urls.db"): Database {
+            val file = File(dbPath)
+            file.parentFile?.mkdirs()
+            return Database.connect(
+                "jdbc:sqlite:$dbPath",
+                driver = "org.sqlite.JDBC",
+                setupConnection = { connection ->
+                    val meta = connection.metaData
+                    val isSqlite = meta.databaseProductName.contains("SQLite", ignoreCase = true) || (meta.url?.startsWith("jdbc:sqlite") == true)
+                    if (isSqlite) {
+                        connection.createStatement().use { stmt ->
+                            stmt.execute("PRAGMA journal_mode=WAL;")
+                            stmt.execute("PRAGMA busy_timeout=5000;")
+                        }
+                    }
+                },
+            )
         }
 
         fun loadConfig(): Map<String, Any?> = ConfigLoader.loadConfig()

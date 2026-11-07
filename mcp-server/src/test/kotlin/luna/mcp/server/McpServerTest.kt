@@ -54,6 +54,8 @@ class McpServerTest {
         transaction(database) {
             McpWebhooksTable.insert {
                 it[McpWebhooksTable.id] = id
+                it[McpWebhooksTable.clientId] = "luna-mcp-client"
+                it[McpWebhooksTable.tag] = "tag-$id"
                 it[McpWebhooksTable.guildId] = "g-$id"
                 it[McpWebhooksTable.channelId] = channelId
                 it[McpWebhooksTable.webhookUrl] = url

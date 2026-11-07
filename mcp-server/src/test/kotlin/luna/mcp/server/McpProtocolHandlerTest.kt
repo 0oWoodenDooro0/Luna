@@ -117,6 +117,8 @@ class McpProtocolHandlerTest {
             transaction(database) {
                 McpWebhooksTable.insert {
                     it[id] = "wh-1"
+                    it[clientId] = "luna-mcp-client"
+                    it[tag] = "default"
                     it[guildId] = "g-1"
                     it[channelId] = "c-1"
                     it[webhookUrl] = "https://discord.com/api/webhooks/111/token1"
