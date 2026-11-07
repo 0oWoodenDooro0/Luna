@@ -165,6 +165,14 @@ class LunaHost(
 }
 
 @OptIn(PrivilegedIntent::class)
-suspend fun main() {
+suspend fun main(args: Array<String>) {
+    if (EnvSyncCli.handleCli(args)) {
+        return
+    }
     LunaHost().start()
+}
+
+@OptIn(PrivilegedIntent::class)
+suspend fun main() {
+    main(emptyArray())
 }

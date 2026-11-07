@@ -35,6 +35,9 @@ RUN useradd -m -u 1000 luna && \
 COPY --from=builder --chown=luna:luna /app/build/libs/Luna-*.jar /app/Luna.jar
 COPY --from=builder --chown=luna:luna /app/mcp-server/build/install/mcp-server /app/mcp-server
 COPY --chown=luna:luna .env.example /app/.env.example
+COPY --chown=luna:luna scripts/ /app/scripts/
+
+RUN chmod +x /app/scripts/*.sh
 
 USER luna
 
