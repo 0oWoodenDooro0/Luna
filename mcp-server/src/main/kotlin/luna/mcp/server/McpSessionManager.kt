@@ -2,15 +2,20 @@ package luna.mcp.server
 
 import kotlinx.coroutines.channels.Channel
 
+data class McpSessionEntry(
+    val channel: Channel<String>,
+    val clientId: String,
+)
+
 class McpSessionManager(
     private val maxSessions: Int = MAX_DEFAULT_SESSIONS,
 ) {
     private val lock = Any()
-    private val sessions: MutableMap<String, Channel<String>> =
-        object : LinkedHashMap<String, Channel<String>>(maxSessions, 0.75f, true) {
-            override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Channel<String>>?): Boolean {
+    private val sessions: MutableMap<String, McpSessionEntry> =
+        object : LinkedHashMap<String, McpSessionEntry>(maxSessions, 0.75f, true) {
+            override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, McpSessionEntry>?): Boolean {
                 if (size > maxSessions) {
-                    eldest?.value?.close()
+                    eldest?.value?.channel?.close()
                     return true
                 }
                 return false
@@ -20,15 +25,21 @@ class McpSessionManager(
     fun registerSession(
         sessionId: String,
         channel: Channel<String>,
+        clientId: String = "luna-mcp-client",
     ) {
         synchronized(lock) {
-            sessions[sessionId] = channel
+            sessions[sessionId] = McpSessionEntry(channel, clientId)
         }
     }
 
+    fun getClientId(sessionId: String): String? =
+        synchronized(lock) {
+            sessions[sessionId]?.clientId
+        }
+
     fun removeSession(sessionId: String) {
         synchronized(lock) {
-            sessions.remove(sessionId)?.close()
+            sessions.remove(sessionId)?.channel?.close()
         }
     }
 
@@ -36,9 +47,9 @@ class McpSessionManager(
         sessionId: String,
         message: String,
     ): Boolean {
-        val channel = synchronized(lock) { sessions[sessionId] } ?: return false
+        val entry = synchronized(lock) { sessions[sessionId] } ?: return false
         return runCatching {
-            channel.send(message)
+            entry.channel.send(message)
             true
         }.getOrDefault(false)
     }

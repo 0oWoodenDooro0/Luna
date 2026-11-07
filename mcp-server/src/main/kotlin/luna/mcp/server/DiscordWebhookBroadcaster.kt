@@ -32,15 +32,22 @@ data class DiscordWebhookPayload(
 )
 
 class DiscordWebhookBroadcaster(
-    private val repository: McpWebhookRepository,
+    val repository: McpWebhookRepository,
     private val httpClient: HttpClient = createDefaultHttpClient(),
 ) {
     private val logger = LoggerFactory.getLogger(DiscordWebhookBroadcaster::class.java)
 
     suspend fun broadcast(message: String): BroadcastResult {
         val webhooks = repository.getAllWebhooks()
+        return broadcastToWebhooks(webhooks, message)
+    }
+
+    suspend fun broadcastToWebhooks(
+        webhooks: List<McpWebhookRecord>,
+        message: String,
+    ): BroadcastResult {
         if (webhooks.isEmpty()) {
-            logger.warn("Discord webhook broadcast requested, but no active webhooks are registered in database")
+            logger.warn("Discord webhook broadcast requested, but no active webhooks were registered in database")
             return BroadcastResult(status = "no_channels_registered", deliveredChannels = 0)
         }
 
