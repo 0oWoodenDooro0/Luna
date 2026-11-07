@@ -44,8 +44,13 @@ fun Application.mcpServerModule(
     broadcaster: DiscordWebhookBroadcaster,
     sessionManager: McpSessionManager = McpSessionManager(),
     authConfig: McpOAuthConfig = McpOAuthConfig(),
-    oAuthProvider: McpOAuthProvider = McpOAuthProvider(authConfig),
+    clientRepository: McpClientRepository? = null,
+    oAuthProvider: McpOAuthProvider = McpOAuthProvider(authConfig, clientRepository),
 ) {
+    if (clientRepository != null && oAuthProvider.clientRepository == null) {
+        oAuthProvider.clientRepository = clientRepository
+    }
+
     install(SSE)
     install(ContentNegotiation) {
         json()
@@ -54,7 +59,26 @@ fun Application.mcpServerModule(
     val handler = McpProtocolHandler(broadcaster)
     val baseUrl = authConfig.normalizedBaseUrl
 
-    fun isValidClient(clientId: String?): Boolean = !clientId.isNullOrBlank() && clientId == authConfig.clientId
+    fun isValidClient(clientId: String?): Boolean = oAuthProvider.isValidClientId(clientId)
+
+    fun verifyClientCredentials(
+        clientId: String?,
+        clientSecret: String?,
+    ): Boolean {
+        if (clientId.isNullOrBlank()) return false
+        val dynamicClient = oAuthProvider.findClient(clientId)
+        if (dynamicClient != null) {
+            if (clientSecret.isNullOrBlank()) return false
+            return oAuthProvider.verifyClientSecret(clientId, clientSecret)
+        }
+        if (!authConfig.clientId.isNullOrBlank() && clientId == authConfig.clientId) {
+            if (!authConfig.clientSecret.isNullOrBlank()) {
+                return clientSecret != null && oAuthProvider.verifyClientSecret(clientId, clientSecret)
+            }
+            return true
+        }
+        return false
+    }
 
     routing {
         get("/oauth/authorize") {
@@ -135,24 +159,36 @@ fun Application.mcpServerModule(
             }
 
             // Client authentication validation
-            if (!authConfig.clientSecret.isNullOrBlank() && !clientSecret.isNullOrBlank()) {
-                if (clientSecret != authConfig.clientSecret || (clientId != null && !isValidClient(clientId))) {
+            if (!clientSecret.isNullOrBlank()) {
+                if (!verifyClientCredentials(clientId, clientSecret)) {
                     val errorJson =
                         buildJsonObject {
                             put("error", "invalid_client")
-                            put("error_description", "Invalid client credentials")
+                            put("error_description", "Client authentication failed")
                         }.toString()
                     call.respondText(errorJson, ContentType.Application.Json, HttpStatusCode.Unauthorized)
                     return@post
                 }
-            } else if (clientId != null && !isValidClient(clientId)) {
-                val errorJson =
-                    buildJsonObject {
-                        put("error", "invalid_client")
-                        put("error_description", "Invalid client_id")
-                    }.toString()
-                call.respondText(errorJson, ContentType.Application.Json, HttpStatusCode.BadRequest)
-                return@post
+            } else if (clientId != null) {
+                val dynamicClient = oAuthProvider.findClient(clientId)
+                if (dynamicClient != null || (!authConfig.clientSecret.isNullOrBlank() && clientId == authConfig.clientId)) {
+                    // Confidential client requires secret
+                    val errorJson =
+                        buildJsonObject {
+                            put("error", "invalid_client")
+                            put("error_description", "Client authentication failed")
+                        }.toString()
+                    call.respondText(errorJson, ContentType.Application.Json, HttpStatusCode.Unauthorized)
+                    return@post
+                } else if (!isValidClient(clientId)) {
+                    val errorJson =
+                        buildJsonObject {
+                            put("error", "invalid_client")
+                            put("error_description", "Invalid client_id")
+                        }.toString()
+                    call.respondText(errorJson, ContentType.Application.Json, HttpStatusCode.BadRequest)
+                    return@post
+                }
             }
 
             if (grantType == "refresh_token") {
@@ -174,6 +210,21 @@ fun Application.mcpServerModule(
                         }.toString()
                     call.respondText(errorJson, ContentType.Application.Json, HttpStatusCode.BadRequest)
                     return@post
+                }
+
+                if (clientId == null) {
+                    val dynamicClient = oAuthProvider.findClient(refreshed.clientId)
+                    if (dynamicClient != null || (!authConfig.clientSecret.isNullOrBlank() && refreshed.clientId == authConfig.clientId)) {
+                        if (clientSecret.isNullOrBlank() || !verifyClientCredentials(refreshed.clientId, clientSecret)) {
+                            val errorJson =
+                                buildJsonObject {
+                                    put("error", "invalid_client")
+                                    put("error_description", "Client authentication failed")
+                                }.toString()
+                            call.respondText(errorJson, ContentType.Application.Json, HttpStatusCode.Unauthorized)
+                            return@post
+                        }
+                    }
                 }
                 call.response.headers.append(HttpHeaders.CacheControl, "no-store")
                 call.response.headers.append(HttpHeaders.Pragma, "no-cache")
@@ -219,13 +270,24 @@ fun Application.mcpServerModule(
                 return@post
             }
 
-            if (clientId != null && !isValidClient(clientId)) {
+            if (clientId != null && clientId != authCode.clientId) {
                 val errorJson =
                     buildJsonObject {
                         put("error", "invalid_grant")
                         put("error_description", "client_id mismatch")
                     }.toString()
                 call.respondText(errorJson, ContentType.Application.Json, HttpStatusCode.BadRequest)
+                return@post
+            }
+
+            val effectiveClientId = clientId ?: authCode.clientId
+            if (clientId == null && !verifyClientCredentials(effectiveClientId, clientSecret)) {
+                val errorJson =
+                    buildJsonObject {
+                        put("error", "invalid_client")
+                        put("error_description", "Client authentication failed")
+                    }.toString()
+                call.respondText(errorJson, ContentType.Application.Json, HttpStatusCode.Unauthorized)
                 return@post
             }
 
