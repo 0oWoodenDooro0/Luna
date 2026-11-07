@@ -29,6 +29,7 @@ Luna is a multi-project Gradle monorepo (`:libs:socialpeek`, `:libs:curtly`, and
 
 - **Decouple parallel vertical slices**: When decomposing pipeline features into parallel agent worktrees (or subagents), vertical slices must not contend on the same monolithic service file. Isolate distinct pipeline stages into independent collaborator components (e.g., `DialogueNoiseFilter`, `ConversationSliceCollector`, `ContextUrlResolver`) or establish explicit interface seams in trunk tickets before scheduling parallel branches.
 - **Collaborator seam extraction**: When extending service pipelines with specialized entity parsing, attachment extraction, media validation, or byte-budget filtering, extract them into dedicated collaborator components with clean companion constants rather than inlining extraction heuristics into service coordinators.
+- **Retire obsolete seams & eliminate Middle Man wrappers**: When deepening a module and extracting collaborator components, do not retain pass-through wrapper methods (Middle Man), vestigial compatibility parameters (`Any? = null`), or duplicate fallback branches on the coordinator solely to preserve legacy test fixtures. Migrate the test surface directly to the new deep module's public interface, and delete obsolete pass-through seams.
 
 ## 5. Kotlin Test Naming & Observability
 

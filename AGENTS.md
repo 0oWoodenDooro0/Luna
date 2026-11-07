@@ -5,6 +5,10 @@
 - `src/main/kotlin/luna/`: Discord bot daemon, including host orchestrator (`plugin/`), first-party plugins:
   - `core/`: Bot core infrastructure and cross-plugin shared memory state ([`LunaWebhookRegistry`](src/main/kotlin/luna/core/LunaWebhookRegistry.kt)).
   - `summarizer/`: Multi-modal AI summarization pipeline ([`SummaryService`](src/main/kotlin/luna/summarizer/SummaryService.kt), [`GeminiSummarizer`](src/main/kotlin/luna/summarizer/GeminiSummarizer.kt), [`GeminiPromptBuilder`](src/main/kotlin/luna/summarizer/GeminiPromptBuilder.kt), [`ConversationSliceCollector`](src/main/kotlin/luna/summarizer/ConversationSliceCollector.kt), [`DialogueNoiseFilter`](src/main/kotlin/luna/summarizer/DialogueNoiseFilter.kt)).
+    - *Test architecture & ownership*:
+      - [`GeminiSummarizerTest`](src/test/kotlin/luna/summarizer/GeminiSummarizerTest.kt): AI multi-turn tool calling, lookback execution, single-round lookback enforcement, and fallback recovery.
+      - [`ConversationSliceCollectorTest`](src/test/kotlin/luna/summarizer/ConversationSliceCollectorTest.kt): Backtracking, gap halts, token/character budgeting, dialogue formatting, and media extraction.
+      - [`SummaryServiceTest`](src/test/kotlin/luna/summarizer/SummaryServiceTest.kt) / [`SummaryServiceWebhookTest`](src/test/kotlin/luna/summarizer/SummaryServiceWebhookTest.kt): Discord reaction event handling, deduplication caching, status publishing, and reply delivery. Decommission obsolete mock fixtures in service tests when moving responsibilities to deep collaborator modules.
   - `curtly/`, `preview/`, `undercover/`: First-party feature plugins.
 - `libs/socialpeek/`: Multi-platform social media post and video metadata resolver library.
 - `mcp-server/`: Standalone Model Context Protocol (MCP) server for Google Gemini Apps integration. Completely decoupled from Discord bot runtime/tokens; communicates via shared SQLite `mcp_webhooks` table ([`McpServerApplication`](mcp-server/src/main/kotlin/luna/mcp/server/McpServerApplication.kt), [`McpServerRoutes`](mcp-server/src/main/kotlin/luna/mcp/server/McpServerRoutes.kt), [`DiscordWebhookBroadcaster`](mcp-server/src/main/kotlin/luna/mcp/server/DiscordWebhookBroadcaster.kt), [`DiscordMessageChunker`](mcp-server/src/main/kotlin/luna/mcp/server/DiscordMessageChunker.kt), [`McpOAuthProvider`](mcp-server/src/main/kotlin/luna/mcp/server/McpOAuthProvider.kt)).
@@ -43,15 +47,16 @@ Inspect library APIs and dependencies directly via their `build.gradle.kts` decl
 
 ## Verification
 
-- **Inner development loop (fast targeted tests)**: Run targeted test suites while iterating to avoid monorepo build overhead:
+- **Inner development & remediation loop (fast targeted tests)**: While iterating on code or fixing code review findings, run only narrow targeted tests to avoid monorepo build overhead and token waste. Never run full monorepo test suites or `docker build` on intermediate edits:
   ```bash
   ./gradlew test --tests "luna.summarizer.*"
+  ./gradlew test --tests "luna.summarizer.ConversationSliceCollectorTest"
+  ./gradlew test --tests "luna.summarizer.GeminiSummarizerTest"
   ./gradlew test --tests "luna.summarizer.SummaryServiceTest"
   ./gradlew test --tests "luna.summarizer.SummaryServiceWebhookTest"
-  ./gradlew test --tests "luna.summarizer.SummaryServiceLookbackTest"
   ./gradlew test --tests "luna.core.CodingStandardsTest"
   ./gradlew :mcp-server:test
   ./gradlew :libs:socialpeek:test
   ```
-- **Pre-commit / Pre-PR check**: Run `./gradlew lintKotlin test` (or `./gradlew check`) to verify code style and test suite across all modules. Pre-commit hooks in `.githooks/` run this automatically.
-- **CI parity**: Before pushing or marking a PR ready, also run `docker build -t luna:ci-test .` to ensure full parity with CI (`.github/workflows/ci.yml`).
+- **Pre-Review / Pre-commit check (full suite & formatting)**: Run `./gradlew lintKotlin test` (or `./gradlew check`) across all modules only after completing an implementation slice or addressing all review findings, before dispatching the Review Gate or creating a PR. Pre-commit hooks in `.githooks/` run this automatically.
+- **CI parity (Docker build)**: Run `docker build -t luna:ci-test .` strictly as the final pre-PR/pre-merge verification step to ensure parity with CI (`.github/workflows/ci.yml`). Banned from inner-loop iteration.
