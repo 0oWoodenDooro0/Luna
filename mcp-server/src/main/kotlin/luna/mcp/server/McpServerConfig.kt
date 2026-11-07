@@ -106,6 +106,8 @@ data class McpServerConfig(
     }
 
     companion object {
+        private val defaultLogger: Logger = LoggerFactory.getLogger(McpServerConfig::class.java)
+
         const val DEFAULT_PORT = 8081
         const val DEFAULT_DB_PATH = "./data/urls.db"
         const val DEFAULT_PUBLIC_BASE_URL = "https://woodendoor.website"
@@ -546,8 +548,14 @@ data class McpServerConfig(
             val text = loadEnvExample()
             return if (!text.isNullOrBlank()) {
                 val parsed = parseEnvExampleSchema(text)
-                if (parsed.isNotEmpty()) parsed else defaultFallbackSchema()
+                if (parsed.isNotEmpty()) {
+                    parsed
+                } else {
+                    defaultLogger.warn("[CONFIG] Parsing .env.example produced no valid schemas; falling back to default built-in schema")
+                    defaultFallbackSchema()
+                }
             } else {
+                defaultLogger.warn("[CONFIG] Canonical .env.example content is empty or not found; falling back to default built-in schema")
                 defaultFallbackSchema()
             }
         }

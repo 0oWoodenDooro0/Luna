@@ -237,6 +237,53 @@ is_recognized_key() {
   return 1
 }
 
+get_candidate_keys() {
+  local sk="$1"
+  local candidates=("$sk")
+  case "$sk" in
+    DISCORD_CLIENT_ID)
+      candidates+=("DISCORD_APP_ID" "clientId" "luna.clientId")
+      ;;
+    DISCORD_TOKEN)
+      candidates+=("botToken" "luna.botToken")
+      ;;
+    DISCORD_CLIENT_SECRET)
+      candidates+=("clientSecret" "luna.clientSecret")
+      ;;
+    PORT)
+      candidates+=("port" "luna.port")
+      ;;
+    BASE_URL)
+      candidates+=("baseUrl" "luna.baseUrl" "curtly.baseUrl" "curtly.base_url" "CURTLY_BASE_URL" "PLUGINS_CURTLY_BASE_URL")
+      ;;
+    DISCORD_REDIRECT_URI)
+      candidates+=("redirectUri" "REDIRECT_URI" "luna.redirectUri")
+      ;;
+    MCP_PORT)
+      candidates+=("mcp.port" "port")
+      ;;
+    MCP_DB_PATH)
+      candidates+=("dbPath" "mcp.dbPath")
+      ;;
+    MCP_PUBLIC_BASE_URL)
+      candidates+=("publicBaseUrl" "mcp.publicBaseUrl")
+      ;;
+    MCP_OAUTH_CLIENT_ID)
+      candidates+=("mcp.clientId" "MCP_CLIENT_ID")
+      ;;
+    MCP_OAUTH_CLIENT_SECRET)
+      candidates+=("mcp.clientSecret" "MCP_CLIENT_SECRET")
+      ;;
+    MCP_AUTH_TOKEN)
+      candidates+=("staticAuthToken" "mcp.staticAuthToken")
+      ;;
+    MCP_REQUIRE_AUTH)
+      candidates+=("requireAuth" "mcp.requireAuth")
+      ;;
+  esac
+  echo "${candidates[@]}"
+}
+
 do_check() {
   if [ ! -f "$ENV_FILE" ]; then
     echo -e "${COLOR_RED}❌ Error: Environment file '$ENV_FILE' does not exist.${COLOR_RESET}" >&2
@@ -261,16 +308,20 @@ do_check() {
     is_req=$(is_required_key "$sk")
 
     local found=false
-    for ak in "${active_keys[@]}"; do
-      if [ "$ak" = "$sk" ]; then
-        # Check that value is non-blank
-        local val
-        val=$(grep -E "^[ \t]*${sk}=" "$ENV_FILE" | head -n 1 | cut -d'=' -f2- | sed 's/^[ \t]*//;s/[ \t]*$//' | tr -d '"'\''')
-        if [ -n "$val" ]; then
-          found=true
+    local cand_str
+    cand_str=$(get_candidate_keys "$sk")
+    for c in $cand_str; do
+      for ak in "${active_keys[@]}"; do
+        if [ "$ak" = "$c" ]; then
+          # Check that value is non-blank
+          local val
+          val=$(grep -E "^[ \t]*${c}=" "$ENV_FILE" | head -n 1 | cut -d'=' -f2- | sed 's/^[ \t]*//;s/[ \t]*$//' | tr -d "\"'")
+          if [ -n "$val" ]; then
+            found=true
+            break 2
+          fi
         fi
-        break
-      fi
+      done
     done
 
     if [ "$found" = false ]; then
@@ -362,11 +413,15 @@ do_sync() {
   local missing_keys=()
   for sk in "${schema_keys[@]}"; do
     local found=false
-    for dk in "${declared_keys[@]}"; do
-      if [ "$dk" = "$sk" ]; then
-        found=true
-        break
-      fi
+    local cand_str
+    cand_str=$(get_candidate_keys "$sk")
+    for c in $cand_str; do
+      for dk in "${declared_keys[@]}"; do
+        if [ "$dk" = "$c" ]; then
+          found=true
+          break 2
+        fi
+      done
     done
     if [ "$found" = false ]; then
       missing_keys+=("$sk")

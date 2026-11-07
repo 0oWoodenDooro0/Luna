@@ -558,4 +558,81 @@ class EnvSyncCliTest {
         val backupsCount2 = tempDir.toFile().listFiles { f -> f.name.contains(".sh_test_idempotent.env.bak.") }?.size ?: 0
         assertEquals(backupsCount1, backupsCount2, "Redundant sync must not create extra backup files")
     }
+
+    @Test
+    fun `standalone shell script in check mode satisfies required variables when legacy aliases like DISCORD_APP_ID are set`() {
+        val script = File(projectRoot, "scripts/sync-env.sh")
+        val testEnv = File(tempDir.toFile(), ".sh_test_alias.env")
+        testEnv.writeText(
+            """
+            DISCORD_TOKEN=test-bot-token
+            DISCORD_APP_ID=test-application-id
+            DISCORD_CLIENT_SECRET=test-secret
+            """.trimIndent(),
+        )
+
+        val process =
+            ProcessBuilder(
+                script.absolutePath,
+                "--check",
+                "-f",
+                testEnv.absolutePath,
+                "-e",
+                exampleFile.absolutePath,
+                "--no-color",
+            ).redirectErrorStream(true).start()
+
+        val output = process.inputStream.bufferedReader().readText()
+        val exitCode = process.waitFor()
+
+        assertEquals(0, exitCode, "Configuration with DISCORD_APP_ID alias must pass check mode with exit 0. Output:\n$output")
+        assertFalse(output.contains("Missing Required"), "Must not report DISCORD_CLIENT_ID missing when DISCORD_APP_ID is present")
+    }
+
+    @Test
+    fun `handleCli in check mode audits container environment variables when default dot-env file is absent`() {
+        val outBytes = java.io.ByteArrayOutputStream()
+        val errBytes = java.io.ByteArrayOutputStream()
+        val outStream = java.io.PrintStream(outBytes)
+        val errStream = java.io.PrintStream(errBytes)
+        var capturedExit: Int? = null
+
+        // Using a non-existent default environment file path to trigger container environment fallback
+        val emptyDir = File(tempDir.toFile(), "empty-dir")
+        emptyDir.mkdirs()
+        val nonExistentDefaultFile = File(emptyDir, ".env")
+
+        val handled =
+            EnvSyncCli.handleCli(
+                args = arrayOf("--check-env", "--example-file=${exampleFile.absolutePath}", "--file=${nonExistentDefaultFile.absolutePath}"),
+                out = outStream,
+                err = errStream,
+                exitProcess = { capturedExit = it },
+            )
+
+        assertTrue(handled)
+        // Explicit file flag should fail with file not found
+        assertEquals(1, capturedExit)
+        assertTrue(errBytes.toString().contains("does not exist"))
+
+        // Implicit default without explicit flag should audit System.getenv()
+        val outBytesImplicit = java.io.ByteArrayOutputStream()
+        val errBytesImplicit = java.io.ByteArrayOutputStream()
+        var capturedExitImplicit: Int? = null
+
+        val handledImplicit =
+            EnvSyncCli.handleCli(
+                args = arrayOf("--check-env", "--example-file=${exampleFile.absolutePath}"),
+                out = java.io.PrintStream(outBytesImplicit),
+                err = java.io.PrintStream(errBytesImplicit),
+                exitProcess = { capturedExitImplicit = it },
+            )
+
+        assertTrue(handledImplicit)
+        val outputImplicit = outBytesImplicit.toString()
+        assertTrue(
+            outputImplicit.contains("Environment Configuration Audit"),
+            "Implicit check when .env is absent must run audit against container environment",
+        )
+    }
 }

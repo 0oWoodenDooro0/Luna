@@ -332,7 +332,7 @@ class CodingStandardsTest {
             .walkTopDown()
             .onEnter { dir ->
                 val name = dir.name
-                name != ".git" && name != ".worktrees" && name != "build" && !name.startsWith(".")
+                !name.startsWith(".") && name != "build"
             }.filter { dir ->
                 dir.isDirectory &&
                     dir.name == "kotlin" &&

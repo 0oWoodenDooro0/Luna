@@ -633,8 +633,26 @@ object ConfigLoader {
         val text = loadEnvExample()
         return if (!text.isNullOrBlank()) {
             val parsed = parseEnvExampleSchema(text)
-            if (parsed.isNotEmpty()) parsed else defaultFallbackSchema()
+            if (parsed.isNotEmpty()) {
+                parsed
+            } else {
+                JsonLogger.warn(
+                    layer = "CONFIG",
+                    component = "ConfigLoader",
+                    operation = "loadEnvExampleSchema",
+                    data = emptyMap<String, Any?>(),
+                    message = "Parsing .env.example produced no valid schemas; falling back to default built-in schema",
+                )
+                defaultFallbackSchema()
+            }
         } else {
+            JsonLogger.warn(
+                layer = "CONFIG",
+                component = "ConfigLoader",
+                operation = "loadEnvExampleSchema",
+                data = emptyMap<String, Any?>(),
+                message = "Canonical .env.example content is empty or not found; falling back to default built-in schema",
+            )
             defaultFallbackSchema()
         }
     }

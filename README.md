@@ -1,4 +1,4 @@
-# 🌘 Luna - 現代化 Discord 機器人與模組化外掛服務平台
+# 🌔 Luna - 現代化 Discord 機器人與模組化外掛服務平台
 
 Luna 是一款基於 Kotlin、Kord 與 Ktor 開發的現代化 Discord 機器人與多功能服務平台。專案採用 **模組化外掛架構 (Modular Plugin Architecture)** 與 **Gradle Monorepo** 架構，以單一執行個體與統一的 `PluginContext` 邊界提供 AI 影音/對話摘要、多平台社群預覽、短網址與數據分析控制台、以及派對互動遊戲。
 

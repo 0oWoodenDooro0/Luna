@@ -241,6 +241,13 @@ object EnvSyncCli {
             try {
                 ConfigLoader.parseDotenv(envFile)
             } catch (e: Exception) {
+                JsonLogger.warn(
+                    layer = "CONFIG",
+                    component = "EnvSyncCli",
+                    operation = "auditEnvFile",
+                    data = mapOf("file" to envFile.path, "error" to (e.message ?: "unknown")),
+                    message = "Failed to parse target .env file: ${e.message}; falling back to empty configuration",
+                )
                 emptyMap<String, String>()
             }
 
@@ -341,6 +348,63 @@ object EnvSyncCli {
         )
     }
 
+    fun isExplicitEnvFile(args: Array<String>): Boolean =
+        args.any {
+            it.startsWith("--env-file=") ||
+                it.startsWith("--env=") ||
+                it.startsWith("--file=") ||
+                it == "--env-file" ||
+                it == "--env" ||
+                it == "-f"
+        }
+
+    fun auditConfigMap(
+        activeConfig: Map<String, String>,
+        targetDescription: String = "Container Environment (System.getenv)",
+        envExampleContent: String? = null,
+    ): EnvAuditReport {
+        val exampleText = envExampleContent ?: ConfigLoader.loadEnvExample()
+        val schemaList =
+            if (!exampleText.isNullOrBlank()) {
+                val parsed = ConfigLoader.parseEnvExampleSchema(exampleText)
+                if (parsed.isNotEmpty()) parsed else ConfigLoader.loadEnvExampleSchema()
+            } else {
+                ConfigLoader.loadEnvExampleSchema()
+            }
+
+        val schemaKeys = schemaList.map { it.name }.toSet()
+
+        val missingRequired = mutableListOf<String>()
+        for (item in schemaList.filter { it.isRequired }) {
+            val value = ConfigLoader.resolveVariableValue(item.name, activeConfig)
+            if (value == null) {
+                missingRequired.add(item.name)
+            }
+        }
+
+        val missingOptional = mutableListOf<Pair<String, String?>>()
+        for (item in schemaList.filter { !it.isRequired }) {
+            val value = ConfigLoader.resolveVariableValue(item.name, activeConfig)
+            if (value == null) {
+                missingOptional.add(item.name to item.defaultValue)
+            }
+        }
+
+        val unknownKeys = mutableListOf<String>()
+        for (k in activeConfig.keys) {
+            if (!ConfigLoader.isRecognizedKey(k, schemaKeys)) {
+                unknownKeys.add(k)
+            }
+        }
+
+        return EnvAuditReport(
+            targetFile = File(targetDescription),
+            missingRequired = missingRequired,
+            missingOptional = missingOptional,
+            unknownKeys = unknownKeys,
+        )
+    }
+
     fun handleCli(
         args: Array<String>,
         out: PrintStream = System.out,
@@ -360,13 +424,21 @@ object EnvSyncCli {
 
         if (isCheck) {
             try {
-                if (!envFile.exists()) {
-                    err.println("❌ Error: Environment file '${envFile.path}' does not exist.")
-                    exitProcess(1)
-                    return true
-                }
+                val report =
+                    if (envFile.exists()) {
+                        auditEnvFile(envFile, exampleContent)
+                    } else if (!isExplicitEnvFile(args)) {
+                        auditConfigMap(
+                            activeConfig = System.getenv(),
+                            targetDescription = "Container Environment (System.getenv)",
+                            envExampleContent = exampleContent,
+                        )
+                    } else {
+                        err.println("❌ Error: Environment file '${envFile.path}' does not exist.")
+                        exitProcess(1)
+                        return true
+                    }
 
-                val report = auditEnvFile(envFile, exampleContent)
                 out.println(report.formatVisualReport())
 
                 if (report.isValid) {
@@ -385,6 +457,10 @@ object EnvSyncCli {
             try {
                 if (!envFile.exists()) {
                     err.println("❌ Error: Target environment file '${envFile.path}' does not exist.")
+                    err.println("   To synchronize a host .env file from within Docker, mount it:")
+                    err.println("     docker compose run --rm -v \$(pwd)/.env:/app/.env luna --sync-env")
+                    err.println("   Or run scripts/sync-env.sh directly on your host:")
+                    err.println("     scripts/sync-env.sh --sync")
                     exitProcess(1)
                     return true
                 }
