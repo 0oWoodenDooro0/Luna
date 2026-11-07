@@ -3,12 +3,23 @@ package luna.preview
 import dev.kord.core.Kord
 import dev.kord.core.event.interaction.ChatInputCommandInteractionCreateEvent
 import dev.kord.core.on
+import dev.socialpeek.SocialPeek
+import dev.socialpeek.SocialPeekClient
+import dev.socialpeek.resolver.bilibili.BilibiliResolver
+import dev.socialpeek.resolver.facebook.FacebookResolver
+import dev.socialpeek.resolver.generic.GenericWebResolver
+import dev.socialpeek.resolver.instagram.InstagramResolver
+import dev.socialpeek.resolver.reddit.RedditResolver
+import dev.socialpeek.resolver.threads.ThreadsResolver
+import dev.socialpeek.resolver.x.XResolver
+import dev.socialpeek.resolver.youtube.YouTubeResolver
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import luna.core.Command
 import luna.core.JsonLogger
 import luna.plugin.LunaPlugin
 import luna.plugin.PluginContext
+import luna.plugin.config
 
 internal fun safeScope(kord: Kord): CoroutineScope {
     val hasValidContext =
@@ -26,6 +37,7 @@ internal fun safeScope(kord: Kord): CoroutineScope {
  */
 class SocialPreviewPlugin(
     private val commandFactory: (PreviewSettingsStorage) -> Command = { PreviewCommand(it) },
+    private val clientFactory: ((String?) -> SocialPeekClient)? = null,
 ) : LunaPlugin {
     override val name: String = "social-preview"
 
@@ -35,9 +47,22 @@ class SocialPreviewPlugin(
     var previewCommand: Command? = null
         private set
 
+    var youtubeApiKey: String? = null
+        private set
+
+    var peekClient: SocialPeekClient? = null
+        private set
+
     override suspend fun initialize(context: PluginContext) {
         val storage = PreviewSettingsStorage(context.database)
         settingsStorage = storage
+
+        val apiKey =
+            context.config<String>("YOUTUBE_API_KEY")?.takeIf { it.isNotBlank() }
+                ?: context.config<String>("youtube.apiKey")?.takeIf { it.isNotBlank() }
+                ?: context.config<String>("youtube.api_key")?.takeIf { it.isNotBlank() }
+                ?: context.config<String>("social_preview.youtubeApiKey")?.takeIf { it.isNotBlank() }
+        this.youtubeApiKey = apiKey
 
         val command = commandFactory(storage)
         previewCommand = command
@@ -75,6 +100,21 @@ class SocialPreviewPlugin(
             }
         }
 
-        SocialPreviewService.register(context.kord, storage, scope = scope)
+        val client =
+            clientFactory?.invoke(apiKey) ?: if (!apiKey.isNullOrBlank()) {
+                SocialPeekClient(resolvers = SocialPeekClient.defaultResolvers(youtubeApiKey = apiKey))
+            } else {
+                JsonLogger.log(
+                    layer = "PLUGIN",
+                    component = "SocialPreviewPlugin",
+                    operation = "initialize",
+                    data = mapOf("youtubeApiKey" to "not_configured", "mode" to "degraded_oembed"),
+                    status = "DEGRADED",
+                )
+                SocialPeek.defaultClient
+            }
+        this.peekClient = client
+
+        SocialPreviewService.register(context.kord, storage, scope = scope, peekClient = client)
     }
 }

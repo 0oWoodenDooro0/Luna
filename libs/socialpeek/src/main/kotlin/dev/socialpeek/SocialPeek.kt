@@ -51,6 +51,12 @@ object SocialPeek {
         private var httpClient: SocialPeekHttpClient? = null
         private val customResolvers = mutableListOf<PlatformResolver>()
         private var includeDefaults: Boolean = true
+        private var youtubeApiKey: String? = null
+
+        fun youtubeApiKey(key: String?) =
+            apply {
+                this.youtubeApiKey = key
+            }
 
         fun httpClient(client: SocialPeekHttpClient) =
             apply {
@@ -71,7 +77,7 @@ object SocialPeek {
             val list = mutableListOf<PlatformResolver>()
             list.addAll(customResolvers)
             if (includeDefaults) {
-                list.addAll(SocialPeekClient.defaultResolvers())
+                list.addAll(SocialPeekClient.defaultResolvers(youtubeApiKey))
             }
             return SocialPeekClient(
                 resolvers = list,

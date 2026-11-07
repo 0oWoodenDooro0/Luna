@@ -9,14 +9,21 @@ object McpServerMain {
 
     @JvmStatic
     fun main(args: Array<String>) {
-        val port = System.getenv("MCP_PORT")?.toIntOrNull() ?: 8081
-        val dbPath = System.getenv("MCP_DB_PATH") ?: "./data/urls.db"
+        val config =
+            try {
+                McpServerConfig.load()
+            } catch (e: Exception) {
+                logger.error("Failed to load MCP server configuration: {}", e.message)
+                throw e
+            }
 
-        logger.info("Starting standalone MCP server on port {} with database path {}", port, dbPath)
+        config.auditLog(logger)
 
-        val repository = McpWebhookRepository.create(dbPath)
+        logger.info("Starting standalone MCP server on port {} with database path {}", config.port, config.dbPath)
+
+        val repository = McpWebhookRepository.create(config.dbPath)
         val broadcaster = DiscordWebhookBroadcaster(repository)
-        val authConfig = McpOAuthConfig()
+        val authConfig = config.toOAuthConfig()
 
         logger.info(
             "MCP server publicBaseUrl={}, clientId={}, authEnabled={}",
@@ -26,7 +33,7 @@ object McpServerMain {
         )
 
         val server =
-            embeddedServer(CIO, port = port, host = "0.0.0.0") {
+            embeddedServer(CIO, port = config.port, host = "0.0.0.0") {
                 mcpServerModule(broadcaster = broadcaster, authConfig = authConfig)
             }
 

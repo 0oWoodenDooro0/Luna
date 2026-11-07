@@ -37,11 +37,13 @@ fun Routing.curtlyRouting(
     curtlyService: CurtlyService,
     userStorage: UserStorage,
     baseUrl: String = "http://localhost:8080/s/",
+    redirectUri: String? = null,
 ) {
     curtlyRouting(
         curtlyService = curtlyService,
         authService = AuthService(userStorage),
         baseUrl = baseUrl,
+        redirectUri = redirectUri,
     )
 }
 
@@ -49,6 +51,7 @@ fun Routing.curtlyRouting(
     curtlyService: CurtlyService,
     authService: AuthService,
     baseUrl: String = "http://localhost:8080/s/",
+    redirectUri: String? = null,
 ) {
     // Helper to resolve application base URL for OAuth redirect
     fun resolveAppBaseUrl(): String =
@@ -59,6 +62,8 @@ fun Routing.curtlyRouting(
         } else {
             baseUrl
         }
+
+    fun resolveEffectiveRedirectUri(): String = redirectUri?.takeIf { it.isNotBlank() } ?: "${resolveAppBaseUrl()}/api/auth/discord/callback"
 
     // ----------------------------------------------------
     // Web Pages
@@ -115,9 +120,8 @@ fun Routing.curtlyRouting(
     // ----------------------------------------------------
     get("/api/auth/discord/login") {
         try {
-            val appBaseUrl = resolveAppBaseUrl()
-            val redirectUri = System.getenv("DISCORD_REDIRECT_URI") ?: "$appBaseUrl/api/auth/discord/callback"
-            val discordAuthUrl = authService.getDiscordLoginUrl(redirectUri)
+            val targetRedirectUri = resolveEffectiveRedirectUri()
+            val discordAuthUrl = authService.getDiscordLoginUrl(targetRedirectUri)
             call.respondRedirect(discordAuthUrl)
         } catch (e: Exception) {
             call.respondText(
@@ -136,9 +140,8 @@ fun Routing.curtlyRouting(
         }
 
         try {
-            val appBaseUrl = resolveAppBaseUrl()
-            val redirectUri = System.getenv("DISCORD_REDIRECT_URI") ?: "$appBaseUrl/api/auth/discord/callback"
-            val session = authService.handleDiscordCallback(code, redirectUri)
+            val targetRedirectUri = resolveEffectiveRedirectUri()
+            val session = authService.handleDiscordCallback(code, targetRedirectUri)
             call.sessions.set(session)
             call.respondRedirect("/dashboard")
         } catch (e: Exception) {

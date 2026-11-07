@@ -98,6 +98,46 @@ class CurtlyPluginTest {
         }
 
     @Test
+    fun `curtly plugin configures oauth client and redirectUri from PluginContext`() =
+        testApplication {
+            val mockKord = mockk<Kord>(relaxed = true)
+            val testDb = createTestDb()
+            val plugin = CurtlyPlugin()
+
+            application {
+                routing {
+                    val context =
+                        DefaultPluginContext(
+                            kord = mockKord,
+                            routing = this,
+                            database = testDb,
+                            configMap =
+                                mapOf(
+                                    "curtly.baseUrl" to "https://short.test/s/",
+                                    "DISCORD_CLIENT_ID" to "test-client-id-123",
+                                    "DISCORD_CLIENT_SECRET" to "test-client-secret-456",
+                                    "DISCORD_REDIRECT_URI" to "https://oauth.test/callback",
+                                ),
+                        )
+
+                    runBlocking {
+                        plugin.initialize(context)
+                    }
+                }
+            }
+
+            startApplication()
+
+            val noFollowClient = createClient { followRedirects = false }
+            val loginRes = noFollowClient.get("/api/auth/discord/login")
+            assertEquals(HttpStatusCode.Found, loginRes.status)
+            val location = loginRes.headers["Location"]
+            assertNotNull(location)
+            assertTrue(location.contains("client_id=test-client-id-123"))
+            assertTrue(location.contains("redirect_uri=https%3A%2F%2Foauth.test%2Fcallback"))
+        }
+
+    @Test
     fun `plugin loader discovers CurtlyPlugin via ServiceLoader`() {
         val loader = PluginLoader()
         val plugins = loader.loadPlugins()

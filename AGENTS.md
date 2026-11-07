@@ -25,11 +25,21 @@ Single-context repository layout (`GLOSSARY.md` and `docs/adr/`). See `docs/agen
 
 ### Coding standards
 
-Judgement calls for daemon state bounds, transient error eviction, and library boundaries. See `CODING_STANDARDS.md`. Mechanical rules (daemon state collections, assertion styles, test naming, and Dockerfile subproject parity) are checked deterministically by [`CodingStandardsTest`](src/test/kotlin/luna/core/CodingStandardsTest.kt).
+Judgement calls for daemon state bounds, transient error eviction, library boundaries, negative boundary coverage, and observable fallback degraded logs. See `CODING_STANDARDS.md`. Mechanical rules (daemon state collections, assertion styles, test naming, Dockerfile subproject parity, and sensitive key synchronization) are checked deterministically by [`CodingStandardsTest`](src/test/kotlin/luna/core/CodingStandardsTest.kt).
+Unified environment configuration architecture and navigation pointers between `:root` and `:mcp-server` are documented in [`docs/architecture/configuration.md`](docs/architecture/configuration.md).
 
 ### Library & dependency exploration
 
 Inspect library APIs and dependencies directly via their `build.gradle.kts` declarations and source/interface definitions rather than running shell classpath extraction scripts.
+
+## Git & Conflict Resolution
+
+- **Targeted Conflict Localization**: When integrating parallel branches or resolving merge conflicts, never guess line numbers or page through file chunks with `view_file`. Immediately run:
+  ```bash
+  git diff --name-only --diff-filter=U
+  grep -n -E "^(<<<<<<<|=======|>>>>>>>)" <conflicted-file>
+  ```
+  to locate exact conflict markers and apply targeted replacements.
 
 ## Verification
 

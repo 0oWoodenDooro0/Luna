@@ -65,6 +65,8 @@ class SummarizerPluginTest {
             assertEquals(SummaryService.DEFAULT_MAX_HISTORY_MESSAGES, plugin.maxHistoryMessages)
             assertEquals(SummaryService.DEFAULT_INACTIVITY_GAP, plugin.inactivityGap)
             assertEquals(SummaryService.DEFAULT_MAX_CHARACTER_BUDGET, plugin.maxCharacterBudget)
+            assertEquals(SummaryService.DEFAULT_MAX_LOOKBACK_MESSAGES, plugin.maxLookbackMessages)
+            assertEquals(SummaryService.DEFAULT_MAX_IMAGES, plugin.maxImages)
             assertNotNull(plugin.summarizer)
             assertNotNull(plugin.summaryService)
 
@@ -92,6 +94,8 @@ class SummarizerPluginTest {
                     "SUMMARY_MAX_HISTORY_MESSAGES" to 30,
                     "SUMMARY_INACTIVITY_GAP_MINUTES" to 20L,
                     "SUMMARY_MAX_CHARACTER_BUDGET" to 15000,
+                    "SUMMARY_MAX_LOOKBACK_MESSAGES" to 15,
+                    "SUMMARY_MAX_IMAGES" to 5,
                 )
 
             val context =
@@ -109,8 +113,85 @@ class SummarizerPluginTest {
             assertEquals(30, plugin.maxHistoryMessages)
             assertEquals(20.minutes, plugin.inactivityGap)
             assertEquals(15000, plugin.maxCharacterBudget)
+            assertEquals(15, plugin.maxLookbackMessages)
+            assertEquals(5, plugin.maxImages)
             assertNotNull(plugin.summarizer)
             assertNotNull(plugin.summaryService)
+
+            listenerJob.cancel()
+        }
+
+    @Test
+    fun `initializes with clamped lookback limit when configured value exceeds upper bound or is non positive`() =
+        runTest {
+            val listenerJob = Job()
+            val testScope = CoroutineScope(Dispatchers.Unconfined + listenerJob)
+            val mockKord = mockk<Kord>(relaxed = true)
+            every { mockKord.events } returns MutableSharedFlow()
+            every { mockKord.coroutineContext } returns testScope.coroutineContext
+            val mockRouting = mockk<Routing>(relaxed = true)
+            val testDb = createTestDb()
+
+            // Out-of-bounds high value (50) clamped to 20
+            val highContext =
+                DefaultPluginContext(
+                    kord = mockKord,
+                    routing = mockRouting,
+                    database = testDb,
+                    configMap = mapOf("SUMMARY_MAX_LOOKBACK_MESSAGES" to 50),
+                )
+            val highPlugin = SummarizerPlugin()
+            highPlugin.initialize(highContext)
+            assertEquals(SummaryService.DEFAULT_MAX_LOOKBACK_MESSAGES, highPlugin.maxLookbackMessages)
+
+            // Non-positive value (-5) clamped to 1
+            val lowContext =
+                DefaultPluginContext(
+                    kord = mockKord,
+                    routing = mockRouting,
+                    database = testDb,
+                    configMap = mapOf("SUMMARY_MAX_LOOKBACK_MESSAGES" to -5),
+                )
+            val lowPlugin = SummarizerPlugin()
+            lowPlugin.initialize(lowContext)
+            assertEquals(1, lowPlugin.maxLookbackMessages)
+
+            listenerJob.cancel()
+        }
+
+    @Test
+    fun `falls back to defaults when budget and images configurations are non positive`() =
+        runTest {
+            val listenerJob = Job()
+            val testScope = CoroutineScope(Dispatchers.Unconfined + listenerJob)
+            val mockKord = mockk<Kord>(relaxed = true)
+            every { mockKord.events } returns MutableSharedFlow()
+            every { mockKord.coroutineContext } returns testScope.coroutineContext
+            val mockRouting = mockk<Routing>(relaxed = true)
+            val testDb = createTestDb()
+
+            val negativeConfig =
+                mapOf(
+                    "SUMMARY_MAX_IMAGES" to -10,
+                    "SUMMARY_MAX_CHARACTER_BUDGET" to -500,
+                    "SUMMARY_INACTIVITY_GAP_MINUTES" to -15L,
+                    "SUMMARY_MAX_HISTORY_MESSAGES" to 999,
+                )
+            val context =
+                DefaultPluginContext(
+                    kord = mockKord,
+                    routing = mockRouting,
+                    database = testDb,
+                    configMap = negativeConfig,
+                )
+            val plugin = SummarizerPlugin()
+            plugin.initialize(context)
+
+            assertEquals(SummaryService.DEFAULT_MAX_IMAGES, plugin.maxImages)
+            assertEquals(SummaryService.DEFAULT_MAX_CHARACTER_BUDGET, plugin.maxCharacterBudget)
+            assertEquals(SummaryService.DEFAULT_INACTIVITY_GAP, plugin.inactivityGap)
+            // History limit clamped to upper bound of 100
+            assertEquals(100, plugin.maxHistoryMessages)
 
             listenerJob.cancel()
         }

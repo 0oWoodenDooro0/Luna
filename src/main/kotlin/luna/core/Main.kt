@@ -16,9 +16,7 @@ import luna.plugin.DefaultPluginContext
 import luna.plugin.PluginContext
 import luna.plugin.PluginLoader
 import org.jetbrains.exposed.v1.jdbc.Database
-import org.yaml.snakeyaml.Yaml
 import java.io.File
-import java.io.InputStream
 import java.util.concurrent.TimeUnit
 
 /**
@@ -32,7 +30,8 @@ class LunaHost(
     val pluginLoader: PluginLoader = PluginLoader(),
     private val kordFactory: ((String) -> Kord)? = null,
 ) {
-    val config: Map<String, Any?> = customConfig ?: loadConfig()
+    val config: Map<String, Any?>
+    val coreConfig: LunaCoreConfig
     val database: Database = customDatabase ?: initDatabase()
 
     var server: EmbeddedServer<NettyApplicationEngine, NettyApplicationEngine.Configuration>? = null
@@ -44,13 +43,29 @@ class LunaHost(
     var kord: Kord? = null
         private set
 
+    init {
+        val loaded = customConfig ?: ConfigLoader.loadConfig()
+        // Fail-fast validation against LunaCoreConfig data model
+        coreConfig = LunaCoreConfig.fromMap(loaded)
+
+        // Ensure active core config is represented in the unified config map
+        val unified = loaded.toMutableMap()
+        unified.putIfAbsent("PORT", coreConfig.port)
+        unified.putIfAbsent("DISCORD_TOKEN", coreConfig.botToken)
+        unified.putIfAbsent("DISCORD_CLIENT_ID", coreConfig.clientId)
+        unified.putIfAbsent("DISCORD_CLIENT_SECRET", coreConfig.clientSecret)
+        unified.putIfAbsent("BASE_URL", coreConfig.baseUrl)
+        unified.putIfAbsent("DISCORD_REDIRECT_URI", coreConfig.redirectUri)
+        config = unified
+
+        // Startup audit log emitting active configuration with secrets masked
+        ConfigLoader.auditLog(config)
+    }
+
     @OptIn(PrivilegedIntent::class)
     suspend fun start(loginKord: Boolean = true): PluginContext {
         // 1. Initialize Ktor embeddedServer (port, session cookie)
-        val serverPort =
-            (config["PORT"] as? String)?.toIntOrNull()
-                ?: (config["PORT"] as? Number)?.toInt()
-                ?: 8080
+        val serverPort = coreConfig.port
 
         val ktorServer =
             embeddedServer(Netty, port = serverPort, host = "0.0.0.0") {
@@ -68,12 +83,12 @@ class LunaHost(
         }
 
         // 2. Initialize Kord client with token
-        val token = (config["DISCORD_TOKEN"] as? String) ?: System.getenv("DISCORD_TOKEN")
+        val token = coreConfig.botToken
         val kordClient =
             if (kordFactory != null) {
-                kordFactory.invoke(token ?: "")
+                kordFactory.invoke(token)
             } else {
-                Kord(token ?: error("Missing discord token"))
+                Kord(token)
             }
         this.kord = kordClient
 
@@ -129,115 +144,7 @@ class LunaHost(
             return Database.connect("jdbc:sqlite:data/urls.db", driver = "org.sqlite.JDBC")
         }
 
-        fun loadConfig(): Map<String, Any?> {
-            val config = mutableMapOf<String, Any?>()
-
-            // 1. Ingest .env if present
-            val envFile = File(".env")
-            if (envFile.exists()) {
-                try {
-                    envFile.forEachLine { line ->
-                        val trimmed = line.trim()
-                        if (trimmed.isNotEmpty() && !trimmed.startsWith("#")) {
-                            val parts = trimmed.split("=", limit = 2)
-                            if (parts.size == 2) {
-                                val key = parts[0].trim()
-                                var value = parts[1].trim()
-                                if ((value.startsWith("\"") && value.endsWith("\"")) ||
-                                    (value.startsWith("'") && value.endsWith("'"))
-                                ) {
-                                    value = value.substring(1, value.length - 1)
-                                }
-                                config[key] = value
-                            }
-                        }
-                    }
-                } catch (e: Exception) {
-                    JsonLogger.error(
-                        layer = "CONFIG",
-                        component = "LunaHost",
-                        operation = "loadConfig",
-                        data = emptyMap<String, Any?>(),
-                        errorMessage = "Failed to parse .env: ${e.message}",
-                    )
-                }
-            }
-
-            // 2. Ingest System.getenv()
-            config.putAll(System.getenv())
-
-            // 3. Ingest application.yml
-            val yamlFile = File("application.yml")
-            val yamlStream: InputStream? =
-                if (yamlFile.exists()) {
-                    yamlFile.inputStream()
-                } else {
-                    Thread.currentThread().contextClassLoader.getResourceAsStream("application.yml")
-                }
-
-            yamlStream?.use { stream ->
-                try {
-                    val yaml = Yaml()
-                    val yamlMap = yaml.load<Map<String, Any?>>(stream)
-                    if (yamlMap != null) {
-                        flattenYaml("", yamlMap, config)
-                    }
-                } catch (e: Exception) {
-                    JsonLogger.error(
-                        layer = "CONFIG",
-                        component = "LunaHost",
-                        operation = "loadConfig",
-                        data = emptyMap<String, Any?>(),
-                        errorMessage = "Failed to parse application.yml: ${e.message}",
-                    )
-                }
-            }
-
-            return config
-        }
-
-        private fun flattenYaml(
-            prefix: String,
-            map: Map<*, *>,
-            target: MutableMap<String, Any?>,
-        ) {
-            for ((key, value) in map) {
-                val fullKey = if (prefix.isEmpty()) key.toString() else "$prefix.$key"
-                when (value) {
-                    is Map<*, *> -> {
-                        target[fullKey] = value
-                        flattenYaml(fullKey, value, target)
-                    }
-
-                    is String -> {
-                        val resolved = resolvePlaceholders(value, target)
-                        target[fullKey] = resolved
-                    }
-
-                    else -> {
-                        if (value != null) {
-                            target[fullKey] = value
-                        }
-                    }
-                }
-            }
-        }
-
-        private fun resolvePlaceholders(
-            raw: String,
-            config: Map<String, Any?>,
-        ): String {
-            val trimmed = raw.trim()
-            if (trimmed.startsWith("\${") && trimmed.endsWith("}")) {
-                val inner = trimmed.substring(2, trimmed.length - 1).trim()
-                val cleanInner = if (inner.startsWith("?")) inner.substring(1) else inner
-                val parts = cleanInner.split(":", limit = 2)
-                val envVarName = parts[0].trim()
-                val defaultValue = if (parts.size > 1) parts[1].trim() else ""
-                return (config[envVarName] as? String) ?: System.getenv(envVarName) ?: defaultValue
-            }
-            return raw
-        }
+        fun loadConfig(): Map<String, Any?> = ConfigLoader.loadConfig()
     }
 }
 
