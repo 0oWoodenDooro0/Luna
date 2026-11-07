@@ -298,4 +298,41 @@ class LunaConfigTest {
             LunaHost(customConfig = invalidMap)
         }
     }
+
+    @Test
+    fun `env example specification is discoverable and readable via classloader resource`() {
+        val stream = Thread.currentThread().contextClassLoader.getResourceAsStream(".env.example")
+        assertNotNull(stream, "Classpath resource '.env.example' must be discoverable")
+        val content = stream.bufferedReader().use { it.readText() }
+        assertTrue(content.isNotBlank(), ".env.example content must not be blank")
+
+        // Assert all five sections are present
+        assertTrue(content.contains("Section 1: Luna Host Core"), "Section 1 must be defined")
+        assertTrue(content.contains("Section 2: Curtly URL Shortener"), "Section 2 must be defined")
+        assertTrue(content.contains("Section 3: Summarizer & Multimodal Pipeline"), "Section 3 must be defined")
+        assertTrue(content.contains("Section 4: Plugin Lifecycle & Management"), "Section 4 must be defined")
+        assertTrue(content.contains("Section 5: Multi-Tenant Gemini MCP Server"), "Section 5 must be defined")
+
+        // Assert multi-tenant workflow and quota limits
+        assertTrue(content.contains("/mcp client create"), "Multi-tenant dynamic client create must be documented")
+        assertTrue(content.contains("/mcp webhook add tag:<tag>"), "Tagged webhook addition must be documented")
+        assertTrue(content.contains("10"), "Webhook quota limit of 10 must be documented")
+
+        // Assert legacy single-tenant compatibility fallbacks
+        assertTrue(content.contains("MCP_OAUTH_CLIENT_SECRET"), "Legacy MCP_OAUTH_CLIENT_SECRET must be documented")
+        assertTrue(content.contains("MCP_AUTH_TOKEN"), "Legacy MCP_AUTH_TOKEN must be documented")
+        assertTrue(content.contains("MCP_REQUIRE_AUTH"), "Legacy MCP_REQUIRE_AUTH must be documented")
+        assertTrue(content.contains("Legacy Single-Tenant Compatibility Fallbacks"), "Legacy compatibility fallback section must be labeled")
+    }
+
+    @Test
+    fun `ConfigLoader getEnvExampleStream and loadEnvExample return authoritative content`() {
+        val stream = ConfigLoader.getEnvExampleStream()
+        assertNotNull(stream, "ConfigLoader.getEnvExampleStream() must return non-null stream")
+        stream.close()
+
+        val text = ConfigLoader.loadEnvExample()
+        assertNotNull(text, "ConfigLoader.loadEnvExample() must return non-null string")
+        assertTrue(text.contains("Luna 統一環境變數設定檔範例 (.env.example)"))
+    }
 }

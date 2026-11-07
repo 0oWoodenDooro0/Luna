@@ -3,6 +3,7 @@ package luna.mcp.server
 import org.slf4j.Logger
 import org.slf4j.LoggerFactory
 import java.io.File
+import java.io.InputStream
 
 /**
  * Dedicated exception thrown when MCP server configuration fails validation at startup.
@@ -358,5 +359,23 @@ data class McpServerConfig(
             val raw = loadRawConfig(envFile, systemEnv, customConfig)
             return fromMap(raw, authExpected = authExpected)
         }
+
+        /**
+         * Loads the canonical .env.example specification as an InputStream from classpath resources or filesystem.
+         */
+        fun getEnvExampleStream(): InputStream? =
+            Thread.currentThread().contextClassLoader.getResourceAsStream(".env.example")
+                ?: McpServerConfig::class.java.getResourceAsStream("/.env.example")
+                ?: findDefaultEnvFile()
+                    ?.parentFile
+                    ?.let { File(it, ".env.example") }
+                    ?.takeIf { it.exists() && it.isFile }
+                    ?.inputStream()
+                ?: File(".env.example").takeIf { it.exists() && it.isFile }?.inputStream()
+
+        /**
+         * Reads the canonical .env.example specification content as a String.
+         */
+        fun loadEnvExample(): String? = getEnvExampleStream()?.bufferedReader()?.use { it.readText() }
     }
 }

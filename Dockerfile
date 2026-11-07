@@ -17,6 +17,7 @@ RUN chmod +x gradlew && ./gradlew dependencies --no-daemon || true
 COPY src ./src
 COPY libs ./libs
 COPY mcp-server ./mcp-server
+COPY .env.example ./.env.example
 
 # Build the fat jar and mcp-server distribution
 RUN ./gradlew jar :mcp-server:installDist --no-daemon
@@ -33,6 +34,7 @@ RUN useradd -m -u 1000 luna && \
 # Copy fat jar and mcp-server from builder stage
 COPY --from=builder --chown=luna:luna /app/build/libs/Luna-*.jar /app/Luna.jar
 COPY --from=builder --chown=luna:luna /app/mcp-server/build/install/mcp-server /app/mcp-server
+COPY --chown=luna:luna .env.example /app/.env.example
 
 USER luna
 

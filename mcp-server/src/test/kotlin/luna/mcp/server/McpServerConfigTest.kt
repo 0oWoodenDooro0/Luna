@@ -410,4 +410,29 @@ class McpServerConfigTest {
         assertTrue(oauthConfig.requireAuth)
         assertTrue(oauthConfig.isAuthEnabled)
     }
+
+    @Test
+    fun `env example specification is discoverable and readable via classloader in mcp-server`() {
+        val stream = Thread.currentThread().contextClassLoader.getResourceAsStream(".env.example")
+        assertNotNull(stream, "Classpath resource '.env.example' must be discoverable in mcp-server")
+        val content = stream.bufferedReader().use { it.readText() }
+        assertTrue(content.isNotBlank(), ".env.example content must not be blank")
+
+        assertTrue(content.contains("Section 5: Multi-Tenant Gemini MCP Server"), "Section 5 must be defined")
+        assertTrue(content.contains("/mcp client create"), "Multi-tenant dynamic client create must be documented")
+        assertTrue(content.contains("MCP_PORT=8081"), "MCP_PORT must be documented")
+        assertTrue(content.contains("MCP_DB_PATH=./data/urls.db"), "MCP_DB_PATH must be documented")
+        assertTrue(content.contains("MCP_PUBLIC_BASE_URL=https://woodendoor.website"), "MCP_PUBLIC_BASE_URL must be documented")
+    }
+
+    @Test
+    fun `McpServerConfig getEnvExampleStream and loadEnvExample return authoritative content`() {
+        val stream = McpServerConfig.getEnvExampleStream()
+        assertNotNull(stream, "McpServerConfig.getEnvExampleStream() must return non-null stream")
+        stream.close()
+
+        val text = McpServerConfig.loadEnvExample()
+        assertNotNull(text, "McpServerConfig.loadEnvExample() must return non-null string")
+        assertTrue(text.contains("Section 5: Multi-Tenant Gemini MCP Server"))
+    }
 }

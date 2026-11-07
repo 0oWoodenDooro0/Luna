@@ -49,6 +49,10 @@ kotlin {
     jvmToolchain(17)
 }
 
+tasks.processResources {
+    from(rootProject.file(".env.example"))
+}
+
 tasks.test {
     useJUnitPlatform()
     filter {
