@@ -95,7 +95,7 @@ class McpWebhookRepository(
         )
 
     companion object {
-        fun create(dbPath: String = "data/urls.db"): McpWebhookRepository {
+        fun create(dbPath: String = ".data/urls.db"): McpWebhookRepository {
             val database = McpDatabase.connect(dbPath)
             return McpWebhookRepository(database)
         }

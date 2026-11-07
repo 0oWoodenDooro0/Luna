@@ -310,6 +310,34 @@ class CodingStandardsTest {
         )
     }
 
+    @Test
+    fun `no kotlin source files in project source roots should be ignored by gitignore`() {
+        val allRoots = findKotlinSourceRoots("main") + findKotlinSourceRoots("test")
+        val allKotlinFiles =
+            allRoots.flatMap { root ->
+                root.walkTopDown().filter { it.isFile && (it.extension == "kt" || it.extension == "kts") }
+            }
+
+        val ignoredFiles = mutableListOf<String>()
+        for (file in allKotlinFiles) {
+            val relPath = file.relativeTo(projectRoot).path.replace('\\', '/')
+            val process =
+                ProcessBuilder("git", "check-ignore", "-q", relPath)
+                    .directory(projectRoot)
+                    .start()
+            val exitCode = process.waitFor()
+            // Exit code 0 means git check-ignore matched the file (it is ignored by .gitignore)
+            if (exitCode == 0) {
+                ignoredFiles.add(relPath)
+            }
+        }
+
+        assertTrue(
+            ignoredFiles.isEmpty(),
+            "The following Kotlin source files are ignored by .gitignore:\n" + ignoredFiles.joinToString("\n"),
+        )
+    }
+
     private fun findKotlinSourceRoots(parentDirName: String): List<File> =
         projectRoot
             .walkTopDown()

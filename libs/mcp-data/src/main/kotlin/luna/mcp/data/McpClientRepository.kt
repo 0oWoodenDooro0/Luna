@@ -85,7 +85,7 @@ class McpClientRepository(
         )
 
     companion object {
-        fun create(dbPath: String = "data/urls.db"): McpClientRepository {
+        fun create(dbPath: String = ".data/urls.db"): McpClientRepository {
             val database = McpDatabase.connect(dbPath)
             return McpClientRepository(database)
         }

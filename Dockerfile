@@ -28,9 +28,9 @@ RUN ./gradlew jar :mcp-server:installDist --no-daemon
 FROM eclipse-temurin:17-jre-jammy
 WORKDIR /app
 
-# Create non-root user and data directory
+# Create non-root user and data directories
 RUN useradd -m -u 1000 luna && \
-    mkdir -p /app/data && \
+    mkdir -p /app/data /app/.data && \
     chown -R luna:luna /app
 
 # Copy fat jar and mcp-server from builder stage
@@ -47,6 +47,6 @@ USER luna
 EXPOSE 8080 8081
 
 # Expose volume for persistent SQLite database and logs
-VOLUME ["/app/data"]
+VOLUME ["/app/.data", "/app/data"]
 
 ENTRYPOINT ["java", "-jar", "/app/Luna.jar"]

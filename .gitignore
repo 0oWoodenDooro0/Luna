@@ -54,10 +54,12 @@ bin/
 Thumbs.db
 **/*.log
 
-# RPG Database & Local Configs
-data/
-**/data/
-!**/src/**/data/
+# Local Database, Runtime Storage & Configs
+.data/
+*.db
+*.db-wal
+*.db-shm
+/data/
 config.yml
 config_test.yml
 .env

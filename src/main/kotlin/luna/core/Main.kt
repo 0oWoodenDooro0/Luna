@@ -141,7 +141,7 @@ class LunaHost(
     }
 
     companion object {
-        fun initDatabase(dbPath: String = "data/urls.db"): Database {
+        fun initDatabase(dbPath: String = ".data/urls.db"): Database {
             val file = File(dbPath)
             file.parentFile?.mkdirs()
             return Database.connect(
