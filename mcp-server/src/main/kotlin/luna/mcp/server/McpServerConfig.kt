@@ -1,5 +1,9 @@
 package luna.mcp.server
 
+import luna.config.ConfigFinder
+import luna.config.DotenvParser
+import luna.config.EnvSchemaAuditor
+import luna.config.SecretMasker
 import net.logstash.logback.argument.StructuredArguments.kv
 import org.slf4j.Logger
 import org.slf4j.LoggerFactory
@@ -16,34 +20,13 @@ class McpConfigValidationException(
 ) : IllegalStateException(message, cause)
 
 typealias ConfigValidationException = McpConfigValidationException
+typealias EnvVarSchema = luna.config.EnvVarSchema
+typealias DriftAuditResult = luna.config.DriftAuditResult
 
 /**
- * Specification schema for an environment variable parsed from .env.example.
- */
-data class EnvVarSchema(
-    val name: String,
-    val isRequired: Boolean,
-    val defaultValue: String? = null,
-    val section: Int = 0,
-    val description: String? = null,
-)
-
-/**
- * Result of a startup drift audit against the canonical environment schema.
- */
-data class DriftAuditResult(
-    val missingRequired: List<String>,
-    val missingOptional: Map<String, Any?>,
-    val unknownKeys: List<String>,
-    val activeConfig: Map<String, Any?>,
-)
-
-/**
- * Navigation Pointer:
- * Configuration parsing (parseDotenv), secret masking (maskConfig, isSensitiveKey),
- * and port validation rules are coordinated with the Luna bot host module in
- * [LunaConfig](file:///home/user/IdeaProjects/Luna/src/main/kotlin/luna/core/LunaConfig.kt).
- * Any changes to masking patterns or parsing behavior must be synchronized across both modules.
+ * McpServerConfig defines typed configuration for the standalone MCP microservice.
+ * Underlying parsing, secret masking, and drift audit rules are delegated to the
+ * shared [luna.config] deep module (:libs:config).
  * See also: [configuration.md](file:///home/user/IdeaProjects/Luna/docs/architecture/configuration.md).
  */
 data class McpServerConfig(
@@ -91,56 +74,22 @@ data class McpServerConfig(
         const val DEFAULT_DB_PATH = "./data/urls.db"
         const val DEFAULT_PUBLIC_BASE_URL = "https://woodendoor.website"
 
-        private val SENSITIVE_EXPLICIT_KEYS =
-            setOf(
-                "DISCORD_TOKEN",
-                "DISCORD_CLIENT_SECRET",
-                "GEMINI_API_KEY",
-                "YOUTUBE_API_KEY",
-            )
+        val SENSITIVE_EXPLICIT_KEYS: Set<String> get() = SecretMasker.SENSITIVE_EXPLICIT_KEYS
 
         /**
          * Checks if the configuration key contains sensitive information that must be masked.
          */
-        fun isSensitiveKey(key: String): Boolean {
-            val upper = key.uppercase()
-            return upper in SENSITIVE_EXPLICIT_KEYS ||
-                upper.endsWith("_SECRET") ||
-                upper.endsWith("_TOKEN") ||
-                upper.endsWith("_KEY") ||
-                upper.endsWith(".SECRET") ||
-                upper.endsWith(".TOKEN") ||
-                upper.endsWith(".KEY") ||
-                upper == "SECRET" ||
-                upper == "TOKEN" ||
-                upper == "KEY" ||
-                key.endsWith("Secret") ||
-                key.endsWith("Token") ||
-                key.endsWith("Key")
-        }
+        fun isSensitiveKey(key: String): Boolean = SecretMasker.isSensitiveKey(key)
 
         /**
          * Masks sensitive configuration values in a map with '******'.
          */
-        fun maskConfig(config: Map<String, Any?>): Map<String, Any?> =
-            config.mapValues { (key, value) ->
-                maskValue(key, value)
-            }
+        fun maskConfig(config: Map<String, Any?>): Map<String, Any?> = SecretMasker.maskConfig(config)
 
         fun maskValue(
             key: String,
             value: Any?,
-        ): Any? {
-            if (value == null) return null
-            if (isSensitiveKey(key)) return "******"
-            if (value is Map<*, *>) {
-                return value.entries.associate { (k, v) ->
-                    val nestedKey = k.toString()
-                    nestedKey to maskValue(nestedKey, v)
-                }
-            }
-            return value
-        }
+        ): Any? = SecretMasker.maskValue(key, value)
 
         /**
          * Emits structured audit log displaying active configuration with sensitive values masked.
@@ -167,60 +116,16 @@ data class McpServerConfig(
         /**
          * Parses a .env format string or sequence into a key-value map.
          */
-        fun parseDotenv(lines: Sequence<String>): Map<String, String> {
-            val result = mutableMapOf<String, String>()
-            for (rawLine in lines) {
-                val trimmed = rawLine.trim()
-                if (trimmed.isEmpty() || trimmed.startsWith("#")) {
-                    continue
-                }
-                val line =
-                    if (trimmed.startsWith("export ")) {
-                        trimmed.removePrefix("export ").trimStart()
-                    } else {
-                        trimmed
-                    }
-                val parts = line.split("=", limit = 2)
-                if (parts.size == 2) {
-                    val key = parts[0].trim()
-                    var value = parts[1].trim()
-                    if ((value.startsWith("\"") && value.endsWith("\"")) ||
-                        (value.startsWith("'") && value.endsWith("'"))
-                    ) {
-                        value = value.substring(1, value.length - 1)
-                    }
-                    if (key.isNotEmpty()) {
-                        result[key] = value
-                    }
-                }
-            }
-            return result
-        }
+        fun parseDotenv(lines: Sequence<String>): Map<String, String> = DotenvParser.parse(lines)
 
-        fun parseDotenv(content: String): Map<String, String> = parseDotenv(content.lineSequence())
+        fun parseDotenv(content: String): Map<String, String> = DotenvParser.parse(content)
 
-        fun parseDotenv(file: File): Map<String, String> = file.useLines { parseDotenv(it) }
+        fun parseDotenv(file: File): Map<String, String> = DotenvParser.parse(file)
 
         /**
          * Automatically detects the project root .env file when running outside Docker.
-         * Checks the current working directory first, then the parent directory.
          */
-        fun findDefaultEnvFile(baseDir: File = File(".")): File? {
-            val direct = File(baseDir, ".env")
-            if (direct.exists() && direct.isFile) return direct
-            val parent = File(baseDir, "../.env")
-            if (parent.exists() && parent.isFile) return parent
-            return null
-        }
-
-        private fun parseBoolean(value: Any?): Boolean =
-            when (value) {
-                null -> false
-                is Boolean -> value
-                is Number -> value.toInt() != 0
-                is String -> value.trim().lowercase() in setOf("true", "1", "yes", "enabled")
-                else -> false
-            }
+        fun findDefaultEnvFile(baseDir: File = File(".")): File? = ConfigFinder.findDefaultEnvFile(baseDir)
 
         /**
          * Builds [McpServerConfig] from a key-value map with canonical defaults and fail-fast validation.
@@ -329,215 +234,28 @@ data class McpServerConfig(
             return fromMap(raw)
         }
 
-        val STANDARD_SYSTEM_KEYS =
-            setOf(
-                "PATH",
-                "HOME",
-                "USER",
-                "LOGNAME",
-                "SHELL",
-                "PWD",
-                "OLDPWD",
-                "TERM",
-                "LANG",
-                "LC_ALL",
-                "LC_CTYPE",
-                "JAVA_HOME",
-                "HOSTNAME",
-                "SHLVL",
-                "_",
-                "LS_COLORS",
-                "EDITOR",
-                "PAGER",
-                "TZ",
-                "NODE_VERSION",
-                "CI",
-                "CLASSPATH",
-            )
+        val STANDARD_SYSTEM_KEYS: Set<String> get() = EnvSchemaAuditor.STANDARD_SYSTEM_KEYS
+        val CORE_KNOWN_ALIASES: Map<String, String> get() = EnvSchemaAuditor.CORE_KNOWN_ALIASES
 
-        val CORE_KNOWN_ALIASES =
-            mapOf(
-                "DISCORD_APP_ID" to "DISCORD_CLIENT_ID",
-                "clientId" to "DISCORD_CLIENT_ID",
-                "luna.clientId" to "DISCORD_CLIENT_ID",
-                "botToken" to "DISCORD_TOKEN",
-                "luna.botToken" to "DISCORD_TOKEN",
-                "clientSecret" to "DISCORD_CLIENT_SECRET",
-                "luna.clientSecret" to "DISCORD_CLIENT_SECRET",
-                "port" to "PORT",
-                "luna.port" to "PORT",
-                "MCP_PORT" to "PORT",
-                "mcp.port" to "MCP_PORT",
-                "baseUrl" to "BASE_URL",
-                "luna.baseUrl" to "BASE_URL",
-                "curtly.baseUrl" to "BASE_URL",
-                "curtly.base_url" to "BASE_URL",
-                "CURTLY_BASE_URL" to "BASE_URL",
-                "PLUGINS_CURTLY_BASE_URL" to "BASE_URL",
-                "redirectUri" to "DISCORD_REDIRECT_URI",
-                "REDIRECT_URI" to "DISCORD_REDIRECT_URI",
-                "luna.redirectUri" to "DISCORD_REDIRECT_URI",
-                "dbPath" to "MCP_DB_PATH",
-                "mcp.dbPath" to "MCP_DB_PATH",
-                "publicBaseUrl" to "MCP_PUBLIC_BASE_URL",
-                "mcp.publicBaseUrl" to "MCP_PUBLIC_BASE_URL",
-            )
+        fun parseDefaultValue(raw: String): String? = EnvSchemaAuditor.parseDefaultValue(raw)
 
-        fun parseDefaultValue(raw: String): String? {
-            val trimmed = raw.trim()
-            if (trimmed.isEmpty() || trimmed.startsWith("空值")) return null
-            if (trimmed.contains("由 BASE_URL 自動推導為 ")) {
-                return trimmed.substringAfter("由 BASE_URL 自動推導為 ").trim()
-            }
-            if (trimmed.contains(" ")) {
-                val firstWord = trimmed.substringBefore(" ").trim()
-                if (firstWord.equals("true", ignoreCase = true) || firstWord.equals("false", ignoreCase = true)) {
-                    return firstWord
-                }
-            }
-            return trimmed
-        }
+        fun parseEnvExampleSchema(content: String): List<EnvVarSchema> = EnvSchemaAuditor.parseEnvExampleSchema(content)
 
-        fun parseEnvExampleSchema(content: String): List<EnvVarSchema> {
-            if (content.isBlank()) return emptyList()
+        fun loadEnvExampleSchema(): List<EnvVarSchema> = EnvSchemaAuditor.loadDefaultSchema()
 
-            val result = mutableListOf<EnvVarSchema>()
-            var currentSection = 0
-            var isRequired = false
-            var defaultValue: String? = null
-            var description: String? = null
+        fun loadEnvExampleStream(): InputStream? = EnvSchemaAuditor.loadDefaultEnvExampleStream()
 
-            val sectionRegex = Regex("""(?i)Section\s+(\d+)""")
-            val defaultValRegex = Regex("""^#\s*預設值[：:]\s*(.*)$""")
-            val descRegex = Regex("""^#\s*說明[：:]\s*(.*)$""")
-            val varAssignRegex = Regex("""^(?:#\s*)?([A-Z0-9_]{3,})\s*=\s*(.*)$""")
-
-            for (line in content.lineSequence()) {
-                val trimmed = line.trim()
-                if (trimmed.isEmpty()) continue
-
-                val sectionMatch = sectionRegex.find(trimmed)
-                if (sectionMatch != null && trimmed.startsWith("#")) {
-                    currentSection = sectionMatch.groupValues[1].toIntOrNull() ?: currentSection
-                    continue
-                }
-
-                if (trimmed.startsWith("#")) {
-                    if (trimmed.contains("[必填]")) {
-                        isRequired = true
-                    } else if (trimmed.contains("[選填]")) {
-                        isRequired = false
-                    }
-
-                    val defaultMatch = defaultValRegex.find(trimmed)
-                    if (defaultMatch != null) {
-                        val rawDefault = defaultMatch.groupValues[1].trim()
-                        defaultValue = parseDefaultValue(rawDefault)
-                    }
-
-                    val descMatch = descRegex.find(trimmed)
-                    if (descMatch != null) {
-                        description = descMatch.groupValues[1].trim()
-                    }
-                }
-
-                val assignMatch = varAssignRegex.find(trimmed)
-                if (assignMatch != null) {
-                    val key = assignMatch.groupValues[1].trim()
-                    if (key != "EXAMPLE" && !key.startsWith("SECTION")) {
-                        val rawVal = assignMatch.groupValues[2].trim()
-                        if (defaultValue == null && !rawVal.startsWith("your_") && rawVal.isNotEmpty()) {
-                            defaultValue = rawVal.trim('\"', '\'')
-                        }
-
-                        result.add(
-                            EnvVarSchema(
-                                name = key,
-                                isRequired = isRequired,
-                                defaultValue = defaultValue,
-                                section = currentSection,
-                                description = description,
-                            ),
-                        )
-                        isRequired = false
-                        defaultValue = null
-                        description = null
-                    }
-                }
-            }
-            return result
-        }
-
-        private fun defaultFallbackSchema(): List<EnvVarSchema> =
-            listOf(
-                EnvVarSchema("MCP_PORT", isRequired = false, defaultValue = "8081", section = 5),
-                EnvVarSchema("MCP_DB_PATH", isRequired = false, defaultValue = "./data/urls.db", section = 5),
-                EnvVarSchema("MCP_PUBLIC_BASE_URL", isRequired = false, defaultValue = "https://woodendoor.website", section = 5),
-            )
-
-        fun loadEnvExampleSchema(): List<EnvVarSchema> {
-            val text = loadEnvExample()
-            return if (!text.isNullOrBlank()) {
-                val parsed = parseEnvExampleSchema(text)
-                if (parsed.isNotEmpty()) {
-                    parsed
-                } else {
-                    defaultLogger.warn("[CONFIG] Parsing .env.example produced no valid schemas; falling back to default built-in schema")
-                    defaultFallbackSchema()
-                }
-            } else {
-                defaultLogger.warn("[CONFIG] Canonical .env.example content is empty or not found; falling back to default built-in schema")
-                defaultFallbackSchema()
-            }
-        }
+        fun loadEnvExample(): String? = EnvSchemaAuditor.loadDefaultEnvExample()
 
         fun isRecognizedKey(
             key: String,
             schemaKeys: Set<String>,
-        ): Boolean {
-            if (key in schemaKeys) return true
-            if (key in CORE_KNOWN_ALIASES) return true
-            if (key in STANDARD_SYSTEM_KEYS) return true
-            if (key.startsWith("PLUGINS_") && key.endsWith("_ENABLED")) return true
-            if (key.startsWith("plugins.") && key.endsWith(".enabled")) return true
-            if (key.startsWith("curtly.") || key.startsWith("CURTLY_")) return true
-            if (key.startsWith("summarizer.") || key.startsWith("summary.") || key.startsWith("SUMMARY_")) return true
-            if (key.startsWith("gemini.") || key.startsWith("GEMINI_")) return true
-            if (key.startsWith("youtube.") || key.startsWith("YOUTUBE_")) return true
-            if (key.startsWith("undercover.") || key.startsWith("UNDERCOVER_")) return true
-            if (key.startsWith("mcp.") || key.startsWith("MCP_")) return true
-            return false
-        }
+        ): Boolean = EnvSchemaAuditor.isRecognizedKey(key, schemaKeys)
 
         fun resolveVariableValue(
             key: String,
             config: Map<String, Any?>,
-        ): Any? {
-            val exact = config[key]
-            if (exact != null && exact.toString().isNotBlank()) return exact
-
-            val aliases =
-                when (key) {
-                    "MCP_PORT" -> listOf("PORT", "port", "mcp.port")
-                    "MCP_DB_PATH" -> listOf("dbPath", "mcp.dbPath")
-                    "MCP_PUBLIC_BASE_URL" -> listOf("publicBaseUrl", "mcp.publicBaseUrl")
-                    else -> emptyList()
-                }
-
-            for (alias in aliases) {
-                val aliasVal = config[alias]
-                if (aliasVal != null && aliasVal.toString().isNotBlank()) return aliasVal
-            }
-
-            for ((alias, canonical) in CORE_KNOWN_ALIASES) {
-                if (canonical == key) {
-                    val aliasVal = config[alias]
-                    if (aliasVal != null && aliasVal.toString().isNotBlank()) return aliasVal
-                }
-            }
-
-            return null
-        }
+        ): Any? = EnvSchemaAuditor.resolveVariableValue(key, config)
 
         /**
          * Performs startup drift audit checking missing required, missing optional with defaults,
@@ -560,77 +278,51 @@ data class McpServerConfig(
             val schemaKeys = schemaList.map { it.name }.toSet()
             val mcpSchema = schemaList.filter { it.section == 5 || it.name.startsWith("MCP_") }
 
-            // 1. Missing required variables
-            val missingRequired = mutableListOf<String>()
-            if (requiredKeys != null) {
-                for (req in requiredKeys) {
-                    val value = resolveVariableValue(req, config)
-                    if (value == null) {
-                        missingRequired.add(req)
-                    }
-                }
-            } else {
-                for (item in mcpSchema.filter { it.isRequired }) {
-                    val value = resolveVariableValue(item.name, config)
-                    if (value == null) {
-                        missingRequired.add(item.name)
-                    }
-                }
-            }
+            val fallbackDefaults =
+                mapOf(
+                    "MCP_PORT" to DEFAULT_PORT,
+                    "MCP_DB_PATH" to DEFAULT_DB_PATH,
+                    "MCP_PUBLIC_BASE_URL" to DEFAULT_PUBLIC_BASE_URL,
+                )
 
-            if (missingRequired.isNotEmpty()) {
-                val errMsg = "Missing required configuration: ${missingRequired.joinToString(", ")} must not be blank"
+            val auditResult =
+                EnvSchemaAuditor.auditDrift(
+                    config = config,
+                    schema = mcpSchema,
+                    allSchemaKeys = schemaKeys,
+                    requiredKeys = requiredKeys,
+                    fallbackDefaults = fallbackDefaults,
+                )
+
+            if (auditResult.missingRequired.isNotEmpty()) {
+                val errMsg = "Missing required configuration: ${auditResult.missingRequired.joinToString(", ")} must not be blank"
                 logger.error(
                     "Layer: {}, Component: {}, Operation: {}, Error: {}",
                     kv("layer", "CONFIG"),
                     kv("component", "McpServer"),
                     kv("operation", "startupValidation"),
                     kv("error_message", errMsg),
-                    kv("data", mapOf("missingRequired" to missingRequired)),
+                    kv("data", mapOf("missingRequired" to auditResult.missingRequired)),
                     kv("status", "FAILURE"),
                 )
                 throw McpConfigValidationException(errMsg)
             }
 
-            // 2. Missing optional variables
-            val missingOptional = mutableMapOf<String, Any?>()
-            val optionalItems = if (mcpSchema.isNotEmpty()) mcpSchema.filter { !it.isRequired } else defaultFallbackSchema()
-            for (item in optionalItems) {
-                val value = resolveVariableValue(item.name, config)
-                if (value == null) {
-                    val defaultVal =
-                        item.defaultValue ?: when (item.name) {
-                            "MCP_PORT" -> DEFAULT_PORT
-                            "MCP_DB_PATH" -> DEFAULT_DB_PATH
-                            "MCP_PUBLIC_BASE_URL" -> DEFAULT_PUBLIC_BASE_URL
-                            else -> null
-                        }
-                    if (defaultVal != null) {
-                        missingOptional[item.name] = defaultVal
-                        val maskedDefault = maskValue(item.name, defaultVal)
-                        logger.info(
-                            "Layer: {}, Component: {}, Operation: {}, Key: {}, DefaultValue: {}",
-                            kv("layer", "CONFIG"),
-                            kv("component", "McpServer"),
-                            kv("operation", "optionalDefaultApplied"),
-                            kv("key", item.name),
-                            kv("defaultValue", maskedDefault),
-                            kv("data", mapOf("component" to "McpServer", "key" to item.name, "defaultValue" to maskedDefault)),
-                        )
-                    }
-                }
+            for ((key, defaultVal) in auditResult.missingOptional) {
+                val maskedDefault = maskValue(key, defaultVal)
+                logger.info(
+                    "Layer: {}, Component: {}, Operation: {}, Key: {}, DefaultValue: {}",
+                    kv("layer", "CONFIG"),
+                    kv("component", "McpServer"),
+                    kv("operation", "optionalDefaultApplied"),
+                    kv("key", key),
+                    kv("defaultValue", maskedDefault),
+                    kv("data", mapOf("component" to "McpServer", "key" to key, "defaultValue" to maskedDefault)),
+                )
             }
 
-            // 3. Deprecated or unrecognized variables
-            val unknownKeys = mutableListOf<String>()
-            for (k in config.keys) {
-                if (!isRecognizedKey(k, schemaKeys)) {
-                    unknownKeys.add(k)
-                }
-            }
-
-            if (unknownKeys.isNotEmpty()) {
-                val warnMessage = "[CONFIG_DRIFT] Unknown or deprecated environment keys: $unknownKeys"
+            if (auditResult.unknownKeys.isNotEmpty()) {
+                val warnMessage = "[CONFIG_DRIFT] Unknown or deprecated environment keys: ${auditResult.unknownKeys}"
                 logger.warn(
                     "{}",
                     warnMessage,
@@ -639,35 +331,11 @@ data class McpServerConfig(
                     kv("operation", "startupDriftAudit"),
                     kv("message", warnMessage),
                     kv("level", "WARN"),
-                    kv("data", mapOf("unknownKeys" to unknownKeys)),
+                    kv("data", mapOf("unknownKeys" to auditResult.unknownKeys)),
                 )
             }
 
-            val maskedActive = maskConfig(config)
-            return DriftAuditResult(
-                missingRequired = missingRequired,
-                missingOptional = missingOptional,
-                unknownKeys = unknownKeys,
-                activeConfig = maskedActive,
-            )
+            return auditResult
         }
-
-        /**
-         * Loads the canonical .env.example specification as an InputStream from classpath resources or filesystem.
-         */
-        fun getEnvExampleStream(): InputStream? =
-            Thread.currentThread().contextClassLoader.getResourceAsStream(".env.example")
-                ?: McpServerConfig::class.java.getResourceAsStream("/.env.example")
-                ?: findDefaultEnvFile()
-                    ?.parentFile
-                    ?.let { File(it, ".env.example") }
-                    ?.takeIf { it.exists() && it.isFile }
-                    ?.inputStream()
-                ?: File(".env.example").takeIf { it.exists() && it.isFile }?.inputStream()
-
-        /**
-         * Reads the canonical .env.example specification content as a String.
-         */
-        fun loadEnvExample(): String? = getEnvExampleStream()?.bufferedReader()?.use { it.readText() }
     }
 }

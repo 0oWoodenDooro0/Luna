@@ -180,7 +180,7 @@ class CodingStandardsTest {
     fun `source root discovery must reliably find all module kotlin source roots and ignore dot-directories and worktrees`() {
         val mainRoots = findKotlinSourceRoots("main")
         val mainPaths = mainRoots.map { it.relativeTo(projectRoot).path.replace('\\', '/') }.toSet()
-        val expectedMain = setOf("src/main/kotlin", "libs/socialpeek/src/main/kotlin", "mcp-server/src/main/kotlin")
+        val expectedMain = setOf("src/main/kotlin", "libs/socialpeek/src/main/kotlin", "libs/config/src/main/kotlin", "mcp-server/src/main/kotlin")
         assertTrue(
             mainPaths == expectedMain,
             "Expected main roots $expectedMain but found $mainPaths",
@@ -188,41 +188,10 @@ class CodingStandardsTest {
 
         val testRoots = findKotlinSourceRoots("test")
         val testPaths = testRoots.map { it.relativeTo(projectRoot).path.replace('\\', '/') }.toSet()
-        val expectedTest = setOf("src/test/kotlin", "libs/socialpeek/src/test/kotlin", "mcp-server/src/test/kotlin")
+        val expectedTest = setOf("src/test/kotlin", "libs/socialpeek/src/test/kotlin", "libs/config/src/test/kotlin", "mcp-server/src/test/kotlin")
         assertTrue(
             testPaths == expectedTest,
             "Expected test roots $expectedTest but found $testPaths",
-        )
-    }
-
-    @Test
-    fun `sensitive configuration keys in LunaConfig and McpServerConfig must remain synchronized`() {
-        val lunaConfigFile = File(projectRoot, "src/main/kotlin/luna/core/LunaConfig.kt")
-        val mcpConfigFile = File(projectRoot, "mcp-server/src/main/kotlin/luna/mcp/server/McpServerConfig.kt")
-        assertTrue(lunaConfigFile.exists(), "LunaConfig.kt must exist")
-        assertTrue(mcpConfigFile.exists(), "McpServerConfig.kt must exist")
-
-        val setRegex = Regex("""SENSITIVE_EXPLICIT_KEYS\s*=\s*setOf\(([^)]+)\)""")
-        val lunaMatch = setRegex.find(lunaConfigFile.readText())
-        val mcpMatch = setRegex.find(mcpConfigFile.readText())
-        assertTrue(lunaMatch != null, "SENSITIVE_EXPLICIT_KEYS not found in LunaConfig.kt")
-        assertTrue(mcpMatch != null, "SENSITIVE_EXPLICIT_KEYS not found in McpServerConfig.kt")
-
-        fun extractKeys(raw: String): Set<String> =
-            raw
-                .lines()
-                .map { it.trim().trim('"', ',') }
-                .filter { it.isNotEmpty() }
-                .toSet()
-
-        val lunaKeys = extractKeys(lunaMatch.groupValues[1])
-        val mcpKeys = extractKeys(mcpMatch.groupValues[1])
-
-        val diff = (lunaKeys - mcpKeys) + (mcpKeys - lunaKeys)
-        assertTrue(
-            diff.isEmpty(),
-            "SENSITIVE_EXPLICIT_KEYS drift between LunaConfig and McpServerConfig: difference = $diff. " +
-                "Synchronize both files per Navigation Pointer.",
         )
     }
 

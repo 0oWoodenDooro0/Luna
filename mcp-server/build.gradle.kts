@@ -33,6 +33,9 @@ dependencies {
     implementation(libs.kotlinx.coroutines.core)
     implementation(libs.kotlinx.serialization.json)
 
+    // Configuration Core Library
+    implementation(project(":libs:config"))
+
     // Logging
     implementation(libs.logback.classic)
     implementation(libs.logstash.logback.encoder)

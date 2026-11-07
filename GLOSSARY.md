@@ -73,7 +73,7 @@ The unified runtime boundary injected by Luna Host into each plugin during initi
 _Avoid_: Global state, service locator, environment container
 
 **Shared Library**:
-A stateless, framework-independent utility library residing in `libs/` that is shared across two or more plugins (such as SocialPeek) or targeted for standalone external distribution.
+A stateless, framework-independent utility library residing in `libs/` that is shared across two or more plugins or decoupled services (such as SocialPeek and Config) or targeted for standalone external distribution.
 _Avoid_: Helper module, common plugin, shared code
 
 **Chat Image Attachment**:
