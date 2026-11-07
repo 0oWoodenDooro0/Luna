@@ -1,8 +1,16 @@
+import java.time.Duration
+
 plugins {
     alias(libs.plugins.kotlin.jvm)
     alias(libs.plugins.kotlin.serialization)
     application
     alias(libs.plugins.kotlinter)
+}
+
+allprojects {
+    tasks.withType<Test> {
+        timeout.set(Duration.ofSeconds(60))
+    }
 }
 
 subprojects {
