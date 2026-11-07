@@ -220,15 +220,12 @@ class SummarizerPluginTest {
             val plugin =
                 SummarizerPlugin(
                     summarizerFactory = { mockSummarizer },
-                    summaryServiceFactory = { summarizer, emoji, historyLimit, gap, budget, peekResolver ->
+                    summaryServiceFactory = { summarizer, collector, emoji ->
                         SummaryService(
                             summarizer = summarizer,
-                            peekResolver = peekResolver,
+                            collector = collector,
                             replySender = { _, content -> replySent = content },
                             configuredEmoji = emoji,
-                            maxHistoryMessages = historyLimit,
-                            inactivityGap = gap,
-                            maxCharacterBudget = budget,
                         )
                     },
                 )

@@ -48,6 +48,7 @@ class ConversationSliceCollectorTest {
         isBot: Boolean = false,
         timestamp: Instant = Instant.fromEpochMilliseconds(id * 1000),
         attachments: Set<Attachment> = emptySet(),
+        type: MessageType = MessageType.Default,
     ): Message {
         val author = mockk<User>()
         every { author.username } returns username
@@ -59,7 +60,7 @@ class ConversationSliceCollectorTest {
         every { message.content } returns content
         every { message.timestamp } returns timestamp
         every { message.attachments } returns attachments
-        every { message.type } returns MessageType.Default
+        every { message.type } returns type
         every { message.stickers } returns emptyList()
         every { message.embeds } returns emptyList()
         every { message.data.author.username } returns username
@@ -223,4 +224,268 @@ class ConversationSliceCollectorTest {
             val expandedContent = lookback("Need background")
             assertEquals(ConversationSliceCollector.NO_FURTHER_HISTORY_MESSAGE, expandedContent)
         }
+
+    @Test
+    fun `collectSlice respects maxCharacterBudget halting backtracking when accumulated characters exceed limit`() =
+        runTest {
+            val baseTime = Instant.parse("2026-11-06T12:00:00Z")
+            val msg1 = createMockMessage(601L, "Alice", "A".repeat(300), timestamp = baseTime)
+            val msg2 = createMockMessage(602L, "Bob", "B".repeat(300), timestamp = baseTime + 1.minutes)
+            val targetMsg = createMockMessage(603L, "Charlie", "C".repeat(100), timestamp = baseTime + 2.minutes)
+
+            val collector =
+                ConversationSliceCollector(
+                    maxCharacterBudget = 500,
+                    historyFetcher = { _, _ -> listOf(msg1, msg2) },
+                )
+
+            val slice = collector.collectSlice(targetMsg)
+            assertNotNull(slice)
+            val lines = slice.summaryInput.content.lines()
+            assertEquals(2, lines.size)
+            assertTrue(lines.first().contains("B".repeat(300)))
+            assertTrue(lines.last().contains("C".repeat(100)))
+        }
+
+    @Test
+    fun `collectSlice normalizes history provided in reverse chronological order`() =
+        runTest {
+            val baseTime = Instant.parse("2026-11-06T12:00:00Z")
+            val msg1 = createMockMessage(701L, "Alice", "First message", timestamp = baseTime)
+            val msg2 = createMockMessage(702L, "Bob", "Second message", timestamp = baseTime + 1.minutes)
+            val targetMsg = createMockMessage(703L, "Charlie", "Third message", timestamp = baseTime + 2.minutes)
+
+            val collector =
+                ConversationSliceCollector(
+                    historyFetcher = { _, _ -> listOf(msg2, msg1) },
+                )
+
+            val slice = collector.collectSlice(targetMsg)
+            assertNotNull(slice)
+            val content = slice.summaryInput.content
+            val idx1 = content.indexOf("First message")
+            val idx2 = content.indexOf("Second message")
+            val idx3 = content.indexOf("Third message")
+            assertTrue(idx1 != -1 && idx2 != -1 && idx3 != -1)
+            assertTrue(idx1 < idx2)
+            assertTrue(idx2 < idx3)
+        }
+
+    @Test
+    fun `collectSlice filters noise messages including slash commands, system messages, and blank messages`() =
+        runTest {
+            val baseTime = Instant.parse("2026-11-06T12:00:00Z")
+            val msg1 = createMockMessage(801L, "Alice", "Valid message", timestamp = baseTime)
+            val slashCmd = createMockMessage(802L, "Bob", "/poll create \"Lunch\"", timestamp = baseTime + 1.minutes)
+            val sysMsg =
+                createMockMessage(
+                    803L,
+                    "System",
+                    "Alice pinned a message",
+                    timestamp = baseTime + 2.minutes,
+                    type = MessageType.ChannelPinnedMessage,
+                )
+            val blankMsg = createMockMessage(804L, "Dave", "   \t\n  ", timestamp = baseTime + 3.minutes)
+            val targetMsg = createMockMessage(805L, "Eve", "Wrap up", timestamp = baseTime + 4.minutes)
+
+            val collector =
+                ConversationSliceCollector(
+                    historyFetcher = { _, _ -> listOf(msg1, slashCmd, sysMsg, blankMsg) },
+                )
+
+            val slice = collector.collectSlice(targetMsg)
+            assertNotNull(slice)
+            val content = slice.summaryInput.content
+            assertTrue(content.contains("Valid message"))
+            assertFalse(content.contains("/poll create"))
+            assertFalse(content.contains("pinned a message"))
+            assertTrue(content.contains("Wrap up"))
+        }
+
+    @Test
+    fun `collectSlice truncates images exceeding maxImages budget`() =
+        runTest {
+            val baseTime = Instant.parse("2026-11-06T12:00:00Z")
+            val img1 = createMockAttachment("https://cdn.discordapp.com/1.png", "image/png", "1.png")
+            val img2 = createMockAttachment("https://cdn.discordapp.com/2.png", "image/png", "2.png")
+            val img3 = createMockAttachment("https://cdn.discordapp.com/3.png", "image/png", "3.png")
+
+            val msg1 = createMockMessage(901L, "Alice", "Image 1", timestamp = baseTime, attachments = setOf(img1))
+            val msg2 = createMockMessage(902L, "Bob", "Image 2", timestamp = baseTime + 1.minutes, attachments = setOf(img2))
+            val targetMsg = createMockMessage(903L, "Charlie", "Image 3", timestamp = baseTime + 2.minutes, attachments = setOf(img3))
+
+            val collector =
+                ConversationSliceCollector(
+                    maxImages = 2,
+                    historyFetcher = { _, _ -> listOf(msg1, msg2) },
+                )
+
+            val slice = collector.collectSlice(targetMsg)
+            assertNotNull(slice)
+            assertEquals(2, slice.summaryInput.imageAttachments.size)
+            // Target image always retained, plus newest preceding (img2)
+            assertEquals("https://cdn.discordapp.com/2.png", slice.summaryInput.imageAttachments[0].url)
+            assertEquals("https://cdn.discordapp.com/3.png", slice.summaryInput.imageAttachments[1].url)
+        }
+
+    @Test
+    fun `collectSlice stops backtracking and discards earlier messages when bot summary is encountered`() =
+        runTest {
+            val baseTime = Instant.parse("2026-11-06T12:00:00Z")
+            val msg1 = createMockMessage(1001L, "Alice", "Before bot summary", timestamp = baseTime)
+            val botSummary = createMockMessage(1002L, "SummaryBot", "TL;DR: Earlier topic summarized", isBot = true, timestamp = baseTime + 1.minutes)
+            val msg2 = createMockMessage(1003L, "Bob", "After bot summary", timestamp = baseTime + 2.minutes)
+            val targetMsg = createMockMessage(1004L, "Charlie", "Target message", timestamp = baseTime + 3.minutes)
+
+            val collector =
+                ConversationSliceCollector(
+                    historyFetcher = { _, _ -> listOf(msg1, botSummary, msg2) },
+                )
+
+            val slice = collector.collectSlice(targetMsg)
+            assertNotNull(slice)
+            assertFalse(slice.summaryInput.content.contains("Before bot summary"))
+            assertFalse(slice.summaryInput.content.contains("Earlier topic summarized"))
+            assertTrue(slice.summaryInput.content.contains("[Bob]: After bot summary"))
+            assertTrue(slice.summaryInput.content.contains("[Charlie]: Target message"))
+        }
+
+    @Test
+    fun `collectSlice retains single message when immediate predecessor is bot summary`() =
+        runTest {
+            val baseTime = Instant.parse("2026-11-06T12:00:00Z")
+            val botMsg = createMockMessage(1011L, "SummaryBot", "TL;DR: Previous summary", isBot = true, timestamp = baseTime)
+            val targetMsg = createMockMessage(1012L, "Alice", "Single target message", timestamp = baseTime + 1.minutes)
+
+            val collector =
+                ConversationSliceCollector(
+                    historyFetcher = { _, _ -> listOf(botMsg) },
+                )
+
+            val slice = collector.collectSlice(targetMsg)
+            assertNotNull(slice)
+            assertFalse(slice.summaryInput.content.contains("Previous summary"))
+            assertEquals("Single target message", slice.summaryInput.content.trim())
+        }
+
+    @Test
+    fun `collectSlice retains single message when immediate predecessor exceeds inactivity gap`() =
+        runTest {
+            val baseTime = Instant.parse("2026-11-06T12:00:00Z")
+            val oldMsg = createMockMessage(1021L, "Alice", "Very old conversation", timestamp = baseTime)
+            val targetMsg = createMockMessage(1022L, "Bob", "Isolated message", timestamp = baseTime + 30.minutes)
+
+            val collector =
+                ConversationSliceCollector(
+                    inactivityGap = 15.minutes,
+                    historyFetcher = { _, _ -> listOf(oldMsg) },
+                )
+
+            val slice = collector.collectSlice(targetMsg)
+            assertNotNull(slice)
+            assertFalse(slice.summaryInput.content.contains("Very old conversation"))
+            assertEquals("Isolated message", slice.summaryInput.content.trim())
+        }
+
+    @Test
+    fun `collectSlice with multiple messages and images extracts images and formats markers in transcript`() =
+        runTest {
+            val baseTime = Instant.parse("2026-11-06T12:00:00Z")
+            val img1 = createMockAttachment("https://cdn.discordapp.com/screenshot.png", "image/png", "screenshot.png")
+            val img2 = createMockAttachment("https://cdn.discordapp.com/photo.jpg", "image/jpeg", "photo.jpg")
+
+            val msg1 = createMockMessage(1031L, "Alice", "Check screenshot", timestamp = baseTime, attachments = setOf(img1))
+            val msg2 = createMockMessage(1032L, "Bob", "Look at photo", timestamp = baseTime + 1.minutes, attachments = setOf(img2))
+            val targetMsg = createMockMessage(1033L, "Charlie", "Review these", timestamp = baseTime + 2.minutes)
+
+            val collector =
+                ConversationSliceCollector(
+                    historyFetcher = { _, _ -> listOf(msg1, msg2) },
+                )
+
+            val slice = collector.collectSlice(targetMsg)
+            assertNotNull(slice)
+            assertEquals(2, slice.summaryInput.imageAttachments.size)
+            assertTrue(slice.summaryInput.content.contains("[Alice]: Check screenshot [附帶圖片 1: screenshot.png]"))
+            assertTrue(slice.summaryInput.content.contains("[Bob]: Look at photo [附帶圖片 2: photo.jpg]"))
+            assertTrue(slice.summaryInput.content.contains("[Charlie]: Review these"))
+        }
+
+    @Test
+    fun `collectSlice with image-only messages formats author attribution with image marker and preserves images`() =
+        runTest {
+            val baseTime = Instant.parse("2026-11-06T12:00:00Z")
+            val img1 = createMockAttachment("https://cdn.discordapp.com/pure.png", "image/png", "pure.png")
+            val targetImg = createMockAttachment("https://cdn.discordapp.com/target.png", "image/png", "target.png")
+
+            val msg1 = createMockMessage(1041L, "Alice", "", timestamp = baseTime, attachments = setOf(img1))
+            val targetMsg = createMockMessage(1042L, "Bob", "", timestamp = baseTime + 1.minutes, attachments = setOf(targetImg))
+
+            val collector =
+                ConversationSliceCollector(
+                    historyFetcher = { _, _ -> listOf(msg1) },
+                )
+
+            val slice = collector.collectSlice(targetMsg)
+            assertNotNull(slice)
+            assertEquals(2, slice.summaryInput.imageAttachments.size)
+            assertTrue(slice.summaryInput.content.contains("[Alice]: [附帶圖片 1: pure.png]"))
+            assertTrue(slice.summaryInput.content.contains("[Bob]: [附帶圖片 2: target.png]"))
+        }
+
+    @Test
+    fun `collectSlice truncates images when target message alone exceeds maxImages budget`() =
+        runTest {
+            val img1 = createMockAttachment("https://cdn.discordapp.com/1.png", "image/png", "1.png")
+            val img2 = createMockAttachment("https://cdn.discordapp.com/2.png", "image/png", "2.png")
+            val img3 = createMockAttachment("https://cdn.discordapp.com/3.png", "image/png", "3.png")
+
+            val targetMsg = createMockMessage(1051L, "Alice", "Three images", attachments = setOf(img1, img2, img3))
+
+            val collector =
+                ConversationSliceCollector(
+                    maxImages = 2,
+                    historyFetcher = { _, _ -> emptyList() },
+                )
+
+            val slice = collector.collectSlice(targetMsg)
+            assertNotNull(slice)
+            assertEquals(2, slice.summaryInput.imageAttachments.size)
+            assertEquals("https://cdn.discordapp.com/1.png", slice.summaryInput.imageAttachments[0].url)
+            assertEquals("https://cdn.discordapp.com/2.png", slice.summaryInput.imageAttachments[1].url)
+        }
+
+    @Test
+    fun `resolves default configuration values when environment is unconfigured`() {
+        assertEquals(50, ConversationSliceCollector.resolveMaxHistoryMessages())
+        assertEquals(15.minutes, ConversationSliceCollector.resolveInactivityGap())
+        assertEquals(20000, ConversationSliceCollector.resolveMaxCharacterBudget())
+        assertEquals(10, ConversationSliceCollector.resolveMaxImages())
+        assertEquals(20, ConversationSliceCollector.resolveMaxLookbackMessages())
+    }
+
+    @Test
+    fun `resolves custom configuration values from environment with bounds clamping`() {
+        val env =
+            mapOf(
+                "SUMMARY_MAX_HISTORY_MESSAGES" to "30",
+                "SUMMARY_INACTIVITY_GAP_MINUTES" to "25",
+                "SUMMARY_MAX_CHARACTER_BUDGET" to "12000",
+                "SUMMARY_MAX_IMAGES" to "8",
+                "SUMMARY_MAX_LOOKBACK_MESSAGES" to "10",
+            )
+        assertEquals(30, ConversationSliceCollector.resolveMaxHistoryMessages(env))
+        assertEquals(25.minutes, ConversationSliceCollector.resolveInactivityGap(env))
+        assertEquals(12000, ConversationSliceCollector.resolveMaxCharacterBudget(env))
+        assertEquals(8, ConversationSliceCollector.resolveMaxImages(env))
+        assertEquals(10, ConversationSliceCollector.resolveMaxLookbackMessages(env))
+
+        val clampedEnv =
+            mapOf(
+                "SUMMARY_MAX_HISTORY_MESSAGES" to "500",
+                "SUMMARY_MAX_LOOKBACK_MESSAGES" to "0",
+            )
+        assertEquals(100, ConversationSliceCollector.resolveMaxHistoryMessages(clampedEnv))
+        assertEquals(1, ConversationSliceCollector.resolveMaxLookbackMessages(clampedEnv))
+    }
 }

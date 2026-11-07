@@ -98,9 +98,12 @@ class SummaryServiceWebhookTest {
             val service =
                 SummaryService(
                     summarizer = summarizer,
-                    peekResolver = peekResolver,
+                    collector =
+                        ConversationSliceCollector(
+                            peekResolver = peekResolver,
+                            noiseFilter = DialogueNoiseFilter(isLunaWebhook = { it == lunaWebhookId }),
+                        ),
                     replySender = replySender,
-                    isLunaWebhook = { it == lunaWebhookId },
                 )
 
             val embed = SummaryTestFixtures.createMockEmbed(title = "Sample Clean Post", description = "Extracted article body")
@@ -171,9 +174,12 @@ class SummaryServiceWebhookTest {
             val service =
                 SummaryService(
                     summarizer = summarizer,
-                    peekResolver = peekResolver,
+                    collector =
+                        ConversationSliceCollector(
+                            peekResolver = peekResolver,
+                            noiseFilter = DialogueNoiseFilter(isLunaWebhook = { it == lunaWebhookId }),
+                        ),
                     replySender = replySender,
-                    isLunaWebhook = { it == lunaWebhookId },
                 )
 
             val targetMsg =
@@ -242,9 +248,12 @@ class SummaryServiceWebhookTest {
             val service =
                 SummaryService(
                     summarizer = summarizer,
+                    collector =
+                        ConversationSliceCollector(
+                            historyFetcher = { _, _ -> listOf(webhookMsg) },
+                            noiseFilter = DialogueNoiseFilter(isLunaWebhook = { it == lunaWebhookId }),
+                        ),
                     replySender = { _, _ -> },
-                    historyFetcher = { _, _ -> listOf(webhookMsg) },
-                    isLunaWebhook = { it == lunaWebhookId },
                 )
 
             val user = mockk<User>()
@@ -273,8 +282,11 @@ class SummaryServiceWebhookTest {
             val service =
                 SummaryService(
                     summarizer = summarizer,
+                    collector =
+                        ConversationSliceCollector(
+                            noiseFilter = DialogueNoiseFilter(isLunaWebhook = { it == Snowflake(777L) }),
+                        ),
                     replySender = { _, _ -> replyCalled = true },
-                    isLunaWebhook = { it == Snowflake(777L) },
                 )
 
             val thirdPartyMsg =
@@ -314,11 +326,17 @@ class SummaryServiceWebhookTest {
             val service =
                 SummaryService(
                     summarizer = summarizer,
+                    collector =
+                        ConversationSliceCollector(
+                            noiseFilter =
+                                DialogueNoiseFilter(
+                                    isLunaWebhook = { id ->
+                                        queryCount.incrementAndGet()
+                                        id == lunaWebhookId
+                                    },
+                                ),
+                        ),
                     replySender = { _, _ -> },
-                    isLunaWebhook = { id ->
-                        queryCount.incrementAndGet()
-                        id == lunaWebhookId
-                    },
                 )
 
             val msg1 =
@@ -422,10 +440,13 @@ class SummaryServiceWebhookTest {
             val service =
                 SummaryService(
                     summarizer = summarizer,
-                    peekResolver = peekResolver,
+                    collector =
+                        ConversationSliceCollector(
+                            peekResolver = peekResolver,
+                            historyFetcher = { _, _ -> listOf(webhookMsg, userMsg1) },
+                            noiseFilter = DialogueNoiseFilter(isLunaWebhook = { it == lunaWebhookId }),
+                        ),
                     replySender = replySender,
-                    historyFetcher = { _, _ -> listOf(webhookMsg, userMsg1) },
-                    isLunaWebhook = { it == lunaWebhookId },
                 )
 
             coEvery {
@@ -540,13 +561,16 @@ class SummaryServiceWebhookTest {
             val service =
                 SummaryService(
                     summarizer = summarizer,
-                    peekResolver = { url ->
-                        resolvedUrl = url
-                        post
-                    },
+                    collector =
+                        ConversationSliceCollector(
+                            peekResolver = { url ->
+                                resolvedUrl = url
+                                post
+                            },
+                            historyFetcher = { _, _ -> listOf(msg1, githubBot, lunaWebhook, msg2) },
+                            noiseFilter = DialogueNoiseFilter(isLunaWebhook = { it == lunaWebhookId }),
+                        ),
                     replySender = { _, _ -> },
-                    historyFetcher = { _, _ -> listOf(msg1, githubBot, lunaWebhook, msg2) },
-                    isLunaWebhook = { it == lunaWebhookId },
                 )
 
             coEvery {
@@ -670,13 +694,16 @@ class SummaryServiceWebhookTest {
             val service =
                 SummaryService(
                     summarizer = summarizer,
-                    peekResolver = { url ->
-                        resolvedUrl = url
-                        post
-                    },
+                    collector =
+                        ConversationSliceCollector(
+                            peekResolver = { url ->
+                                resolvedUrl = url
+                                post
+                            },
+                            historyFetcher = { _, _ -> listOf(msg0, oldWebhook, botSummary, lunaWebhook, msg1) },
+                            noiseFilter = DialogueNoiseFilter(isLunaWebhook = { it == lunaWebhookId }),
+                        ),
                     replySender = { _, _ -> },
-                    historyFetcher = { _, _ -> listOf(msg0, oldWebhook, botSummary, lunaWebhook, msg1) },
-                    isLunaWebhook = { it == lunaWebhookId },
                 )
 
             coEvery {
@@ -758,8 +785,11 @@ class SummaryServiceWebhookTest {
             val service =
                 SummaryService(
                     summarizer = summarizer,
-                    historyFetcher = { _, _ -> listOf(msg0, webhookWithTldr) },
-                    isLunaWebhook = { it == lunaWebhookId },
+                    collector =
+                        ConversationSliceCollector(
+                            historyFetcher = { _, _ -> listOf(msg0, webhookWithTldr) },
+                            noiseFilter = DialogueNoiseFilter(isLunaWebhook = { it == lunaWebhookId }),
+                        ),
                     replySender = { _, _ -> },
                 )
 
@@ -835,9 +865,12 @@ class SummaryServiceWebhookTest {
             val service =
                 SummaryService(
                     summarizer = summarizer,
+                    collector =
+                        ConversationSliceCollector(
+                            historyFetcher = { _, _ -> listOf(webhookMsg) },
+                            peekResolver = { null },
+                        ),
                     replySender = { _, _ -> },
-                    historyFetcher = { _, _ -> listOf(webhookMsg) },
-                    peekResolver = { null },
                 )
 
             val event = SummaryTestFixtures.createMockReactionEvent(targetMsg)
@@ -904,9 +937,12 @@ class SummaryServiceWebhookTest {
             val service =
                 SummaryService(
                     summarizer = summarizer,
+                    collector =
+                        ConversationSliceCollector(
+                            historyFetcher = { _, _ -> listOf(msg1, msg2) },
+                            peekResolver = { null },
+                        ),
                     replySender = { _, _ -> },
-                    historyFetcher = { _, _ -> listOf(msg1, msg2) },
-                    peekResolver = { null },
                 )
 
             val event = SummaryTestFixtures.createMockReactionEvent(targetMsg)
@@ -966,9 +1002,12 @@ class SummaryServiceWebhookTest {
             val service =
                 SummaryService(
                     summarizer = summarizer,
+                    collector =
+                        ConversationSliceCollector(
+                            historyFetcher = { _, _ -> listOf(msg1) },
+                            peekResolver = { null },
+                        ),
                     replySender = { _, _ -> },
-                    historyFetcher = { _, _ -> listOf(msg1) },
-                    peekResolver = { null },
                 )
 
             val event = SummaryTestFixtures.createMockReactionEvent(targetMsg)
@@ -1009,9 +1048,12 @@ class SummaryServiceWebhookTest {
             val service =
                 SummaryService(
                     summarizer = summarizer,
+                    collector =
+                        ConversationSliceCollector(
+                            peekResolver = { null },
+                            noiseFilter = DialogueNoiseFilter(kord = kordMock),
+                        ),
                     replySender = { _, text -> replyText = text },
-                    kord = kordMock,
-                    peekResolver = { null },
                 )
 
             val event = SummaryTestFixtures.createMockReactionEvent(targetMsg)
@@ -1050,8 +1092,11 @@ class SummaryServiceWebhookTest {
             val service =
                 SummaryService(
                     summarizer = summarizer,
+                    collector =
+                        ConversationSliceCollector(
+                            peekResolver = { null },
+                        ),
                     replySender = { _, _ -> },
-                    peekResolver = { null },
                 )
 
             val event = SummaryTestFixtures.createMockReactionEvent(targetMsg)

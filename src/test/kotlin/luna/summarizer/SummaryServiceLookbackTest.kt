@@ -78,17 +78,20 @@ class SummaryServiceLookbackTest {
             val service =
                 SummaryService(
                     summarizer = summarizer,
+                    collector =
+                        ConversationSliceCollector(
+                            historyFetcher = { msg, _ ->
+                                if (msg.id == targetMsg.id) {
+                                    listOf(msg1, msg2, msg3)
+                                } else if (msg.id == msg3.id) {
+                                    listOf(msg1, msg2)
+                                } else {
+                                    emptyList()
+                                }
+                            },
+                            peekResolver = { null },
+                        ),
                     replySender = { _, text -> sentReply = text },
-                    historyFetcher = { msg, _ ->
-                        if (msg.id == targetMsg.id) {
-                            listOf(msg1, msg2, msg3)
-                        } else if (msg.id == msg3.id) {
-                            listOf(msg1, msg2)
-                        } else {
-                            emptyList()
-                        }
-                    },
-                    peekResolver = { null },
                 )
 
             val event = SummaryTestFixtures.createMockReactionEvent(targetMsg)
@@ -128,12 +131,15 @@ class SummaryServiceLookbackTest {
             val service =
                 SummaryService(
                     summarizer = summarizer,
+                    collector =
+                        ConversationSliceCollector(
+                            historyFetcher = { _, _ ->
+                                historyFetchCount++
+                                listOf(msg1)
+                            },
+                            peekResolver = { null },
+                        ),
                     replySender = { _, text -> sentReply = text },
-                    historyFetcher = { _, _ ->
-                        historyFetchCount++
-                        listOf(msg1)
-                    },
-                    peekResolver = { null },
                 )
 
             val event = SummaryTestFixtures.createMockReactionEvent(targetMsg)
@@ -157,9 +163,12 @@ class SummaryServiceLookbackTest {
             val service =
                 SummaryService(
                     summarizer = summarizer,
+                    collector =
+                        ConversationSliceCollector(
+                            historyFetcher = { _, _ -> emptyList() },
+                            peekResolver = { null },
+                        ),
                     replySender = { _, _ -> },
-                    historyFetcher = { _, _ -> emptyList() },
-                    peekResolver = { null },
                 )
 
             val event = SummaryTestFixtures.createMockReactionEvent(targetMsg)
@@ -183,9 +192,12 @@ class SummaryServiceLookbackTest {
             val service =
                 SummaryService(
                     summarizer = summarizer,
+                    collector =
+                        ConversationSliceCollector(
+                            historyFetcher = { _, _ -> emptyList() },
+                            peekResolver = { null },
+                        ),
                     replySender = { _, text -> replySent = text },
-                    historyFetcher = { _, _ -> emptyList() },
-                    peekResolver = { null },
                 )
 
             val event = SummaryTestFixtures.createMockReactionEvent(targetMsg)

@@ -26,11 +26,8 @@ class SummarizerPlugin(
     private val summaryServiceFactory: (
         (
             summarizer: GeminiSummarizer,
+            collector: ConversationSliceCollector,
             configuredEmoji: String,
-            maxHistoryMessages: Int,
-            inactivityGap: Duration,
-            maxCharacterBudget: Int,
-            peekResolver: suspend (String) -> PeekPost?,
         ) -> SummaryService
     )? = null,
 ) : LunaPlugin {
@@ -162,24 +159,26 @@ class SummarizerPlugin(
                 { url -> SocialPeek.peekOrNull(url) }
             }
 
-        val service =
-            summaryServiceFactory?.invoke(
-                gemini,
-                emoji,
-                historyLimit,
-                gap,
-                characterBudget,
-                peekResolver,
-            ) ?: SummaryService(
-                summarizer = gemini,
-                peekResolver = peekResolver,
-                configuredEmoji = emoji,
+        val collector =
+            ConversationSliceCollector(
                 maxHistoryMessages = historyLimit,
                 inactivityGap = gap,
                 maxCharacterBudget = characterBudget,
                 maxImages = imagesLimit,
                 maxLookbackMessages = lookbackLimit,
-                kord = context.kord,
+                noiseFilter = DialogueNoiseFilter(kord = context.kord),
+                peekResolver = peekResolver,
+            )
+
+        val service =
+            summaryServiceFactory?.invoke(
+                gemini,
+                collector,
+                emoji,
+            ) ?: SummaryService(
+                summarizer = gemini,
+                collector = collector,
+                configuredEmoji = emoji,
             )
         this.summaryService = service
 
