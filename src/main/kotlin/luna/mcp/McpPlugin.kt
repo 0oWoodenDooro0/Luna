@@ -23,7 +23,7 @@ internal fun safeScope(kord: Kord): CoroutineScope {
  * Luna plugin implementing Discord webhook and client management for Model Context Protocol (MCP) integrations.
  */
 class McpPlugin(
-    private val commandFactory: (McpWebhookStorage) -> Command = { McpWebhookCommand(it) },
+    private val commandFactory: (McpWebhookStorage) -> Command = { McpLegacyWebhookCommand(it) },
     private val clientCommandFactory: (McpClientRepository, McpWebhookRepository, String) -> Command = { clientRepo, webhookRepo, baseUrl ->
         McpClientCommand(clientRepo, webhookRepo, baseUrl)
     },
