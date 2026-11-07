@@ -41,7 +41,7 @@ class DiscordWebhookBroadcasterTest {
         transaction(database) {
             McpWebhooksTable.insert {
                 it[McpWebhooksTable.id] = id
-                it[McpWebhooksTable.clientId] = "luna-mcp-client"
+                it[McpWebhooksTable.clientId] = "test-client"
                 it[McpWebhooksTable.tag] = "tag-$id"
                 it[McpWebhooksTable.guildId] = "guild-$id"
                 it[McpWebhooksTable.channelId] = channelId

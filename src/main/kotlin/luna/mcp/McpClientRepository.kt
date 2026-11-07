@@ -35,7 +35,7 @@ data class McpClientRecord(
 )
 
 class McpClientRepository(
-    private val database: Database,
+    val database: Database,
 ) {
     init {
         transaction(database) {

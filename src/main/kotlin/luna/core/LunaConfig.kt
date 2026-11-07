@@ -185,10 +185,6 @@ object ConfigLoader {
             "DISCORD_CLIENT_SECRET",
             "GEMINI_API_KEY",
             "YOUTUBE_API_KEY",
-            "MCP_AUTH_TOKEN",
-            "MCP_OAUTH_CLIENT_SECRET",
-            "clientSecret",
-            "staticAuthToken",
         )
 
     private val PLACEHOLDER_REGEX = Regex("""\$\{\??([^}:]+)(?::([^}]*))?\}""")
@@ -500,15 +496,6 @@ object ConfigLoader {
             "mcp.dbPath" to "MCP_DB_PATH",
             "publicBaseUrl" to "MCP_PUBLIC_BASE_URL",
             "mcp.publicBaseUrl" to "MCP_PUBLIC_BASE_URL",
-            "mcp.clientId" to "MCP_OAUTH_CLIENT_ID",
-            "MCP_CLIENT_ID" to "MCP_OAUTH_CLIENT_ID",
-            "mcp.clientSecret" to "MCP_OAUTH_CLIENT_SECRET",
-            "MCP_CLIENT_SECRET" to "MCP_OAUTH_CLIENT_SECRET",
-            "staticAuthToken" to "MCP_AUTH_TOKEN",
-            "mcp.staticAuthToken" to "MCP_AUTH_TOKEN",
-            "requireAuth" to "MCP_REQUIRE_AUTH",
-            "mcp.requireAuth" to "MCP_REQUIRE_AUTH",
-            "authExpected" to "MCP_REQUIRE_AUTH",
         )
 
     fun parseDefaultValue(raw: String): String? {
@@ -623,10 +610,6 @@ object ConfigLoader {
             EnvVarSchema("MCP_PORT", isRequired = false, defaultValue = "8081", section = 5),
             EnvVarSchema("MCP_DB_PATH", isRequired = false, defaultValue = "./data/urls.db", section = 5),
             EnvVarSchema("MCP_PUBLIC_BASE_URL", isRequired = false, defaultValue = "https://woodendoor.website", section = 5),
-            EnvVarSchema("MCP_OAUTH_CLIENT_ID", isRequired = false, defaultValue = "luna-mcp-client", section = 5),
-            EnvVarSchema("MCP_OAUTH_CLIENT_SECRET", isRequired = false, section = 5),
-            EnvVarSchema("MCP_AUTH_TOKEN", isRequired = false, section = 5),
-            EnvVarSchema("MCP_REQUIRE_AUTH", isRequired = false, defaultValue = "false", section = 5),
         )
 
     fun loadEnvExampleSchema(): List<EnvVarSchema> {
@@ -705,10 +688,6 @@ object ConfigLoader {
                 "MCP_PORT" -> listOf("PORT", "port", "mcp.port")
                 "MCP_DB_PATH" -> listOf("dbPath", "mcp.dbPath")
                 "MCP_PUBLIC_BASE_URL" -> listOf("publicBaseUrl", "mcp.publicBaseUrl")
-                "MCP_OAUTH_CLIENT_ID" -> listOf("clientId", "mcp.clientId", "MCP_CLIENT_ID")
-                "MCP_OAUTH_CLIENT_SECRET" -> listOf("clientSecret", "mcp.clientSecret", "MCP_CLIENT_SECRET")
-                "MCP_AUTH_TOKEN" -> listOf("staticAuthToken", "mcp.staticAuthToken")
-                "MCP_REQUIRE_AUTH" -> listOf("requireAuth", "mcp.requireAuth")
                 else -> emptyList()
             }
 

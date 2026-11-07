@@ -38,7 +38,7 @@ class McpWebhookStorage(
         guildId: String,
         channelId: String,
         webhookUrl: String,
-        clientId: String = "luna-mcp-client",
+        clientId: String = "storage-client",
         tag: String = "wh-${UUID.randomUUID().toString().take(8)}",
     ): McpWebhook =
         transaction(database) {

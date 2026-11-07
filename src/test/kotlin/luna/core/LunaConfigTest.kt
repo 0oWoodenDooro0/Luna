@@ -260,8 +260,6 @@ class LunaConfigTest {
                 "DISCORD_CLIENT_SECRET" to "secret_secret_456",
                 "GEMINI_API_KEY" to "ai_key_789",
                 "YOUTUBE_API_KEY" to "yt_key_101",
-                "MCP_AUTH_TOKEN" to "mcp_token_202",
-                "MCP_OAUTH_CLIENT_SECRET" to "oauth_secret_303",
                 "NORMAL_CONFIG" to "safe_value",
             )
 
@@ -270,8 +268,6 @@ class LunaConfigTest {
         assertEquals("******", masked["DISCORD_CLIENT_SECRET"])
         assertEquals("******", masked["GEMINI_API_KEY"])
         assertEquals("******", masked["YOUTUBE_API_KEY"])
-        assertEquals("******", masked["MCP_AUTH_TOKEN"])
-        assertEquals("******", masked["MCP_OAUTH_CLIENT_SECRET"])
         assertEquals("safe_value", masked["NORMAL_CONFIG"])
     }
 
@@ -325,11 +321,11 @@ class LunaConfigTest {
         assertTrue(content.contains("/mcp webhook add tag:<tag>"), "Tagged webhook addition must be documented")
         assertTrue(content.contains("10"), "Webhook quota limit of 10 must be documented")
 
-        // Assert legacy single-tenant compatibility fallbacks
-        assertTrue(content.contains("MCP_OAUTH_CLIENT_SECRET"), "Legacy MCP_OAUTH_CLIENT_SECRET must be documented")
-        assertTrue(content.contains("MCP_AUTH_TOKEN"), "Legacy MCP_AUTH_TOKEN must be documented")
-        assertTrue(content.contains("MCP_REQUIRE_AUTH"), "Legacy MCP_REQUIRE_AUTH must be documented")
-        assertTrue(content.contains("Legacy Single-Tenant Compatibility Fallbacks"), "Legacy compatibility fallback section must be labeled")
+        // Assert legacy single-tenant compatibility fallbacks removed
+        assertFalse(content.contains("MCP_OAUTH_CLIENT_SECRET"), "Legacy MCP_OAUTH_CLIENT_SECRET must not be present")
+        assertFalse(content.contains("MCP_AUTH_TOKEN"), "Legacy MCP_AUTH_TOKEN must not be present")
+        assertFalse(content.contains("MCP_REQUIRE_AUTH"), "Legacy MCP_REQUIRE_AUTH must not be present")
+        assertFalse(content.contains("Legacy Single-Tenant Compatibility Fallbacks"), "Legacy compatibility fallback section must not be present")
     }
 
     @Test
@@ -494,7 +490,7 @@ class LunaConfigTest {
                 put("DISCORD_CLIENT_SECRET", "super_secret_discord_oauth_secret")
                 put("GEMINI_API_KEY", "super_secret_gemini_api_key")
                 put("YOUTUBE_API_KEY", "super_secret_youtube_data_api_key")
-                put("MCP_AUTH_TOKEN", "super_secret_static_bearer_token")
+                put("SESSION_SECRET", "super_secret_session_secret_key")
             }
 
         val result = ConfigLoader.auditDrift(sensitiveConfig)
@@ -502,6 +498,6 @@ class LunaConfigTest {
         assertEquals("******", result.activeConfig["DISCORD_CLIENT_SECRET"], "DISCORD_CLIENT_SECRET must be masked")
         assertEquals("******", result.activeConfig["GEMINI_API_KEY"], "GEMINI_API_KEY must be masked")
         assertEquals("******", result.activeConfig["YOUTUBE_API_KEY"], "YOUTUBE_API_KEY must be masked")
-        assertEquals("******", result.activeConfig["MCP_AUTH_TOKEN"], "MCP_AUTH_TOKEN must be masked")
+        assertEquals("******", result.activeConfig["SESSION_SECRET"], "SESSION_SECRET must be masked")
     }
 }

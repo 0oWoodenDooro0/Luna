@@ -49,7 +49,7 @@ class McpProtocolHandlerTest {
         runTest {
             val requestJson =
                 """{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"test-client","version":"1.0.0"}}}"""
-            val response = handler.handle(requestJson)
+            val response = handler.handle(requestJson, clientId = "test-client")
             assertNotNull(response)
 
             val root = Json.parseToJsonElement(response).jsonObject
@@ -83,7 +83,7 @@ class McpProtocolHandlerTest {
         runTest {
             val notificationJson =
                 """{"jsonrpc":"2.0","method":"notifications/initialized"}"""
-            val response = handler.handle(notificationJson)
+            val response = handler.handle(notificationJson, clientId = "test-client")
             assertNull(response)
         }
 
@@ -92,7 +92,7 @@ class McpProtocolHandlerTest {
         runTest {
             val requestJson =
                 """{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}"""
-            val response = handler.handle(requestJson)
+            val response = handler.handle(requestJson, clientId = "test-client")
             assertNotNull(response)
 
             val root = Json.parseToJsonElement(response).jsonObject
@@ -451,7 +451,7 @@ class McpProtocolHandlerTest {
         runTest {
             val requestJson =
                 """{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"unknown_tool","arguments":{}}}"""
-            val response = handler.handle(requestJson)
+            val response = handler.handle(requestJson, clientId = "test-client")
             assertNotNull(response)
 
             val root = Json.parseToJsonElement(response).jsonObject

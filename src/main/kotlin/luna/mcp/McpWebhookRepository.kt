@@ -14,7 +14,7 @@ import java.io.File
 
 object McpWebhooksTable : Table("mcp_webhooks") {
     val id = varchar("id", 64)
-    val clientId = varchar("client_id", 64).default("luna-mcp-client").index()
+    val clientId = varchar("client_id", 64).index()
     val tag = varchar("tag", 32).default("default")
     val guildId = varchar("guild_id", 32)
     val channelId = varchar("channel_id", 32)
@@ -31,7 +31,7 @@ object McpWebhooksTable : Table("mcp_webhooks") {
 
 data class McpWebhookRecord(
     val id: String,
-    val clientId: String = "luna-mcp-client",
+    val clientId: String,
     val tag: String = "default",
     val guildId: String,
     val channelId: String,

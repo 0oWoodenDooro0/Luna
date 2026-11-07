@@ -37,6 +37,27 @@ class McpOAuthServerTest {
         clientRepository = McpClientRepository(database)
     }
 
+    private fun registerTestClient(
+        clientId: String = "test-client-id",
+        secret: String? = null,
+    ): McpClientRecord {
+        val salt = if (secret != null) "test-salt" else ""
+        val hash = if (secret != null) McpOAuthSecurity.hashSecret(secret, salt) else ""
+        val now = System.currentTimeMillis()
+        val client =
+            McpClientRecord(
+                clientId = clientId,
+                userId = "user-$clientId",
+                clientName = "Client $clientId",
+                secretHash = hash,
+                secretSalt = salt,
+                createdAt = now,
+                updatedAt = now,
+            )
+        clientRepository.createClient(client)
+        return client
+    }
+
     @Test
     fun `GET oauth authorize with dynamic client in DB succeeds and redirects to Google URL`() =
         testApplication {
@@ -274,7 +295,7 @@ class McpOAuthServerTest {
     fun `revokeClientTokens purges tokens and causes subsequent token validation to fail`() =
         testApplication {
             val broadcaster = DiscordWebhookBroadcaster(repository)
-            val authConfig = McpOAuthConfig(requireAuth = true)
+            val authConfig = McpOAuthConfig()
             val provider = McpOAuthProvider(config = authConfig, clientRepository = clientRepository)
             val clientId = "client-to-revoke"
             val now = System.currentTimeMillis()
@@ -399,9 +420,10 @@ class McpOAuthServerTest {
     fun `GET oauth authorize with valid Google redirect URI issues code and redirects 302`() =
         testApplication {
             val broadcaster = DiscordWebhookBroadcaster(repository)
-            val authConfig = McpOAuthConfig(clientId = "test-client-id")
+            registerTestClient("test-client-id")
+            val provider = McpOAuthProvider(clientRepository = clientRepository)
             application {
-                mcpServerModule(broadcaster = broadcaster, authConfig = authConfig)
+                mcpServerModule(broadcaster = broadcaster, clientRepository = clientRepository, oAuthProvider = provider)
             }
 
             val client = createClient { followRedirects = false }
@@ -430,9 +452,10 @@ class McpOAuthServerTest {
     fun `GET oauth authorize with valid localhost redirect URI issues code and redirects 302`() =
         testApplication {
             val broadcaster = DiscordWebhookBroadcaster(repository)
-            val authConfig = McpOAuthConfig(clientId = "test-client-id")
+            registerTestClient("test-client-id")
+            val provider = McpOAuthProvider(clientRepository = clientRepository)
             application {
-                mcpServerModule(broadcaster = broadcaster, authConfig = authConfig)
+                mcpServerModule(broadcaster = broadcaster, clientRepository = clientRepository, oAuthProvider = provider)
             }
 
             val client = createClient { followRedirects = false }
@@ -459,9 +482,10 @@ class McpOAuthServerTest {
     fun `GET oauth authorize with invalid response_type returns 400 Bad Request`() =
         testApplication {
             val broadcaster = DiscordWebhookBroadcaster(repository)
-            val authConfig = McpOAuthConfig(clientId = "test-client-id")
+            registerTestClient("test-client-id")
+            val provider = McpOAuthProvider(clientRepository = clientRepository)
             application {
-                mcpServerModule(broadcaster = broadcaster, authConfig = authConfig)
+                mcpServerModule(broadcaster = broadcaster, clientRepository = clientRepository, oAuthProvider = provider)
             }
 
             val client = createClient { followRedirects = false }
@@ -483,9 +507,10 @@ class McpOAuthServerTest {
     fun `GET oauth authorize with mismatched client_id returns 400 Bad Request`() =
         testApplication {
             val broadcaster = DiscordWebhookBroadcaster(repository)
-            val authConfig = McpOAuthConfig(clientId = "expected-client-id")
+            registerTestClient("expected-client-id")
+            val provider = McpOAuthProvider(clientRepository = clientRepository)
             application {
-                mcpServerModule(broadcaster = broadcaster, authConfig = authConfig)
+                mcpServerModule(broadcaster = broadcaster, clientRepository = clientRepository, oAuthProvider = provider)
             }
 
             val client = createClient { followRedirects = false }
@@ -507,9 +532,10 @@ class McpOAuthServerTest {
     fun `GET oauth authorize with unauthorized redirect_uri returns 400 Bad Request`() =
         testApplication {
             val broadcaster = DiscordWebhookBroadcaster(repository)
-            val authConfig = McpOAuthConfig(clientId = "test-client-id")
+            registerTestClient("test-client-id")
+            val provider = McpOAuthProvider(clientRepository = clientRepository)
             application {
-                mcpServerModule(broadcaster = broadcaster, authConfig = authConfig)
+                mcpServerModule(broadcaster = broadcaster, clientRepository = clientRepository, oAuthProvider = provider)
             }
 
             val client = createClient { followRedirects = false }
@@ -531,9 +557,10 @@ class McpOAuthServerTest {
     fun `GET oauth authorize appends parameters properly when redirect_uri contains query parameters`() =
         testApplication {
             val broadcaster = DiscordWebhookBroadcaster(repository)
-            val authConfig = McpOAuthConfig(clientId = "test-client-id")
+            registerTestClient("test-client-id")
+            val provider = McpOAuthProvider(clientRepository = clientRepository)
             application {
-                mcpServerModule(broadcaster = broadcaster, authConfig = authConfig)
+                mcpServerModule(broadcaster = broadcaster, clientRepository = clientRepository, oAuthProvider = provider)
             }
 
             val client = createClient { followRedirects = false }
@@ -559,14 +586,16 @@ class McpOAuthServerTest {
     fun `POST oauth token with valid authorization code and PKCE verifier returns access token`() =
         testApplication {
             val broadcaster = DiscordWebhookBroadcaster(repository)
-            val authConfig =
-                McpOAuthConfig(
-                    clientId = "test-client-id",
-                    clientSecret = "test-secret",
-                )
-            val provider = McpOAuthProvider(authConfig)
+            registerTestClient("test-client-id", "test-secret")
+            val authConfig = McpOAuthConfig()
+            val provider = McpOAuthProvider(authConfig, clientRepository = clientRepository)
             application {
-                mcpServerModule(broadcaster = broadcaster, authConfig = authConfig, oAuthProvider = provider)
+                mcpServerModule(
+                    broadcaster = broadcaster,
+                    authConfig = authConfig,
+                    clientRepository = clientRepository,
+                    oAuthProvider = provider,
+                )
             }
 
             // S256 PKCE pair: verifier "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"
@@ -613,14 +642,16 @@ class McpOAuthServerTest {
     fun `POST oauth token with Basic authentication header succeeds`() =
         testApplication {
             val broadcaster = DiscordWebhookBroadcaster(repository)
-            val authConfig =
-                McpOAuthConfig(
-                    clientId = "test-client-id",
-                    clientSecret = "test-secret",
-                )
-            val provider = McpOAuthProvider(authConfig)
+            registerTestClient("test-client-id", "test-secret")
+            val authConfig = McpOAuthConfig()
+            val provider = McpOAuthProvider(authConfig, clientRepository = clientRepository)
             application {
-                mcpServerModule(broadcaster = broadcaster, authConfig = authConfig, oAuthProvider = provider)
+                mcpServerModule(
+                    broadcaster = broadcaster,
+                    authConfig = authConfig,
+                    clientRepository = clientRepository,
+                    oAuthProvider = provider,
+                )
             }
 
             val redirectUri = "http://localhost:8080/callback"
@@ -662,14 +693,16 @@ class McpOAuthServerTest {
     fun `POST oauth token with invalid client_secret returns 401 invalid_client`() =
         testApplication {
             val broadcaster = DiscordWebhookBroadcaster(repository)
-            val authConfig =
-                McpOAuthConfig(
-                    clientId = "test-client-id",
-                    clientSecret = "correct-secret",
-                )
-            val provider = McpOAuthProvider(authConfig)
+            registerTestClient("test-client-id", "correct-secret")
+            val authConfig = McpOAuthConfig()
+            val provider = McpOAuthProvider(authConfig, clientRepository = clientRepository)
             application {
-                mcpServerModule(broadcaster = broadcaster, authConfig = authConfig, oAuthProvider = provider)
+                mcpServerModule(
+                    broadcaster = broadcaster,
+                    authConfig = authConfig,
+                    clientRepository = clientRepository,
+                    oAuthProvider = provider,
+                )
             }
 
             val response =
@@ -696,14 +729,16 @@ class McpOAuthServerTest {
     fun `POST oauth token with invalid authorization code returns 400 invalid_grant`() =
         testApplication {
             val broadcaster = DiscordWebhookBroadcaster(repository)
-            val authConfig =
-                McpOAuthConfig(
-                    clientId = "test-client-id",
-                    clientSecret = "secret",
-                )
-            val provider = McpOAuthProvider(authConfig)
+            registerTestClient("test-client-id", "secret")
+            val authConfig = McpOAuthConfig()
+            val provider = McpOAuthProvider(authConfig, clientRepository = clientRepository)
             application {
-                mcpServerModule(broadcaster = broadcaster, authConfig = authConfig, oAuthProvider = provider)
+                mcpServerModule(
+                    broadcaster = broadcaster,
+                    authConfig = authConfig,
+                    clientRepository = clientRepository,
+                    oAuthProvider = provider,
+                )
             }
 
             val response =
@@ -730,13 +765,16 @@ class McpOAuthServerTest {
     fun `POST oauth token with mismatched PKCE verifier returns 400 invalid_grant`() =
         testApplication {
             val broadcaster = DiscordWebhookBroadcaster(repository)
-            val authConfig =
-                McpOAuthConfig(
-                    clientId = "test-client-id",
-                )
-            val provider = McpOAuthProvider(authConfig)
+            registerTestClient("test-client-id")
+            val authConfig = McpOAuthConfig()
+            val provider = McpOAuthProvider(authConfig, clientRepository = clientRepository)
             application {
-                mcpServerModule(broadcaster = broadcaster, authConfig = authConfig, oAuthProvider = provider)
+                mcpServerModule(
+                    broadcaster = broadcaster,
+                    authConfig = authConfig,
+                    clientRepository = clientRepository,
+                    oAuthProvider = provider,
+                )
             }
 
             val challenge = "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM"
@@ -773,13 +811,16 @@ class McpOAuthServerTest {
     fun `POST oauth token with code reused returns 400 invalid_grant`() =
         testApplication {
             val broadcaster = DiscordWebhookBroadcaster(repository)
-            val authConfig =
-                McpOAuthConfig(
-                    clientId = "test-client-id",
-                )
-            val provider = McpOAuthProvider(authConfig)
+            registerTestClient("test-client-id")
+            val authConfig = McpOAuthConfig()
+            val provider = McpOAuthProvider(authConfig, clientRepository = clientRepository)
             application {
-                mcpServerModule(broadcaster = broadcaster, authConfig = authConfig, oAuthProvider = provider)
+                mcpServerModule(
+                    broadcaster = broadcaster,
+                    authConfig = authConfig,
+                    clientRepository = clientRepository,
+                    oAuthProvider = provider,
+                )
             }
 
             val redirectUri = "http://localhost:8080/callback"
@@ -832,10 +873,16 @@ class McpOAuthServerTest {
     fun `POST oauth token with unsupported grant_type returns 400 unsupported_grant_type`() =
         testApplication {
             val broadcaster = DiscordWebhookBroadcaster(repository)
-            val authConfig = McpOAuthConfig(clientId = "test-client-id")
-            val provider = McpOAuthProvider(authConfig)
+            registerTestClient("test-client-id")
+            val authConfig = McpOAuthConfig()
+            val provider = McpOAuthProvider(authConfig, clientRepository = clientRepository)
             application {
-                mcpServerModule(broadcaster = broadcaster, authConfig = authConfig, oAuthProvider = provider)
+                mcpServerModule(
+                    broadcaster = broadcaster,
+                    authConfig = authConfig,
+                    clientRepository = clientRepository,
+                    oAuthProvider = provider,
+                )
             }
 
             val response =
@@ -856,10 +903,10 @@ class McpOAuthServerTest {
         }
 
     @Test
-    fun `GET mcp sse when auth enabled rejects unauthenticated request with 401 and WWW-Authenticate header`() =
+    fun `GET mcp sse rejects unauthenticated request with 401 and WWW-Authenticate header`() =
         testApplication {
             val broadcaster = DiscordWebhookBroadcaster(repository)
-            val authConfig = McpOAuthConfig(requireAuth = true)
+            val authConfig = McpOAuthConfig()
             application {
                 mcpServerModule(broadcaster = broadcaster, authConfig = authConfig)
             }
@@ -870,10 +917,10 @@ class McpOAuthServerTest {
         }
 
     @Test
-    fun `GET mcp sse when auth enabled accepts valid Bearer token in Authorization header`() =
+    fun `GET mcp sse accepts valid Bearer token in Authorization header`() =
         testApplication {
             val broadcaster = DiscordWebhookBroadcaster(repository)
-            val authConfig = McpOAuthConfig(requireAuth = true)
+            val authConfig = McpOAuthConfig()
             val provider = McpOAuthProvider(authConfig)
             val issuedToken = provider.issueAccessToken("test-client")
             application {
@@ -894,10 +941,10 @@ class McpOAuthServerTest {
         }
 
     @Test
-    fun `GET mcp sse when auth enabled accepts valid Bearer token in query parameter`() =
+    fun `GET mcp sse accepts valid Bearer token in query parameter`() =
         testApplication {
             val broadcaster = DiscordWebhookBroadcaster(repository)
-            val authConfig = McpOAuthConfig(requireAuth = true)
+            val authConfig = McpOAuthConfig()
             val provider = McpOAuthProvider(authConfig)
             val issuedToken = provider.issueAccessToken("test-client")
             application {
@@ -916,10 +963,10 @@ class McpOAuthServerTest {
         }
 
     @Test
-    fun `POST mcp messages when auth enabled rejects unauthenticated request with 401 and WWW-Authenticate header`() =
+    fun `POST mcp messages rejects unauthenticated request with 401 and WWW-Authenticate header`() =
         testApplication {
             val broadcaster = DiscordWebhookBroadcaster(repository)
-            val authConfig = McpOAuthConfig(requireAuth = true)
+            val authConfig = McpOAuthConfig()
             application {
                 mcpServerModule(broadcaster = broadcaster, authConfig = authConfig)
             }
@@ -936,10 +983,10 @@ class McpOAuthServerTest {
         }
 
     @Test
-    fun `POST mcp messages when auth enabled rejects invalid Bearer token with 401`() =
+    fun `POST mcp messages rejects invalid Bearer token with 401`() =
         testApplication {
             val broadcaster = DiscordWebhookBroadcaster(repository)
-            val authConfig = McpOAuthConfig(requireAuth = true)
+            val authConfig = McpOAuthConfig()
             application {
                 mcpServerModule(broadcaster = broadcaster, authConfig = authConfig)
             }
@@ -957,10 +1004,10 @@ class McpOAuthServerTest {
         }
 
     @Test
-    fun `POST mcp messages when auth enabled accepts valid Bearer token in Authorization header`() =
+    fun `POST mcp messages accepts valid Bearer token in Authorization header`() =
         testApplication {
             val broadcaster = DiscordWebhookBroadcaster(repository)
-            val authConfig = McpOAuthConfig(requireAuth = true)
+            val authConfig = McpOAuthConfig()
             val provider = McpOAuthProvider(authConfig)
             val issuedToken = provider.issueAccessToken("test-client")
             application {
@@ -981,38 +1028,24 @@ class McpOAuthServerTest {
         }
 
     @Test
-    fun `POST mcp messages accepts static auth token when configured`() =
-        testApplication {
-            val broadcaster = DiscordWebhookBroadcaster(repository)
-            val authConfig = McpOAuthConfig(staticAuthToken = "secret-static-token")
-            val provider = McpOAuthProvider(authConfig)
-            application {
-                mcpServerModule(broadcaster = broadcaster, authConfig = authConfig, oAuthProvider = provider)
-            }
-
-            val request = """{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05"}}"""
-            val response =
-                client.post("/mcp/messages?token=secret-static-token") {
-                    contentType(io.ktor.http.ContentType.Application.Json)
-                    setBody(request)
-                }
-
-            assertEquals(HttpStatusCode.OK, response.status)
-            val json = Json.parseToJsonElement(response.bodyAsText()).jsonObject
-            assertEquals("2.0", json["jsonrpc"]?.jsonPrimitive?.content)
-        }
-
-    @Test
     fun `POST oauth token returns refresh_token and supports grant_type refresh_token`() =
         testApplication {
             val broadcaster = DiscordWebhookBroadcaster(repository)
-            val authConfig = McpOAuthConfig(clientId = "luna-mcp-client")
-            val provider = McpOAuthProvider(authConfig)
+            val clientId = "refresh-test-client"
+            val secret = "refresh-secret"
+            registerTestClient(clientId, secret)
+            val authConfig = McpOAuthConfig()
+            val provider = McpOAuthProvider(authConfig, clientRepository = clientRepository)
             application {
-                mcpServerModule(broadcaster = broadcaster, authConfig = authConfig, oAuthProvider = provider)
+                mcpServerModule(
+                    broadcaster = broadcaster,
+                    authConfig = authConfig,
+                    clientRepository = clientRepository,
+                    oAuthProvider = provider,
+                )
             }
 
-            val code = provider.issueAuthorizationCode("luna-mcp-client", "https://oauth-redirect.googleusercontent.com/r/test", null, null)
+            val code = provider.issueAuthorizationCode(clientId, "https://oauth-redirect.googleusercontent.com/r/test", null, null)
 
             val tokenResponse =
                 client.post("/oauth/token") {
@@ -1021,7 +1054,8 @@ class McpOAuthServerTest {
                             io.ktor.http.parameters {
                                 append("grant_type", "authorization_code")
                                 append("code", code)
-                                append("client_id", "luna-mcp-client")
+                                append("client_id", clientId)
+                                append("client_secret", secret)
                                 append("redirect_uri", "https://oauth-redirect.googleusercontent.com/r/test")
                             },
                         ),
@@ -1042,7 +1076,8 @@ class McpOAuthServerTest {
                             io.ktor.http.parameters {
                                 append("grant_type", "refresh_token")
                                 append("refresh_token", refreshToken)
-                                append("client_id", "luna-mcp-client")
+                                append("client_id", clientId)
+                                append("client_secret", secret)
                             },
                         ),
                     )

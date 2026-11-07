@@ -1,10 +1,26 @@
 package luna.mcp.server
 
+import org.jetbrains.exposed.v1.core.Table
+import org.jetbrains.exposed.v1.core.eq
+import org.jetbrains.exposed.v1.jdbc.SchemaUtils
+import org.jetbrains.exposed.v1.jdbc.deleteWhere
+import org.jetbrains.exposed.v1.jdbc.insert
+import org.jetbrains.exposed.v1.jdbc.selectAll
+import org.jetbrains.exposed.v1.jdbc.transactions.transaction
 import java.nio.charset.StandardCharsets
 import java.security.MessageDigest
 import java.security.SecureRandom
 import java.util.Base64
-import java.util.UUID
+
+object McpOAuthTokensTable : Table("mcp_oauth_tokens") {
+    val token = varchar("token", 128)
+    val refreshToken = varchar("refresh_token", 128).uniqueIndex()
+    val clientId = varchar("client_id", 64).index()
+    val expiresAt = long("expires_at")
+    val issuedAt = long("issued_at")
+
+    override val primaryKey = PrimaryKey(token)
+}
 
 data class AuthorizationCode(
     val code: String,
@@ -25,12 +41,35 @@ data class AccessToken(
 
 class McpOAuthProvider(
     val config: McpOAuthConfig = McpOAuthConfig(),
-    var clientRepository: McpClientRepository? = null,
+    clientRepository: McpClientRepository? = null,
     private val maxCodes: Int = MAX_AUTH_CODES,
     private val maxTokens: Int = MAX_ACCESS_TOKENS,
 ) {
     private val lock = Any()
     private val secureRandom = SecureRandom()
+
+    var clientRepository: McpClientRepository? = null
+        set(value) {
+            field = value
+            initTokenTable(value)
+        }
+
+    init {
+        this.clientRepository = clientRepository
+    }
+
+    private fun initTokenTable(repo: McpClientRepository?) {
+        repo?.let {
+            transaction(it.database) {
+                if (db.vendor.contains("sqlite", ignoreCase = true)) {
+                    exec("PRAGMA journal_mode=WAL;")
+                    exec("PRAGMA busy_timeout=5000;")
+                }
+                @Suppress("DEPRECATION")
+                SchemaUtils.createMissingTablesAndColumns(McpOAuthTokensTable)
+            }
+        }
+    }
 
     private val authCodes: MutableMap<String, AuthorizationCode> =
         object : LinkedHashMap<String, AuthorizationCode>(maxCodes, 0.75f, true) {
@@ -146,6 +185,19 @@ class McpOAuthProvider(
             accessTokens[token] = accessToken
             refreshTokens[refreshToken] = token
         }
+
+        clientRepository?.let { repo ->
+            transaction(repo.database) {
+                McpOAuthTokensTable.insert {
+                    it[McpOAuthTokensTable.token] = token
+                    it[McpOAuthTokensTable.refreshToken] = refreshToken
+                    it[McpOAuthTokensTable.clientId] = clientId
+                    it[McpOAuthTokensTable.expiresAt] = expiresAt
+                    it[McpOAuthTokensTable.issuedAt] = accessToken.issuedAt
+                }
+            }
+        }
+
         return accessToken
     }
 
@@ -153,10 +205,54 @@ class McpOAuthProvider(
         refreshToken: String,
         clientId: String?,
     ): AccessToken? {
-        val oldToken = synchronized(lock) { refreshTokens[refreshToken] } ?: return null
-        val oldAccessToken = synchronized(lock) { accessTokens[oldToken] } ?: return null
-        if (clientId != null && clientId != oldAccessToken.clientId) {
+        var oldToken = synchronized(lock) { refreshTokens[refreshToken] }
+        var oldAccessToken = synchronized(lock) { oldToken?.let { accessTokens[it] } }
+
+        if (oldAccessToken == null) {
+            clientRepository?.let { repo ->
+                transaction(repo.database) {
+                    val row =
+                        McpOAuthTokensTable
+                            .selectAll()
+                            .where { McpOAuthTokensTable.refreshToken eq refreshToken }
+                            .singleOrNull()
+                    if (row != null) {
+                        oldToken = row[McpOAuthTokensTable.token]
+                        oldAccessToken =
+                            AccessToken(
+                                token = row[McpOAuthTokensTable.token],
+                                refreshToken = row[McpOAuthTokensTable.refreshToken],
+                                clientId = row[McpOAuthTokensTable.clientId],
+                                expiresAt = row[McpOAuthTokensTable.expiresAt],
+                                issuedAt = row[McpOAuthTokensTable.issuedAt],
+                            )
+                    }
+                }
+            }
+        }
+
+        val currentOldToken = oldAccessToken ?: return null
+        if (clientId != null && clientId != currentOldToken.clientId) {
             return null
+        }
+
+        val effectiveClientId = currentOldToken.clientId
+
+        val repo = clientRepository
+        if (repo != null) {
+            val clientRecord = repo.findByClientId(effectiveClientId)
+            if (clientRecord == null || currentOldToken.issuedAt < clientRecord.updatedAt) {
+                oldToken?.let { tok ->
+                    synchronized(lock) {
+                        accessTokens.remove(tok)
+                        refreshTokens.remove(refreshToken)
+                    }
+                    transaction(repo.database) {
+                        McpOAuthTokensTable.deleteWhere { McpOAuthTokensTable.token eq tok }
+                    }
+                }
+                return null
+            }
         }
 
         val randomBytes = ByteArray(32)
@@ -168,15 +264,31 @@ class McpOAuthProvider(
             AccessToken(
                 token = newToken,
                 refreshToken = refreshToken,
-                clientId = oldAccessToken.clientId,
+                clientId = effectiveClientId,
                 expiresAt = expiresAt,
             )
 
         synchronized(lock) {
-            accessTokens.remove(oldToken)
+            oldToken?.let { accessTokens.remove(it) }
             accessTokens[newToken] = newAccessToken
             refreshTokens[refreshToken] = newToken
         }
+
+        repo?.let {
+            transaction(it.database) {
+                oldToken?.let { tok ->
+                    McpOAuthTokensTable.deleteWhere { McpOAuthTokensTable.token eq tok }
+                }
+                McpOAuthTokensTable.insert {
+                    it[McpOAuthTokensTable.token] = newToken
+                    it[McpOAuthTokensTable.refreshToken] = refreshToken
+                    it[McpOAuthTokensTable.clientId] = effectiveClientId
+                    it[McpOAuthTokensTable.expiresAt] = expiresAt
+                    it[McpOAuthTokensTable.issuedAt] = newAccessToken.issuedAt
+                }
+            }
+        }
+
         return newAccessToken
     }
 
@@ -184,64 +296,80 @@ class McpOAuthProvider(
 
     fun isValidClientId(clientId: String?): Boolean {
         if (clientId.isNullOrBlank()) return false
-        if (clientRepository?.findByClientId(clientId) != null) return true
-        return !config.clientId.isNullOrBlank() && clientId == config.clientId
+        return clientRepository?.findByClientId(clientId) != null
     }
 
     fun verifyClientSecret(
         clientId: String,
         clientSecret: String?,
     ): Boolean {
-        val dynamicClient = findClient(clientId)
-        if (dynamicClient != null) {
-            if (clientSecret.isNullOrBlank()) return false
-            return McpOAuthSecurity.verifySecret(clientSecret, dynamicClient.secretSalt, dynamicClient.secretHash)
-        }
-        if (!config.clientId.isNullOrBlank() && clientId == config.clientId) {
-            if (!config.clientSecret.isNullOrBlank()) {
-                return clientSecret != null &&
-                    MessageDigest.isEqual(
-                        clientSecret.toByteArray(StandardCharsets.UTF_8),
-                        config.clientSecret.toByteArray(StandardCharsets.UTF_8),
-                    )
-            }
-            return true
-        }
-        return false
+        if (clientSecret.isNullOrBlank()) return false
+        val dynamicClient = findClient(clientId) ?: return false
+        return McpOAuthSecurity.verifySecret(clientSecret, dynamicClient.secretSalt, dynamicClient.secretHash)
     }
 
     fun getClientIdFromToken(token: String?): String? {
         if (token.isNullOrBlank()) return null
-        if (!config.staticAuthToken.isNullOrBlank() && token == config.staticAuthToken) {
-            return config.clientId
+
+        var accessToken = synchronized(lock) { accessTokens[token] }
+        if (accessToken == null) {
+            clientRepository?.let { repo ->
+                transaction(repo.database) {
+                    val row =
+                        McpOAuthTokensTable
+                            .selectAll()
+                            .where { McpOAuthTokensTable.token eq token }
+                            .singleOrNull()
+                    if (row != null) {
+                        accessToken =
+                            AccessToken(
+                                token = row[McpOAuthTokensTable.token],
+                                refreshToken = row[McpOAuthTokensTable.refreshToken],
+                                clientId = row[McpOAuthTokensTable.clientId],
+                                expiresAt = row[McpOAuthTokensTable.expiresAt],
+                                issuedAt = row[McpOAuthTokensTable.issuedAt],
+                            )
+                    }
+                }
+            }
         }
 
-        val accessToken =
-            synchronized(lock) {
-                accessTokens[token]
-            } ?: return null
+        val currentToken = accessToken ?: return null
 
-        if (System.currentTimeMillis() > accessToken.expiresAt) {
+        if (System.currentTimeMillis() > currentToken.expiresAt) {
             synchronized(lock) {
                 accessTokens.remove(token)
-                refreshTokens.remove(accessToken.refreshToken)
+                refreshTokens.remove(currentToken.refreshToken)
+            }
+            clientRepository?.let { repo ->
+                transaction(repo.database) {
+                    McpOAuthTokensTable.deleteWhere { McpOAuthTokensTable.token eq token }
+                }
             }
             return null
         }
 
         val repo = clientRepository
-        if (repo != null && accessToken.clientId != config.clientId) {
-            val clientRecord = repo.findByClientId(accessToken.clientId)
-            if (clientRecord == null || accessToken.issuedAt < clientRecord.updatedAt) {
+        if (repo != null) {
+            val clientRecord = repo.findByClientId(currentToken.clientId)
+            if (clientRecord == null || currentToken.issuedAt < clientRecord.updatedAt) {
                 synchronized(lock) {
                     accessTokens.remove(token)
-                    refreshTokens.remove(accessToken.refreshToken)
+                    refreshTokens.remove(currentToken.refreshToken)
+                }
+                transaction(repo.database) {
+                    McpOAuthTokensTable.deleteWhere { McpOAuthTokensTable.token eq token }
                 }
                 return null
             }
         }
 
-        return accessToken.clientId
+        synchronized(lock) {
+            accessTokens[token] = currentToken
+            refreshTokens[currentToken.refreshToken] = token
+        }
+
+        return currentToken.clientId
     }
 
     fun isValidAccessToken(token: String?): Boolean = getClientIdFromToken(token) != null
@@ -254,6 +382,11 @@ class McpOAuthProvider(
                 refreshTokens.remove(at.refreshToken)
             }
             authCodes.entries.removeIf { it.value.clientId == clientId }
+        }
+        clientRepository?.let { repo ->
+            transaction(repo.database) {
+                McpOAuthTokensTable.deleteWhere { McpOAuthTokensTable.clientId eq clientId }
+            }
         }
     }
 
