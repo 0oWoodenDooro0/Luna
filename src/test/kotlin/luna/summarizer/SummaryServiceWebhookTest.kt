@@ -117,7 +117,7 @@ class SummaryServiceWebhookTest {
 
             var capturedInput: SummaryInput? = null
             coEvery {
-                summarizer.summarize(any<SummaryInput>())
+                summarizer.summarize(any<SummaryInput>(), any())
             } answers {
                 capturedInput = firstArg<SummaryInput>()
                 SummaryResult.Success("TL;DR summary of clean post")
@@ -135,7 +135,7 @@ class SummaryServiceWebhookTest {
 
             service.handleReaction(event)
 
-            coVerify(exactly = 1) { summarizer.summarize(any<SummaryInput>()) }
+            coVerify(exactly = 1) { summarizer.summarize(any<SummaryInput>(), any()) }
             assertEquals(targetMsg, repliedMessage)
             assertEquals("TL;DR summary of clean post", replyContent)
             assertEquals(SummaryStatus.DONE, service.getStatus(targetMsg.id))
@@ -186,7 +186,7 @@ class SummaryServiceWebhookTest {
                 )
 
             coEvery {
-                summarizer.summarize(any<SummaryInput>())
+                summarizer.summarize(any<SummaryInput>(), any())
             } returns SummaryResult.Success("TL;DR summary of clean post")
 
             val user = mockk<User>()
@@ -201,7 +201,7 @@ class SummaryServiceWebhookTest {
 
             service.handleReaction(event)
 
-            coVerify(exactly = 1) { summarizer.summarize(match<SummaryInput> { it.url == "https://example.com/post" }) }
+            coVerify(exactly = 1) { summarizer.summarize(match<SummaryInput> { it.url == "https://example.com/post" }, any()) }
             assertEquals(targetMsg, repliedMessage)
             assertEquals("TL;DR summary of clean post", replyContent)
             assertEquals(SummaryStatus.DONE, service.getStatus(targetMsg.id))
@@ -214,7 +214,7 @@ class SummaryServiceWebhookTest {
             val summarizer = mockk<GeminiSummarizer>()
             var capturedInput: SummaryInput? = null
             coEvery {
-                summarizer.summarize(any<SummaryInput>())
+                summarizer.summarize(any<SummaryInput>(), any())
             } answers {
                 capturedInput = firstArg<SummaryInput>()
                 SummaryResult.Success("Slice summary")
@@ -259,7 +259,7 @@ class SummaryServiceWebhookTest {
 
             service.handleReaction(event)
 
-            coVerify(exactly = 1) { summarizer.summarize(any<SummaryInput>()) }
+            coVerify(exactly = 1) { summarizer.summarize(any<SummaryInput>(), any()) }
             assertNotNull(capturedInput)
             assertTrue(capturedInput.content.contains("[MasqueradedBob]: Interesting discussion context"))
             assertTrue(capturedInput.content.contains("[Charlie]: Agreed with the above"))
@@ -298,7 +298,7 @@ class SummaryServiceWebhookTest {
 
             service.handleReaction(event)
 
-            coVerify(exactly = 0) { summarizer.summarize(any<SummaryInput>()) }
+            coVerify(exactly = 0) { summarizer.summarize(any<SummaryInput>(), any()) }
             assertFalse(replyCalled)
             assertNull(service.getStatus(thirdPartyMsg.id))
         }
@@ -309,7 +309,7 @@ class SummaryServiceWebhookTest {
             val lunaWebhookId = Snowflake(777L)
             val queryCount = AtomicInteger(0)
             val summarizer = mockk<GeminiSummarizer>()
-            coEvery { summarizer.summarize(any<SummaryInput>()) } returns SummaryResult.Success("Summary")
+            coEvery { summarizer.summarize(any<SummaryInput>(), any()) } returns SummaryResult.Success("Summary")
 
             val service =
                 SummaryService(
@@ -429,7 +429,7 @@ class SummaryServiceWebhookTest {
                 )
 
             coEvery {
-                summarizer.summarize(any<SummaryInput>())
+                summarizer.summarize(any<SummaryInput>(), any())
             } answers {
                 capturedInput = firstArg<SummaryInput>()
                 SummaryResult.Success("TL;DR: Summary of discussion and article")
@@ -446,12 +446,12 @@ class SummaryServiceWebhookTest {
             coEvery { event.getMessageOrNull() } returns targetMsg
 
             // Verify a: The Luna Webhook message is retained in precedingMessages
-            val precedingMessages = service.retrievePrecedingMessages(targetMsg)
+            val precedingMessages = service.collector.retrievePrecedingMessages(targetMsg)
             assertEquals(listOf(webhookMsg, userMsg1), precedingMessages)
 
             service.handleReaction(event)
 
-            coVerify(exactly = 1) { summarizer.summarize(any<SummaryInput>()) }
+            coVerify(exactly = 1) { summarizer.summarize(any<SummaryInput>(), any()) }
             val input = capturedInput
             assertNotNull(input)
 
@@ -550,7 +550,7 @@ class SummaryServiceWebhookTest {
                 )
 
             coEvery {
-                summarizer.summarize(any<SummaryInput>())
+                summarizer.summarize(any<SummaryInput>(), any())
             } answers {
                 capturedInput = firstArg<SummaryInput>()
                 SummaryResult.Success("TL;DR: Proposal discussion summary")
@@ -567,13 +567,13 @@ class SummaryServiceWebhookTest {
             coEvery { event.getMessageOrNull() } returns targetMsg
 
             // Verify precedingMessages excludes third-party webhook and includes Luna webhook and humans
-            val precedingMessages = service.retrievePrecedingMessages(targetMsg)
+            val precedingMessages = service.collector.retrievePrecedingMessages(targetMsg)
             assertEquals(listOf(msg1, lunaWebhook, msg2), precedingMessages)
             assertFalse(precedingMessages.contains(githubBot))
 
             service.handleReaction(event)
 
-            coVerify(exactly = 1) { summarizer.summarize(any<SummaryInput>()) }
+            coVerify(exactly = 1) { summarizer.summarize(any<SummaryInput>(), any()) }
             val input = capturedInput
             assertNotNull(input)
 
@@ -680,7 +680,7 @@ class SummaryServiceWebhookTest {
                 )
 
             coEvery {
-                summarizer.summarize(any<SummaryInput>())
+                summarizer.summarize(any<SummaryInput>(), any())
             } answers {
                 capturedInput = firstArg<SummaryInput>()
                 SummaryResult.Success("TL;DR: Summary of new topic")
@@ -697,12 +697,12 @@ class SummaryServiceWebhookTest {
             coEvery { event.getMessageOrNull() } returns targetMsg
 
             // Verify history backtracking stopped at bot summary without crashing on webhook entries
-            val precedingMessages = service.retrievePrecedingMessages(targetMsg)
+            val precedingMessages = service.collector.retrievePrecedingMessages(targetMsg)
             assertEquals(listOf(lunaWebhook, msg1), precedingMessages)
 
             service.handleReaction(event)
 
-            coVerify(exactly = 1) { summarizer.summarize(any<SummaryInput>()) }
+            coVerify(exactly = 1) { summarizer.summarize(any<SummaryInput>(), any()) }
             val input = capturedInput
             assertNotNull(input)
 
@@ -764,7 +764,7 @@ class SummaryServiceWebhookTest {
                 )
 
             coEvery {
-                summarizer.summarize(any<SummaryInput>())
+                summarizer.summarize(any<SummaryInput>(), any())
             } answers {
                 capturedInput = firstArg<SummaryInput>()
                 SummaryResult.Success("TL;DR: Summary")
@@ -780,7 +780,7 @@ class SummaryServiceWebhookTest {
             coEvery { event.getUserOrNull() } returns user
             coEvery { event.getMessageOrNull() } returns targetMsg
 
-            val precedingMessages = service.retrievePrecedingMessages(targetMsg)
+            val precedingMessages = service.collector.retrievePrecedingMessages(targetMsg)
             assertEquals(listOf(msg0, webhookWithTldr), precedingMessages)
 
             service.handleReaction(event)
@@ -801,7 +801,7 @@ class SummaryServiceWebhookTest {
             val summarizer = mockk<GeminiSummarizer>()
             var capturedInput: SummaryInput? = null
             coEvery {
-                summarizer.summarize(any<SummaryInput>())
+                summarizer.summarize(any<SummaryInput>(), any())
             } answers {
                 capturedInput = firstArg<SummaryInput>()
                 SummaryResult.Success("Slice summary")
@@ -843,7 +843,7 @@ class SummaryServiceWebhookTest {
             val event = SummaryTestFixtures.createMockReactionEvent(targetMsg)
             service.handleReaction(event)
 
-            coVerify(exactly = 1) { summarizer.summarize(any<SummaryInput>()) }
+            coVerify(exactly = 1) { summarizer.summarize(any<SummaryInput>(), any()) }
             val input = capturedInput
             assertNotNull(input)
             assertTrue(
@@ -863,7 +863,7 @@ class SummaryServiceWebhookTest {
             val summarizer = mockk<GeminiSummarizer>()
             var capturedInput: SummaryInput? = null
             coEvery {
-                summarizer.summarize(any<SummaryInput>())
+                summarizer.summarize(any<SummaryInput>(), any())
             } answers {
                 capturedInput = firstArg<SummaryInput>()
                 SummaryResult.Success("Slice summary")
@@ -928,7 +928,7 @@ class SummaryServiceWebhookTest {
             val summarizer = mockk<GeminiSummarizer>()
             var capturedInput: SummaryInput? = null
             coEvery {
-                summarizer.summarize(any<SummaryInput>())
+                summarizer.summarize(any<SummaryInput>(), any())
             } answers {
                 capturedInput = firstArg<SummaryInput>()
                 SummaryResult.Success("Slice summary")
@@ -993,7 +993,7 @@ class SummaryServiceWebhookTest {
 
             val summarizer = mockk<GeminiSummarizer>()
             coEvery {
-                summarizer.summarize(any<SummaryInput>())
+                summarizer.summarize(any<SummaryInput>(), any())
             } returns SummaryResult.Success("Summary text")
 
             val targetMsg =
@@ -1030,7 +1030,7 @@ class SummaryServiceWebhookTest {
             val summarizer = mockk<GeminiSummarizer>()
             var capturedInput: SummaryInput? = null
             coEvery {
-                summarizer.summarize(any<SummaryInput>())
+                summarizer.summarize(any<SummaryInput>(), any())
             } answers {
                 capturedInput = firstArg<SummaryInput>()
                 SummaryResult.Success("Single message summary")
