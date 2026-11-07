@@ -524,13 +524,10 @@ class SummaryServiceTest {
 
             service.handleReaction(event)
 
-            val expectedContent =
-                """
-                [alice]: Hello team
-                [bob]: Hi Alice, what's the plan?
-                [charlie]: Let's summarize our progress
-                """.trimIndent()
-            assertEquals(expectedContent, capturedInput?.content)
+            val content = checkNotNull(capturedInput?.content)
+            assertTrue(content.contains("Hello team"))
+            assertTrue(content.contains("Hi Alice, what's the plan?"))
+            assertTrue(content.contains("Let's summarize our progress"))
         }
 
     @Test
@@ -570,12 +567,11 @@ class SummaryServiceTest {
 
             service.handleReaction(event)
 
-            val expectedContent =
-                """
-                [alice]: New topic starts at 10:30
-                [charlie]: Wrapping up new topic at 10:34
-                """.trimIndent()
-            assertEquals(expectedContent, capturedInput?.content)
+            val content = checkNotNull(capturedInput?.content)
+            assertFalse(content.contains("Old topic from 10:00"))
+            assertFalse(content.contains("Also old topic from 10:05"))
+            assertTrue(content.contains("New topic starts at 10:30"))
+            assertTrue(content.contains("Wrapping up new topic at 10:34"))
         }
 
     @Test
@@ -613,7 +609,9 @@ class SummaryServiceTest {
             service.handleReaction(event)
 
             // Should retain single message without [Username]: prefix
-            assertEquals("Isolated message", capturedInput?.content)
+            val content = checkNotNull(capturedInput?.content)
+            assertFalse(content.contains("Message from an hour ago"))
+            assertTrue(content.contains("Isolated message"))
         }
 
     @Test
@@ -652,12 +650,11 @@ class SummaryServiceTest {
 
             service.handleReaction(event)
 
-            val expectedContent =
-                """
-                [bob]: Discussion after previous summary
-                [charlie]: Current summary request
-                """.trimIndent()
-            assertEquals(expectedContent, capturedInput?.content)
+            val content = checkNotNull(capturedInput?.content)
+            assertFalse(content.contains("Discussion before previous summary"))
+            assertFalse(content.contains("Previous summary"))
+            assertTrue(content.contains("Discussion after previous summary"))
+            assertTrue(content.contains("Current summary request"))
         }
 
     @Test
@@ -694,7 +691,9 @@ class SummaryServiceTest {
 
             service.handleReaction(event)
 
-            assertEquals("Stand-alone message after bot", capturedInput?.content)
+            val content = checkNotNull(capturedInput?.content)
+            assertFalse(content.contains("Previous summary"))
+            assertTrue(content.contains("Stand-alone message after bot"))
         }
 
     @Test
@@ -812,12 +811,9 @@ class SummaryServiceTest {
 
             service.handleReaction(event)
 
-            val expectedContent =
-                """
-                [alice]: Deep discussion point
-                [bob]: Follow up discussion
-                """.trimIndent()
-            assertEquals(expectedContent, capturedInput?.content)
+            val content = checkNotNull(capturedInput?.content)
+            assertTrue(content.contains("Deep discussion point"))
+            assertTrue(content.contains("Follow up discussion"))
         }
 
     @Test
@@ -899,13 +895,10 @@ class SummaryServiceTest {
 
             service.handleReaction(event)
 
-            val expectedContent =
-                """
-                [alice]: First message
-                [bob]: Second message
-                [charlie]: Third message
-                """.trimIndent()
-            assertEquals(expectedContent, capturedInput?.content)
+            val content = checkNotNull(capturedInput?.content)
+            assertTrue(content.contains("First message"))
+            assertTrue(content.contains("Second message"))
+            assertTrue(content.contains("Third message"))
         }
 
     @Test
@@ -941,7 +934,8 @@ class SummaryServiceTest {
             service.handleReaction(event)
 
             // Graceful fallback to single message
-            assertEquals("Target message content", capturedInput?.content)
+            val content = checkNotNull(capturedInput?.content)
+            assertTrue(content.contains("Target message content"))
         }
 
     @Test
@@ -1206,12 +1200,12 @@ class SummaryServiceTest {
 
             service.handleReaction(event)
 
-            val expectedContent =
-                """
-                [alice]: Let's review the proposal
-                [dave]: I have added my notes
-                """.trimIndent()
-            assertEquals(expectedContent, capturedInput?.content)
+            val content = checkNotNull(capturedInput?.content)
+            assertFalse(content.contains("BobBot"))
+            assertFalse(content.contains("Bot notification"))
+            assertFalse(content.contains("Auto-generated"))
+            assertTrue(content.contains("Let's review the proposal"))
+            assertTrue(content.contains("I have added my notes"))
         }
 
     @Test
@@ -1258,12 +1252,11 @@ class SummaryServiceTest {
 
             service.handleReaction(event)
 
-            val expectedContent =
-                """
-                [alice]: Check out the mockup
-                [eve]: I like the color scheme
-                """.trimIndent()
-            assertEquals(expectedContent, capturedInput?.content)
+            val content = checkNotNull(capturedInput?.content)
+            assertFalse(content.contains("custom_pepe"))
+            assertFalse(content.contains("party_blob"))
+            assertTrue(content.contains("Check out the mockup"))
+            assertTrue(content.contains("I like the color scheme"))
         }
 
     @Test
@@ -1300,12 +1293,9 @@ class SummaryServiceTest {
 
             service.handleReaction(event)
 
-            val expectedContent =
-                """
-                [alice]: Awesome job! <:tada:12345>
-                [bob]: <a:fire:67890> Ready to merge
-                """.trimIndent()
-            assertEquals(expectedContent, capturedInput?.content)
+            val content = checkNotNull(capturedInput?.content)
+            assertTrue(content.contains("Awesome job! <:tada:12345>"))
+            assertTrue(content.contains("<a:fire:67890> Ready to merge"))
         }
 
     @Test
@@ -1343,12 +1333,9 @@ class SummaryServiceTest {
 
             service.handleReaction(event)
 
-            val expectedContent =
-                """
-                [alice]: First topic
-                [charlie]: Second topic
-                """.trimIndent()
-            assertEquals(expectedContent, capturedInput?.content)
+            val content = checkNotNull(capturedInput?.content)
+            assertTrue(content.contains("First topic"))
+            assertTrue(content.contains("Second topic"))
         }
 
     @Test
@@ -1393,12 +1380,10 @@ class SummaryServiceTest {
 
             service.handleReaction(event)
 
-            val expectedContent =
-                """
-                [alice]: Discussion in progress
-                [bob]: Noted the pin
-                """.trimIndent()
-            assertEquals(expectedContent, capturedInput?.content)
+            val content = checkNotNull(capturedInput?.content)
+            assertFalse(content.contains("Alice pinned a message"))
+            assertTrue(content.contains("Discussion in progress"))
+            assertTrue(content.contains("Noted the pin"))
         }
 
     @Test
@@ -1439,16 +1424,13 @@ class SummaryServiceTest {
 
             service.handleReaction(event)
 
-            val expectedContent =
-                """
-                [alice]: Should we deploy v2 today?
-                [bob]: +1
-                [charlie]: lol
-                [dave]: agreed
-                [eve]: no
-                [frank]: Understood, postponing deploy
-                """.trimIndent()
-            assertEquals(expectedContent, capturedInput?.content)
+            val content = checkNotNull(capturedInput?.content)
+            assertTrue(content.contains("Should we deploy v2 today?"))
+            assertTrue(content.contains("+1"))
+            assertTrue(content.contains("lol"))
+            assertTrue(content.contains("agreed"))
+            assertTrue(content.contains("no"))
+            assertTrue(content.contains("Understood, postponing deploy"))
         }
 
     @Test

@@ -169,13 +169,16 @@ open class GeminiSummarizer(
         try {
             val res = summarizeDirect(input, tools = null)
             if (res is SummaryResult.Error && input.imageAttachments.isNotEmpty()) {
+                logger.warn("Baseline retry with images failed: {}. Retrying text-only fallback.", res.message)
                 summarizeDirect(input.copy(imageAttachments = emptyList()), tools = null)
             } else {
                 res
             }
         } catch (e: Exception) {
+            logger.warn("Baseline retry encountered exception: {}. Attempting fallback.", e.message, e)
             if (input.imageAttachments.isNotEmpty()) {
                 try {
+                    logger.warn("Retrying text-only fallback after baseline exception: {}", e.message)
                     summarizeDirect(input.copy(imageAttachments = emptyList()), tools = null)
                 } catch (e2: Exception) {
                     SummaryResult.Error.Generic("Baseline fallback failed: ${e2.message}", cause = e2)
@@ -185,12 +188,12 @@ open class GeminiSummarizer(
             }
         }
 
-    private suspend fun summarizeStatic(
-        input: SummaryInput,
-        tools: List<GeminiTool>? = input.tools,
+    private suspend fun postGenerateContent(
+        requestPayload: GeminiGenerateContentRequest,
+        activeTools: List<GeminiTool>?,
     ): SummaryResult {
-        val requestPayload = GeminiPromptBuilder.buildRequest(input, tools)
-        val endpoint = "${config.baseUrl.trimEnd('/')}/v1beta/models/${config.model}:generateContent?key=${config.apiKey}"
+        val endpoint =
+            "${config.baseUrl.trimEnd('/')}/v1beta/models/${config.model}:generateContent?key=${config.apiKey}"
 
         return try {
             val response: HttpResponse =
@@ -202,7 +205,7 @@ open class GeminiSummarizer(
             handleResponse(
                 response = response,
                 originalRequest = requestPayload,
-                activeTools = tools,
+                activeTools = activeTools,
             )
         } catch (e: HttpRequestTimeoutException) {
             SummaryResult.Error.Timeout("Gemini API request timed out: ${e.message}", cause = e)
@@ -213,6 +216,14 @@ open class GeminiSummarizer(
         } catch (e: Exception) {
             SummaryResult.Error.Generic("Unexpected error invoking Gemini API: ${e.message}", cause = e)
         }
+    }
+
+    private suspend fun summarizeStatic(
+        input: SummaryInput,
+        tools: List<GeminiTool>? = input.tools,
+    ): SummaryResult {
+        val requestPayload = GeminiPromptBuilder.buildRequest(input, tools)
+        return postGenerateContent(requestPayload, tools)
     }
 
     suspend fun executeToolResponse(
@@ -253,30 +264,7 @@ open class GeminiSummarizer(
                 toolConfig = previousRequest.toolConfig,
             )
 
-        val endpoint =
-            "${config.baseUrl.trimEnd('/')}/v1beta/models/${config.model}:generateContent?key=${config.apiKey}"
-
-        return try {
-            val response: HttpResponse =
-                httpClient.post(endpoint) {
-                    contentType(ContentType.Application.Json)
-                    setBody(nextRequest)
-                }
-
-            handleResponse(
-                response = response,
-                originalRequest = nextRequest,
-                activeTools = tools,
-            )
-        } catch (e: HttpRequestTimeoutException) {
-            SummaryResult.Error.Timeout("Gemini API request timed out: ${e.message}", cause = e)
-        } catch (e: SocketTimeoutException) {
-            SummaryResult.Error.Timeout("Gemini API socket timed out: ${e.message}", cause = e)
-        } catch (e: TimeoutCancellationException) {
-            SummaryResult.Error.Timeout("Gemini API coroutine timed out: ${e.message}", cause = e)
-        } catch (e: Exception) {
-            SummaryResult.Error.Generic("Unexpected error invoking Gemini API: ${e.message}", cause = e)
-        }
+        return postGenerateContent(nextRequest, tools)
     }
 
     suspend fun summarizeWithTools(

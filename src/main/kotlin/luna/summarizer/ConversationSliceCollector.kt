@@ -1,6 +1,7 @@
 package luna.summarizer
 
 import dev.kord.common.entity.Snowflake
+import dev.kord.core.Kord
 import dev.kord.core.entity.Message
 import dev.socialpeek.SocialPeek
 import dev.socialpeek.model.PeekPost
@@ -16,13 +17,11 @@ import kotlin.time.Duration.Companion.minutes
  * @property summaryInput Formatted input payload including dialogue transcript and media attachments.
  * @property primaryUrl Extracted primary link if a web URL was detected in the slice.
  * @property durationExceeded True if a linked YouTube video exceeds the 2-hour processing limit.
- * @property lookbackProvider Optional callback to fetch earlier conversational context on demand.
  */
 data class PreparedConversationSlice(
     val summaryInput: SummaryInput,
     val primaryUrl: String? = null,
     val durationExceeded: Boolean = false,
-    val lookbackProvider: (suspend (reason: String) -> String?)? = null,
 )
 
 /**
@@ -47,11 +46,19 @@ open class ConversationSliceCollector(
 ) {
     private val logger = LoggerFactory.getLogger(ConversationSliceCollector::class.java)
 
-    suspend fun isNoiseMessage(message: Message): Boolean = noiseFilter.isNoiseMessage(message)
+    fun setKord(kord: Kord) {
+        noiseFilter.setKord(kord)
+    }
 
-    suspend fun isBotSummaryMessage(message: Message): Boolean = noiseFilter.isBotSummaryMessage(message)
+    fun clearCache() {
+        noiseFilter.clearWebhookCache()
+    }
 
-    fun extractImageAttachments(message: Message): List<ChatImageAttachment> {
+    internal suspend fun isNoiseMessage(message: Message): Boolean = noiseFilter.isNoiseMessage(message)
+
+    internal suspend fun isBotSummaryMessage(message: Message): Boolean = noiseFilter.isBotSummaryMessage(message)
+
+    internal fun extractImageAttachments(message: Message): List<ChatImageAttachment> {
         val attachments = runCatching { message.attachments }.getOrElse { emptySet() }
         if (attachments.isEmpty()) return emptyList()
 
@@ -230,11 +237,27 @@ open class ConversationSliceCollector(
                 ),
             primaryUrl = primaryUrl,
             durationExceeded = false,
-            lookbackProvider = lookbackProvider,
         )
     }
 
-    suspend fun retrieveContextMessagesWithHistory(targetMessage: Message): Pair<List<Message>, List<Message>> {
+    private fun normalizeChronologicalOrder(messages: List<Message>): List<Message> {
+        if (messages.size < 2) return messages
+        val firstTime = runCatching { messages.first().timestamp }.getOrNull()
+        val lastTime = runCatching { messages.last().timestamp }.getOrNull()
+        return if (firstTime != null && lastTime != null && firstTime > lastTime) {
+            messages.reversed()
+        } else {
+            val firstId = runCatching { messages.first().id }.getOrNull()
+            val lastId = runCatching { messages.last().id }.getOrNull()
+            if (firstId != null && lastId != null && firstId > lastId) {
+                messages.reversed()
+            } else {
+                messages
+            }
+        }
+    }
+
+    internal suspend fun retrieveContextMessagesWithHistory(targetMessage: Message): Pair<List<Message>, List<Message>> {
         val rawHistory =
             runCatching {
                 historyFetcher(targetMessage, maxHistoryMessages)
@@ -247,24 +270,7 @@ open class ConversationSliceCollector(
             return emptyList<Message>() to emptyList<Message>()
         }
 
-        val chronological =
-            if (rawHistory.size >= 2) {
-                val firstTime = runCatching { rawHistory.first().timestamp }.getOrNull()
-                val lastTime = runCatching { rawHistory.last().timestamp }.getOrNull()
-                if (firstTime != null && lastTime != null && firstTime > lastTime) {
-                    rawHistory.reversed()
-                } else {
-                    val firstId = runCatching { rawHistory.first().id }.getOrNull()
-                    val lastId = runCatching { rawHistory.last().id }.getOrNull()
-                    if (firstId != null && lastId != null && firstId > lastId) {
-                        rawHistory.reversed()
-                    } else {
-                        rawHistory
-                    }
-                }
-            } else {
-                rawHistory
-            }.takeLast(maxHistoryMessages)
+        val chronological = normalizeChronologicalOrder(rawHistory).takeLast(maxHistoryMessages)
 
         val acceptedPreceding = ArrayDeque<Message>()
         var referenceMessage = targetMessage
@@ -316,11 +322,12 @@ open class ConversationSliceCollector(
         return acceptedPreceding.toList() to unconsumed
     }
 
-    suspend fun retrieveContextMessages(targetMessage: Message): List<Message> = retrieveContextMessagesWithHistory(targetMessage).first
+    internal suspend fun retrieveContextMessages(targetMessage: Message): List<Message> = retrieveContextMessagesWithHistory(targetMessage).first
 
-    suspend fun retrievePrecedingMessages(targetMessage: Message): List<Message> = retrieveContextMessages(targetMessage).filterNot { isNoiseMessage(it) }
+    internal suspend fun retrievePrecedingMessages(targetMessage: Message): List<Message> =
+        retrieveContextMessages(targetMessage).filterNot { isNoiseMessage(it) }
 
-    suspend fun retrieveEarlierMessages(
+    internal suspend fun retrieveEarlierMessages(
         earliestBaselineMessage: Message,
         fallbackHistory: List<Message> = emptyList(),
     ): List<Message> {
@@ -332,24 +339,7 @@ open class ConversationSliceCollector(
                 emptyList()
             }
 
-        val normalizedFetched =
-            if (fetchedHistory.size >= 2) {
-                val firstTime = runCatching { fetchedHistory.first().timestamp }.getOrNull()
-                val lastTime = runCatching { fetchedHistory.last().timestamp }.getOrNull()
-                if (firstTime != null && lastTime != null && firstTime > lastTime) {
-                    fetchedHistory.reversed()
-                } else {
-                    val firstId = runCatching { fetchedHistory.first().id }.getOrNull()
-                    val lastId = runCatching { fetchedHistory.last().id }.getOrNull()
-                    if (firstId != null && lastId != null && firstId > lastId) {
-                        fetchedHistory.reversed()
-                    } else {
-                        fetchedHistory
-                    }
-                }
-            } else {
-                fetchedHistory
-            }
+        val normalizedFetched = normalizeChronologicalOrder(fetchedHistory)
 
         val candidateFromFetched =
             normalizedFetched.filter { msg ->
@@ -429,7 +419,7 @@ open class ConversationSliceCollector(
         return acceptedEarlier.filterNot { isNoiseMessage(it) }
     }
 
-    fun formatDialogueMessages(
+    internal fun formatDialogueMessages(
         messages: List<Message>,
         imagesByMessage: Map<Snowflake, List<ChatImageAttachment>> = emptyMap(),
         startingImageIndex: Int = 1,
@@ -477,7 +467,7 @@ open class ConversationSliceCollector(
         return formatted to imageIndex
     }
 
-    fun formatEmbedPreviews(message: Message): String {
+    internal fun formatEmbedPreviews(message: Message): String {
         val embeds = runCatching { message.embeds }.getOrNull() ?: return ""
         if (embeds.isEmpty()) return ""
 
@@ -495,7 +485,7 @@ open class ConversationSliceCollector(
         return previews.joinToString(" ")
     }
 
-    fun resolveAuthorName(message: Message): String =
+    internal fun resolveAuthorName(message: Message): String =
         message.author?.username
             ?: runCatching { message.data.author.username }.getOrNull()
             ?: "Unknown"

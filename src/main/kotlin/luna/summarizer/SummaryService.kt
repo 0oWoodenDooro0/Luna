@@ -125,24 +125,17 @@ class SummaryService(
         kord = kord,
     )
 
-    val maxHistoryMessages: Int get() = collector.maxHistoryMessages
-    val inactivityGap: Duration get() = collector.inactivityGap
-    val maxCharacterBudget: Int get() = collector.maxCharacterBudget
-    val maxImages: Int get() = collector.maxImages
-    val maxLookbackMessages: Int get() = collector.maxLookbackMessages
-    val noiseFilter: DialogueNoiseFilter get() = collector.noiseFilter
-
     fun register(kord: Kord) {
         this.kordInstance = kord
-        collector.noiseFilter.setKord(kord)
+        collector.setKord(kord)
         kord.on<ReactionAddEvent> {
             handleReaction(this)
         }
         logger.info(
             "SummaryService registered successfully with Summary Reaction emoji: {}, maxHistory: {}, inactivityGap: {}m",
             configuredEmoji ?: DEFAULT_EMOJI,
-            maxHistoryMessages,
-            inactivityGap.inWholeMinutes,
+            collector.maxHistoryMessages,
+            collector.inactivityGap.inWholeMinutes,
         )
     }
 
@@ -163,7 +156,7 @@ class SummaryService(
 
     fun clearCache() {
         statusCache.clear()
-        collector.noiseFilter.clearWebhookCache()
+        collector.clearCache()
     }
 
     fun truncateForDiscord(
