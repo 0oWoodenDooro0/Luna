@@ -21,7 +21,7 @@ data class McpWebhook(
 )
 
 class McpWebhookStorage(
-    private val database: Database,
+    internal val database: Database,
 ) {
     init {
         transaction(database) {

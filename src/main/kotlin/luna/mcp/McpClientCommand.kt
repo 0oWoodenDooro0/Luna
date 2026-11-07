@@ -15,6 +15,7 @@ class McpClientCommand(
     private val clientRepository: McpClientRepository,
     private val webhookRepository: McpWebhookRepository,
     private val publicBaseUrl: String = DEFAULT_PUBLIC_BASE_URL,
+    private val webhookCommand: McpWebhookCommand = McpWebhookCommand(clientRepository, webhookRepository),
 ) : Command {
     override val name: String = "mcp"
     override val description: String = "Manage Model Context Protocol (MCP) clients and webhooks"
@@ -29,30 +30,48 @@ class McpClientCommand(
                 }
                 subCommand("show", "Show your current MCP client ID and webhook quota usage") {}
             }
+            group("webhook", "Manage MCP channel webhooks") {
+                subCommand("add", "Add or auto-provision a Discord webhook for MCP") {
+                    string("tag", "Tag name for this webhook") {
+                        required = true
+                    }
+                    string("url", "Custom Discord Webhook URL (optional)") {
+                        required = false
+                    }
+                }
+                subCommand("list", "List all registered webhooks and quota usage") {}
+            }
         }
     }
 
     override suspend fun handle(interaction: ChatInputCommandInteraction) {
         val groupCommand = interaction.command as? GroupCommand
-        if (groupCommand == null || groupCommand.groupName != "client") {
-            interaction.respondEphemeral {
-                content = "Unknown command. Please use `/mcp client create` or `/mcp client show`."
-            }
-            return
-        }
+        when (groupCommand?.groupName) {
+            "client" -> {
+                when (groupCommand.name) {
+                    "create" -> {
+                        handleClientCreate(interaction, groupCommand)
+                    }
 
-        when (groupCommand.name) {
-            "create" -> {
-                handleClientCreate(interaction, groupCommand)
+                    "show" -> {
+                        handleClientShow(interaction)
+                    }
+
+                    else -> {
+                        interaction.respondEphemeral {
+                            content = "Unknown subcommand. Please use `/mcp client create` or `/mcp client show`."
+                        }
+                    }
+                }
             }
 
-            "show" -> {
-                handleClientShow(interaction)
+            "webhook" -> {
+                webhookCommand.handle(interaction)
             }
 
             else -> {
                 interaction.respondEphemeral {
-                    content = "Unknown subcommand. Please use `/mcp client create` or `/mcp client show`."
+                    content = "Unknown command. Please use `/mcp client create` or `/mcp client show`."
                 }
             }
         }
