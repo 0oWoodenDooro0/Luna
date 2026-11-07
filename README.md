@@ -115,7 +115,7 @@ Luna 與獨立運行的 MCP 伺服器支援分層組態配置（優先順序：`
 | 環境變數 | 狀態 | 預設值 | 說明與邊界限制 |
 | :--- | :---: | :--- | :--- |
 | `MCP_PORT` | 選填 | `8081` | MCP HTTP / SSE 伺服器通訊埠。有效範圍整數 `1-65535`，超出時快速失敗。Docker 映射 `${MCP_PORT:-8081}:8081`。 |
-| `MCP_DB_PATH` | 選填 | `./data/urls.db` | MCP 伺服器存取之 SQLite 資料庫檔案路徑（與 Luna 主機器人共享，支援 WAL 模式）。在 Docker 中為 `/app/data/urls.db`。 |
+| `MCP_DB_PATH` | 選填 | `./.data/luna.db` | MCP 伺服器存取之 SQLite 資料庫檔案路徑（與 Luna 主機器人共享，支援 WAL 模式）。在 Docker 中為 `/app/.data/luna.db`。 |
 | `MCP_PUBLIC_BASE_URL` | 選填 | `https://woodendoor.website` | MCP 伺服器對外公開基底網址，用於 OAuth 2.1 端點探索 (`/.well-known/oauth-authorization-server`)、Gemini 重導向驗證與 SSE 連線。 |
 
 ---
@@ -173,7 +173,7 @@ MCP 伺服器採用「標籤 (Tag)」機制精確路由不同頻道，防止跨�
 
 ### 3. 多程序 SQLite WAL 模式並發 (Multi-Process SQLite Concurrency)
 
-在 Luna 部署架構中，`:app` (`luna-bot`) 與 `:mcp-server` (`luna-mcp-server`) 分屬不同進程（甚至不同容器），兩者透過共享 SQLite 資料庫檔案 (`./data/urls.db`) 協同運作：
+在 Luna 部署架構中，`:app` (`luna-bot`) 與 `:mcp-server` (`luna-mcp-server`) 分屬不同進程（甚至不同容器），兩者透過共享 SQLite 資料庫檔案 (`./.data/luna.db`) 協同運作：
 
 - **高並發 WAL 模式**：
   - 雙方連線池均在初始化時強制執行：
@@ -284,7 +284,7 @@ YOUTUBE_API_KEY=你的_YOUTUBE_API_KEY
 
 # 多租戶 MCP 伺服器 (Section 5，選填 - 多租戶模式無需手動配置靜態憑證)
 MCP_PORT=8081
-MCP_DB_PATH=./data/urls.db
+MCP_DB_PATH=./.data/luna.db
 MCP_PUBLIC_BASE_URL=https://woodendoor.website
 ```
 
@@ -292,14 +292,14 @@ MCP_PUBLIC_BASE_URL=https://woodendoor.website
 
 ### 方法 A：使用 Docker Compose 啟動（推薦）
 
-專案內建 [`docker-compose.yml`](file:///home/user/IdeaProjects/Luna/docker-compose.yml)，透過單一專案根目錄 [`.env`](file:///home/user/IdeaProjects/Luna/.env.example) 統一傳遞參數給主機器人與獨立 MCP 伺服器雙容器服務，並自動掛載 `./data` 磁區以持久保存 SQLite 資料庫與日誌：
+專案內建 [`docker-compose.yml`](file:///home/user/IdeaProjects/Luna/docker-compose.yml)，透過單一專案根目錄 [`.env`](file:///home/user/IdeaProjects/Luna/.env.example) 統一傳遞參數給主機器人與獨立 MCP 伺服器雙容器服務，並自動掛載 `./.data` 與 `./data` 磁區以持久保存 SQLite 資料庫與日誌：
 
 - **雙容器服務架構 (Dual Services)**：
   - `luna` (`luna-bot`)：Luna 主機器人與 Web 服務容器。讀取 Section 1–4 變數（Discord 認證、Web 埠、Gemini / YouTube 金鑰、外掛開關），並將 HTTP 伺服器埠映射至主機 `${PORT:-8080}:8080`。
   - `mcp-server` (`luna-mcp-server`)：獨立運行的 Model Context Protocol 伺服器容器。讀取 Section 5 變數（`MCP_PORT`、`MCP_DB_PATH`、`MCP_PUBLIC_BASE_URL` 等），並將 MCP HTTP/SSE 埠映射至主機 `${MCP_PORT:-8081}:8081`。容器宣告 `depends_on: [luna]` 依賴主服務。
 - **統一環境變數傳遞 (.env Parameter Passing)**：
   - 兩個容器皆宣告 `env_file: - .env`，由專案根目錄 `.env` 統一注入環境變數，實現單一設定檔同時管理主機與 MCP 伺服器，無需維護多份組態。
-  - 兩個容器皆掛載 `./data:/app/data`，共享同一 SQLite 資料庫（`./data/urls.db`），確保數據即時同步且在重啟後持續保留。
+  - 兩個容器皆掛載 `./.data:/app/.data`，共享同一 SQLite 資料庫（`./.data/luna.db`），確保數據即時同步且在重啟後持續保留。
 
 #### 1. 一鍵啟動
 ```bash
@@ -367,7 +367,7 @@ docker run -d \
 ```
 
 > [!TIP]
-> **資料持久化**：使用 `-v $(pwd)/data:/app/data` 磁區掛載，可確保容器重新啟動或更新版本時，SQLite 資料庫（`data/urls.db`）與結構化日誌（`data/logs/`）完整保留。
+> **資料持久化**：使用 `-v $(pwd)/.data:/app/.data -v $(pwd)/data:/app/data` 磁區掛載，可確保容器重新啟動或更新版本時，SQLite 資料庫（`.data/luna.db`）與結構化日誌（`data/logs/`）完整保留。
 
 ---
 

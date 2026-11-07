@@ -35,6 +35,8 @@ import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.put
+import luna.mcp.data.McpClientRepository
+import luna.mcp.data.McpWebhookRepository
 import java.net.URLEncoder
 import java.nio.charset.StandardCharsets
 import java.util.Base64

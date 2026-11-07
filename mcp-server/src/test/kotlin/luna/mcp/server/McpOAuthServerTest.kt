@@ -16,6 +16,9 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import luna.mcp.data.McpClientRecord
+import luna.mcp.data.McpClientRepository
+import luna.mcp.data.McpWebhookRepository
 import org.jetbrains.exposed.v1.jdbc.Database
 import java.util.UUID
 import kotlin.test.BeforeTest

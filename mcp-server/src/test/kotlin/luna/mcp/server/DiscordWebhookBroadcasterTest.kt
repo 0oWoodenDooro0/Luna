@@ -13,9 +13,9 @@ import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import luna.mcp.data.McpWebhookRecord
+import luna.mcp.data.McpWebhookRepository
 import org.jetbrains.exposed.v1.jdbc.Database
-import org.jetbrains.exposed.v1.jdbc.insert
-import org.jetbrains.exposed.v1.jdbc.transactions.transaction
 import java.util.UUID
 import kotlin.test.BeforeTest
 import kotlin.test.Test
@@ -38,17 +38,17 @@ class DiscordWebhookBroadcasterTest {
         channelId: String,
         url: String,
     ) {
-        transaction(database) {
-            McpWebhooksTable.insert {
-                it[McpWebhooksTable.id] = id
-                it[McpWebhooksTable.clientId] = "test-client"
-                it[McpWebhooksTable.tag] = "tag-$id"
-                it[McpWebhooksTable.guildId] = "guild-$id"
-                it[McpWebhooksTable.channelId] = channelId
-                it[McpWebhooksTable.webhookUrl] = url
-                it[McpWebhooksTable.createdAt] = System.currentTimeMillis()
-            }
-        }
+        repository.addWebhook(
+            McpWebhookRecord(
+                id = id,
+                clientId = "test-client",
+                tag = "tag-$id",
+                guildId = "guild-$id",
+                channelId = channelId,
+                webhookUrl = url,
+                createdAt = System.currentTimeMillis(),
+            ),
+        )
     }
 
     @Test

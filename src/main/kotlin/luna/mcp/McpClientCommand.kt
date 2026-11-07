@@ -8,6 +8,10 @@ import dev.kord.rest.builder.interaction.group
 import dev.kord.rest.builder.interaction.string
 import dev.kord.rest.builder.interaction.subCommand
 import luna.core.Command
+import luna.mcp.data.McpClientRecord
+import luna.mcp.data.McpClientRepository
+import luna.mcp.data.McpWebhookRecord
+import luna.mcp.data.McpWebhookRepository
 import java.time.Instant
 import java.time.format.DateTimeFormatter
 

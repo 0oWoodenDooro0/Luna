@@ -1,5 +1,7 @@
 package luna.mcp.server
 
+import luna.mcp.data.McpClientRecord
+import luna.mcp.data.McpClientRepository
 import org.jetbrains.exposed.v1.core.Table
 import org.jetbrains.exposed.v1.core.eq
 import org.jetbrains.exposed.v1.jdbc.SchemaUtils

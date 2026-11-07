@@ -192,7 +192,7 @@ object EnvSchemaAuditor {
             EnvVarSchema("PLUGINS_SUMMARIZER_ENABLED", isRequired = false, defaultValue = "true", section = 4),
             EnvVarSchema("PLUGINS_UNDERCOVER_ENABLED", isRequired = false, defaultValue = "true", section = 4),
             EnvVarSchema("MCP_PORT", isRequired = false, defaultValue = "8081", section = 5),
-            EnvVarSchema("MCP_DB_PATH", isRequired = false, defaultValue = "./data/urls.db", section = 5),
+            EnvVarSchema("MCP_DB_PATH", isRequired = false, defaultValue = "./.data/luna.db", section = 5),
             EnvVarSchema("MCP_PUBLIC_BASE_URL", isRequired = false, defaultValue = "https://woodendoor.website", section = 5),
         )
 

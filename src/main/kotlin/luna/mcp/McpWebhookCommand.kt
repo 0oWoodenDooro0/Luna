@@ -14,6 +14,10 @@ import dev.kord.rest.builder.interaction.subCommand
 import dev.kord.rest.service.WebhookService
 import luna.core.Command
 import luna.core.JsonLogger
+import luna.mcp.data.McpClientRecord
+import luna.mcp.data.McpClientRepository
+import luna.mcp.data.McpWebhookRecord
+import luna.mcp.data.McpWebhookRepository
 import org.slf4j.LoggerFactory
 import java.time.Instant
 import java.time.format.DateTimeFormatter

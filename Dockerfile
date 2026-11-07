@@ -9,6 +9,7 @@ COPY gradlew gradlew.bat settings.gradle.kts build.gradle.kts gradle.properties 
 COPY gradle ./gradle
 COPY libs/socialpeek/build.gradle.kts ./libs/socialpeek/
 COPY libs/config/build.gradle.kts ./libs/config/
+COPY libs/mcp-data/build.gradle.kts ./libs/mcp-data/
 COPY mcp-server/build.gradle.kts ./mcp-server/
 
 # Make gradlew executable and fetch dependencies
@@ -27,9 +28,9 @@ RUN ./gradlew jar :mcp-server:installDist --no-daemon
 FROM eclipse-temurin:17-jre-jammy
 WORKDIR /app
 
-# Create non-root user and data directory
+# Create non-root user and data directories
 RUN useradd -m -u 1000 luna && \
-    mkdir -p /app/data && \
+    mkdir -p /app/data /app/.data && \
     chown -R luna:luna /app
 
 # Copy fat jar and mcp-server from builder stage
@@ -46,6 +47,6 @@ USER luna
 EXPOSE 8080 8081
 
 # Expose volume for persistent SQLite database and logs
-VOLUME ["/app/data"]
+VOLUME ["/app/.data", "/app/data"]
 
 ENTRYPOINT ["java", "-jar", "/app/Luna.jar"]

@@ -13,7 +13,8 @@ services:
     env_file:
       - .env
     volumes:
-      # 持久化保存 SQLite 資料庫 (urls.db) 與運行日誌 (logs/)
+      # 持久化保存 SQLite 資料庫 (.data/) 與運行日誌 (data/logs/)
+      - ./.data:/app/.data
       - ./data:/app/data
 
   mcp-server:
@@ -29,6 +30,7 @@ services:
     env_file:
       - .env
     volumes:
+      - ./.data:/app/.data
       - ./data:/app/data
     depends_on:
       - luna

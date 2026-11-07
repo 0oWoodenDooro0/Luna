@@ -12,6 +12,8 @@ import io.ktor.serialization.kotlinx.json.json
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import luna.mcp.data.McpWebhookRecord
+import luna.mcp.data.McpWebhookRepository
 import org.slf4j.LoggerFactory
 
 @Serializable

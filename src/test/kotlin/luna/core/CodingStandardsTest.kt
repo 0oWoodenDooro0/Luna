@@ -180,7 +180,14 @@ class CodingStandardsTest {
     fun `source root discovery must reliably find all module kotlin source roots and ignore dot-directories and worktrees`() {
         val mainRoots = findKotlinSourceRoots("main")
         val mainPaths = mainRoots.map { it.relativeTo(projectRoot).path.replace('\\', '/') }.toSet()
-        val expectedMain = setOf("src/main/kotlin", "libs/socialpeek/src/main/kotlin", "libs/config/src/main/kotlin", "mcp-server/src/main/kotlin")
+        val expectedMain =
+            setOf(
+                "src/main/kotlin",
+                "libs/socialpeek/src/main/kotlin",
+                "libs/config/src/main/kotlin",
+                "libs/mcp-data/src/main/kotlin",
+                "mcp-server/src/main/kotlin",
+            )
         assertTrue(
             mainPaths == expectedMain,
             "Expected main roots $expectedMain but found $mainPaths",
@@ -188,7 +195,14 @@ class CodingStandardsTest {
 
         val testRoots = findKotlinSourceRoots("test")
         val testPaths = testRoots.map { it.relativeTo(projectRoot).path.replace('\\', '/') }.toSet()
-        val expectedTest = setOf("src/test/kotlin", "libs/socialpeek/src/test/kotlin", "libs/config/src/test/kotlin", "mcp-server/src/test/kotlin")
+        val expectedTest =
+            setOf(
+                "src/test/kotlin",
+                "libs/socialpeek/src/test/kotlin",
+                "libs/config/src/test/kotlin",
+                "libs/mcp-data/src/test/kotlin",
+                "mcp-server/src/test/kotlin",
+            )
         assertTrue(
             testPaths == expectedTest,
             "Expected test roots $expectedTest but found $testPaths",
@@ -293,6 +307,34 @@ class CodingStandardsTest {
                     unconsumedInCode.sorted().forEach { appendLine("    - $it") }
                 }
             },
+        )
+    }
+
+    @Test
+    fun `no kotlin source files in project source roots should be ignored by gitignore`() {
+        val allRoots = findKotlinSourceRoots("main") + findKotlinSourceRoots("test")
+        val allKotlinFiles =
+            allRoots.flatMap { root ->
+                root.walkTopDown().filter { it.isFile && (it.extension == "kt" || it.extension == "kts") }
+            }
+
+        val ignoredFiles = mutableListOf<String>()
+        for (file in allKotlinFiles) {
+            val relPath = file.relativeTo(projectRoot).path.replace('\\', '/')
+            val process =
+                ProcessBuilder("git", "check-ignore", "-q", relPath)
+                    .directory(projectRoot)
+                    .start()
+            val exitCode = process.waitFor()
+            // Exit code 0 means git check-ignore matched the file (it is ignored by .gitignore)
+            if (exitCode == 0) {
+                ignoredFiles.add(relPath)
+            }
+        }
+
+        assertTrue(
+            ignoredFiles.isEmpty(),
+            "The following Kotlin source files are ignored by .gitignore:\n" + ignoredFiles.joinToString("\n"),
         )
     }
 

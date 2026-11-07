@@ -1,11 +1,11 @@
-package luna.mcp
+package luna.mcp.data
 
 import org.jetbrains.exposed.v1.jdbc.Database
+import org.junit.jupiter.api.BeforeEach
+import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertThrows
+import java.io.File
 import java.util.UUID
-import kotlin.test.AfterTest
-import kotlin.test.BeforeTest
-import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
@@ -16,16 +16,11 @@ class McpWebhookRepositoryTest {
     private lateinit var database: Database
     private lateinit var repository: McpWebhookRepository
 
-    @BeforeTest
+    @BeforeEach
     fun setUp() {
-        val dbName = "test_mcp_app_${UUID.randomUUID()}"
+        val dbName = "test_webhook_${UUID.randomUUID()}"
         database = Database.connect("jdbc:h2:mem:$dbName;DB_CLOSE_DELAY=-1;", driver = "org.h2.Driver")
         repository = McpWebhookRepository(database)
-    }
-
-    @AfterTest
-    fun tearDown() {
-        // In-memory db cleanup
     }
 
     @Test
@@ -150,7 +145,7 @@ class McpWebhookRepositoryTest {
                 clientId = "client-B",
                 tag = "tag-1",
                 guildId = "g-2",
-                channelId = "c-3",
+                channelId = "c-1",
                 webhookUrl = "https://discord.com/api/webhooks/b1/url",
                 isAutoProvisioned = true,
                 createdAt = now + 50,
@@ -176,28 +171,27 @@ class McpWebhookRepositoryTest {
         val record1 =
             McpWebhookRecord(
                 id = "wh-dup-1",
-                clientId = "client-dup",
-                tag = "alerts",
+                clientId = "client-same",
+                tag = "shared-tag",
                 guildId = "g-1",
                 channelId = "c-1",
-                webhookUrl = "https://discord.com/api/webhooks/dup1/url",
+                webhookUrl = "https://discord.com/api/webhooks/dup1",
                 isAutoProvisioned = true,
                 createdAt = now,
             )
         val record2 =
             McpWebhookRecord(
                 id = "wh-dup-2",
-                clientId = "client-dup",
-                tag = "alerts",
+                clientId = "client-same",
+                tag = "shared-tag",
                 guildId = "g-1",
                 channelId = "c-2",
-                webhookUrl = "https://discord.com/api/webhooks/dup2/url",
+                webhookUrl = "https://discord.com/api/webhooks/dup2",
                 isAutoProvisioned = false,
-                createdAt = now + 100,
+                createdAt = now + 50,
             )
 
         repository.addWebhook(record1)
-
         assertThrows<Exception> {
             repository.addWebhook(record2)
         }
@@ -208,26 +202,26 @@ class McpWebhookRepositoryTest {
         val now = System.currentTimeMillis()
         repository.addWebhook(
             McpWebhookRecord(
-                id = "wh-user1",
+                id = "wh-diff-1",
                 clientId = "client-1",
                 tag = "general",
                 guildId = "g-1",
                 channelId = "c-1",
-                webhookUrl = "https://discord.com/api/webhooks/u1/url",
+                webhookUrl = "https://discord.com/api/webhooks/1",
                 isAutoProvisioned = true,
                 createdAt = now,
             ),
         )
         repository.addWebhook(
             McpWebhookRecord(
-                id = "wh-user2",
+                id = "wh-diff-2",
                 clientId = "client-2",
                 tag = "general",
                 guildId = "g-2",
                 channelId = "c-2",
-                webhookUrl = "https://discord.com/api/webhooks/u2/url",
+                webhookUrl = "https://discord.com/api/webhooks/2",
                 isAutoProvisioned = true,
-                createdAt = now + 10,
+                createdAt = now,
             ),
         )
 
@@ -240,12 +234,12 @@ class McpWebhookRepositoryTest {
         val now = System.currentTimeMillis()
         repository.addWebhook(
             McpWebhookRecord(
-                id = "wh-rem-1",
+                id = "wh-del",
                 clientId = "client-rem",
                 tag = "tag-to-delete",
                 guildId = "g-1",
                 channelId = "c-1",
-                webhookUrl = "https://discord.com/api/webhooks/rem1/url",
+                webhookUrl = "https://discord.com/api/webhooks/del",
                 isAutoProvisioned = true,
                 createdAt = now,
             ),
@@ -267,24 +261,24 @@ class McpWebhookRepositoryTest {
         val now = System.currentTimeMillis()
         repository.addWebhook(
             McpWebhookRecord(
-                id = "wh-del-1",
+                id = "wh-bulk-1",
                 clientId = "client-bulk-del",
                 tag = "tag-1",
                 guildId = "g-1",
                 channelId = "c-1",
-                webhookUrl = "https://discord.com/api/webhooks/d1/url",
+                webhookUrl = "https://discord.com/api/webhooks/bulk1",
                 isAutoProvisioned = true,
                 createdAt = now,
             ),
         )
         repository.addWebhook(
             McpWebhookRecord(
-                id = "wh-del-2",
+                id = "wh-bulk-2",
                 clientId = "client-bulk-del",
                 tag = "tag-2",
                 guildId = "g-1",
                 channelId = "c-2",
-                webhookUrl = "https://discord.com/api/webhooks/d2/url",
+                webhookUrl = "https://discord.com/api/webhooks/bulk2",
                 isAutoProvisioned = false,
                 createdAt = now + 10,
             ),
@@ -295,10 +289,10 @@ class McpWebhookRepositoryTest {
                 clientId = "client-other",
                 tag = "tag-1",
                 guildId = "g-2",
-                channelId = "c-3",
-                webhookUrl = "https://discord.com/api/webhooks/other/url",
+                channelId = "c-1",
+                webhookUrl = "https://discord.com/api/webhooks/other",
                 isAutoProvisioned = true,
-                createdAt = now + 20,
+                createdAt = now,
             ),
         )
 
@@ -306,5 +300,32 @@ class McpWebhookRepositoryTest {
         assertEquals(2, count)
         assertTrue(repository.listByClientId("client-bulk-del").isEmpty())
         assertEquals(1, repository.listByClientId("client-other").size)
+    }
+
+    @Test
+    fun `create factory method connects to sqlite database file`() {
+        val tempFile = File.createTempFile("mcp_webhook_test_", ".db")
+        try {
+            val repo = McpWebhookRepository.create(tempFile.absolutePath)
+            val now = System.currentTimeMillis()
+            repo.addWebhook(
+                McpWebhookRecord(
+                    id = "wh-sql",
+                    clientId = "client-sql",
+                    tag = "sql-tag",
+                    guildId = "g-1",
+                    channelId = "c-1",
+                    webhookUrl = "https://discord.com/api/webhooks/sql",
+                    createdAt = now,
+                ),
+            )
+            val found = repo.findByClientAndTag("client-sql", "sql-tag")
+            assertNotNull(found)
+            assertEquals("wh-sql", found.id)
+        } finally {
+            tempFile.delete()
+            File("${tempFile.absolutePath}-wal").delete()
+            File("${tempFile.absolutePath}-shm").delete()
+        }
     }
 }

@@ -21,7 +21,7 @@ class McpServerConfigTest {
         val config = McpServerConfig()
 
         assertEquals(8081, config.port)
-        assertEquals("./data/urls.db", config.dbPath)
+        assertEquals("./.data/luna.db", config.dbPath)
         assertEquals("https://woodendoor.website", config.publicBaseUrl)
         assertEquals("https://woodendoor.website", config.normalizedBaseUrl)
     }
@@ -213,14 +213,14 @@ class McpServerConfigTest {
         val config =
             McpServerConfig(
                 port = 8081,
-                dbPath = "./data/urls.db",
+                dbPath = "./.data/luna.db",
                 publicBaseUrl = "https://woodendoor.website",
             )
 
         val masked = config.toMaskedMap()
 
         assertEquals(8081, masked["MCP_PORT"])
-        assertEquals("./data/urls.db", masked["MCP_DB_PATH"])
+        assertEquals("./.data/luna.db", masked["MCP_DB_PATH"])
         assertEquals("https://woodendoor.website", masked["MCP_PUBLIC_BASE_URL"])
     }
 
@@ -261,7 +261,7 @@ class McpServerConfigTest {
         assertTrue(content.contains("Section 5: Multi-Tenant Gemini MCP Server"), "Section 5 must be defined")
         assertTrue(content.contains("/mcp client create"), "Multi-tenant dynamic client create must be documented")
         assertTrue(content.contains("MCP_PORT=8081"), "MCP_PORT must be documented")
-        assertTrue(content.contains("MCP_DB_PATH=./data/urls.db"), "MCP_DB_PATH must be documented")
+        assertTrue(content.contains("MCP_DB_PATH=./.data/luna.db"), "MCP_DB_PATH must be documented")
         assertTrue(content.contains("MCP_PUBLIC_BASE_URL=https://woodendoor.website"), "MCP_PUBLIC_BASE_URL must be documented")
     }
 
@@ -298,7 +298,7 @@ class McpServerConfigTest {
             assertTrue(result.missingOptional.containsKey("MCP_PORT"), "MCP_PORT must be in missingOptional")
             assertEquals("8081", result.missingOptional["MCP_PORT"].toString())
             assertTrue(result.missingOptional.containsKey("MCP_DB_PATH"), "MCP_DB_PATH must be in missingOptional")
-            assertEquals("./data/urls.db", result.missingOptional["MCP_DB_PATH"])
+            assertEquals("./.data/luna.db", result.missingOptional["MCP_DB_PATH"])
             assertTrue(result.missingOptional.containsKey("MCP_PUBLIC_BASE_URL"), "MCP_PUBLIC_BASE_URL must be in missingOptional")
             assertEquals("https://woodendoor.website", result.missingOptional["MCP_PUBLIC_BASE_URL"])
 
@@ -358,7 +358,7 @@ class McpServerConfigTest {
             val mapWithAliases =
                 mapOf(
                     "PORT" to 8081, // alias for MCP_PORT
-                    "dbPath" to "./data/urls.db", // alias for MCP_DB_PATH
+                    "dbPath" to "./.data/luna.db", // alias for MCP_DB_PATH
                     "publicBaseUrl" to "https://woodendoor.website", // alias for MCP_PUBLIC_BASE_URL
                     "curtly.baseUrl" to "https://woodendoor.website/s/", // cross-module alias
                     "BASE_URL" to "https://woodendoor.website/s/", // cross-module alias
