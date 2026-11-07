@@ -35,6 +35,7 @@ dependencies {
 
     // Configuration Core Library
     implementation(project(":libs:config"))
+    implementation(project(":libs:mcp-data"))
 
     // Logging
     implementation(libs.logback.classic)

@@ -16,6 +16,10 @@ import io.mockk.every
 import io.mockk.mockk
 import io.mockk.slot
 import kotlinx.coroutines.test.runTest
+import luna.mcp.data.McpClientRecord
+import luna.mcp.data.McpClientRepository
+import luna.mcp.data.McpWebhookRecord
+import luna.mcp.data.McpWebhookRepository
 import org.jetbrains.exposed.v1.jdbc.Database
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test

@@ -11,9 +11,9 @@ import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import luna.mcp.data.McpWebhookRecord
+import luna.mcp.data.McpWebhookRepository
 import org.jetbrains.exposed.v1.jdbc.Database
-import org.jetbrains.exposed.v1.jdbc.insert
-import org.jetbrains.exposed.v1.jdbc.transactions.transaction
 import java.util.UUID
 import kotlin.test.BeforeTest
 import kotlin.test.Test
@@ -131,35 +131,15 @@ class McpProtocolHandlerTest {
     @Test
     fun `handles list_targets returning client tags and quota status`() =
         runTest {
-            transaction(database) {
-                McpWebhooksTable.insert {
-                    it[id] = "wh-client-1"
-                    it[clientId] = "client-alpha"
-                    it[tag] = "general"
-                    it[guildId] = "g-1"
-                    it[channelId] = "c-1"
-                    it[webhookUrl] = "https://discord.com/api/webhooks/111/alpha1"
-                    it[createdAt] = 1000L
-                }
-                McpWebhooksTable.insert {
-                    it[id] = "wh-client-2"
-                    it[clientId] = "client-alpha"
-                    it[tag] = "alerts"
-                    it[guildId] = "g-1"
-                    it[channelId] = "c-2"
-                    it[webhookUrl] = "https://discord.com/api/webhooks/111/alpha2"
-                    it[createdAt] = 2000L
-                }
-                McpWebhooksTable.insert {
-                    it[id] = "wh-other"
-                    it[clientId] = "client-beta"
-                    it[tag] = "other"
-                    it[guildId] = "g-2"
-                    it[channelId] = "c-3"
-                    it[webhookUrl] = "https://discord.com/api/webhooks/222/beta"
-                    it[createdAt] = 3000L
-                }
-            }
+            repository.addWebhook(
+                McpWebhookRecord("wh-client-1", "client-alpha", "general", "g-1", "c-1", "https://discord.com/api/webhooks/111/alpha1", createdAt = 1000L),
+            )
+            repository.addWebhook(
+                McpWebhookRecord("wh-client-2", "client-alpha", "alerts", "g-1", "c-2", "https://discord.com/api/webhooks/111/alpha2", createdAt = 2000L),
+            )
+            repository.addWebhook(
+                McpWebhookRecord("wh-other", "client-beta", "other", "g-2", "c-3", "https://discord.com/api/webhooks/222/beta", createdAt = 3000L),
+            )
 
             val requestJson =
                 """{"jsonrpc":"2.0","id":10,"method":"tools/call","params":{"name":"list_targets","arguments":{}}}"""
@@ -203,26 +183,12 @@ class McpProtocolHandlerTest {
             val broadcasterWithCapture = DiscordWebhookBroadcaster(repository, client)
             val customHandler = McpProtocolHandler(broadcasterWithCapture, repository)
 
-            transaction(database) {
-                McpWebhooksTable.insert {
-                    it[id] = "wh-1"
-                    it[clientId] = "client-1"
-                    it[tag] = "alerts"
-                    it[guildId] = "g-1"
-                    it[channelId] = "c-1"
-                    it[webhookUrl] = "https://discord.com/api/webhooks/111/alerts"
-                    it[createdAt] = 1000L
-                }
-                McpWebhooksTable.insert {
-                    it[id] = "wh-2"
-                    it[clientId] = "client-1"
-                    it[tag] = "general"
-                    it[guildId] = "g-1"
-                    it[channelId] = "c-2"
-                    it[webhookUrl] = "https://discord.com/api/webhooks/111/general"
-                    it[createdAt] = 2000L
-                }
-            }
+            repository.addWebhook(
+                McpWebhookRecord("wh-1", "client-1", "alerts", "g-1", "c-1", "https://discord.com/api/webhooks/111/alerts", createdAt = 1000L),
+            )
+            repository.addWebhook(
+                McpWebhookRecord("wh-2", "client-1", "general", "g-1", "c-2", "https://discord.com/api/webhooks/111/general", createdAt = 2000L),
+            )
 
             val requestJson =
                 """{"jsonrpc":"2.0","id":11,"method":"tools/call","params":{"name":"send_discord_message","arguments":{"content":"Deploy alert","target":"alerts"}}}"""
@@ -263,26 +229,12 @@ class McpProtocolHandlerTest {
             val broadcasterWithCapture = DiscordWebhookBroadcaster(repository, client)
             val customHandler = McpProtocolHandler(broadcasterWithCapture, repository)
 
-            transaction(database) {
-                McpWebhooksTable.insert {
-                    it[id] = "wh-1"
-                    it[clientId] = "client-1"
-                    it[tag] = "general"
-                    it[guildId] = "g-1"
-                    it[channelId] = "c-1"
-                    it[webhookUrl] = "https://discord.com/api/webhooks/111/general"
-                    it[createdAt] = 1000L
-                }
-                McpWebhooksTable.insert {
-                    it[id] = "wh-2"
-                    it[clientId] = "client-1"
-                    it[tag] = "alerts"
-                    it[guildId] = "g-1"
-                    it[channelId] = "c-2"
-                    it[webhookUrl] = "https://discord.com/api/webhooks/111/alerts"
-                    it[createdAt] = 2000L
-                }
-            }
+            repository.addWebhook(
+                McpWebhookRecord("wh-1", "client-1", "general", "g-1", "c-1", "https://discord.com/api/webhooks/111/general", createdAt = 1000L),
+            )
+            repository.addWebhook(
+                McpWebhookRecord("wh-2", "client-1", "alerts", "g-1", "c-2", "https://discord.com/api/webhooks/111/alerts", createdAt = 2000L),
+            )
 
             val requestJson =
                 """{"jsonrpc":"2.0","id":12,"method":"tools/call","params":{"name":"send_discord_message","arguments":{"content":"Broadcast to all","target":"all"}}}"""
@@ -312,17 +264,9 @@ class McpProtocolHandlerTest {
     @Test
     fun `send_discord_message with unknown tag returns Traditional Chinese guidance error`() =
         runTest {
-            transaction(database) {
-                McpWebhooksTable.insert {
-                    it[id] = "wh-1"
-                    it[clientId] = "client-1"
-                    it[tag] = "general"
-                    it[guildId] = "g-1"
-                    it[channelId] = "c-1"
-                    it[webhookUrl] = "https://discord.com/api/webhooks/111/general"
-                    it[createdAt] = 1000L
-                }
-            }
+            repository.addWebhook(
+                McpWebhookRecord("wh-1", "client-1", "general", "g-1", "c-1", "https://discord.com/api/webhooks/111/general", createdAt = 1000L),
+            )
 
             val requestJson =
                 """{"jsonrpc":"2.0","id":13,"method":"tools/call","params":{"name":"send_discord_message","arguments":{"content":"Hello","target":"nonexistent"}}}"""
@@ -387,26 +331,12 @@ class McpProtocolHandlerTest {
             val broadcasterWithCapture = DiscordWebhookBroadcaster(repository, client)
             val customHandler = McpProtocolHandler(broadcasterWithCapture, repository)
 
-            transaction(database) {
-                McpWebhooksTable.insert {
-                    it[id] = "wh-a"
-                    it[clientId] = "client-A"
-                    it[tag] = "production"
-                    it[guildId] = "guild-A"
-                    it[channelId] = "chan-A"
-                    it[webhookUrl] = "https://discord.com/api/webhooks/AAA/production"
-                    it[createdAt] = 1000L
-                }
-                McpWebhooksTable.insert {
-                    it[id] = "wh-b"
-                    it[clientId] = "client-B"
-                    it[tag] = "production"
-                    it[guildId] = "guild-B"
-                    it[channelId] = "chan-B"
-                    it[webhookUrl] = "https://discord.com/api/webhooks/BBB/production"
-                    it[createdAt] = 2000L
-                }
-            }
+            repository.addWebhook(
+                McpWebhookRecord("wh-a", "client-A", "production", "guild-A", "chan-A", "https://discord.com/api/webhooks/AAA/production", createdAt = 1000L),
+            )
+            repository.addWebhook(
+                McpWebhookRecord("wh-b", "client-B", "production", "guild-B", "chan-B", "https://discord.com/api/webhooks/BBB/production", createdAt = 2000L),
+            )
 
             // Client A calls send_discord_message for "production"
             val requestJson =

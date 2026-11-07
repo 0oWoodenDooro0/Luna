@@ -9,6 +9,7 @@ COPY gradlew gradlew.bat settings.gradle.kts build.gradle.kts gradle.properties 
 COPY gradle ./gradle
 COPY libs/socialpeek/build.gradle.kts ./libs/socialpeek/
 COPY libs/config/build.gradle.kts ./libs/config/
+COPY libs/mcp-data/build.gradle.kts ./libs/mcp-data/
 COPY mcp-server/build.gradle.kts ./mcp-server/
 
 # Make gradlew executable and fetch dependencies

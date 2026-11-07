@@ -57,6 +57,7 @@ Thumbs.db
 # RPG Database & Local Configs
 data/
 **/data/
+!**/src/**/data/
 config.yml
 config_test.yml
 .env

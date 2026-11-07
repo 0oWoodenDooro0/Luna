@@ -62,6 +62,7 @@ dependencies {
     // SocialPeek Social Post Resolver Library
     implementation(project(":libs:socialpeek"))
     implementation(project(":libs:config"))
+    implementation(project(":libs:mcp-data"))
 }
 
 kotlin {

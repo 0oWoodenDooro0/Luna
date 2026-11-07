@@ -7,6 +7,8 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import luna.core.Command
 import luna.core.JsonLogger
+import luna.mcp.data.McpClientRepository
+import luna.mcp.data.McpWebhookRepository
 import luna.plugin.LunaPlugin
 import luna.plugin.PluginContext
 

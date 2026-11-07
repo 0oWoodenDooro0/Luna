@@ -7,6 +7,8 @@ include(":libs:socialpeek")
 project(":libs:socialpeek").projectDir = file("libs/socialpeek")
 include(":libs:config")
 project(":libs:config").projectDir = file("libs/config")
+include(":libs:mcp-data")
+project(":libs:mcp-data").projectDir = file("libs/mcp-data")
 include("mcp-server")
 
 dependencyResolutionManagement {

@@ -1,6 +1,5 @@
-package luna.mcp
+package luna.mcp.data
 
-import luna.core.LunaHost
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
@@ -17,7 +16,7 @@ class SqliteWalConcurrencyTest {
 
     @BeforeEach
     fun setUp() {
-        tempDbFile = File.createTempFile("luna_app_wal_test_", ".db")
+        tempDbFile = File.createTempFile("mcp_data_wal_test_", ".db")
     }
 
     @AfterEach
@@ -28,9 +27,10 @@ class SqliteWalConcurrencyTest {
     }
 
     @Test
-    fun `LunaHost initDatabase and McpWebhookStorage initialize with WAL mode and 5000ms busy timeout`() {
-        val hostDb = LunaHost.initDatabase(tempDbFile.absolutePath)
-        val storage = McpWebhookStorage(hostDb)
+    fun `McpDatabase connect initializes with WAL mode and 5000ms busy timeout`() {
+        val database = McpDatabase.connect(tempDbFile.absolutePath)
+        val clientRepo = McpClientRepository(database)
+        val webhookRepo = McpWebhookRepository(database)
 
         val conn = DriverManager.getConnection("jdbc:sqlite:${tempDbFile.absolutePath}")
         conn.createStatement().use { stmt ->
@@ -49,20 +49,19 @@ class SqliteWalConcurrencyTest {
         }
         conn.close()
 
-        assertTrue(storage.getAllWebhooks().isEmpty())
+        assertTrue(webhookRepo.getAllWebhooks().isEmpty())
+        assertEquals(null, clientRepo.findByClientId("non-existent"))
     }
 
     @Test
-    fun `simulated multi-process concurrent reads and writes in app complete without locking errors`() {
-        // Process 1 (Luna Bot) connection
-        val botDb = LunaHost.initDatabase(tempDbFile.absolutePath)
-        val botClientRepo = McpClientRepository(botDb)
-        val botWebhookRepo = McpWebhookRepository(botDb)
+    fun `simulated multi-process concurrent reads and writes complete without locking errors`() {
+        // Process 1 (Luna Host) independent connection and repositories
+        val process1ClientRepo = McpClientRepository.create(tempDbFile.absolutePath)
+        val process1WebhookRepo = McpWebhookRepository.create(tempDbFile.absolutePath)
 
-        // Process 2 (MCP Server) independent connection
-        val mcpDb = LunaHost.initDatabase(tempDbFile.absolutePath)
-        val mcpClientRepo = McpClientRepository(mcpDb)
-        val mcpWebhookRepo = McpWebhookRepository(mcpDb)
+        // Process 2 (MCP Server) independent connection and repositories
+        val process2ClientRepo = McpClientRepository.create(tempDbFile.absolutePath)
+        val process2WebhookRepo = McpWebhookRepository.create(tempDbFile.absolutePath)
 
         val threadCount = 4
         val iterationsPerThread = 25
@@ -72,12 +71,12 @@ class SqliteWalConcurrencyTest {
             val tasks =
                 (0 until threadCount).map { threadIndex ->
                     Callable {
-                        val clientRepo = if (threadIndex % 2 == 0) botClientRepo else mcpClientRepo
-                        val webhookRepo = if (threadIndex % 2 == 0) botWebhookRepo else mcpWebhookRepo
+                        val clientRepo = if (threadIndex % 2 == 0) process1ClientRepo else process2ClientRepo
+                        val webhookRepo = if (threadIndex % 2 == 0) process1WebhookRepo else process2WebhookRepo
 
                         for (i in 0 until iterationsPerThread) {
-                            val clientId = "app-client-$threadIndex-$i"
-                            val userId = "app-user-$threadIndex-$i"
+                            val clientId = "client-$threadIndex-$i"
+                            val userId = "user-$threadIndex-$i"
                             val now = System.currentTimeMillis()
 
                             // 1. Write client record
@@ -85,7 +84,7 @@ class SqliteWalConcurrencyTest {
                                 McpClientRecord(
                                     clientId = clientId,
                                     userId = userId,
-                                    clientName = "App Client $threadIndex-$i",
+                                    clientName = "Client $threadIndex-$i",
                                     secretHash = "hash-$i",
                                     secretSalt = "salt-$i",
                                     createdAt = now,
@@ -96,12 +95,12 @@ class SqliteWalConcurrencyTest {
                             // 2. Write webhook record
                             webhookRepo.addWebhook(
                                 McpWebhookRecord(
-                                    id = "wh-app-$threadIndex-$i",
+                                    id = "wh-$threadIndex-$i",
                                     clientId = clientId,
                                     tag = "tag-$i",
-                                    guildId = "guild-app",
-                                    channelId = "channel-app",
-                                    webhookUrl = "https://discord.com/api/webhooks/app/$threadIndex/$i",
+                                    guildId = "guild-1",
+                                    channelId = "channel-1",
+                                    webhookUrl = "https://discord.com/api/webhooks/$threadIndex/$i",
                                     isAutoProvisioned = true,
                                     createdAt = now,
                                 ),
@@ -109,13 +108,13 @@ class SqliteWalConcurrencyTest {
 
                             // 3. Read back client and webhook
                             val foundClient = clientRepo.findByClientId(clientId)
-                            checkNotNull(foundClient) { "App client $clientId should exist" }
+                            checkNotNull(foundClient) { "Client $clientId should exist" }
 
                             val foundWebhook = webhookRepo.findByClientAndTag(clientId, "tag-$i")
-                            checkNotNull(foundWebhook) { "App webhook $clientId:tag-$i should exist" }
+                            checkNotNull(foundWebhook) { "Webhook $clientId:tag-$i should exist" }
 
                             // 4. Update secret
-                            clientRepo.updateSecret(clientId, "updated-hash-$i", "updated-salt-$i", now + 15)
+                            clientRepo.updateSecret(clientId, "new-hash-$i", "new-salt-$i", now + 10)
                         }
                         true
                     }
@@ -126,8 +125,8 @@ class SqliteWalConcurrencyTest {
                 assertTrue(future.get(10, TimeUnit.SECONDS), "Thread execution must succeed")
             }
 
-            val all = mcpWebhookRepo.getAllWebhooks()
-            assertEquals(threadCount * iterationsPerThread, all.size)
+            val allWebhooks = process2WebhookRepo.getAllWebhooks()
+            assertEquals(threadCount * iterationsPerThread, allWebhooks.size)
         } finally {
             executor.shutdown()
             executor.awaitTermination(5, TimeUnit.SECONDS)

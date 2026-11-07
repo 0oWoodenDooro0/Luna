@@ -9,8 +9,9 @@
       - [`GeminiSummarizerTest`](src/test/kotlin/luna/summarizer/GeminiSummarizerTest.kt): AI multi-turn tool calling, lookback execution, single-round lookback enforcement, and fallback recovery.
       - [`ConversationSliceCollectorTest`](src/test/kotlin/luna/summarizer/ConversationSliceCollectorTest.kt): Backtracking, gap halts, token/character budgeting, dialogue formatting, and media extraction.
       - [`SummaryServiceTest`](src/test/kotlin/luna/summarizer/SummaryServiceTest.kt) / [`SummaryServiceWebhookTest`](src/test/kotlin/luna/summarizer/SummaryServiceWebhookTest.kt): Discord reaction event handling, deduplication caching, status publishing, and reply delivery. Decommission obsolete mock fixtures in service tests when moving responsibilities to deep collaborator modules.
-  - `curtly/`, `preview/`, `undercover/`: First-party feature plugins.
 - `libs/socialpeek/`: Multi-platform social media post and video metadata resolver library.
+- `libs/config/`: Shared environment and dotenv parsing, secret masking, and schema validation.
+- `libs/mcp-data/`: Shared SQLite persistence layer for MCP client credentials and channel webhooks ([`McpClientRepository`](libs/mcp-data/src/main/kotlin/luna/mcp/data/McpClientRepository.kt), [`McpWebhookRepository`](libs/mcp-data/src/main/kotlin/luna/mcp/data/McpWebhookRepository.kt), [`McpDatabase`](libs/mcp-data/src/main/kotlin/luna/mcp/data/McpDatabase.kt)).
 - `mcp-server/`: Standalone Model Context Protocol (MCP) server for Google Gemini Apps integration. Completely decoupled from Discord bot runtime/tokens; communicates via shared SQLite `mcp_webhooks` table ([`McpServerApplication`](mcp-server/src/main/kotlin/luna/mcp/server/McpServerApplication.kt), [`McpServerRoutes`](mcp-server/src/main/kotlin/luna/mcp/server/McpServerRoutes.kt), [`DiscordWebhookBroadcaster`](mcp-server/src/main/kotlin/luna/mcp/server/DiscordWebhookBroadcaster.kt), [`DiscordMessageChunker`](mcp-server/src/main/kotlin/luna/mcp/server/DiscordMessageChunker.kt), [`McpOAuthProvider`](mcp-server/src/main/kotlin/luna/mcp/server/McpOAuthProvider.kt)).
 
 ## Agent skills

@@ -100,3 +100,8 @@ _Avoid_: Channel spammer, multi-bot poster
 The internal OAuth 2.1 authorization server integrated within the MCP service that advertises RFC 8414 metadata discovery and validates credentials without requiring a third-party identity service.
 _Avoid_: External auth server, Auth0 integration
 
+**Shared MCP Data Store**:
+The cross-process SQLite storage library residing in `libs/mcp-data` shared between Luna Host and Decoupled MCP Server, managing client credentials, tagged webhooks, and WAL concurrency without exposing database tables across the interface seam.
+_Avoid_: SQLite helper, MCP database layer, shared DB scripts
+
+

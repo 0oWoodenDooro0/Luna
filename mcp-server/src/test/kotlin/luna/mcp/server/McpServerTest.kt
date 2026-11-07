@@ -24,9 +24,11 @@ import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import luna.mcp.data.McpClientRecord
+import luna.mcp.data.McpClientRepository
+import luna.mcp.data.McpWebhookRecord
+import luna.mcp.data.McpWebhookRepository
 import org.jetbrains.exposed.v1.jdbc.Database
-import org.jetbrains.exposed.v1.jdbc.insert
-import org.jetbrains.exposed.v1.jdbc.transactions.transaction
 import java.util.UUID
 import kotlin.test.BeforeTest
 import kotlin.test.Test
@@ -87,17 +89,17 @@ class McpServerTest {
         url: String,
         clientId: String = "test-client",
     ) {
-        transaction(database) {
-            McpWebhooksTable.insert {
-                it[McpWebhooksTable.id] = id
-                it[McpWebhooksTable.clientId] = clientId
-                it[McpWebhooksTable.tag] = "tag-$id"
-                it[McpWebhooksTable.guildId] = "g-$id"
-                it[McpWebhooksTable.channelId] = channelId
-                it[McpWebhooksTable.webhookUrl] = url
-                it[McpWebhooksTable.createdAt] = System.currentTimeMillis()
-            }
-        }
+        repository.addWebhook(
+            McpWebhookRecord(
+                id = id,
+                clientId = clientId,
+                tag = "tag-$id",
+                guildId = "g-$id",
+                channelId = channelId,
+                webhookUrl = url,
+                createdAt = System.currentTimeMillis(),
+            ),
+        )
     }
 
     @Test
@@ -443,26 +445,8 @@ class McpServerTest {
     @Test
     fun `POST mcp messages handles list_targets for specific clientId query param`() =
         testApplication {
-            transaction(database) {
-                McpWebhooksTable.insert {
-                    it[McpWebhooksTable.id] = "wh-a1"
-                    it[McpWebhooksTable.clientId] = "tenant-a"
-                    it[McpWebhooksTable.tag] = "ops"
-                    it[McpWebhooksTable.guildId] = "g-1"
-                    it[McpWebhooksTable.channelId] = "c-1"
-                    it[McpWebhooksTable.webhookUrl] = "https://discord.com/api/webhooks/111/ops"
-                    it[McpWebhooksTable.createdAt] = 100L
-                }
-                McpWebhooksTable.insert {
-                    it[McpWebhooksTable.id] = "wh-b1"
-                    it[McpWebhooksTable.clientId] = "tenant-b"
-                    it[McpWebhooksTable.tag] = "dev"
-                    it[McpWebhooksTable.guildId] = "g-2"
-                    it[McpWebhooksTable.channelId] = "c-2"
-                    it[McpWebhooksTable.webhookUrl] = "https://discord.com/api/webhooks/222/dev"
-                    it[McpWebhooksTable.createdAt] = 200L
-                }
-            }
+            repository.addWebhook(McpWebhookRecord("wh-a1", "tenant-a", "ops", "g-1", "c-1", "https://discord.com/api/webhooks/111/ops", createdAt = 100L))
+            repository.addWebhook(McpWebhookRecord("wh-b1", "tenant-b", "dev", "g-2", "c-2", "https://discord.com/api/webhooks/222/dev", createdAt = 200L))
 
             val tokenA = issueClientToken("tenant-a")
             val mockHttpClient = HttpClient(MockEngine { respond("{}", HttpStatusCode.NoContent) })
@@ -512,26 +496,10 @@ class McpServerTest {
                     install(ContentNegotiation) { json() }
                 }
 
-            transaction(database) {
-                McpWebhooksTable.insert {
-                    it[McpWebhooksTable.id] = "wh-a1"
-                    it[McpWebhooksTable.clientId] = "tenant-a"
-                    it[McpWebhooksTable.tag] = "ops"
-                    it[McpWebhooksTable.guildId] = "g-1"
-                    it[McpWebhooksTable.channelId] = "c-1"
-                    it[McpWebhooksTable.webhookUrl] = "https://discord.com/api/webhooks/111/ops"
-                    it[McpWebhooksTable.createdAt] = 100L
-                }
-                McpWebhooksTable.insert {
-                    it[McpWebhooksTable.id] = "wh-a2"
-                    it[McpWebhooksTable.clientId] = "tenant-a"
-                    it[McpWebhooksTable.tag] = "marketing"
-                    it[McpWebhooksTable.guildId] = "g-1"
-                    it[McpWebhooksTable.channelId] = "c-2"
-                    it[McpWebhooksTable.webhookUrl] = "https://discord.com/api/webhooks/111/marketing"
-                    it[McpWebhooksTable.createdAt] = 200L
-                }
-            }
+            repository.addWebhook(McpWebhookRecord("wh-a1", "tenant-a", "ops", "g-1", "c-1", "https://discord.com/api/webhooks/111/ops", createdAt = 100L))
+            repository.addWebhook(
+                McpWebhookRecord("wh-a2", "tenant-a", "marketing", "g-1", "c-2", "https://discord.com/api/webhooks/111/marketing", createdAt = 200L),
+            )
 
             val tokenA = issueClientToken("tenant-a")
             val broadcaster = DiscordWebhookBroadcaster(repository, mockHttpClient)
@@ -568,17 +536,7 @@ class McpServerTest {
     @Test
     fun `POST mcp messages with unknown tag returns guidance error`() =
         testApplication {
-            transaction(database) {
-                McpWebhooksTable.insert {
-                    it[McpWebhooksTable.id] = "wh-1"
-                    it[McpWebhooksTable.clientId] = "tenant-a"
-                    it[McpWebhooksTable.tag] = "ops"
-                    it[McpWebhooksTable.guildId] = "g-1"
-                    it[McpWebhooksTable.channelId] = "c-1"
-                    it[McpWebhooksTable.webhookUrl] = "https://discord.com/api/webhooks/111/ops"
-                    it[McpWebhooksTable.createdAt] = 100L
-                }
-            }
+            repository.addWebhook(McpWebhookRecord("wh-1", "tenant-a", "ops", "g-1", "c-1", "https://discord.com/api/webhooks/111/ops", createdAt = 100L))
 
             val tokenA = issueClientToken("tenant-a")
             val mockHttpClient = HttpClient(MockEngine { respond("{}", HttpStatusCode.NoContent) })
@@ -616,17 +574,9 @@ class McpServerTest {
     @Test
     fun `SSE session propagates authenticated clientId to subsequent POST messages`() =
         testApplication {
-            transaction(database) {
-                McpWebhooksTable.insert {
-                    it[McpWebhooksTable.id] = "wh-sse"
-                    it[McpWebhooksTable.clientId] = "tenant-sse"
-                    it[McpWebhooksTable.tag] = "sse-tag"
-                    it[McpWebhooksTable.guildId] = "g-sse"
-                    it[McpWebhooksTable.channelId] = "c-sse"
-                    it[McpWebhooksTable.webhookUrl] = "https://discord.com/api/webhooks/sse/url"
-                    it[McpWebhooksTable.createdAt] = 100L
-                }
-            }
+            repository.addWebhook(
+                McpWebhookRecord("wh-sse", "tenant-sse", "sse-tag", "g-sse", "c-sse", "https://discord.com/api/webhooks/sse/url", createdAt = 100L),
+            )
 
             val tokenSse = issueClientToken("tenant-sse")
             val mockHttpClient = HttpClient(MockEngine { respond("{}", HttpStatusCode.NoContent) })

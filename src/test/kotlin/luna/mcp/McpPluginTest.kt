@@ -11,12 +11,12 @@ import io.mockk.mockk
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.test.runTest
 import luna.core.Command
+import luna.mcp.data.McpWebhookRecord
+import luna.mcp.data.McpWebhookRepository
 import luna.plugin.DefaultPluginContext
 import luna.plugin.LunaPlugin
 import luna.plugin.PluginLoader
 import org.jetbrains.exposed.v1.jdbc.Database
-import org.jetbrains.exposed.v1.jdbc.selectAll
-import org.jetbrains.exposed.v1.jdbc.transactions.transaction
 import org.junit.jupiter.api.Test
 import java.util.ServiceLoader
 import java.util.UUID
@@ -95,12 +95,11 @@ class McpPluginTest {
                 )
             plugin.webhookRepository!!.addWebhook(webhookRecord)
 
-            transaction(db) {
-                val rows = McpWebhooksTable.selectAll().toList()
-                assertEquals(1, rows.size)
-                assertEquals("wh-1", rows.first()[McpWebhooksTable.id])
-                assertEquals("general", rows.first()[McpWebhooksTable.tag])
-            }
+            val stored = plugin.webhookRepository!!.findByClientAndTag("cli-1", "general")
+            assertNotNull(stored)
+            assertEquals("wh-1", stored.id)
+            assertEquals("general", stored.tag)
+            assertEquals(1, plugin.webhookRepository!!.getAllWebhooks().size)
         }
 
     @Test
