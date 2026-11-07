@@ -211,7 +211,7 @@ class SummarizerPluginTest {
 
             val mockSummarizer = mockk<GeminiSummarizer>(relaxed = true)
             var capturedInput: SummaryInput? = null
-            coEvery { mockSummarizer.summarize(any<SummaryInput>()) } answers {
+            coEvery { mockSummarizer.summarize(any<SummaryInput>(), any()) } answers {
                 capturedInput = firstArg()
                 SummaryResult.Success("TL;DR: Plugin successfully summarized context")
             }
@@ -259,7 +259,7 @@ class SummarizerPluginTest {
             // Emit reaction event on Kord's event stream
             eventsFlow.emit(event)
 
-            coVerify(exactly = 1) { mockSummarizer.summarize(any<SummaryInput>()) }
+            coVerify(exactly = 1) { mockSummarizer.summarize(any<SummaryInput>(), any()) }
             assertEquals("Important discussion to summarize via plugin", capturedInput?.content)
             assertEquals("TL;DR: Plugin successfully summarized context", replySent)
 

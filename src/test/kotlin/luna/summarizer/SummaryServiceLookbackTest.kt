@@ -68,10 +68,10 @@ class SummaryServiceLookbackTest {
             val targetMsg = createMockMessage(9004L, "Alice", "Can someone summarize what we decided?", timestamp = baseTime + 32.minutes)
 
             coEvery {
-                summarizer.summarize(any<SummaryInput>())
+                summarizer.summarize(any<SummaryInput>(), any())
             } answers {
                 capturedInput = firstArg()
-                capturedLookbackProvider = firstArg<SummaryInput>().lookbackProvider
+                capturedLookbackProvider = secondArg()
                 SummaryResult.Success("TL;DR: Decided to implement two-stage lookback for Project Luna.")
             }
 
@@ -94,7 +94,7 @@ class SummaryServiceLookbackTest {
             val event = SummaryTestFixtures.createMockReactionEvent(targetMsg)
             service.handleReaction(event)
 
-            coVerify(exactly = 1) { summarizer.summarize(any<SummaryInput>()) }
+            coVerify(exactly = 1) { summarizer.summarize(any<SummaryInput>(), any()) }
 
             // Verify SummaryService passed lookbackProvider seam
             val provider = checkNotNull(capturedLookbackProvider)
@@ -122,7 +122,7 @@ class SummaryServiceLookbackTest {
             val targetMsg = createMockMessage(9012L, "Bob", "Let's summarize", timestamp = baseTime + 2.minutes)
 
             coEvery {
-                summarizer.summarize(any<SummaryInput>())
+                summarizer.summarize(any<SummaryInput>(), any())
             } returns SummaryResult.Success("TL;DR: Standard direct summary")
 
             val service =
@@ -151,7 +151,7 @@ class SummaryServiceLookbackTest {
             val targetMsg = createMockMessage(9021L, "User", "Discussion content")
 
             coEvery {
-                summarizer.summarize(any<SummaryInput>())
+                summarizer.summarize(any<SummaryInput>(), any())
             } returns SummaryResult.Error.RateLimitExceeded()
 
             val service =
@@ -165,7 +165,7 @@ class SummaryServiceLookbackTest {
             val event = SummaryTestFixtures.createMockReactionEvent(targetMsg)
             service.handleReaction(event)
 
-            coVerify(exactly = 1) { summarizer.summarize(any<SummaryInput>()) }
+            coVerify(exactly = 1) { summarizer.summarize(any<SummaryInput>(), any()) }
             assertNull(service.getStatus(targetMsg.id))
         }
 
@@ -177,7 +177,7 @@ class SummaryServiceLookbackTest {
             val targetMsg = createMockMessage(9031L, "User", "Discussion content")
 
             coEvery {
-                summarizer.summarize(any<SummaryInput>())
+                summarizer.summarize(any<SummaryInput>(), any())
             } throws RuntimeException("Unexpected internal network disconnect")
 
             val service =

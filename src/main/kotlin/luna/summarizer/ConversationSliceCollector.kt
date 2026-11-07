@@ -17,11 +17,13 @@ import kotlin.time.Duration.Companion.minutes
  * @property summaryInput Formatted input payload including dialogue transcript and media attachments.
  * @property primaryUrl Extracted primary link if a web URL was detected in the slice.
  * @property durationExceeded True if a linked YouTube video exceeds the 2-hour processing limit.
+ * @property lookbackProvider Optional callback to fetch earlier conversational context on demand.
  */
 data class PreparedConversationSlice(
     val summaryInput: SummaryInput,
     val primaryUrl: String? = null,
     val durationExceeded: Boolean = false,
+    val lookbackProvider: (suspend (reason: String) -> String?)? = null,
 )
 
 /**
@@ -233,10 +235,10 @@ open class ConversationSliceCollector(
                     url = primaryUrl,
                     imageAttachments = sliceImageAttachments,
                     tools = listOf(GeminiTools.FETCH_EARLIER_MESSAGES_TOOL),
-                    lookbackProvider = lookbackProvider,
                 ),
             primaryUrl = primaryUrl,
             durationExceeded = false,
+            lookbackProvider = lookbackProvider,
         )
     }
 
@@ -255,6 +257,42 @@ open class ConversationSliceCollector(
                 messages
             }
         }
+    }
+
+    private fun isEarlierThan(
+        msg: Message,
+        baseline: Message,
+    ): Boolean {
+        val timeOrder = runCatching { msg.timestamp < baseline.timestamp }.getOrNull()
+        return timeOrder ?: (msg.id != baseline.id && msg.id.value < baseline.id.value)
+    }
+
+    private suspend fun shouldStopBacktracking(
+        msg: Message,
+        referenceMessage: Message,
+        accumulatedLength: Int,
+    ): Boolean {
+        if (isBotSummaryMessage(msg)) {
+            logger.debug("Encountered bot summary message {}, stopping history backtracking", msg.id)
+            return true
+        }
+
+        val elapsed = runCatching { referenceMessage.timestamp - msg.timestamp }.getOrNull()
+        if (elapsed != null && elapsed > inactivityGap) {
+            logger.debug("Inactivity gap {} exceeds {}, stopping history backtracking", elapsed, inactivityGap)
+            return true
+        }
+
+        if (accumulatedLength + msg.content.length > maxCharacterBudget) {
+            logger.debug(
+                "Accumulated character budget {} exceeded with message {}, stopping history backtracking",
+                maxCharacterBudget,
+                msg.id,
+            )
+            return true
+        }
+
+        return false
     }
 
     internal suspend fun retrieveContextMessagesWithHistory(targetMessage: Message): Pair<List<Message>, List<Message>> {
@@ -280,29 +318,7 @@ open class ConversationSliceCollector(
         for (i in chronological.lastIndex downTo 0) {
             val msg = chronological[i]
 
-            if (isBotSummaryMessage(msg)) {
-                logger.debug("Encountered bot summary message {}, stopping history backtracking", msg.id)
-                stopIndex = i
-                break
-            }
-
-            val elapsed =
-                runCatching {
-                    referenceMessage.timestamp - msg.timestamp
-                }.getOrNull()
-
-            if (elapsed != null && elapsed > inactivityGap) {
-                logger.debug("Inactivity gap {} exceeds {}, stopping history backtracking", elapsed, inactivityGap)
-                stopIndex = i
-                break
-            }
-
-            if (accumulatedLength + msg.content.length > maxCharacterBudget) {
-                logger.debug(
-                    "Accumulated character budget {} exceeded with message {}, stopping history backtracking",
-                    maxCharacterBudget,
-                    msg.id,
-                )
+            if (shouldStopBacktracking(msg, referenceMessage, accumulatedLength)) {
                 stopIndex = i
                 break
             }
@@ -340,31 +356,12 @@ open class ConversationSliceCollector(
             }
 
         val normalizedFetched = normalizeChronologicalOrder(fetchedHistory)
-
-        val candidateFromFetched =
-            normalizedFetched.filter { msg ->
-                val timeOrder =
-                    runCatching { msg.timestamp < earliestBaselineMessage.timestamp }.getOrNull()
-                if (timeOrder != null) {
-                    timeOrder
-                } else {
-                    msg.id != earliestBaselineMessage.id && msg.id.value < earliestBaselineMessage.id.value
-                }
-            }
-
+        val candidateFromFetched = normalizedFetched.filter { isEarlierThan(it, earliestBaselineMessage) }
         val rawCandidates =
             if (candidateFromFetched.isNotEmpty()) {
                 candidateFromFetched
             } else {
-                fallbackHistory.filter { msg ->
-                    val timeOrder =
-                        runCatching { msg.timestamp < earliestBaselineMessage.timestamp }.getOrNull()
-                    if (timeOrder != null) {
-                        timeOrder
-                    } else {
-                        msg.id != earliestBaselineMessage.id && msg.id.value < earliestBaselineMessage.id.value
-                    }
-                }
+                fallbackHistory.filter { isEarlierThan(it, earliestBaselineMessage) }
             }
 
         if (rawCandidates.isEmpty()) {
@@ -391,23 +388,7 @@ open class ConversationSliceCollector(
 
             val msg = rawCandidates[i]
 
-            if (isBotSummaryMessage(msg)) {
-                logger.debug("Encountered bot summary message {}, stopping lookback backtracking", msg.id)
-                break
-            }
-
-            val elapsed =
-                runCatching {
-                    referenceMessage.timestamp - msg.timestamp
-                }.getOrNull()
-
-            if (elapsed != null && elapsed > inactivityGap) {
-                logger.debug("Another inactivity gap {} exceeds {}, stopping lookback backtracking", elapsed, inactivityGap)
-                break
-            }
-
-            if (accumulatedLength + msg.content.length > maxCharacterBudget) {
-                logger.debug("Accumulated character budget exceeded in lookback with message {}", msg.id)
+            if (shouldStopBacktracking(msg, referenceMessage, accumulatedLength)) {
                 break
             }
 

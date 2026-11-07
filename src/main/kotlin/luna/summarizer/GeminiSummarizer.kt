@@ -78,8 +78,7 @@ open class GeminiSummarizer(
             return SummaryResult.Error.Generic("Content to summarize cannot be blank")
         }
 
-        val effectiveLookbackProvider = lookbackProvider ?: input.lookbackProvider
-        if (effectiveLookbackProvider == null) {
+        if (lookbackProvider == null) {
             val res =
                 try {
                     summarizeDirect(input, tools = input.tools)
@@ -123,7 +122,7 @@ open class GeminiSummarizer(
                 if (continuation != null) {
                     val toolOutput =
                         try {
-                            effectiveLookbackProvider(reason) ?: ConversationSliceCollector.NO_FURTHER_HISTORY_MESSAGE
+                            lookbackProvider(reason) ?: ConversationSliceCollector.NO_FURTHER_HISTORY_MESSAGE
                         } catch (e: Exception) {
                             logger.warn("Lookback provider failed: {}", e.message)
                             null
@@ -226,7 +225,7 @@ open class GeminiSummarizer(
         return postGenerateContent(requestPayload, tools)
     }
 
-    suspend fun executeToolResponse(
+    private suspend fun executeToolResponse(
         previousRequest: GeminiGenerateContentRequest,
         modelContent: GeminiContent,
         toolName: String,
@@ -265,44 +264,6 @@ open class GeminiSummarizer(
             )
 
         return postGenerateContent(nextRequest, tools)
-    }
-
-    suspend fun summarizeWithTools(
-        input: SummaryInput,
-        tools: List<GeminiTool> = listOf(GeminiTools.FETCH_EARLIER_MESSAGES_TOOL),
-        maxTurns: Int = 3,
-        toolExecutor: suspend (name: String, args: Map<String, String>) -> String,
-    ): SummaryResult {
-        var result = summarizeDirect(input = input, tools = tools)
-        var turn = 0
-
-        while (result is SummaryResult.ToolCall && turn < maxTurns) {
-            val toolCall = result
-            val continuation =
-                toolCall.continuation
-                    ?: return SummaryResult.Error.Generic(
-                        "No continuation available for tool call: ${toolCall.name}",
-                    )
-
-            val toolOutput =
-                try {
-                    toolExecutor(toolCall.name, toolCall.args)
-                } catch (e: Exception) {
-                    return SummaryResult.Error.Generic(
-                        "Error executing tool '${toolCall.name}': ${e.message}",
-                        cause = e,
-                    )
-                }
-
-            result = continuation(toolOutput)
-            turn++
-        }
-
-        if (result is SummaryResult.ToolCall) {
-            return SummaryResult.Error.Generic("Exceeded maximum tool call turns ($maxTurns)")
-        }
-
-        return result
     }
 
     private suspend fun summarizeAgentic(input: SummaryInput): SummaryResult {

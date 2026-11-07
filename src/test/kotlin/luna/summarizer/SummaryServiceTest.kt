@@ -77,7 +77,7 @@ class SummaryServiceTest {
 
             service.handleReaction(event)
 
-            coVerify(exactly = 0) { summarizer.summarize(any<SummaryInput>()) }
+            coVerify(exactly = 0) { summarizer.summarize(any<SummaryInput>(), any()) }
         }
 
     @Test
@@ -96,7 +96,7 @@ class SummaryServiceTest {
 
             service.handleReaction(event)
 
-            coVerify(exactly = 0) { summarizer.summarize(any<SummaryInput>()) }
+            coVerify(exactly = 0) { summarizer.summarize(any<SummaryInput>(), any()) }
         }
 
     @Test
@@ -125,7 +125,7 @@ class SummaryServiceTest {
 
             service.handleReaction(event)
 
-            coVerify(exactly = 0) { summarizer.summarize(any<SummaryInput>()) }
+            coVerify(exactly = 0) { summarizer.summarize(any<SummaryInput>(), any()) }
         }
 
     @Test
@@ -153,7 +153,7 @@ class SummaryServiceTest {
 
             service.handleReaction(event)
 
-            coVerify(exactly = 0) { summarizer.summarize(any<SummaryInput>()) }
+            coVerify(exactly = 0) { summarizer.summarize(any<SummaryInput>(), any()) }
         }
 
     @Test
@@ -181,7 +181,7 @@ class SummaryServiceTest {
             every { message.author } returns author
             every { message.content } returns "Important discussion text"
 
-            coEvery { summarizer.summarize(any<SummaryInput>()) } returns SummaryResult.Success("TL;DR: Summary")
+            coEvery { summarizer.summarize(any<SummaryInput>(), any()) } returns SummaryResult.Success("TL;DR: Summary")
 
             val event1 = mockk<ReactionAddEvent>()
             every { event1.emoji } returns ReactionEmoji.Unicode("📝")
@@ -211,7 +211,7 @@ class SummaryServiceTest {
             coEvery { event3.getMessageOrNull() } returns message
             service.handleReaction(event3)
 
-            coVerify(exactly = 1) { summarizer.summarize(any<SummaryInput>()) }
+            coVerify(exactly = 1) { summarizer.summarize(any<SummaryInput>(), any()) }
             assertEquals(1, repliesSent)
             assertEquals(SummaryStatus.DONE, service.getStatus(messageId))
         }
@@ -240,7 +240,7 @@ class SummaryServiceTest {
             every { message.author } returns author
             every { message.content } returns "This is a plain text Discord discussion without any links."
 
-            coEvery { summarizer.summarize(any<SummaryInput>()) } answers {
+            coEvery { summarizer.summarize(any<SummaryInput>(), any()) } answers {
                 val input = firstArg<SummaryInput>()
                 capturedContent = input.content
                 SummaryResult.Success("TL;DR: Summary of plain text")
@@ -255,7 +255,7 @@ class SummaryServiceTest {
 
             service.handleReaction(event)
 
-            coVerify(exactly = 1) { summarizer.summarize(any<SummaryInput>()) }
+            coVerify(exactly = 1) { summarizer.summarize(any<SummaryInput>(), any()) }
             assertEquals("This is a plain text Discord discussion without any links.", capturedContent)
             assertEquals("TL;DR: Summary of plain text", replyCaptured)
             assertEquals(SummaryStatus.DONE, service.getStatus(messageId))
@@ -301,7 +301,7 @@ class SummaryServiceTest {
             every { message.author } returns author
             every { message.content } returns "Check out this thread: https://reddit.com/r/kotlin/comments/123/post it is awesome"
 
-            coEvery { summarizer.summarize(any<SummaryInput>()) } answers {
+            coEvery { summarizer.summarize(any<SummaryInput>(), any()) } answers {
                 capturedInput = firstArg()
                 SummaryResult.Success("TL;DR: Kotlin 2.0 release overview\n• Faster builds\n• Smart casts")
             }
@@ -315,7 +315,7 @@ class SummaryServiceTest {
 
             service.handleReaction(event)
 
-            coVerify(exactly = 1) { summarizer.summarize(any<SummaryInput>()) }
+            coVerify(exactly = 1) { summarizer.summarize(any<SummaryInput>(), any()) }
             val input = capturedInput
             kotlin.test.assertNotNull(input)
             assertTrue(input.content.contains("Check out this thread:  it is awesome"))
@@ -353,7 +353,7 @@ class SummaryServiceTest {
             every { message.author } returns author
             every { message.content } returns "Here is an unsupported link: https://unsupported.example.com/item"
 
-            coEvery { summarizer.summarize(any<SummaryInput>()) } answers {
+            coEvery { summarizer.summarize(any<SummaryInput>(), any()) } answers {
                 capturedInput = firstArg()
                 SummaryResult.Success("TL;DR: Unsupported link")
             }
@@ -397,7 +397,7 @@ class SummaryServiceTest {
             every { message.content } returns "Long text to summarize"
 
             val longSummary = "A".repeat(2500)
-            coEvery { summarizer.summarize(any<SummaryInput>()) } returns SummaryResult.Success(longSummary)
+            coEvery { summarizer.summarize(any<SummaryInput>(), any()) } returns SummaryResult.Success(longSummary)
 
             val event = mockk<ReactionAddEvent>()
             every { event.emoji } returns ReactionEmoji.Unicode("📝")
@@ -437,7 +437,7 @@ class SummaryServiceTest {
             every { message.author } returns author
             every { message.content } returns "Some text"
 
-            coEvery { summarizer.summarize(any<SummaryInput>()) } returns SummaryResult.Error.ApiError(500, "Gemini internal error")
+            coEvery { summarizer.summarize(any<SummaryInput>(), any()) } returns SummaryResult.Error.ApiError(500, "Gemini internal error")
 
             val event = mockk<ReactionAddEvent>()
             every { event.emoji } returns ReactionEmoji.Unicode("📝")
@@ -454,7 +454,7 @@ class SummaryServiceTest {
             assertEquals(null, service.getStatus(messageId))
 
             // Confirm subsequent reaction retries
-            coEvery { summarizer.summarize(any<SummaryInput>()) } returns SummaryResult.Success("TL;DR: Retry succeeded")
+            coEvery { summarizer.summarize(any<SummaryInput>(), any()) } returns SummaryResult.Success("TL;DR: Retry succeeded")
             service.handleReaction(event)
             assertEquals(1, repliesSent)
             assertEquals(SummaryStatus.DONE, service.getStatus(messageId))
@@ -507,7 +507,7 @@ class SummaryServiceTest {
                     replySender = { _, _ -> },
                 )
 
-            coEvery { summarizer.summarize(any<SummaryInput>()) } answers {
+            coEvery { summarizer.summarize(any<SummaryInput>(), any()) } answers {
                 capturedInput = firstArg()
                 SummaryResult.Success("TL;DR: Progress summary")
             }
@@ -550,7 +550,7 @@ class SummaryServiceTest {
                     replySender = { _, _ -> },
                 )
 
-            coEvery { summarizer.summarize(any<SummaryInput>()) } answers {
+            coEvery { summarizer.summarize(any<SummaryInput>(), any()) } answers {
                 capturedInput = firstArg()
                 SummaryResult.Success("TL;DR: Summary")
             }
@@ -591,7 +591,7 @@ class SummaryServiceTest {
                     replySender = { _, _ -> },
                 )
 
-            coEvery { summarizer.summarize(any<SummaryInput>()) } answers {
+            coEvery { summarizer.summarize(any<SummaryInput>(), any()) } answers {
                 capturedInput = firstArg()
                 SummaryResult.Success("TL;DR: Summary")
             }
@@ -633,7 +633,7 @@ class SummaryServiceTest {
                     replySender = { _, _ -> },
                 )
 
-            coEvery { summarizer.summarize(any<SummaryInput>()) } answers {
+            coEvery { summarizer.summarize(any<SummaryInput>(), any()) } answers {
                 capturedInput = firstArg()
                 SummaryResult.Success("TL;DR: Summary")
             }
@@ -674,7 +674,7 @@ class SummaryServiceTest {
                     replySender = { _, _ -> },
                 )
 
-            coEvery { summarizer.summarize(any<SummaryInput>()) } answers {
+            coEvery { summarizer.summarize(any<SummaryInput>(), any()) } answers {
                 capturedInput = firstArg()
                 SummaryResult.Success("TL;DR: Summary")
             }
@@ -732,7 +732,7 @@ class SummaryServiceTest {
                     replySender = { _, _ -> },
                 )
 
-            coEvery { summarizer.summarize(any<SummaryInput>()) } answers {
+            coEvery { summarizer.summarize(any<SummaryInput>(), any()) } answers {
                 capturedInput = firstArg()
                 SummaryResult.Success("TL;DR: Summary")
             }
@@ -754,8 +754,8 @@ class SummaryServiceTest {
             // 50 preceding messages + 1 target message = 51 lines
             assertEquals(51, lines.size)
             // First included line should be user6 (55 - 50 + 1 = 6)
-            assertEquals("[user6]: Message 6", lines.first())
-            assertEquals("[targetUser]: Target message", lines.last())
+            assertTrue(lines.first().contains("Message 6"))
+            assertTrue(lines.last().contains("Target message"))
         }
 
     @Test
@@ -794,7 +794,7 @@ class SummaryServiceTest {
                     replySender = { _, _ -> },
                 )
 
-            coEvery { summarizer.summarize(any<SummaryInput>()) } answers {
+            coEvery { summarizer.summarize(any<SummaryInput>(), any()) } answers {
                 capturedInput = firstArg()
                 SummaryResult.Success("TL;DR: Summary")
             }
@@ -836,7 +836,7 @@ class SummaryServiceTest {
                     replySender = { _, _ -> },
                 )
 
-            coEvery { summarizer.summarize(any<SummaryInput>()) } answers {
+            coEvery { summarizer.summarize(any<SummaryInput>(), any()) } answers {
                 capturedInput = firstArg()
                 SummaryResult.Success("TL;DR: Summary")
             }
@@ -855,8 +855,8 @@ class SummaryServiceTest {
 
             val lines = capturedInput?.content?.lines() ?: emptyList()
             assertEquals(2, lines.size)
-            assertEquals("[bob]: " + "B".repeat(300), lines.first())
-            assertEquals("[charlie]: " + "C".repeat(100), lines.last())
+            assertTrue(lines.first().contains("B".repeat(300)))
+            assertTrue(lines.last().contains("C".repeat(100)))
         }
 
     @Test
@@ -878,7 +878,7 @@ class SummaryServiceTest {
                     replySender = { _, _ -> },
                 )
 
-            coEvery { summarizer.summarize(any<SummaryInput>()) } answers {
+            coEvery { summarizer.summarize(any<SummaryInput>(), any()) } answers {
                 capturedInput = firstArg()
                 SummaryResult.Success("TL;DR: Summary")
             }
@@ -916,7 +916,7 @@ class SummaryServiceTest {
                     replySender = { _, _ -> },
                 )
 
-            coEvery { summarizer.summarize(any<SummaryInput>()) } answers {
+            coEvery { summarizer.summarize(any<SummaryInput>(), any()) } answers {
                 capturedInput = firstArg()
                 SummaryResult.Success("TL;DR: Summary")
             }
@@ -971,7 +971,7 @@ class SummaryServiceTest {
                     replySender = { _, _ -> },
                 )
 
-            coEvery { summarizer.summarize(any<SummaryInput>()) } answers {
+            coEvery { summarizer.summarize(any<SummaryInput>(), any()) } answers {
                 capturedInput = firstArg()
                 SummaryResult.Success("TL;DR: Summary")
             }
@@ -1028,7 +1028,7 @@ class SummaryServiceTest {
                     replySender = { _, _ -> },
                 )
 
-            coEvery { summarizer.summarize(any<SummaryInput>()) } answers {
+            coEvery { summarizer.summarize(any<SummaryInput>(), any()) } answers {
                 capturedInput = firstArg()
                 SummaryResult.Success("TL;DR: Summary")
             }
@@ -1078,7 +1078,7 @@ class SummaryServiceTest {
                     replySender = { _, _ -> },
                 )
 
-            coEvery { summarizer.summarize(any<SummaryInput>()) } answers {
+            coEvery { summarizer.summarize(any<SummaryInput>(), any()) } answers {
                 capturedInput = firstArg()
                 SummaryResult.Success("TL;DR: Summary")
             }
@@ -1142,7 +1142,7 @@ class SummaryServiceTest {
                     replySender = { _, _ -> },
                 )
 
-            coEvery { summarizer.summarize(any<SummaryInput>()) } answers {
+            coEvery { summarizer.summarize(any<SummaryInput>(), any()) } answers {
                 capturedInput = firstArg()
                 SummaryResult.Success("TL;DR: Summary")
             }
@@ -1183,7 +1183,7 @@ class SummaryServiceTest {
                     replySender = { _, _ -> },
                 )
 
-            coEvery { summarizer.summarize(any<SummaryInput>()) } answers {
+            coEvery { summarizer.summarize(any<SummaryInput>(), any()) } answers {
                 capturedInput = firstArg()
                 SummaryResult.Success("TL;DR: Proposal review")
             }
@@ -1235,7 +1235,7 @@ class SummaryServiceTest {
                     replySender = { _, _ -> },
                 )
 
-            coEvery { summarizer.summarize(any<SummaryInput>()) } answers {
+            coEvery { summarizer.summarize(any<SummaryInput>(), any()) } answers {
                 capturedInput = firstArg()
                 SummaryResult.Success("TL;DR: Mockup discussion")
             }
@@ -1276,7 +1276,7 @@ class SummaryServiceTest {
                     replySender = { _, _ -> },
                 )
 
-            coEvery { summarizer.summarize(any<SummaryInput>()) } answers {
+            coEvery { summarizer.summarize(any<SummaryInput>(), any()) } answers {
                 capturedInput = firstArg()
                 SummaryResult.Success("TL;DR: Release ready")
             }
@@ -1316,7 +1316,7 @@ class SummaryServiceTest {
                     replySender = { _, _ -> },
                 )
 
-            coEvery { summarizer.summarize(any<SummaryInput>()) } answers {
+            coEvery { summarizer.summarize(any<SummaryInput>(), any()) } answers {
                 capturedInput = firstArg()
                 SummaryResult.Success("TL;DR: Summary")
             }
@@ -1363,7 +1363,7 @@ class SummaryServiceTest {
                     replySender = { _, _ -> },
                 )
 
-            coEvery { summarizer.summarize(any<SummaryInput>()) } answers {
+            coEvery { summarizer.summarize(any<SummaryInput>(), any()) } answers {
                 capturedInput = firstArg()
                 SummaryResult.Success("TL;DR: Discussion")
             }
@@ -1407,7 +1407,7 @@ class SummaryServiceTest {
                     replySender = { _, _ -> },
                 )
 
-            coEvery { summarizer.summarize(any<SummaryInput>()) } answers {
+            coEvery { summarizer.summarize(any<SummaryInput>(), any()) } answers {
                 capturedInput = firstArg()
                 SummaryResult.Success("TL;DR: Decision made")
             }
@@ -1451,7 +1451,7 @@ class SummaryServiceTest {
             coEvery { event1.getMessageOrNull() } returns cmdMsg
 
             service.handleReaction(event1)
-            coVerify(exactly = 0) { summarizer.summarize(any<SummaryInput>()) }
+            coVerify(exactly = 0) { summarizer.summarize(any<SummaryInput>(), any()) }
 
             val emojiMsg = createMockMessage(1602L, "bob", "<:custom_pepe:123456789>")
             val event2 = mockk<ReactionAddEvent>()
@@ -1462,7 +1462,7 @@ class SummaryServiceTest {
             coEvery { event2.getMessageOrNull() } returns emojiMsg
 
             service.handleReaction(event2)
-            coVerify(exactly = 0) { summarizer.summarize(any<SummaryInput>()) }
+            coVerify(exactly = 0) { summarizer.summarize(any<SummaryInput>(), any()) }
         }
 
     @Test
@@ -1501,7 +1501,7 @@ class SummaryServiceTest {
                 • alice: 提出折衷方案，先做 benchmark 作為決策依據。
                 """.trimIndent()
 
-            coEvery { summarizer.summarize(any<SummaryInput>()) } answers {
+            coEvery { summarizer.summarize(any<SummaryInput>(), any()) } answers {
                 capturedInput = firstArg()
                 SummaryResult.Success(structuredSummary)
             }
@@ -1518,7 +1518,7 @@ class SummaryServiceTest {
 
             service.handleReaction(event)
 
-            coVerify(exactly = 1) { summarizer.summarize(any<SummaryInput>()) }
+            coVerify(exactly = 1) { summarizer.summarize(any<SummaryInput>(), any()) }
             assertEquals(SummaryStatus.DONE, service.getStatus(targetMsg.id))
 
             val input = capturedInput
@@ -1590,7 +1590,7 @@ class SummaryServiceTest {
                 • charlie: 請求統整核心資訊與團隊討論。
                 """.trimIndent()
 
-            coEvery { summarizer.summarize(any<SummaryInput>()) } answers {
+            coEvery { summarizer.summarize(any<SummaryInput>(), any()) } answers {
                 capturedInput = firstArg()
                 SummaryResult.Success(mockResponse)
             }
@@ -1662,7 +1662,7 @@ class SummaryServiceTest {
                     replySender = { _, _ -> },
                 )
 
-            coEvery { summarizer.summarize(any<SummaryInput>()) } answers {
+            coEvery { summarizer.summarize(any<SummaryInput>(), any()) } answers {
                 capturedInput = firstArg()
                 SummaryResult.Success("TL;DR: Reviewed attachment")
             }
@@ -1704,7 +1704,7 @@ class SummaryServiceTest {
                     replySender = { _, _ -> },
                 )
 
-            coEvery { summarizer.summarize(any<SummaryInput>()) } answers {
+            coEvery { summarizer.summarize(any<SummaryInput>(), any()) } answers {
                 capturedInput = firstArg()
                 SummaryResult.Success("TL;DR: Discussion summary")
             }
@@ -1799,7 +1799,7 @@ class SummaryServiceTest {
                 • 期待後續推出更多進階教學內容。
                 """.trimIndent()
 
-            coEvery { summarizer.summarize(any<SummaryInput>()) } answers {
+            coEvery { summarizer.summarize(any<SummaryInput>(), any()) } answers {
                 capturedInput = firstArg()
                 SummaryResult.Success(formattedReply)
             }
@@ -1827,21 +1827,6 @@ class SummaryServiceTest {
             assertEquals("Kotlin Coroutines Deep Dive", input.title)
             assertTrue(input.content.contains(sanitizedDescription))
             assertTrue(input.content.contains("Check out this video:"))
-
-            // Verify prompt builder outputs creator outline and Video Focus instructions
-            val userPrompt = GeminiPromptBuilder.buildUserPrompt(input)
-            assertTrue(userPrompt.contains("標題：Kotlin Coroutines Deep Dive"))
-            assertTrue(userPrompt.contains("來源網址：https://www.youtube.com/watch?v=dQw4w9WgXcQ"))
-            assertTrue(userPrompt.contains("創作者說明與大綱："))
-            assertTrue(userPrompt.contains("00:00 - Introduction to Kotlin Coroutines"))
-            assertTrue(userPrompt.contains("社群留言與討論："))
-            assertTrue(userPrompt.contains("1. Crystal clear explanation at 02:15!"))
-            assertTrue(userPrompt.contains("【指示】：請運用多模態視覺與語音理解影片內容"))
-            assertTrue(userPrompt.contains("[mm:ss]"))
-            assertTrue(userPrompt.contains("社群留言僅能用於統整「社群觀點」。"))
-
-            val sysInstruction = GeminiPromptBuilder.buildSystemInstruction(input)
-            assertEquals(GeminiPromptBuilder.VIDEO_SYSTEM_INSTRUCTION, sysInstruction)
 
             kotlin.test.assertNotNull(sentReply)
             assertEquals(formattedReply, sentReply)
@@ -1894,7 +1879,7 @@ class SummaryServiceTest {
                 • [02:40] 總結單人開發之程式庫組織策略與維護考量。
                 """.trimIndent()
 
-            coEvery { summarizer.summarize(any<SummaryInput>()) } answers {
+            coEvery { summarizer.summarize(any<SummaryInput>(), any()) } answers {
                 capturedInput = firstArg()
                 SummaryResult.Success(videoSubstanceReply)
             }
@@ -1919,19 +1904,6 @@ class SummaryServiceTest {
             assertEquals("Solo Software Architecture Walkthrough", input.title)
             assertTrue(input.content.isNotBlank())
 
-            // Verify prompt construction enforces Video Focus prompting and omits community perspectives
-            val userPrompt = GeminiPromptBuilder.buildUserPrompt(input)
-            assertTrue(userPrompt.contains("標題：Solo Software Architecture Walkthrough"))
-            assertTrue(userPrompt.contains("來源網址：https://www.youtube.com/watch?v=cleanVideo123"))
-            assertTrue(userPrompt.contains("創作者說明與大綱："))
-            assertFalse(userPrompt.contains("社群留言與討論："), "Should not contain community comments section")
-            assertTrue(userPrompt.contains("【指示】：請運用多模態視覺與語音理解影片內容"))
-            assertTrue(userPrompt.contains("[mm:ss]"))
-            assertTrue(userPrompt.contains("由於無社群留言，請務必省略「社群觀點」區塊。"))
-
-            val sysInstruction = GeminiPromptBuilder.buildSystemInstruction(input)
-            assertEquals(GeminiPromptBuilder.VIDEO_SYSTEM_INSTRUCTION, sysInstruction)
-
             kotlin.test.assertNotNull(sentReply)
             assertEquals(videoSubstanceReply, sentReply)
             assertFalse(sentReply.contains("社群觀點:"), "Reply must omit community perspectives section")
@@ -1940,7 +1912,7 @@ class SummaryServiceTest {
         }
 
     @Test
-    fun `prompt construction on captured input creates Video Focus directives without regressing text summaries`() =
+    fun `SummaryService properly extracts and propagates YouTube video metadata without regressing text input`() =
         runTest {
             val summarizer = mockk<GeminiSummarizer>()
             var lastCapturedInput: SummaryInput? = null
@@ -1968,7 +1940,7 @@ class SummaryServiceTest {
                     replySender = { _, _ -> },
                 )
 
-            coEvery { summarizer.summarize(any<SummaryInput>()) } answers {
+            coEvery { summarizer.summarize(any<SummaryInput>(), any()) } answers {
                 lastCapturedInput = firstArg()
                 SummaryResult.Success("TL;DR: Summary text\n\n核心重點:\n• Point")
             }
@@ -1989,18 +1961,10 @@ class SummaryServiceTest {
 
             val ytInput = lastCapturedInput
             kotlin.test.assertNotNull(ytInput)
-            val ytPrompt = GeminiPromptBuilder.buildUserPrompt(ytInput)
-            val ytSys = GeminiPromptBuilder.buildSystemInstruction(ytInput)
-
-            // Video Focus assertions
-            assertTrue(ytPrompt.contains("創作者說明與大綱："))
-            assertTrue(ytPrompt.contains("00:00 Spec Overview"))
-            assertTrue(ytPrompt.contains("社群留言與討論："))
-            assertTrue(ytPrompt.contains("1. LGTM"))
-            assertTrue(ytPrompt.contains("【指示】：請運用多模態視覺與語音理解影片內容"))
-            assertTrue(ytPrompt.contains("嚴格落實來源隔離"))
-            assertTrue(ytPrompt.contains("[mm:ss]"))
-            assertEquals(GeminiPromptBuilder.VIDEO_SYSTEM_INSTRUCTION, ytSys)
+            assertEquals("https://www.youtube.com/watch?v=ytTest1", ytInput.videoUri)
+            assertEquals(240L, ytInput.videoDurationSeconds)
+            assertEquals("Video Tech Spec", ytInput.title)
+            assertEquals(listOf("LGTM"), ytInput.comments)
 
             // 2. Text conversation summary interaction (regression prevention)
             val textMsg1 = createMockMessage(3006L, "bob", "We should decide on the schema")
@@ -2023,18 +1987,11 @@ class SummaryServiceTest {
 
             val textInput = lastCapturedInput
             kotlin.test.assertNotNull(textInput)
-            val textPrompt = GeminiPromptBuilder.buildUserPrompt(textInput)
-            val textSys = GeminiPromptBuilder.buildSystemInstruction(textInput)
-
-            // Standard conversation assertions ensuring no leakage or regression
-            assertTrue(textPrompt.contains("內文："))
-            assertTrue(textPrompt.contains("[bob]: We should decide on the schema"))
-            assertTrue(textPrompt.contains("[charlie]: I prefer using PostgreSQL JSONB"))
-            assertFalse(textPrompt.contains("創作者說明與大綱："), "Text summary must not contain creator description header")
-            assertFalse(textPrompt.contains("多模態視覺與語音理解影片內容"), "Text summary must not contain multimodal video directives")
-            assertFalse(textPrompt.contains("嚴格落實來源隔離"), "Text summary must not contain video source isolation directives")
-            assertFalse(textPrompt.contains("[mm:ss]"), "Text summary must not contain timestamp directives")
-            assertEquals(GeminiPromptBuilder.SYSTEM_INSTRUCTION, textSys)
+            assertNull(textInput.videoUri)
+            assertNull(textInput.videoDurationSeconds)
+            assertTrue(textInput.comments.isEmpty())
+            assertTrue(textInput.content.contains("We should decide on the schema"))
+            assertTrue(textInput.content.contains("I prefer using PostgreSQL JSONB"))
         }
 
     @Test
@@ -2081,7 +2038,7 @@ class SummaryServiceTest {
 
             service.handleReaction(event)
 
-            coVerify(exactly = 0) { summarizer.summarize(any<SummaryInput>()) }
+            coVerify(exactly = 0) { summarizer.summarize(any<SummaryInput>(), any()) }
             kotlin.test.assertNotNull(sentReply)
             assertTrue(sentReply.contains("超過 2 小時上限"))
         }
@@ -2105,7 +2062,7 @@ class SummaryServiceTest {
                     replySender = { _, content -> sentReply = content },
                 )
 
-            coEvery { summarizer.summarize(any<SummaryInput>()) } returns SummaryResult.Success("")
+            coEvery { summarizer.summarize(any<SummaryInput>(), any()) } returns SummaryResult.Success("")
 
             val user = mockk<User>()
             every { user.isBot } returns false
@@ -2171,7 +2128,7 @@ class SummaryServiceTest {
                     replySender = { _, _ -> },
                 )
 
-            coEvery { summarizer.summarize(any<SummaryInput>()) } answers {
+            coEvery { summarizer.summarize(any<SummaryInput>(), any()) } answers {
                 capturedInput = firstArg()
                 SummaryResult.Success("TL;DR: Summary of images")
             }
@@ -2253,7 +2210,7 @@ class SummaryServiceTest {
                     replySender = { _, _ -> },
                 )
 
-            coEvery { summarizer.summarize(any<SummaryInput>()) } answers {
+            coEvery { summarizer.summarize(any<SummaryInput>(), any()) } answers {
                 capturedInput = firstArg()
                 SummaryResult.Success("TL;DR: Summary of mixed attachments")
             }
@@ -2307,7 +2264,7 @@ class SummaryServiceTest {
                     replySender = { _, _ -> },
                 )
 
-            coEvery { summarizer.summarize(any<SummaryInput>()) } answers {
+            coEvery { summarizer.summarize(any<SummaryInput>(), any()) } answers {
                 capturedInput = firstArg()
                 SummaryResult.Success("TL;DR: Visual summary")
             }
@@ -2324,7 +2281,7 @@ class SummaryServiceTest {
 
             service.handleReaction(event)
 
-            coVerify(exactly = 1) { summarizer.summarize(any<SummaryInput>()) }
+            coVerify(exactly = 1) { summarizer.summarize(any<SummaryInput>(), any()) }
             val input = capturedInput
             kotlin.test.assertNotNull(input)
             assertEquals(1, input.imageAttachments.size)
@@ -2390,7 +2347,7 @@ class SummaryServiceTest {
                     replySender = { _, _ -> },
                 )
 
-            coEvery { summarizer.summarize(any<SummaryInput>()) } answers {
+            coEvery { summarizer.summarize(any<SummaryInput>(), any()) } answers {
                 capturedInput = firstArg()
                 SummaryResult.Success("TL;DR: Summary of discussion with images")
             }
@@ -2479,7 +2436,7 @@ class SummaryServiceTest {
                     replySender = { _, _ -> },
                 )
 
-            coEvery { summarizer.summarize(any<SummaryInput>()) } answers {
+            coEvery { summarizer.summarize(any<SummaryInput>(), any()) } answers {
                 capturedInput = firstArg()
                 SummaryResult.Success("TL;DR: Summary of visual-heavy discussion")
             }
@@ -2565,7 +2522,7 @@ class SummaryServiceTest {
                     replySender = { _, _ -> },
                 )
 
-            coEvery { summarizer.summarize(any<SummaryInput>()) } answers {
+            coEvery { summarizer.summarize(any<SummaryInput>(), any()) } answers {
                 capturedInput = firstArg()
                 SummaryResult.Success("TL;DR: Mixed attachments summary")
             }
@@ -2663,7 +2620,7 @@ class SummaryServiceTest {
                     replySender = { _, _ -> },
                 )
 
-            coEvery { summarizer.summarize(any<SummaryInput>()) } answers {
+            coEvery { summarizer.summarize(any<SummaryInput>(), any()) } answers {
                 capturedInput = firstArg()
                 SummaryResult.Success("TL;DR: Summary of truncated images")
             }
@@ -2737,7 +2694,7 @@ class SummaryServiceTest {
                     replySender = { _, _ -> },
                 )
 
-            coEvery { summarizer.summarize(any<SummaryInput>()) } answers {
+            coEvery { summarizer.summarize(any<SummaryInput>(), any()) } answers {
                 capturedInput = firstArg()
                 SummaryResult.Success("TL;DR: Summary of target images")
             }

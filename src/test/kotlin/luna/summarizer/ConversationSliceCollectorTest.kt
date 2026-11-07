@@ -115,7 +115,7 @@ class ConversationSliceCollectorTest {
             assertNotNull(slice)
             assertFalse(slice.durationExceeded)
             assertNull(slice.primaryUrl)
-            assertNotNull(slice.summaryInput.lookbackProvider)
+            assertNotNull(slice.lookbackProvider)
 
             assertTrue(slice.summaryInput.content.contains("[Alice]: Meeting start"))
             assertTrue(slice.summaryInput.content.contains("[Bob]: Agreed on plan"))
@@ -195,7 +195,7 @@ class ConversationSliceCollectorTest {
 
             val slice = collector.collectSlice(targetMsg)
             assertNotNull(slice)
-            val lookback = checkNotNull(slice.summaryInput.lookbackProvider)
+            val lookback = checkNotNull(slice.lookbackProvider)
 
             val expandedContent = lookback("Need historical background")
             assertNotNull(expandedContent)
@@ -218,7 +218,7 @@ class ConversationSliceCollectorTest {
 
             val slice = collector.collectSlice(targetMsg)
             assertNotNull(slice)
-            val lookback = checkNotNull(slice.summaryInput.lookbackProvider)
+            val lookback = checkNotNull(slice.lookbackProvider)
 
             val expandedContent = lookback("Need background")
             assertEquals(ConversationSliceCollector.NO_FURTHER_HISTORY_MESSAGE, expandedContent)

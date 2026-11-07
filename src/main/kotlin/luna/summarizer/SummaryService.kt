@@ -234,7 +234,7 @@ class SummaryService(
 
         try {
             logger.info("Executing Gemini summarization for message {}", event.messageId)
-            val result = summarizer.summarize(slice.summaryInput)
+            val result = summarizer.summarize(slice.summaryInput, slice.lookbackProvider)
 
             when (result) {
                 is SummaryResult.Success -> {

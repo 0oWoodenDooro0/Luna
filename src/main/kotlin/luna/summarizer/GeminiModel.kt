@@ -45,7 +45,6 @@ data class ChatImageAttachment(
  * @property imageAttachments Optional list of chat image attachments for multimodal visual understanding.
  * @property tools Optional list of tool declarations provided for model function calling.
  * @property earlierContext Optional preceding conversational background context from autonomous lookback.
- * @property lookbackProvider Optional callback to fetch earlier conversational context on demand.
  */
 data class SummaryInput(
     val content: String,
@@ -57,7 +56,6 @@ data class SummaryInput(
     val imageAttachments: List<ChatImageAttachment> = emptyList(),
     val tools: List<GeminiTool>? = null,
     val earlierContext: String? = null,
-    val lookbackProvider: (suspend (reason: String) -> String?)? = null,
 )
 
 /**
