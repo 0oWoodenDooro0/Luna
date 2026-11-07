@@ -45,6 +45,8 @@ class LunaHost(
 
     init {
         val loaded = customConfig ?: ConfigLoader.loadConfig()
+        // Run startup drift audit to fail fast on missing required variables and report drift
+        ConfigLoader.auditDrift(loaded)
         // Fail-fast validation against LunaCoreConfig data model
         coreConfig = LunaCoreConfig.fromMap(loaded)
 
