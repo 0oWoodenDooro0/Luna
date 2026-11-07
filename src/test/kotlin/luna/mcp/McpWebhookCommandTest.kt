@@ -586,4 +586,169 @@ class McpWebhookCommandTest {
             assertNotNull(content)
             assertTrue(content.contains("/mcp webhook add") || content.contains("/mcp webhook list"))
         }
+
+    @Test
+    fun `remove with auto-provisioned webhook deletes via kord rest and removes from database`() =
+        runTest {
+            registerTestClient()
+
+            val now = System.currentTimeMillis()
+            webhookRepo.addWebhook(
+                McpWebhookRecord(
+                    id = "wh-remove-auto",
+                    clientId = testClientId,
+                    tag = "alerts",
+                    guildId = guildIdSnowflake.toString(),
+                    channelId = channelIdSnowflake.toString(),
+                    webhookUrl = "https://discord.com/api/webhooks/777888999/auto-token-xyz",
+                    isAutoProvisioned = true,
+                    createdAt = now,
+                ),
+            )
+
+            val (interaction, getResponseContent) =
+                setupInteraction(
+                    subcommandName = "remove",
+                    options = mapOf("tag" to "alerts"),
+                )
+
+            command.handle(interaction)
+
+            val content = getResponseContent()
+            assertNotNull(content)
+            assertTrue(content.contains("已成功移除標籤為 `alerts` 的 Webhook"))
+
+            coVerify(exactly = 1) {
+                mockRequestHandler.handle(
+                    match<dev.kord.rest.request.Request<*, *>> {
+                        it.route == dev.kord.rest.route.Route.WebhookByTokenDelete
+                    },
+                )
+            }
+
+            val stored = webhookRepo.findByClientAndTag(testClientId, "alerts")
+            assertEquals(null, stored)
+        }
+
+    @Test
+    fun `remove with custom url only deletes from database without kord webhook deletion call`() =
+        runTest {
+            registerTestClient()
+
+            val now = System.currentTimeMillis()
+            val customUrl = "https://discord.com/api/webhooks/123456789/custom-token"
+            webhookRepo.addWebhook(
+                McpWebhookRecord(
+                    id = "wh-remove-custom",
+                    clientId = testClientId,
+                    tag = "custom_alerts",
+                    guildId = guildIdSnowflake.toString(),
+                    channelId = channelIdSnowflake.toString(),
+                    webhookUrl = customUrl,
+                    isAutoProvisioned = false,
+                    createdAt = now,
+                ),
+            )
+
+            val (interaction, getResponseContent) =
+                setupInteraction(
+                    subcommandName = "remove",
+                    options = mapOf("tag" to "custom_alerts"),
+                )
+
+            command.handle(interaction)
+
+            val content = getResponseContent()
+            assertNotNull(content)
+            assertTrue(content.contains("已成功移除標籤為 `custom_alerts` 的 Webhook"))
+
+            coVerify(exactly = 0) {
+                mockRequestHandler.handle(
+                    match<dev.kord.rest.request.Request<*, *>> {
+                        it.route == dev.kord.rest.route.Route.WebhookByTokenDelete
+                    },
+                )
+            }
+
+            val stored = webhookRepo.findByClientAndTag(testClientId, "custom_alerts")
+            assertEquals(null, stored)
+        }
+
+    @Test
+    fun `remove when discord rest throws exception logs degraded warning and still removes from database`() =
+        runTest {
+            registerTestClient()
+
+            val now = System.currentTimeMillis()
+            webhookRepo.addWebhook(
+                McpWebhookRecord(
+                    id = "wh-remove-err",
+                    clientId = testClientId,
+                    tag = "failing_wh",
+                    guildId = guildIdSnowflake.toString(),
+                    channelId = channelIdSnowflake.toString(),
+                    webhookUrl = "https://discord.com/api/webhooks/777888999/auto-token-xyz",
+                    isAutoProvisioned = true,
+                    createdAt = now,
+                ),
+            )
+
+            val (interaction, getResponseContent) =
+                setupInteraction(
+                    subcommandName = "remove",
+                    options = mapOf("tag" to "failing_wh"),
+                )
+
+            coEvery {
+                mockRequestHandler.handle(
+                    match<dev.kord.rest.request.Request<*, *>> {
+                        it.route == dev.kord.rest.route.Route.WebhookByTokenDelete
+                    },
+                )
+            } throws RuntimeException("Discord 404 Not Found")
+
+            command.handle(interaction)
+
+            val content = getResponseContent()
+            assertNotNull(content)
+            assertTrue(content.contains("已成功移除標籤為 `failing_wh` 的 Webhook"))
+
+            val stored = webhookRepo.findByClientAndTag(testClientId, "failing_wh")
+            assertEquals(null, stored)
+        }
+
+    @Test
+    fun `remove with nonexistent tag returns error message`() =
+        runTest {
+            registerTestClient()
+
+            val (interaction, getResponseContent) =
+                setupInteraction(
+                    subcommandName = "remove",
+                    options = mapOf("tag" to "nonexistent_tag"),
+                )
+
+            command.handle(interaction)
+
+            val content = getResponseContent()
+            assertNotNull(content)
+            assertTrue(content.contains("找不到標籤為 `nonexistent_tag` 的 Webhook"))
+        }
+
+    @Test
+    fun `remove rejects interaction when user has not created client ID`() =
+        runTest {
+            val (interaction, getResponseContent) =
+                setupInteraction(
+                    subcommandName = "remove",
+                    options = mapOf("tag" to "any_tag"),
+                )
+
+            command.handle(interaction)
+
+            val content = getResponseContent()
+            assertNotNull(content)
+            assertTrue(content.contains("您尚未建立 Client ID"))
+            assertTrue(content.contains("/mcp client create"))
+        }
 }

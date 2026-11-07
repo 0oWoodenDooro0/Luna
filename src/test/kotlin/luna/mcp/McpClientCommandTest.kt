@@ -2,14 +2,16 @@ package luna.mcp
 
 import dev.kord.common.entity.Snowflake
 import dev.kord.core.Kord
-import dev.kord.core.behavior.interaction.response.EphemeralMessageInteractionResponseBehavior
 import dev.kord.core.entity.User
 import dev.kord.core.entity.interaction.ChatInputCommandInteraction
 import dev.kord.core.entity.interaction.GroupCommand
 import dev.kord.rest.json.request.MultipartInteractionResponseCreateRequest
+import dev.kord.rest.request.RequestHandler
 import dev.kord.rest.service.InteractionService
 import dev.kord.rest.service.RestClient
+import dev.kord.rest.service.WebhookService
 import io.mockk.coEvery
+import io.mockk.coVerify
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.slot
@@ -30,6 +32,7 @@ class McpClientCommandTest {
     private lateinit var clientRepo: McpClientRepository
     private lateinit var webhookRepo: McpWebhookRepository
     private lateinit var command: McpClientCommand
+    private lateinit var mockRequestHandler: RequestHandler
 
     @BeforeEach
     fun setUp() {
@@ -38,6 +41,7 @@ class McpClientCommandTest {
         clientRepo = McpClientRepository(database)
         webhookRepo = McpWebhookRepository(database)
         command = McpClientCommand(clientRepo, webhookRepo, publicBaseUrl = testBaseUrl)
+        mockRequestHandler = mockk(relaxed = true)
     }
 
     private fun setupInteraction(
@@ -72,9 +76,12 @@ class McpClientCommandTest {
             Unit
         }
 
+        val webhookService = WebhookService(mockRequestHandler)
+
         val mockRestClient =
             mockk<RestClient>(relaxed = true) {
                 every { interaction } returns mockInteractionService
+                every { webhook } returns webhookService
             }
 
         val mockKord =
@@ -306,5 +313,191 @@ class McpClientCommandTest {
             val content = getResponseContent()
             assertNotNull(content)
             assertTrue(content.contains("/mcp client create") || content.contains("/mcp client show"))
+        }
+
+    @Test
+    fun `reset-secret subcommand updates hash and salt in database and returns new secret`() =
+        runTest {
+            val now = System.currentTimeMillis()
+            val oldSecret = "old_plain_secret_value_12345678"
+            val oldSalt = "old_salt_value"
+            val oldHash = McpSecurity.hashSecret(oldSecret, oldSalt)
+            val clientId = "luna_cli_reset_test"
+
+            clientRepo.createClient(
+                McpClientRecord(
+                    clientId = clientId,
+                    userId = testUserIdSnowflake.toString(),
+                    clientName = "Reset Test Client",
+                    secretHash = oldHash,
+                    secretSalt = oldSalt,
+                    createdAt = now - 10000,
+                    updatedAt = now - 10000,
+                ),
+            )
+
+            val (interaction, getResponseContent) =
+                setupInteraction(subcommandName = "reset-secret")
+
+            command.handle(interaction)
+
+            val content = getResponseContent()
+            assertNotNull(content)
+            assertTrue(content.contains("密鑰已重設！舊密鑰與現有連線已全數失效。新密鑰僅顯示這一次，請在 Gemini 端重新填入設定！"))
+            assertTrue(content.contains(clientId))
+
+            val secretMatch = Regex("""Client Secret\*\*:\s*`([^`]+)`""").find(content)
+            assertNotNull(secretMatch)
+            val newPlainSecret = secretMatch.groupValues[1]
+
+            val updatedClient = clientRepo.findByClientId(clientId)
+            assertNotNull(updatedClient)
+            assertTrue(updatedClient.secretHash != oldHash)
+            assertTrue(updatedClient.secretSalt != oldSalt)
+            assertTrue(McpSecurity.verifySecret(newPlainSecret, updatedClient.secretSalt, updatedClient.secretHash))
+            assertFalse(McpSecurity.verifySecret(oldSecret, updatedClient.secretSalt, updatedClient.secretHash))
+        }
+
+    @Test
+    fun `reset-secret subcommand when client does not exist returns guidance message prompting create`() =
+        runTest {
+            val (interaction, getResponseContent) =
+                setupInteraction(subcommandName = "reset-secret")
+
+            command.handle(interaction)
+
+            val content = getResponseContent()
+            assertNotNull(content)
+            assertTrue(content.contains("/mcp client create"))
+        }
+
+    @Test
+    fun `revoke subcommand deletes all webhooks deletes auto-provisioned discord webhooks via api and removes client from database`() =
+        runTest {
+            val now = System.currentTimeMillis()
+            val clientId = "luna_cli_revoke_test"
+            clientRepo.createClient(
+                McpClientRecord(
+                    clientId = clientId,
+                    userId = testUserIdSnowflake.toString(),
+                    clientName = "Revoke Client",
+                    secretHash = "hash123",
+                    secretSalt = "salt123",
+                    createdAt = now,
+                    updatedAt = now,
+                ),
+            )
+
+            // Add auto-provisioned webhook
+            webhookRepo.addWebhook(
+                McpWebhookRecord(
+                    id = "wh-auto-1",
+                    clientId = clientId,
+                    tag = "auto-wh",
+                    guildId = "g-1",
+                    channelId = "c-1",
+                    webhookUrl = "https://discord.com/api/webhooks/777888999/auto-token-xyz",
+                    isAutoProvisioned = true,
+                    createdAt = now,
+                ),
+            )
+
+            // Add custom url webhook
+            webhookRepo.addWebhook(
+                McpWebhookRecord(
+                    id = "wh-custom-1",
+                    clientId = clientId,
+                    tag = "custom-wh",
+                    guildId = "g-1",
+                    channelId = "c-2",
+                    webhookUrl = "https://discord.com/api/webhooks/123/custom-token",
+                    isAutoProvisioned = false,
+                    createdAt = now + 100,
+                ),
+            )
+
+            val (interaction, getResponseContent) =
+                setupInteraction(subcommandName = "revoke")
+
+            command.handle(interaction)
+
+            val content = getResponseContent()
+            assertNotNull(content)
+            assertTrue(content.contains("已成功撤銷 Client ID (`$clientId`) 及所有綁定之 Webhook。"))
+
+            coVerify(exactly = 1) {
+                mockRequestHandler.handle(
+                    match<dev.kord.rest.request.Request<*, *>> {
+                        it.route == dev.kord.rest.route.Route.WebhookByTokenDelete
+                    },
+                )
+            }
+
+            assertTrue(webhookRepo.listByClientId(clientId).isEmpty())
+            assertEquals(null, clientRepo.findByClientId(clientId))
+        }
+
+    @Test
+    fun `revoke subcommand when discord rest throws exception logs degraded warning and still removes client and webhooks from database`() =
+        runTest {
+            val now = System.currentTimeMillis()
+            val clientId = "luna_cli_revoke_err_test"
+            clientRepo.createClient(
+                McpClientRecord(
+                    clientId = clientId,
+                    userId = testUserIdSnowflake.toString(),
+                    clientName = "Revoke Client",
+                    secretHash = "hash123",
+                    secretSalt = "salt123",
+                    createdAt = now,
+                    updatedAt = now,
+                ),
+            )
+
+            webhookRepo.addWebhook(
+                McpWebhookRecord(
+                    id = "wh-auto-err",
+                    clientId = clientId,
+                    tag = "auto-wh",
+                    guildId = "g-1",
+                    channelId = "c-1",
+                    webhookUrl = "https://discord.com/api/webhooks/777888999/auto-token-xyz",
+                    isAutoProvisioned = true,
+                    createdAt = now,
+                ),
+            )
+
+            coEvery {
+                mockRequestHandler.handle(
+                    match<dev.kord.rest.request.Request<*, *>> {
+                        it.route == dev.kord.rest.route.Route.WebhookByTokenDelete
+                    },
+                )
+            } throws RuntimeException("Discord 404 Not Found")
+
+            val (interaction, getResponseContent) =
+                setupInteraction(subcommandName = "revoke")
+
+            command.handle(interaction)
+
+            val content = getResponseContent()
+            assertNotNull(content)
+            assertTrue(content.contains("已成功撤銷 Client ID (`$clientId`) 及所有綁定之 Webhook。"))
+
+            assertTrue(webhookRepo.listByClientId(clientId).isEmpty())
+            assertEquals(null, clientRepo.findByClientId(clientId))
+        }
+
+    @Test
+    fun `revoke subcommand when client does not exist returns guidance message prompting create`() =
+        runTest {
+            val (interaction, getResponseContent) =
+                setupInteraction(subcommandName = "revoke")
+
+            command.handle(interaction)
+
+            val content = getResponseContent()
+            assertNotNull(content)
+            assertTrue(content.contains("/mcp client create"))
         }
 }
