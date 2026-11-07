@@ -75,6 +75,10 @@ tasks.test {
     }
 }
 
+tasks.processResources {
+    from(rootProject.file(".env.example"))
+}
+
 tasks.jar {
     manifest {
         attributes["Main-Class"] = "luna.core.MainKt"

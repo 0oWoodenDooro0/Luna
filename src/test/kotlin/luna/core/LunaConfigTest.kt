@@ -1,9 +1,16 @@
 package luna.core
 
+import ch.qos.logback.classic.Level
+import ch.qos.logback.classic.Logger
+import ch.qos.logback.classic.spi.ILoggingEvent
+import ch.qos.logback.core.read.ListAppender
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertThrows
+import org.slf4j.LoggerFactory
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 class LunaConfigTest {
@@ -297,5 +304,204 @@ class LunaConfigTest {
         assertThrows<ConfigValidationException> {
             LunaHost(customConfig = invalidMap)
         }
+    }
+
+    @Test
+    fun `env example specification is discoverable and readable via classloader resource`() {
+        val stream = Thread.currentThread().contextClassLoader.getResourceAsStream(".env.example")
+        assertNotNull(stream, "Classpath resource '.env.example' must be discoverable")
+        val content = stream.bufferedReader().use { it.readText() }
+        assertTrue(content.isNotBlank(), ".env.example content must not be blank")
+
+        // Assert all five sections are present
+        assertTrue(content.contains("Section 1: Luna Host Core"), "Section 1 must be defined")
+        assertTrue(content.contains("Section 2: Curtly URL Shortener"), "Section 2 must be defined")
+        assertTrue(content.contains("Section 3: Summarizer & Multimodal Pipeline"), "Section 3 must be defined")
+        assertTrue(content.contains("Section 4: Plugin Lifecycle & Management"), "Section 4 must be defined")
+        assertTrue(content.contains("Section 5: Multi-Tenant Gemini MCP Server"), "Section 5 must be defined")
+
+        // Assert multi-tenant workflow and quota limits
+        assertTrue(content.contains("/mcp client create"), "Multi-tenant dynamic client create must be documented")
+        assertTrue(content.contains("/mcp webhook add tag:<tag>"), "Tagged webhook addition must be documented")
+        assertTrue(content.contains("10"), "Webhook quota limit of 10 must be documented")
+
+        // Assert legacy single-tenant compatibility fallbacks
+        assertTrue(content.contains("MCP_OAUTH_CLIENT_SECRET"), "Legacy MCP_OAUTH_CLIENT_SECRET must be documented")
+        assertTrue(content.contains("MCP_AUTH_TOKEN"), "Legacy MCP_AUTH_TOKEN must be documented")
+        assertTrue(content.contains("MCP_REQUIRE_AUTH"), "Legacy MCP_REQUIRE_AUTH must be documented")
+        assertTrue(content.contains("Legacy Single-Tenant Compatibility Fallbacks"), "Legacy compatibility fallback section must be labeled")
+    }
+
+    @Test
+    fun `ConfigLoader getEnvExampleStream and loadEnvExample return authoritative content`() {
+        val stream = ConfigLoader.getEnvExampleStream()
+        assertNotNull(stream, "ConfigLoader.getEnvExampleStream() must return non-null stream")
+        stream.close()
+
+        val text = ConfigLoader.loadEnvExample()
+        assertNotNull(text, "ConfigLoader.loadEnvExample() must return non-null string")
+        assertTrue(text.contains("Luna 統一環境變數設定檔範例 (.env.example)"))
+    }
+
+    @Test
+    fun `audit drift rejects missing required variables with ConfigValidationException detailing missing keys`() {
+        // Missing all required variables
+        val exAll =
+            assertThrows<ConfigValidationException> {
+                ConfigLoader.auditDrift(emptyMap())
+            }
+        assertTrue(exAll.message!!.contains("DISCORD_TOKEN"), "Exception must detail DISCORD_TOKEN")
+        assertTrue(exAll.message!!.contains("DISCORD_CLIENT_ID"), "Exception must detail DISCORD_CLIENT_ID")
+        assertTrue(exAll.message!!.contains("DISCORD_CLIENT_SECRET"), "Exception must detail DISCORD_CLIENT_SECRET")
+
+        // Missing single required variable
+        val exSingle =
+            assertThrows<ConfigValidationException> {
+                ConfigLoader.auditDrift(
+                    mapOf(
+                        "DISCORD_TOKEN" to "token_123",
+                        "DISCORD_CLIENT_SECRET" to "secret_456",
+                    ),
+                )
+            }
+        assertTrue(exSingle.message!!.contains("DISCORD_CLIENT_ID"), "Exception must detail missing DISCORD_CLIENT_ID")
+
+        // Explicit required key parameter rejection
+        val exParam =
+            assertThrows<ConfigValidationException> {
+                ConfigLoader.auditDrift(
+                    validBaseMap(),
+                    requiredKeys = setOf("CUSTOM_MANDATORY_ENV"),
+                )
+            }
+        assertTrue(exParam.message!!.contains("CUSTOM_MANDATORY_ENV"), "Exception must detail CUSTOM_MANDATORY_ENV")
+    }
+
+    @Test
+    fun `audit drift logs structured info events for missing optional variables with applied defaults`() {
+        val jsonLogger = LoggerFactory.getLogger("JSON_LOGGER") as Logger
+        val listAppender = ListAppender<ILoggingEvent>()
+        listAppender.start()
+        jsonLogger.addAppender(listAppender)
+
+        try {
+            val result = ConfigLoader.auditDrift(validBaseMap().apply { remove("PORT") })
+
+            // Verify missing optional entries recorded with defaults
+            assertTrue(result.missingOptional.containsKey("PORT"), "PORT must be recorded in missingOptional")
+            assertEquals("8080", result.missingOptional["PORT"].toString())
+            assertTrue(result.missingOptional.containsKey("BASE_URL"), "BASE_URL must be recorded in missingOptional")
+            assertEquals("http://localhost:8080/s/", result.missingOptional["BASE_URL"])
+            assertTrue(result.missingOptional.containsKey("GEMINI_MODEL"), "GEMINI_MODEL must be recorded in missingOptional")
+            assertEquals("gemini-3.5-flash-lite", result.missingOptional["GEMINI_MODEL"])
+
+            // Verify INFO structured log was emitted
+            val infoLogs =
+                listAppender.list.filter { event ->
+                    event.level == Level.INFO && event.message.contains("Layer:")
+                }
+            assertTrue(infoLogs.isNotEmpty(), "Startup audit must emit structured INFO logs for missing optional defaults")
+        } finally {
+            jsonLogger.detachAppender(listAppender)
+        }
+    }
+
+    @Test
+    fun `audit drift emits structured warn log for deprecated or unrecognized keys without terminating process`() {
+        val jsonLogger = LoggerFactory.getLogger("JSON_LOGGER") as Logger
+        val listAppender = ListAppender<ILoggingEvent>()
+        listAppender.start()
+        jsonLogger.addAppender(listAppender)
+
+        try {
+            val configWithUnknown =
+                validBaseMap().apply {
+                    put("DEPRECATED_LEGACY_FLAG", "old_val")
+                    put("UNKNOWN_OPERATOR_CONFIG", "random_123")
+                }
+
+            // Must NOT throw
+            val result = ConfigLoader.auditDrift(configWithUnknown)
+
+            assertTrue(result.unknownKeys.contains("DEPRECATED_LEGACY_FLAG"), "DEPRECATED_LEGACY_FLAG must be flagged")
+            assertTrue(result.unknownKeys.contains("UNKNOWN_OPERATOR_CONFIG"), "UNKNOWN_OPERATOR_CONFIG must be flagged")
+
+            // Verify structured WARN log with [CONFIG_DRIFT] prefix was emitted
+            val warnEvent =
+                listAppender.list.firstOrNull { event ->
+                    event.level == Level.WARN && event.formattedMessage.contains("[CONFIG_DRIFT]")
+                }
+            assertNotNull(warnEvent, "Must emit structured WARN log containing [CONFIG_DRIFT]")
+            val formatted = warnEvent.formattedMessage
+            assertTrue(formatted.contains("[CONFIG_DRIFT] Unknown or deprecated environment keys:"), "Message must contain standard prefix")
+            assertTrue(formatted.contains("DEPRECATED_LEGACY_FLAG"), "Message must detail unrecognized key")
+        } finally {
+            jsonLogger.detachAppender(listAppender)
+        }
+    }
+
+    @Test
+    fun `audit drift does not emit false drift warnings for recognized alias keys and dual namespace properties`() {
+        val jsonLogger = LoggerFactory.getLogger("JSON_LOGGER") as Logger
+        val listAppender = ListAppender<ILoggingEvent>()
+        listAppender.start()
+        jsonLogger.addAppender(listAppender)
+
+        try {
+            val configWithAliases =
+                mutableMapOf<String, Any?>(
+                    "DISCORD_TOKEN" to "token_val",
+                    "DISCORD_APP_ID" to "app_id_val", // alias for DISCORD_CLIENT_ID
+                    "clientSecret" to "secret_val", // alias for DISCORD_CLIENT_SECRET
+                    "port" to 8080, // alias for PORT
+                    "MCP_PORT" to 8081, // cross-subproject alias
+                    "curtly.baseUrl" to "https://short.custom/s/", // dual-namespace plugin key
+                    "summarizer.emoji" to "✨", // dual-namespace plugin key
+                    "summary.maxHistoryMessages" to 60, // dual-namespace plugin key
+                    "gemini.apiKey" to "ai_key", // dual-namespace plugin key
+                    "PLUGINS_CURTLY_ENABLED" to "true", // plugin lifecycle toggle
+                )
+
+            val result = ConfigLoader.auditDrift(configWithAliases)
+
+            assertTrue(
+                result.unknownKeys.isEmpty(),
+                "Aliases and dual-namespace keys must not produce unknown drift keys, but got: ${result.unknownKeys}",
+            )
+
+            val warnEvents =
+                listAppender.list.filter { event ->
+                    event.level == Level.WARN && event.formattedMessage.contains("[CONFIG_DRIFT]")
+                }
+            assertTrue(warnEvents.isEmpty(), "No [CONFIG_DRIFT] warning should be emitted for recognized aliases")
+        } finally {
+            jsonLogger.detachAppender(listAppender)
+        }
+    }
+
+    @Test
+    fun `audit drift handles empty or corrupt schema safely and masks secrets during audit`() {
+        // Negative boundary: corrupt schema string fallback
+        val corruptSchema = "### Corrupt non-schema content without sections or variables ###"
+        val fallbackResult = ConfigLoader.auditDrift(validBaseMap(), envExampleContent = corruptSchema)
+        assertNotNull(fallbackResult, "Corrupt schema must fall back to default schema gracefully")
+        assertTrue(fallbackResult.missingRequired.isEmpty(), "Valid config must satisfy fallback schema")
+
+        // Secret masking verification
+        val sensitiveConfig =
+            validBaseMap().apply {
+                put("DISCORD_TOKEN", "super_secret_discord_bot_token")
+                put("DISCORD_CLIENT_SECRET", "super_secret_discord_oauth_secret")
+                put("GEMINI_API_KEY", "super_secret_gemini_api_key")
+                put("YOUTUBE_API_KEY", "super_secret_youtube_data_api_key")
+                put("MCP_AUTH_TOKEN", "super_secret_static_bearer_token")
+            }
+
+        val result = ConfigLoader.auditDrift(sensitiveConfig)
+        assertEquals("******", result.activeConfig["DISCORD_TOKEN"], "DISCORD_TOKEN must be masked")
+        assertEquals("******", result.activeConfig["DISCORD_CLIENT_SECRET"], "DISCORD_CLIENT_SECRET must be masked")
+        assertEquals("******", result.activeConfig["GEMINI_API_KEY"], "GEMINI_API_KEY must be masked")
+        assertEquals("******", result.activeConfig["YOUTUBE_API_KEY"], "YOUTUBE_API_KEY must be masked")
+        assertEquals("******", result.activeConfig["MCP_AUTH_TOKEN"], "MCP_AUTH_TOKEN must be masked")
     }
 }

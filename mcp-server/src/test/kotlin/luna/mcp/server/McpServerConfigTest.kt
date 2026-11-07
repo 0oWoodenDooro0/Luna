@@ -1,5 +1,9 @@
 package luna.mcp.server
 
+import ch.qos.logback.classic.Level
+import ch.qos.logback.classic.Logger
+import ch.qos.logback.classic.spi.ILoggingEvent
+import ch.qos.logback.core.read.ListAppender
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertThrows
 import org.junit.jupiter.api.io.TempDir
@@ -409,5 +413,199 @@ class McpServerConfigTest {
         assertEquals("test-token", oauthConfig.staticAuthToken)
         assertTrue(oauthConfig.requireAuth)
         assertTrue(oauthConfig.isAuthEnabled)
+    }
+
+    @Test
+    fun `env example specification is discoverable and readable via classloader in mcp-server`() {
+        val stream = Thread.currentThread().contextClassLoader.getResourceAsStream(".env.example")
+        assertNotNull(stream, "Classpath resource '.env.example' must be discoverable in mcp-server")
+        val content = stream.bufferedReader().use { it.readText() }
+        assertTrue(content.isNotBlank(), ".env.example content must not be blank")
+
+        assertTrue(content.contains("Section 5: Multi-Tenant Gemini MCP Server"), "Section 5 must be defined")
+        assertTrue(content.contains("/mcp client create"), "Multi-tenant dynamic client create must be documented")
+        assertTrue(content.contains("MCP_PORT=8081"), "MCP_PORT must be documented")
+        assertTrue(content.contains("MCP_DB_PATH=./data/urls.db"), "MCP_DB_PATH must be documented")
+        assertTrue(content.contains("MCP_PUBLIC_BASE_URL=https://woodendoor.website"), "MCP_PUBLIC_BASE_URL must be documented")
+    }
+
+    @Test
+    fun `McpServerConfig getEnvExampleStream and loadEnvExample return authoritative content`() {
+        val stream = McpServerConfig.getEnvExampleStream()
+        assertNotNull(stream, "McpServerConfig.getEnvExampleStream() must return non-null stream")
+        stream.close()
+
+        val text = McpServerConfig.loadEnvExample()
+        assertNotNull(text, "McpServerConfig.loadEnvExample() must return non-null string")
+        assertTrue(text.contains("Section 5: Multi-Tenant Gemini MCP Server"))
+    }
+
+    @Test
+    fun `audit drift rejects missing required variables with ConfigValidationException detailing missing keys`() {
+        // Missing required key parameter rejection
+        val exParam =
+            assertThrows<ConfigValidationException> {
+                McpServerConfig.auditDrift(
+                    emptyMap(),
+                    requiredKeys = setOf("MCP_MANDATORY_ENV"),
+                )
+            }
+        assertTrue(exParam.message!!.contains("MCP_MANDATORY_ENV"), "Exception must detail missing MCP_MANDATORY_ENV")
+
+        // Missing credentials when auth is expected
+        val exAuth =
+            assertThrows<ConfigValidationException> {
+                McpServerConfig.auditDrift(
+                    mapOf("MCP_REQUIRE_AUTH" to "true"),
+                )
+            }
+        assertTrue(
+            exAuth.message!!.contains("MCP_OAUTH_CLIENT_SECRET or MCP_AUTH_TOKEN"),
+            "Exception must detail missing required auth credentials",
+        )
+
+        // Custom schema with required variable
+        val customSchema =
+            """
+            # Section 5: Multi-Tenant Gemini MCP Server
+            # [必填] MCP 伺服器自訂金鑰
+            MCP_MANDATORY_SECRET=your_token
+            """.trimIndent()
+        val exSchema =
+            assertThrows<ConfigValidationException> {
+                McpServerConfig.auditDrift(
+                    emptyMap(),
+                    envExampleContent = customSchema,
+                )
+            }
+        assertTrue(exSchema.message!!.contains("MCP_MANDATORY_SECRET"), "Exception must detail MCP_MANDATORY_SECRET")
+    }
+
+    @Test
+    fun `audit drift logs structured info events for missing optional variables with applied defaults`() {
+        val mcpLogger = LoggerFactory.getLogger(McpServerConfig::class.java) as Logger
+        val listAppender = ListAppender<ILoggingEvent>()
+        listAppender.start()
+        mcpLogger.addAppender(listAppender)
+
+        try {
+            val result = McpServerConfig.auditDrift(emptyMap())
+
+            // Assert applied defaults in missingOptional
+            assertTrue(result.missingOptional.containsKey("MCP_PORT"), "MCP_PORT must be in missingOptional")
+            assertEquals("8081", result.missingOptional["MCP_PORT"].toString())
+            assertTrue(result.missingOptional.containsKey("MCP_DB_PATH"), "MCP_DB_PATH must be in missingOptional")
+            assertEquals("./data/urls.db", result.missingOptional["MCP_DB_PATH"])
+            assertTrue(result.missingOptional.containsKey("MCP_PUBLIC_BASE_URL"), "MCP_PUBLIC_BASE_URL must be in missingOptional")
+            assertEquals("https://woodendoor.website", result.missingOptional["MCP_PUBLIC_BASE_URL"])
+            assertTrue(result.missingOptional.containsKey("MCP_OAUTH_CLIENT_ID"), "MCP_OAUTH_CLIENT_ID must be in missingOptional")
+            assertEquals("luna-mcp-client", result.missingOptional["MCP_OAUTH_CLIENT_ID"])
+            assertTrue(result.missingOptional.containsKey("MCP_REQUIRE_AUTH"), "MCP_REQUIRE_AUTH must be in missingOptional")
+            assertEquals("false", result.missingOptional["MCP_REQUIRE_AUTH"].toString())
+
+            // Assert structured INFO events emitted
+            val infoEvents =
+                listAppender.list.filter { event ->
+                    event.level == Level.INFO && event.message.contains("Layer:")
+                }
+            assertTrue(infoEvents.isNotEmpty(), "Audit must emit structured INFO logs for missing optional defaults")
+        } finally {
+            mcpLogger.detachAppender(listAppender)
+        }
+    }
+
+    @Test
+    fun `audit drift emits structured warn log for deprecated or unrecognized keys without terminating process`() {
+        val mcpLogger = LoggerFactory.getLogger(McpServerConfig::class.java) as Logger
+        val listAppender = ListAppender<ILoggingEvent>()
+        listAppender.start()
+        mcpLogger.addAppender(listAppender)
+
+        try {
+            val mapWithUnknown =
+                mapOf(
+                    "MCP_PORT" to 8081,
+                    "DEPRECATED_MCP_KEY" to "legacy_val",
+                    "UNKNOWN_MCP_OPTION" to "random_foo",
+                )
+
+            // Must NOT throw
+            val result = McpServerConfig.auditDrift(mapWithUnknown)
+
+            assertTrue(result.unknownKeys.contains("DEPRECATED_MCP_KEY"), "DEPRECATED_MCP_KEY must be in unknownKeys")
+            assertTrue(result.unknownKeys.contains("UNKNOWN_MCP_OPTION"), "UNKNOWN_MCP_OPTION must be in unknownKeys")
+
+            val warnEvent =
+                listAppender.list.firstOrNull { event ->
+                    event.level == Level.WARN && event.formattedMessage.contains("[CONFIG_DRIFT]")
+                }
+            assertNotNull(warnEvent, "Must emit structured WARN log containing [CONFIG_DRIFT]")
+            val formatted = warnEvent.formattedMessage
+            assertTrue(formatted.contains("[CONFIG_DRIFT] Unknown or deprecated environment keys:"), "Message must contain standard prefix")
+            assertTrue(formatted.contains("DEPRECATED_MCP_KEY"), "Message must detail unrecognized key")
+        } finally {
+            mcpLogger.detachAppender(listAppender)
+        }
+    }
+
+    @Test
+    fun `audit drift does not emit false drift warnings for recognized alias keys`() {
+        val mcpLogger = LoggerFactory.getLogger(McpServerConfig::class.java) as Logger
+        val listAppender = ListAppender<ILoggingEvent>()
+        listAppender.start()
+        mcpLogger.addAppender(listAppender)
+
+        try {
+            val mapWithAliases =
+                mapOf(
+                    "PORT" to 8081, // alias for MCP_PORT
+                    "dbPath" to "./data/urls.db", // alias for MCP_DB_PATH
+                    "publicBaseUrl" to "https://woodendoor.website", // alias for MCP_PUBLIC_BASE_URL
+                    "clientId" to "custom-client", // alias for MCP_OAUTH_CLIENT_ID
+                    "clientSecret" to "sec-val", // alias for MCP_OAUTH_CLIENT_SECRET
+                    "staticAuthToken" to "tok-val", // alias for MCP_AUTH_TOKEN
+                    "requireAuth" to false, // alias for MCP_REQUIRE_AUTH
+                    "curtly.baseUrl" to "https://woodendoor.website/s/", // cross-module alias
+                    "BASE_URL" to "https://woodendoor.website/s/", // cross-module alias
+                    "DISCORD_CLIENT_ID" to "cli-123", // host alias
+                    "DISCORD_APP_ID" to "app-123", // host alias
+                )
+
+            val result = McpServerConfig.auditDrift(mapWithAliases)
+
+            assertTrue(
+                result.unknownKeys.isEmpty(),
+                "Recognized aliases must not produce unknown drift keys, but got: ${result.unknownKeys}",
+            )
+
+            val warnEvents =
+                listAppender.list.filter { event ->
+                    event.level == Level.WARN && event.formattedMessage.contains("[CONFIG_DRIFT]")
+                }
+            assertTrue(warnEvents.isEmpty(), "No [CONFIG_DRIFT] warning should be emitted for recognized aliases")
+        } finally {
+            mcpLogger.detachAppender(listAppender)
+        }
+    }
+
+    @Test
+    fun `audit drift handles empty or corrupt schema safely and masks secrets during audit`() {
+        // Corrupt schema fallback
+        val corruptSchema = "### Corrupt schema without sections ###"
+        val fallbackResult = McpServerConfig.auditDrift(emptyMap(), envExampleContent = corruptSchema)
+        assertNotNull(fallbackResult, "Corrupt schema must fall back to default schema gracefully")
+        assertTrue(fallbackResult.missingRequired.isEmpty(), "Default fallback schema without auth must not fail")
+
+        // Secret masking verification
+        val sensitiveConfig =
+            mapOf(
+                "MCP_PORT" to 8081,
+                "MCP_OAUTH_CLIENT_SECRET" to "super_secret_mcp_oauth_secret",
+                "MCP_AUTH_TOKEN" to "super_secret_mcp_static_token",
+            )
+
+        val result = McpServerConfig.auditDrift(sensitiveConfig)
+        assertEquals("******", result.activeConfig["MCP_OAUTH_CLIENT_SECRET"], "MCP_OAUTH_CLIENT_SECRET must be masked")
+        assertEquals("******", result.activeConfig["MCP_AUTH_TOKEN"], "MCP_AUTH_TOKEN must be masked")
     }
 }

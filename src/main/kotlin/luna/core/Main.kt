@@ -45,6 +45,8 @@ class LunaHost(
 
     init {
         val loaded = customConfig ?: ConfigLoader.loadConfig()
+        // Run startup drift audit to fail fast on missing required variables and report drift
+        ConfigLoader.auditDrift(loaded)
         // Fail-fast validation against LunaCoreConfig data model
         coreConfig = LunaCoreConfig.fromMap(loaded)
 
@@ -163,6 +165,14 @@ class LunaHost(
 }
 
 @OptIn(PrivilegedIntent::class)
-suspend fun main() {
+suspend fun main(args: Array<String>) {
+    if (EnvSyncCli.handleCli(args)) {
+        return
+    }
     LunaHost().start()
+}
+
+@OptIn(PrivilegedIntent::class)
+suspend fun main() {
+    main(emptyArray())
 }

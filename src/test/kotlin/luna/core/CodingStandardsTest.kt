@@ -2,6 +2,7 @@ package luna.core
 
 import java.io.File
 import kotlin.test.Test
+import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 
 /**
@@ -222,6 +223,107 @@ class CodingStandardsTest {
             diff.isEmpty(),
             "SENSITIVE_EXPLICIT_KEYS drift between LunaConfig and McpServerConfig: difference = $diff. " +
                 "Synchronize both files per Navigation Pointer.",
+        )
+    }
+
+    @Test
+    fun `bidirectional parity must be enforced between dot-env-example and codebase configuration declarations`() {
+        val envContent =
+            ConfigLoader.loadEnvExample()
+                ?: File(projectRoot, ".env.example").takeIf { it.exists() }?.readText()
+        assertNotNull(envContent, ".env.example must be discoverable and loadable via ConfigLoader or filesystem")
+
+        val envKeyRegex = Regex("""^\s*(?:#\s*)?([A-Z][A-Z0-9_]+)\s*=""", RegexOption.MULTILINE)
+        val declaredEnvKeys =
+            envKeyRegex
+                .findAll(envContent)
+                .map { it.groupValues[1] }
+                .toSet()
+
+        assertTrue(
+            declaredEnvKeys.isNotEmpty(),
+            "Declared configuration keys extracted from .env.example must not be empty",
+        )
+
+        val mainRoots = findKotlinSourceRoots("main")
+        assertTrue(mainRoots.isNotEmpty(), "At least one src/main/kotlin directory must exist")
+
+        val codebaseKeys = mutableSetOf<String>()
+        val configBracketRegex = Regex("""\bconfig\[\s*["']([A-Z][A-Z0-9_]+)["']\s*\]""")
+        val pluginContextRegex = Regex("""context\.config(?:<[^>]+>)?\s*\(\s*["']([A-Z][A-Z0-9_]+)["']""")
+        val sysEnvRegex = Regex("""System\.getenv\s*\(\s*["']([A-Z][A-Z0-9_]+)["']\s*\)""")
+        val envBracketRegex = Regex("""\benv\[\s*["']([A-Z][A-Z0-9_]+)["']\s*\]""")
+        val pluginNameRegex = Regex("""override\s+val\s+name\s*:\s*String\s*=\s*["']([^"']+)["']""")
+
+        mainRoots.forEach { root ->
+            root.walkTopDown().filter { it.extension == "kt" }.forEach { file ->
+                val content = file.readText()
+                configBracketRegex.findAll(content).forEach { codebaseKeys.add(it.groupValues[1]) }
+                pluginContextRegex.findAll(content).forEach { codebaseKeys.add(it.groupValues[1]) }
+                sysEnvRegex.findAll(content).forEach { codebaseKeys.add(it.groupValues[1]) }
+                envBracketRegex.findAll(content).forEach { codebaseKeys.add(it.groupValues[1]) }
+
+                if (content.contains(": LunaPlugin") || content.contains(": luna.plugin.LunaPlugin")) {
+                    pluginNameRegex.find(content)?.let { match ->
+                        val rawName = match.groupValues[1]
+                        val flagName = "PLUGINS_${rawName.replace('-', '_').uppercase()}_ENABLED"
+                        codebaseKeys.add(flagName)
+                    }
+                }
+            }
+        }
+
+        // Dynamically inspect META-INF plugin service registration if available
+        val metaInfService = File(projectRoot, "src/main/resources/META-INF/services/luna.plugin.LunaPlugin")
+        if (metaInfService.exists()) {
+            metaInfService
+                .readLines()
+                .map { it.trim() }
+                .filter { it.isNotEmpty() && !it.startsWith("#") }
+                .forEach { className ->
+                    runCatching {
+                        val clazz = Class.forName(className)
+                        val instance = clazz.getDeclaredConstructor().newInstance() as? luna.plugin.LunaPlugin
+                        if (instance != null) {
+                            codebaseKeys.add("PLUGINS_${instance.name.replace('-', '_').uppercase()}_ENABLED")
+                        }
+                    }
+                }
+        }
+
+        // Backward compatibility fallback aliases accepted at runtime but not canonical
+        val legacyFallbackAliases =
+            setOf(
+                "DISCORD_APP_ID",
+                "REDIRECT_URI",
+                "MCP_CLIENT_ID",
+                "MCP_CLIENT_SECRET",
+            )
+
+        // Ensure legacy aliases are not erroneously declared as active in .env.example
+        val declaredAliases = declaredEnvKeys.intersect(legacyFallbackAliases)
+        assertTrue(
+            declaredAliases.isEmpty(),
+            "Legacy fallback aliases must not be declared as active keys in .env.example: $declaredAliases",
+        )
+
+        val canonicalCodebaseKeys = codebaseKeys - legacyFallbackAliases
+        val missingInEnv = canonicalCodebaseKeys - declaredEnvKeys
+        val unconsumedInCode = declaredEnvKeys - canonicalCodebaseKeys
+
+        assertTrue(
+            missingInEnv.isEmpty() && unconsumedInCode.isEmpty(),
+            buildString {
+                appendLine("Bidirectional parity violation between .env.example and codebase configuration declarations:")
+                if (missingInEnv.isNotEmpty()) {
+                    appendLine("  [Missing in .env.example] The following keys are used in codebase but missing in .env.example:")
+                    missingInEnv.sorted().forEach { appendLine("    - $it") }
+                }
+                if (unconsumedInCode.isNotEmpty()) {
+                    appendLine("  [Unconsumed in codebase] The following keys are declared in .env.example but have no active codebase reference:")
+                    unconsumedInCode.sorted().forEach { appendLine("    - $it") }
+                }
+            },
         )
     }
 

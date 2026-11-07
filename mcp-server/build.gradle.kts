@@ -35,6 +35,8 @@ dependencies {
 
     // Logging
     implementation(libs.logback.classic)
+    implementation(libs.logstash.logback.encoder)
+    implementation(libs.jackson.core)
 
     // Testing
     testImplementation(kotlin("test"))
@@ -47,6 +49,10 @@ dependencies {
 
 kotlin {
     jvmToolchain(17)
+}
+
+tasks.processResources {
+    from(rootProject.file(".env.example"))
 }
 
 tasks.test {

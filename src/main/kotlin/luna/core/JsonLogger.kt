@@ -58,4 +58,26 @@ object JsonLogger {
             kv("error_message", errorMessage),
         )
     }
+
+    /**
+     * Convenience method for logging warnings with structured fields.
+     */
+    fun warn(
+        layer: String,
+        component: String,
+        operation: String,
+        data: Any? = null,
+        message: String? = null,
+    ) {
+        logger.warn(
+            "{}",
+            message,
+            kv("layer", layer),
+            kv("component", component),
+            kv("operation", operation),
+            kv("data", data),
+            kv("message", message),
+            kv("level", "WARN"),
+        )
+    }
 }
