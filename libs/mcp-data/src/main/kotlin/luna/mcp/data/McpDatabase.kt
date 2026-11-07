@@ -6,7 +6,7 @@ import org.jetbrains.exposed.v1.jdbc.transactions.transaction
 import java.io.File
 
 object McpDatabase {
-    fun connect(dbPath: String = ".data/urls.db"): Database {
+    fun connect(dbPath: String = ".data/luna.db"): Database {
         val file = File(dbPath)
         file.parentFile?.mkdirs()
         val database =

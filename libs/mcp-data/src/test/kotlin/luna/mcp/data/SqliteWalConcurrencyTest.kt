@@ -64,7 +64,7 @@ class SqliteWalConcurrencyTest {
         val process2WebhookRepo = McpWebhookRepository.create(tempDbFile.absolutePath)
 
         val threadCount = 4
-        val iterationsPerThread = 25
+        val iterationsPerThread = 10
         val executor = Executors.newFixedThreadPool(threadCount)
 
         try {

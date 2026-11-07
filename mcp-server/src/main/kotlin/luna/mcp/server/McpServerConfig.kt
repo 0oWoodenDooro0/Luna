@@ -71,7 +71,7 @@ data class McpServerConfig(
         private val defaultLogger: Logger = LoggerFactory.getLogger(McpServerConfig::class.java)
 
         const val DEFAULT_PORT = 8081
-        const val DEFAULT_DB_PATH = "./.data/urls.db"
+        const val DEFAULT_DB_PATH = "./.data/luna.db"
         const val DEFAULT_PUBLIC_BASE_URL = "https://woodendoor.website"
 
         val SENSITIVE_EXPLICIT_KEYS: Set<String> get() = SecretMasker.SENSITIVE_EXPLICIT_KEYS
