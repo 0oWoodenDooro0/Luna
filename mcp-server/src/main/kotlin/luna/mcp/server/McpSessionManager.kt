@@ -25,7 +25,7 @@ class McpSessionManager(
     fun registerSession(
         sessionId: String,
         channel: Channel<String>,
-        clientId: String = "luna-mcp-client",
+        clientId: String,
     ) {
         synchronized(lock) {
             sessions[sessionId] = McpSessionEntry(channel, clientId)

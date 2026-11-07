@@ -223,7 +223,7 @@ is_recognized_key() {
   done
 
   case "$key" in
-    DISCORD_APP_ID|clientId|luna.clientId|botToken|luna.botToken|clientSecret|luna.clientSecret|port|luna.port|MCP_PORT|mcp.port|baseUrl|luna.baseUrl|curtly.baseUrl|curtly.base_url|CURTLY_BASE_URL|PLUGINS_CURTLY_BASE_URL|redirectUri|REDIRECT_URI|luna.redirectUri|dbPath|mcp.dbPath|publicBaseUrl|mcp.publicBaseUrl|mcp.clientId|MCP_CLIENT_ID|mcp.clientSecret|MCP_CLIENT_SECRET|staticAuthToken|mcp.staticAuthToken|requireAuth|mcp.requireAuth|authExpected)
+    DISCORD_APP_ID|clientId|luna.clientId|botToken|luna.botToken|clientSecret|luna.clientSecret|port|luna.port|MCP_PORT|mcp.port|baseUrl|luna.baseUrl|curtly.baseUrl|curtly.base_url|CURTLY_BASE_URL|PLUGINS_CURTLY_BASE_URL|redirectUri|REDIRECT_URI|luna.redirectUri|dbPath|mcp.dbPath|publicBaseUrl|mcp.publicBaseUrl)
       return 0
       ;;
     PATH|HOME|USER|LOGNAME|SHELL|PWD|OLDPWD|TERM|LANG|LC_ALL|LC_CTYPE|JAVA_HOME|HOSTNAME|SHLVL|_|LS_COLORS|EDITOR|PAGER|TZ|NODE_VERSION|CI|CLASSPATH)
@@ -267,18 +267,6 @@ get_candidate_keys() {
       ;;
     MCP_PUBLIC_BASE_URL)
       candidates+=("publicBaseUrl" "mcp.publicBaseUrl")
-      ;;
-    MCP_OAUTH_CLIENT_ID)
-      candidates+=("mcp.clientId" "MCP_CLIENT_ID")
-      ;;
-    MCP_OAUTH_CLIENT_SECRET)
-      candidates+=("mcp.clientSecret" "MCP_CLIENT_SECRET")
-      ;;
-    MCP_AUTH_TOKEN)
-      candidates+=("staticAuthToken" "mcp.staticAuthToken")
-      ;;
-    MCP_REQUIRE_AUTH)
-      candidates+=("requireAuth" "mcp.requireAuth")
       ;;
   esac
   echo "${candidates[@]}"

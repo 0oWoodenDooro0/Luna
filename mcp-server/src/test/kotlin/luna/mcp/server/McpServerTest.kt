@@ -38,23 +38,59 @@ import kotlin.test.assertTrue
 class McpServerTest {
     private lateinit var database: Database
     private lateinit var repository: McpWebhookRepository
+    private lateinit var clientRepository: McpClientRepository
+    private lateinit var oAuthProvider: McpOAuthProvider
+    private lateinit var defaultToken: String
 
     @BeforeTest
     fun setUp() {
         val dbName = "test_server_${UUID.randomUUID()}"
         database = Database.connect("jdbc:h2:mem:$dbName;DB_CLOSE_DELAY=-1;", driver = "org.h2.Driver")
         repository = McpWebhookRepository(database)
+        clientRepository = McpClientRepository(database)
+        oAuthProvider = McpOAuthProvider(clientRepository = clientRepository)
+
+        val now = System.currentTimeMillis()
+        clientRepository.createClient(
+            McpClientRecord(
+                clientId = "test-client",
+                userId = "test-user",
+                clientName = "Test Client",
+                secretHash = "",
+                secretSalt = "",
+                createdAt = now,
+                updatedAt = now,
+            ),
+        )
+        defaultToken = oAuthProvider.issueAccessToken("test-client").token
+    }
+
+    private fun issueClientToken(clientId: String): String {
+        val now = System.currentTimeMillis()
+        clientRepository.createClient(
+            McpClientRecord(
+                clientId = clientId,
+                userId = "user-$clientId",
+                clientName = "Client $clientId",
+                secretHash = "",
+                secretSalt = "",
+                createdAt = now,
+                updatedAt = now,
+            ),
+        )
+        return oAuthProvider.issueAccessToken(clientId).token
     }
 
     private fun addWebhook(
         id: String,
         channelId: String,
         url: String,
+        clientId: String = "test-client",
     ) {
         transaction(database) {
             McpWebhooksTable.insert {
                 it[McpWebhooksTable.id] = id
-                it[McpWebhooksTable.clientId] = "luna-mcp-client"
+                it[McpWebhooksTable.clientId] = clientId
                 it[McpWebhooksTable.tag] = "tag-$id"
                 it[McpWebhooksTable.guildId] = "g-$id"
                 it[McpWebhooksTable.channelId] = channelId
@@ -70,7 +106,7 @@ class McpServerTest {
             val mockHttpClient = HttpClient(MockEngine { respond("{}", HttpStatusCode.NoContent) })
             val broadcaster = DiscordWebhookBroadcaster(repository, mockHttpClient)
             application {
-                mcpServerModule(broadcaster)
+                mcpServerModule(broadcaster, clientRepository = clientRepository, oAuthProvider = oAuthProvider)
             }
 
             val sseClient =
@@ -78,7 +114,7 @@ class McpServerTest {
                     install(io.ktor.client.plugins.sse.SSE)
                 }
 
-            sseClient.sse("/mcp/sse") {
+            sseClient.sse("/mcp/sse?token=$defaultToken") {
                 val event = incoming.first()
                 assertEquals("endpoint", event.event)
                 assertTrue(event.data?.startsWith("/mcp/messages?sessionId=") == true)
@@ -91,7 +127,7 @@ class McpServerTest {
             val mockHttpClient = HttpClient(MockEngine { respond("{}", HttpStatusCode.NoContent) })
             val broadcaster = DiscordWebhookBroadcaster(repository, mockHttpClient)
             application {
-                mcpServerModule(broadcaster)
+                mcpServerModule(broadcaster, clientRepository = clientRepository, oAuthProvider = oAuthProvider)
             }
 
             val sseClient =
@@ -99,7 +135,7 @@ class McpServerTest {
                     install(io.ktor.client.plugins.sse.SSE)
                 }
 
-            sseClient.sse("/mcp/sse") {
+            sseClient.sse("/mcp/sse?token=$defaultToken") {
                 var endpointUri = ""
                 var messageData = ""
                 val testScope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Default)
@@ -153,13 +189,14 @@ class McpServerTest {
             val mockHttpClient = HttpClient(MockEngine { respond("{}", HttpStatusCode.NoContent) })
             val broadcaster = DiscordWebhookBroadcaster(repository, mockHttpClient)
             application {
-                mcpServerModule(broadcaster)
+                mcpServerModule(broadcaster, clientRepository = clientRepository, oAuthProvider = oAuthProvider)
             }
 
             val request =
                 """{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05"}}"""
             val response =
                 client.post("/mcp/messages") {
+                    headers.append(HttpHeaders.Authorization, "Bearer $defaultToken")
                     contentType(ContentType.Application.Json)
                     setBody(request)
                 }
@@ -196,12 +233,13 @@ class McpServerTest {
             val mockHttpClient = HttpClient(MockEngine { respond("{}", HttpStatusCode.NoContent) })
             val broadcaster = DiscordWebhookBroadcaster(repository, mockHttpClient)
             application {
-                mcpServerModule(broadcaster)
+                mcpServerModule(broadcaster, clientRepository = clientRepository, oAuthProvider = oAuthProvider)
             }
 
             val notification = """{"jsonrpc":"2.0","method":"notifications/initialized"}"""
             val response =
                 client.post("/mcp/messages") {
+                    headers.append(HttpHeaders.Authorization, "Bearer $defaultToken")
                     contentType(ContentType.Application.Json)
                     setBody(notification)
                 }
@@ -214,12 +252,13 @@ class McpServerTest {
             val mockHttpClient = HttpClient(MockEngine { respond("{}", HttpStatusCode.NoContent) })
             val broadcaster = DiscordWebhookBroadcaster(repository, mockHttpClient)
             application {
-                mcpServerModule(broadcaster)
+                mcpServerModule(broadcaster, clientRepository = clientRepository, oAuthProvider = oAuthProvider)
             }
 
             val request = """{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}"""
             val response =
                 client.post("/mcp/messages") {
+                    headers.append(HttpHeaders.Authorization, "Bearer $defaultToken")
                     contentType(ContentType.Application.Json)
                     setBody(request)
                 }
@@ -258,13 +297,14 @@ class McpServerTest {
 
             val broadcaster = DiscordWebhookBroadcaster(repository, mockHttpClient)
             application {
-                mcpServerModule(broadcaster)
+                mcpServerModule(broadcaster, clientRepository = clientRepository, oAuthProvider = oAuthProvider)
             }
 
             val request =
                 """{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"send_discord_message","arguments":{"content":"Broadcast to Discord","target":"all"}}}"""
             val response =
                 client.post("/mcp/messages") {
+                    headers.append(HttpHeaders.Authorization, "Bearer $defaultToken")
                     contentType(ContentType.Application.Json)
                     setBody(request)
                 }
@@ -315,7 +355,7 @@ class McpServerTest {
 
             val broadcaster = DiscordWebhookBroadcaster(repository, mockHttpClient)
             application {
-                mcpServerModule(broadcaster)
+                mcpServerModule(broadcaster, clientRepository = clientRepository, oAuthProvider = oAuthProvider)
             }
 
             val part1 = "p1".repeat(700)
@@ -328,6 +368,7 @@ class McpServerTest {
                 )},"target":"all"}}}"""
             val response =
                 client.post("/mcp/messages") {
+                    headers.append(HttpHeaders.Authorization, "Bearer $defaultToken")
                     contentType(ContentType.Application.Json)
                     setBody(request)
                 }
@@ -370,13 +411,14 @@ class McpServerTest {
             val mockHttpClient = HttpClient(MockEngine { respond("{}", HttpStatusCode.NoContent) })
             val broadcaster = DiscordWebhookBroadcaster(repository, mockHttpClient)
             application {
-                mcpServerModule(broadcaster)
+                mcpServerModule(broadcaster, clientRepository = clientRepository, oAuthProvider = oAuthProvider)
             }
 
             val request =
                 """{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"send_discord_message","arguments":{"content":"Hello","target":"all"}}}"""
             val response =
                 client.post("/mcp/messages") {
+                    headers.append(HttpHeaders.Authorization, "Bearer $defaultToken")
                     contentType(ContentType.Application.Json)
                     setBody(request)
                 }
@@ -422,15 +464,17 @@ class McpServerTest {
                 }
             }
 
+            val tokenA = issueClientToken("tenant-a")
             val mockHttpClient = HttpClient(MockEngine { respond("{}", HttpStatusCode.NoContent) })
             val broadcaster = DiscordWebhookBroadcaster(repository, mockHttpClient)
             application {
-                mcpServerModule(broadcaster)
+                mcpServerModule(broadcaster, clientRepository = clientRepository, oAuthProvider = oAuthProvider)
             }
 
             val request = """{"jsonrpc":"2.0","id":20,"method":"tools/call","params":{"name":"list_targets","arguments":{}}}"""
             val response =
-                client.post("/mcp/messages?clientId=tenant-a") {
+                client.post("/mcp/messages") {
+                    headers.append(HttpHeaders.Authorization, "Bearer $tokenA")
                     contentType(ContentType.Application.Json)
                     setBody(request)
                 }
@@ -489,15 +533,17 @@ class McpServerTest {
                 }
             }
 
+            val tokenA = issueClientToken("tenant-a")
             val broadcaster = DiscordWebhookBroadcaster(repository, mockHttpClient)
             application {
-                mcpServerModule(broadcaster)
+                mcpServerModule(broadcaster, clientRepository = clientRepository, oAuthProvider = oAuthProvider)
             }
 
             val request =
                 """{"jsonrpc":"2.0","id":21,"method":"tools/call","params":{"name":"send_discord_message","arguments":{"content":"Alert!","target":"ops"}}}"""
             val response =
-                client.post("/mcp/messages?clientId=tenant-a") {
+                client.post("/mcp/messages") {
+                    headers.append(HttpHeaders.Authorization, "Bearer $tokenA")
                     contentType(ContentType.Application.Json)
                     setBody(request)
                 }
@@ -534,16 +580,18 @@ class McpServerTest {
                 }
             }
 
+            val tokenA = issueClientToken("tenant-a")
             val mockHttpClient = HttpClient(MockEngine { respond("{}", HttpStatusCode.NoContent) })
             val broadcaster = DiscordWebhookBroadcaster(repository, mockHttpClient)
             application {
-                mcpServerModule(broadcaster)
+                mcpServerModule(broadcaster, clientRepository = clientRepository, oAuthProvider = oAuthProvider)
             }
 
             val request =
                 """{"jsonrpc":"2.0","id":22,"method":"tools/call","params":{"name":"send_discord_message","arguments":{"content":"Hello","target":"unknown"}}}"""
             val response =
-                client.post("/mcp/messages?clientId=tenant-a") {
+                client.post("/mcp/messages") {
+                    headers.append(HttpHeaders.Authorization, "Bearer $tokenA")
                     contentType(ContentType.Application.Json)
                     setBody(request)
                 }
@@ -580,10 +628,11 @@ class McpServerTest {
                 }
             }
 
+            val tokenSse = issueClientToken("tenant-sse")
             val mockHttpClient = HttpClient(MockEngine { respond("{}", HttpStatusCode.NoContent) })
             val broadcaster = DiscordWebhookBroadcaster(repository, mockHttpClient)
             application {
-                mcpServerModule(broadcaster)
+                mcpServerModule(broadcaster, clientRepository = clientRepository, oAuthProvider = oAuthProvider)
             }
 
             val sseClient =
@@ -591,7 +640,7 @@ class McpServerTest {
                     install(io.ktor.client.plugins.sse.SSE)
                 }
 
-            sseClient.sse("/mcp/sse?clientId=tenant-sse") {
+            sseClient.sse("/mcp/sse?token=$tokenSse") {
                 val event = incoming.first()
                 assertEquals("endpoint", event.event)
                 val endpointUri = event.data.orEmpty()
@@ -627,13 +676,14 @@ class McpServerTest {
             val mockHttpClient = HttpClient(MockEngine { respond("{}", HttpStatusCode.NoContent) })
             val broadcaster = DiscordWebhookBroadcaster(repository, mockHttpClient)
             application {
-                mcpServerModule(broadcaster)
+                mcpServerModule(broadcaster, clientRepository = clientRepository, oAuthProvider = oAuthProvider)
             }
 
             val request =
                 """{"jsonrpc":"2.0","id":10,"method":"initialize","params":{"protocolVersion":"2024-11-05"}}"""
             val response =
                 client.post("/mcp/sse") {
+                    headers.append(HttpHeaders.Authorization, "Bearer $defaultToken")
                     contentType(ContentType.Application.Json)
                     setBody(request)
                 }
@@ -653,12 +703,13 @@ class McpServerTest {
             val mockHttpClient = HttpClient(MockEngine { respond("{}", HttpStatusCode.NoContent) })
             val broadcaster = DiscordWebhookBroadcaster(repository, mockHttpClient)
             application {
-                mcpServerModule(broadcaster)
+                mcpServerModule(broadcaster, clientRepository = clientRepository, oAuthProvider = oAuthProvider)
             }
 
             val request = """{"jsonrpc":"2.0","id":11,"method":"ping"}"""
             val response =
                 client.post("/mcp") {
+                    headers.append(HttpHeaders.Authorization, "Bearer $defaultToken")
                     contentType(ContentType.Application.Json)
                     setBody(request)
                 }
@@ -676,7 +727,7 @@ class McpServerTest {
             val mockHttpClient = HttpClient(MockEngine { respond("{}", HttpStatusCode.NoContent) })
             val broadcaster = DiscordWebhookBroadcaster(repository, mockHttpClient)
             application {
-                mcpServerModule(broadcaster)
+                mcpServerModule(broadcaster, clientRepository = clientRepository, oAuthProvider = oAuthProvider)
             }
 
             val headSse = client.head("/mcp/sse")

@@ -37,7 +37,6 @@ data class JsonRpcError(
 class McpProtocolHandler(
     val broadcaster: DiscordWebhookBroadcaster,
     val repository: McpWebhookRepository = broadcaster.repository,
-    private val defaultClientId: String = DEFAULT_CLIENT_ID,
     private val json: Json =
         Json {
             ignoreUnknownKeys = true
@@ -46,7 +45,7 @@ class McpProtocolHandler(
 ) {
     suspend fun handle(
         requestBody: String,
-        clientId: String = defaultClientId,
+        clientId: String,
     ): String? {
         val request =
             runCatching {
@@ -66,7 +65,7 @@ class McpProtocolHandler(
 
     suspend fun handleRequest(
         request: JsonRpcRequest,
-        clientId: String = defaultClientId,
+        clientId: String,
     ): JsonRpcResponse? =
         when (request.method) {
             "initialize" -> {
@@ -293,6 +292,5 @@ class McpProtocolHandler(
         const val TOOL_SEND_MESSAGE = "send_discord_message"
         const val TOOL_LIST_TARGETS = "list_targets"
         const val MAX_WEBHOOK_QUOTA = 10
-        const val DEFAULT_CLIENT_ID = "luna-mcp-client"
     }
 }

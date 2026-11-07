@@ -118,15 +118,6 @@ Luna 與獨立運行的 MCP 伺服器支援分層組態配置（優先順序：`
 | `MCP_DB_PATH` | 選填 | `./data/urls.db` | MCP 伺服器存取之 SQLite 資料庫檔案路徑（與 Luna 主機器人共享，支援 WAL 模式）。在 Docker 中為 `/app/data/urls.db`。 |
 | `MCP_PUBLIC_BASE_URL` | 選填 | `https://woodendoor.website` | MCP 伺服器對外公開基底網址，用於 OAuth 2.1 端點探索 (`/.well-known/oauth-authorization-server`)、Gemini 重導向驗證與 SSE 連線。 |
 
-#### 5.2 舊版單租戶靜態憑證相容降級 (Legacy Single-Tenant Compatibility Fallbacks)
-
-| 環境變數 | 狀態 | 預設值 | 說明與邊界限制 |
-| :--- | :---: | :--- | :--- |
-| `MCP_OAUTH_CLIENT_ID` | 選填 / 相容降級 | `luna-mcp-client` | 舊版單租戶相容模式之靜態 Client ID。在多租戶模式下由動態客戶端 ID (`luna_cli_...`) 取代。 |
-| `MCP_OAUTH_CLIENT_SECRET` | 選填 / 相容降級 | *(無)* | 舊版單租戶模式靜態 Client Secret。啟動日誌中自動遮蔽。 |
-| `MCP_AUTH_TOKEN` | 選填 / 相容降級 | *(無)* | 靜態 Bearer 認證權杖。提供時可跳過 OAuth2 直接以 Bearer Header 呼叫。啟動日誌中自動遮蔽。 |
-| `MCP_REQUIRE_AUTH` | 選填 / 相容降級 | `false` | 是否強制要求靜態 MCP 端點身份驗證。若為 `true`，必須提供 Client Secret 或 Bearer Token 其中之一。 |
-
 ---
 
 ## ⚙️ Discord 開發者後台設定步驟

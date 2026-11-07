@@ -27,10 +27,8 @@ object McpServerMain {
         val authConfig = config.toOAuthConfig()
 
         logger.info(
-            "MCP server publicBaseUrl={}, clientId={}, authEnabled={}",
+            "MCP server publicBaseUrl={}",
             authConfig.publicBaseUrl,
-            authConfig.clientId,
-            authConfig.isAuthEnabled,
         )
 
         val server =

@@ -50,24 +50,12 @@ data class McpServerConfig(
     val port: Int = DEFAULT_PORT,
     val dbPath: String = DEFAULT_DB_PATH,
     val publicBaseUrl: String = DEFAULT_PUBLIC_BASE_URL,
-    val clientId: String = DEFAULT_CLIENT_ID,
-    val clientSecret: String? = null,
-    val staticAuthToken: String? = null,
-    val requireAuth: Boolean = false,
 ) {
     val normalizedBaseUrl: String = publicBaseUrl.trimEnd('/')
-
-    val isAuthEnabled: Boolean
-        get() = requireAuth || !clientSecret.isNullOrBlank() || !staticAuthToken.isNullOrBlank()
 
     init {
         if (port !in 1..65535) {
             throw McpConfigValidationException("Invalid configuration: PORT must be between 1 and 65535, but got: $port")
-        }
-        if (requireAuth && clientSecret.isNullOrBlank() && staticAuthToken.isNullOrBlank()) {
-            throw McpConfigValidationException(
-                "Invalid configuration: Authentication is required, but both clientSecret and staticAuthToken are blank",
-            )
         }
     }
 
@@ -77,10 +65,6 @@ data class McpServerConfig(
     fun toOAuthConfig(): McpOAuthConfig =
         McpOAuthConfig(
             publicBaseUrl = normalizedBaseUrl,
-            clientId = clientId,
-            clientSecret = clientSecret,
-            staticAuthToken = staticAuthToken,
-            requireAuth = requireAuth,
         )
 
     /**
@@ -91,11 +75,6 @@ data class McpServerConfig(
             "MCP_PORT" to port,
             "MCP_DB_PATH" to dbPath,
             "MCP_PUBLIC_BASE_URL" to publicBaseUrl,
-            "MCP_OAUTH_CLIENT_ID" to clientId,
-            "MCP_OAUTH_CLIENT_SECRET" to (clientSecret?.let { "******" }),
-            "MCP_AUTH_TOKEN" to (staticAuthToken?.let { "******" }),
-            "requireAuth" to requireAuth,
-            "isAuthEnabled" to isAuthEnabled,
         )
 
     /**
@@ -111,7 +90,6 @@ data class McpServerConfig(
         const val DEFAULT_PORT = 8081
         const val DEFAULT_DB_PATH = "./data/urls.db"
         const val DEFAULT_PUBLIC_BASE_URL = "https://woodendoor.website"
-        const val DEFAULT_CLIENT_ID = "luna-mcp-client"
 
         private val SENSITIVE_EXPLICIT_KEYS =
             setOf(
@@ -119,10 +97,6 @@ data class McpServerConfig(
                 "DISCORD_CLIENT_SECRET",
                 "GEMINI_API_KEY",
                 "YOUTUBE_API_KEY",
-                "MCP_AUTH_TOKEN",
-                "MCP_OAUTH_CLIENT_SECRET",
-                "clientSecret",
-                "staticAuthToken",
             )
 
         /**
@@ -251,10 +225,7 @@ data class McpServerConfig(
         /**
          * Builds [McpServerConfig] from a key-value map with canonical defaults and fail-fast validation.
          */
-        fun fromMap(
-            config: Map<String, Any?>,
-            authExpected: Boolean? = null,
-        ): McpServerConfig {
+        fun fromMap(config: Map<String, Any?>): McpServerConfig {
             val rawPort = config["MCP_PORT"] ?: config["PORT"] ?: config["port"] ?: config["mcp.port"]
             val port =
                 when (rawPort) {
@@ -299,35 +270,10 @@ data class McpServerConfig(
                 (config["MCP_PUBLIC_BASE_URL"] ?: config["publicBaseUrl"] ?: config["mcp.publicBaseUrl"])?.toString()
             val publicBaseUrl = if (rawBaseUrl.isNullOrBlank()) DEFAULT_PUBLIC_BASE_URL else rawBaseUrl
 
-            val rawClientId =
-                (config["MCP_OAUTH_CLIENT_ID"] ?: config["clientId"] ?: config["mcp.clientId"] ?: config["MCP_CLIENT_ID"])?.toString()
-            val clientId = if (rawClientId.isNullOrBlank()) DEFAULT_CLIENT_ID else rawClientId
-
-            val rawClientSecret =
-                (config["MCP_OAUTH_CLIENT_SECRET"] ?: config["clientSecret"] ?: config["mcp.clientSecret"] ?: config["MCP_CLIENT_SECRET"])?.toString()
-            val clientSecret = rawClientSecret?.takeIf { it.isNotBlank() }
-
-            val rawToken =
-                (config["MCP_AUTH_TOKEN"] ?: config["staticAuthToken"] ?: config["mcp.staticAuthToken"])?.toString()
-            val staticAuthToken = rawToken?.takeIf { it.isNotBlank() }
-
-            val rawRequireAuth = config["MCP_REQUIRE_AUTH"] ?: config["requireAuth"] ?: config["mcp.requireAuth"]
-            val requireAuth = authExpected ?: parseBoolean(rawRequireAuth)
-
-            if (requireAuth && clientSecret == null && staticAuthToken == null) {
-                throw McpConfigValidationException(
-                    "Invalid configuration: Authentication is required, but both clientSecret and staticAuthToken are blank",
-                )
-            }
-
             return McpServerConfig(
                 port = port,
                 dbPath = dbPath,
                 publicBaseUrl = publicBaseUrl,
-                clientId = clientId,
-                clientSecret = clientSecret,
-                staticAuthToken = staticAuthToken,
-                requireAuth = requireAuth,
             )
         }
 
@@ -358,7 +304,6 @@ data class McpServerConfig(
             dotenvContent: String? = null,
             systemEnv: Map<String, String> = emptyMap(),
             customConfig: Map<String, Any?>? = null,
-            authExpected: Boolean? = null,
         ): McpServerConfig {
             val config = mutableMapOf<String, Any?>()
             if (dotenvContent != null) {
@@ -368,7 +313,7 @@ data class McpServerConfig(
             if (customConfig != null) {
                 config.putAll(customConfig)
             }
-            return fromMap(config, authExpected = authExpected)
+            return fromMap(config)
         }
 
         /**
@@ -378,11 +323,10 @@ data class McpServerConfig(
             envFile: File? = findDefaultEnvFile(),
             systemEnv: Map<String, String> = System.getenv(),
             customConfig: Map<String, Any?>? = null,
-            authExpected: Boolean? = null,
         ): McpServerConfig {
             val raw = loadRawConfig(envFile, systemEnv, customConfig)
-            auditDrift(raw, authExpected = authExpected)
-            return fromMap(raw, authExpected = authExpected)
+            auditDrift(raw)
+            return fromMap(raw)
         }
 
         val STANDARD_SYSTEM_KEYS =
@@ -437,15 +381,6 @@ data class McpServerConfig(
                 "mcp.dbPath" to "MCP_DB_PATH",
                 "publicBaseUrl" to "MCP_PUBLIC_BASE_URL",
                 "mcp.publicBaseUrl" to "MCP_PUBLIC_BASE_URL",
-                "mcp.clientId" to "MCP_OAUTH_CLIENT_ID",
-                "MCP_CLIENT_ID" to "MCP_OAUTH_CLIENT_ID",
-                "mcp.clientSecret" to "MCP_OAUTH_CLIENT_SECRET",
-                "MCP_CLIENT_SECRET" to "MCP_OAUTH_CLIENT_SECRET",
-                "staticAuthToken" to "MCP_AUTH_TOKEN",
-                "mcp.staticAuthToken" to "MCP_AUTH_TOKEN",
-                "requireAuth" to "MCP_REQUIRE_AUTH",
-                "mcp.requireAuth" to "MCP_REQUIRE_AUTH",
-                "authExpected" to "MCP_REQUIRE_AUTH",
             )
 
         fun parseDefaultValue(raw: String): String? {
@@ -538,10 +473,6 @@ data class McpServerConfig(
                 EnvVarSchema("MCP_PORT", isRequired = false, defaultValue = "8081", section = 5),
                 EnvVarSchema("MCP_DB_PATH", isRequired = false, defaultValue = "./data/urls.db", section = 5),
                 EnvVarSchema("MCP_PUBLIC_BASE_URL", isRequired = false, defaultValue = "https://woodendoor.website", section = 5),
-                EnvVarSchema("MCP_OAUTH_CLIENT_ID", isRequired = false, defaultValue = "luna-mcp-client", section = 5),
-                EnvVarSchema("MCP_OAUTH_CLIENT_SECRET", isRequired = false, section = 5),
-                EnvVarSchema("MCP_AUTH_TOKEN", isRequired = false, section = 5),
-                EnvVarSchema("MCP_REQUIRE_AUTH", isRequired = false, defaultValue = "false", section = 5),
             )
 
         fun loadEnvExampleSchema(): List<EnvVarSchema> {
@@ -590,10 +521,6 @@ data class McpServerConfig(
                     "MCP_PORT" -> listOf("PORT", "port", "mcp.port")
                     "MCP_DB_PATH" -> listOf("dbPath", "mcp.dbPath")
                     "MCP_PUBLIC_BASE_URL" -> listOf("publicBaseUrl", "mcp.publicBaseUrl")
-                    "MCP_OAUTH_CLIENT_ID" -> listOf("clientId", "mcp.clientId", "MCP_CLIENT_ID")
-                    "MCP_OAUTH_CLIENT_SECRET" -> listOf("clientSecret", "mcp.clientSecret", "MCP_CLIENT_SECRET")
-                    "MCP_AUTH_TOKEN" -> listOf("staticAuthToken", "mcp.staticAuthToken")
-                    "MCP_REQUIRE_AUTH" -> listOf("requireAuth", "mcp.requireAuth")
                     else -> emptyList()
                 }
 
@@ -620,7 +547,6 @@ data class McpServerConfig(
             config: Map<String, Any?>,
             envExampleContent: String? = loadEnvExample(),
             requiredKeys: Set<String>? = null,
-            authExpected: Boolean? = null,
             logger: Logger = LoggerFactory.getLogger(McpServerConfig::class.java),
         ): DriftAuditResult {
             val schemaList =
@@ -652,27 +578,6 @@ data class McpServerConfig(
                 }
             }
 
-            val rawRequireAuth = config["MCP_REQUIRE_AUTH"] ?: config["requireAuth"] ?: config["mcp.requireAuth"]
-            val isAuth = authExpected ?: parseBoolean(rawRequireAuth)
-            if (isAuth) {
-                val secret =
-                    (
-                        config["MCP_OAUTH_CLIENT_SECRET"]
-                            ?: config["clientSecret"]
-                            ?: config["mcp.clientSecret"]
-                            ?: config["MCP_CLIENT_SECRET"]
-                    )?.toString()
-                val token =
-                    (
-                        config["MCP_AUTH_TOKEN"]
-                            ?: config["staticAuthToken"]
-                            ?: config["mcp.staticAuthToken"]
-                    )?.toString()
-                if (secret.isNullOrBlank() && token.isNullOrBlank()) {
-                    missingRequired.add("MCP_OAUTH_CLIENT_SECRET or MCP_AUTH_TOKEN")
-                }
-            }
-
             if (missingRequired.isNotEmpty()) {
                 val errMsg = "Missing required configuration: ${missingRequired.joinToString(", ")} must not be blank"
                 logger.error(
@@ -698,8 +603,6 @@ data class McpServerConfig(
                             "MCP_PORT" -> DEFAULT_PORT
                             "MCP_DB_PATH" -> DEFAULT_DB_PATH
                             "MCP_PUBLIC_BASE_URL" -> DEFAULT_PUBLIC_BASE_URL
-                            "MCP_OAUTH_CLIENT_ID" -> DEFAULT_CLIENT_ID
-                            "MCP_REQUIRE_AUTH" -> false
                             else -> null
                         }
                     if (defaultVal != null) {
