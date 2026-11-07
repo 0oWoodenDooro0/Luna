@@ -1,10 +1,11 @@
-# Kord 0.18.x Recipes & API Patterns for Luna
+# Kord Recipes & API Patterns for Luna
 
 This document provides quick reference recipes and patterns for working with Kord in Luna, avoiding runtime trial-and-error or decompilation.
 
 ## Version & Source
-- **Version**: `0.18.1` (declared in `gradle/libs.versions.toml`)
-- **Repository**: Maven Central (`dev.kord:kord-core`)
+- **Version**: `0.19.0-SNAPSHOT` (declared in `gradle/libs.versions.toml`)
+- **Repository**: `https://snapshots.kord.dev` (`dev.kord:kord-core`)
+- **Note on 0.18.1 vs 0.19.0-SNAPSHOT**: In August 2026, Discord made `channel.application_id` nullable in gateway dispatches. Kord PR #1072 (`9e7dd18`) resolved this by changing `applicationId` to `OptionalSnowflake?`. Stable `0.18.1` (March 2026) still expects non-nullable `OptionalSnowflake`, crashing with `JsonDecodingException: Failed to parse type 'ULong' for input 'null'` on gateway `GUILD_CREATE`. Always retain `0.19.0-SNAPSHOT` until `0.19.0` stable is released.
 
 ---
 
