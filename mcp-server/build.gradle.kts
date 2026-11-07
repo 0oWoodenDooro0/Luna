@@ -35,6 +35,8 @@ dependencies {
 
     // Logging
     implementation(libs.logback.classic)
+    implementation(libs.logstash.logback.encoder)
+    implementation(libs.jackson.core)
 
     // Testing
     testImplementation(kotlin("test"))
