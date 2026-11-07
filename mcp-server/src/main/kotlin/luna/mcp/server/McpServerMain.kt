@@ -22,6 +22,7 @@ object McpServerMain {
         logger.info("Starting standalone MCP server on port {} with database path {}", config.port, config.dbPath)
 
         val repository = McpWebhookRepository.create(config.dbPath)
+        val clientRepository = McpClientRepository.create(config.dbPath)
         val broadcaster = DiscordWebhookBroadcaster(repository)
         val authConfig = config.toOAuthConfig()
 
@@ -34,7 +35,11 @@ object McpServerMain {
 
         val server =
             embeddedServer(CIO, port = config.port, host = "0.0.0.0") {
-                mcpServerModule(broadcaster = broadcaster, authConfig = authConfig)
+                mcpServerModule(
+                    broadcaster = broadcaster,
+                    authConfig = authConfig,
+                    clientRepository = clientRepository,
+                )
             }
 
         Runtime.getRuntime().addShutdownHook(

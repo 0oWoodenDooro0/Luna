@@ -54,6 +54,8 @@ class McpServerTest {
         transaction(database) {
             McpWebhooksTable.insert {
                 it[McpWebhooksTable.id] = id
+                it[McpWebhooksTable.clientId] = "luna-mcp-client"
+                it[McpWebhooksTable.tag] = "tag-$id"
                 it[McpWebhooksTable.guildId] = "g-$id"
                 it[McpWebhooksTable.channelId] = channelId
                 it[McpWebhooksTable.webhookUrl] = url
@@ -207,7 +209,7 @@ class McpServerTest {
         }
 
     @Test
-    fun `POST mcp messages handles tools list returning send_discord_message`() =
+    fun `POST mcp messages handles tools list returning send_discord_message and list_targets`() =
         testApplication {
             val mockHttpClient = HttpClient(MockEngine { respond("{}", HttpStatusCode.NoContent) })
             val broadcaster = DiscordWebhookBroadcaster(repository, mockHttpClient)
@@ -226,8 +228,9 @@ class McpServerTest {
             val jsonResponse = Json.parseToJsonElement(response.bodyAsText()).jsonObject
             val tools = jsonResponse["result"]?.jsonObject?.get("tools")?.jsonArray
             assertNotNull(tools)
-            assertEquals(1, tools.size)
-            assertEquals("send_discord_message", tools[0].jsonObject["name"]?.jsonPrimitive?.content)
+            assertEquals(2, tools.size)
+            assertTrue(tools.any { it.jsonObject["name"]?.jsonPrimitive?.content == "send_discord_message" })
+            assertTrue(tools.any { it.jsonObject["name"]?.jsonPrimitive?.content == "list_targets" })
         }
 
     @Test
@@ -259,7 +262,7 @@ class McpServerTest {
             }
 
             val request =
-                """{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"send_discord_message","arguments":{"message":"Broadcast to Discord"}}}"""
+                """{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"send_discord_message","arguments":{"content":"Broadcast to Discord","target":"all"}}}"""
             val response =
                 client.post("/mcp/messages") {
                     contentType(ContentType.Application.Json)
@@ -277,9 +280,7 @@ class McpServerTest {
                     ?.jsonObject
             assertNotNull(content)
             val text = content["text"]?.jsonPrimitive?.content.orEmpty()
-            val textJson = Json.parseToJsonElement(text).jsonObject
-            assertEquals("success", textJson["status"]?.jsonPrimitive?.content)
-            assertEquals(2, textJson["delivered_channels"]?.jsonPrimitive?.content?.toInt())
+            assertEquals("✅ 已成功將訊息發送至 2 個頻道 [tag-wh-1, tag-wh-2]", text)
 
             assertEquals(2, outboundUrls.size)
             assertTrue(outboundUrls.contains("https://discord.com/api/webhooks/111/token1"))
@@ -322,9 +323,9 @@ class McpServerTest {
             val message = "$part1\n$part2"
 
             val request =
-                """{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"send_discord_message","arguments":{"message":${Json.encodeToString(
+                """{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"send_discord_message","arguments":{"content":${Json.encodeToString(
                     message,
-                )}}}}"""
+                )},"target":"all"}}}"""
             val response =
                 client.post("/mcp/messages") {
                     contentType(ContentType.Application.Json)
@@ -344,9 +345,7 @@ class McpServerTest {
                     ?.jsonPrimitive
                     ?.content
                     .orEmpty()
-            val textJson = Json.parseToJsonElement(text).jsonObject
-            assertEquals("success", textJson["status"]?.jsonPrimitive?.content)
-            assertEquals(1, textJson["delivered_channels"]?.jsonPrimitive?.content?.toInt())
+            assertEquals("✅ 已成功將訊息發送至 1 個頻道 [tag-wh-1]", text)
 
             assertEquals(2, outboundPayloads.size)
             val c1 =
@@ -366,7 +365,7 @@ class McpServerTest {
         }
 
     @Test
-    fun `POST mcp messages tools call when empty webhooks returns no_channels_registered`() =
+    fun `POST mcp messages tools call when empty webhooks returns guidance error`() =
         testApplication {
             val mockHttpClient = HttpClient(MockEngine { respond("{}", HttpStatusCode.NoContent) })
             val broadcaster = DiscordWebhookBroadcaster(repository, mockHttpClient)
@@ -375,9 +374,63 @@ class McpServerTest {
             }
 
             val request =
-                """{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"send_discord_message","arguments":{"message":"Hello"}}}"""
+                """{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"send_discord_message","arguments":{"content":"Hello","target":"all"}}}"""
             val response =
                 client.post("/mcp/messages") {
+                    contentType(ContentType.Application.Json)
+                    setBody(request)
+                }
+
+            assertEquals(HttpStatusCode.OK, response.status)
+            val jsonResponse = Json.parseToJsonElement(response.bodyAsText()).jsonObject
+            val result = jsonResponse["result"]?.jsonObject
+            assertNotNull(result)
+            assertEquals(true, result["isError"]?.jsonPrimitive?.booleanOrNull)
+            val text =
+                result["content"]
+                    ?.jsonArray
+                    ?.get(0)
+                    ?.jsonObject
+                    ?.get("text")
+                    ?.jsonPrimitive
+                    ?.content
+                    .orEmpty()
+            assertEquals("❌ 發送失敗：尚未綁定任何 Discord 頻道 Webhook。請在 Discord 中執行 /mcp webhook add tag:<標籤> 進行綁定。", text)
+        }
+
+    @Test
+    fun `POST mcp messages handles list_targets for specific clientId query param`() =
+        testApplication {
+            transaction(database) {
+                McpWebhooksTable.insert {
+                    it[McpWebhooksTable.id] = "wh-a1"
+                    it[McpWebhooksTable.clientId] = "tenant-a"
+                    it[McpWebhooksTable.tag] = "ops"
+                    it[McpWebhooksTable.guildId] = "g-1"
+                    it[McpWebhooksTable.channelId] = "c-1"
+                    it[McpWebhooksTable.webhookUrl] = "https://discord.com/api/webhooks/111/ops"
+                    it[McpWebhooksTable.createdAt] = 100L
+                }
+                McpWebhooksTable.insert {
+                    it[McpWebhooksTable.id] = "wh-b1"
+                    it[McpWebhooksTable.clientId] = "tenant-b"
+                    it[McpWebhooksTable.tag] = "dev"
+                    it[McpWebhooksTable.guildId] = "g-2"
+                    it[McpWebhooksTable.channelId] = "c-2"
+                    it[McpWebhooksTable.webhookUrl] = "https://discord.com/api/webhooks/222/dev"
+                    it[McpWebhooksTable.createdAt] = 200L
+                }
+            }
+
+            val mockHttpClient = HttpClient(MockEngine { respond("{}", HttpStatusCode.NoContent) })
+            val broadcaster = DiscordWebhookBroadcaster(repository, mockHttpClient)
+            application {
+                mcpServerModule(broadcaster)
+            }
+
+            val request = """{"jsonrpc":"2.0","id":20,"method":"tools/call","params":{"name":"list_targets","arguments":{}}}"""
+            val response =
+                client.post("/mcp/messages?clientId=tenant-a") {
                     contentType(ContentType.Application.Json)
                     setBody(request)
                 }
@@ -395,9 +448,177 @@ class McpServerTest {
                     ?.jsonPrimitive
                     ?.content
                     .orEmpty()
-            val textJson = Json.parseToJsonElement(text).jsonObject
-            assertEquals("no_channels_registered", textJson["status"]?.jsonPrimitive?.content)
-            assertEquals(0, textJson["delivered_channels"]?.jsonPrimitive?.content?.toInt())
+            val listJson = Json.parseToJsonElement(text).jsonObject
+            assertEquals(1, listJson["count"]?.jsonPrimitive?.content?.toInt())
+            assertEquals(listOf("ops"), listJson["tags"]?.jsonArray?.map { it.jsonPrimitive.content })
+            assertEquals(10, listJson["maxQuota"]?.jsonPrimitive?.content?.toInt())
+        }
+
+    @Test
+    fun `POST mcp messages handles tag-scoped send_discord_message for specific clientId`() =
+        testApplication {
+            val dispatchedUrls = mutableListOf<String>()
+            val mockHttpClient =
+                HttpClient(
+                    MockEngine { req ->
+                        dispatchedUrls.add(req.url.toString())
+                        respond("{}", HttpStatusCode.NoContent)
+                    },
+                ) {
+                    install(ContentNegotiation) { json() }
+                }
+
+            transaction(database) {
+                McpWebhooksTable.insert {
+                    it[McpWebhooksTable.id] = "wh-a1"
+                    it[McpWebhooksTable.clientId] = "tenant-a"
+                    it[McpWebhooksTable.tag] = "ops"
+                    it[McpWebhooksTable.guildId] = "g-1"
+                    it[McpWebhooksTable.channelId] = "c-1"
+                    it[McpWebhooksTable.webhookUrl] = "https://discord.com/api/webhooks/111/ops"
+                    it[McpWebhooksTable.createdAt] = 100L
+                }
+                McpWebhooksTable.insert {
+                    it[McpWebhooksTable.id] = "wh-a2"
+                    it[McpWebhooksTable.clientId] = "tenant-a"
+                    it[McpWebhooksTable.tag] = "marketing"
+                    it[McpWebhooksTable.guildId] = "g-1"
+                    it[McpWebhooksTable.channelId] = "c-2"
+                    it[McpWebhooksTable.webhookUrl] = "https://discord.com/api/webhooks/111/marketing"
+                    it[McpWebhooksTable.createdAt] = 200L
+                }
+            }
+
+            val broadcaster = DiscordWebhookBroadcaster(repository, mockHttpClient)
+            application {
+                mcpServerModule(broadcaster)
+            }
+
+            val request =
+                """{"jsonrpc":"2.0","id":21,"method":"tools/call","params":{"name":"send_discord_message","arguments":{"content":"Alert!","target":"ops"}}}"""
+            val response =
+                client.post("/mcp/messages?clientId=tenant-a") {
+                    contentType(ContentType.Application.Json)
+                    setBody(request)
+                }
+
+            assertEquals(HttpStatusCode.OK, response.status)
+            val jsonResponse = Json.parseToJsonElement(response.bodyAsText()).jsonObject
+            val text =
+                jsonResponse["result"]
+                    ?.jsonObject
+                    ?.get("content")
+                    ?.jsonArray
+                    ?.get(0)
+                    ?.jsonObject
+                    ?.get("text")
+                    ?.jsonPrimitive
+                    ?.content
+                    .orEmpty()
+            assertEquals("✅ 已成功將訊息發送至 1 個頻道 [ops]", text)
+            assertEquals(listOf("https://discord.com/api/webhooks/111/ops"), dispatchedUrls)
+        }
+
+    @Test
+    fun `POST mcp messages with unknown tag returns guidance error`() =
+        testApplication {
+            transaction(database) {
+                McpWebhooksTable.insert {
+                    it[McpWebhooksTable.id] = "wh-1"
+                    it[McpWebhooksTable.clientId] = "tenant-a"
+                    it[McpWebhooksTable.tag] = "ops"
+                    it[McpWebhooksTable.guildId] = "g-1"
+                    it[McpWebhooksTable.channelId] = "c-1"
+                    it[McpWebhooksTable.webhookUrl] = "https://discord.com/api/webhooks/111/ops"
+                    it[McpWebhooksTable.createdAt] = 100L
+                }
+            }
+
+            val mockHttpClient = HttpClient(MockEngine { respond("{}", HttpStatusCode.NoContent) })
+            val broadcaster = DiscordWebhookBroadcaster(repository, mockHttpClient)
+            application {
+                mcpServerModule(broadcaster)
+            }
+
+            val request =
+                """{"jsonrpc":"2.0","id":22,"method":"tools/call","params":{"name":"send_discord_message","arguments":{"content":"Hello","target":"unknown"}}}"""
+            val response =
+                client.post("/mcp/messages?clientId=tenant-a") {
+                    contentType(ContentType.Application.Json)
+                    setBody(request)
+                }
+
+            assertEquals(HttpStatusCode.OK, response.status)
+            val jsonResponse = Json.parseToJsonElement(response.bodyAsText()).jsonObject
+            val result = jsonResponse["result"]?.jsonObject
+            assertNotNull(result)
+            assertEquals(true, result["isError"]?.jsonPrimitive?.booleanOrNull)
+            val text =
+                result["content"]
+                    ?.jsonArray
+                    ?.get(0)
+                    ?.jsonObject
+                    ?.get("text")
+                    ?.jsonPrimitive
+                    ?.content
+                    .orEmpty()
+            assertEquals("❌ 發送失敗：找不到標籤為 'unknown' 的 Webhook。請先在 Discord 使用 /mcp webhook add tag:unknown 綁定頻道，或調用 list_targets 查看現有可用標籤。", text)
+        }
+
+    @Test
+    fun `SSE session propagates authenticated clientId to subsequent POST messages`() =
+        testApplication {
+            transaction(database) {
+                McpWebhooksTable.insert {
+                    it[McpWebhooksTable.id] = "wh-sse"
+                    it[McpWebhooksTable.clientId] = "tenant-sse"
+                    it[McpWebhooksTable.tag] = "sse-tag"
+                    it[McpWebhooksTable.guildId] = "g-sse"
+                    it[McpWebhooksTable.channelId] = "c-sse"
+                    it[McpWebhooksTable.webhookUrl] = "https://discord.com/api/webhooks/sse/url"
+                    it[McpWebhooksTable.createdAt] = 100L
+                }
+            }
+
+            val mockHttpClient = HttpClient(MockEngine { respond("{}", HttpStatusCode.NoContent) })
+            val broadcaster = DiscordWebhookBroadcaster(repository, mockHttpClient)
+            application {
+                mcpServerModule(broadcaster)
+            }
+
+            val sseClient =
+                createClient {
+                    install(io.ktor.client.plugins.sse.SSE)
+                }
+
+            sseClient.sse("/mcp/sse?clientId=tenant-sse") {
+                val event = incoming.first()
+                assertEquals("endpoint", event.event)
+                val endpointUri = event.data.orEmpty()
+                assertTrue(endpointUri.startsWith("/mcp/messages?sessionId="))
+
+                val postResponse =
+                    client.post(endpointUri) {
+                        contentType(ContentType.Application.Json)
+                        setBody("""{"jsonrpc":"2.0","id":30,"method":"tools/call","params":{"name":"list_targets","arguments":{}}}""")
+                    }
+                assertEquals(HttpStatusCode.OK, postResponse.status)
+                val jsonResponse = Json.parseToJsonElement(postResponse.bodyAsText()).jsonObject
+                val text =
+                    jsonResponse["result"]
+                        ?.jsonObject
+                        ?.get("content")
+                        ?.jsonArray
+                        ?.get(0)
+                        ?.jsonObject
+                        ?.get("text")
+                        ?.jsonPrimitive
+                        ?.content
+                        .orEmpty()
+                val listJson = Json.parseToJsonElement(text).jsonObject
+                assertEquals(1, listJson["count"]?.jsonPrimitive?.content?.toInt())
+                assertEquals(listOf("sse-tag"), listJson["tags"]?.jsonArray?.map { it.jsonPrimitive.content })
+            }
         }
 
     @Test

@@ -88,7 +88,7 @@ class McpProtocolHandlerTest {
         }
 
     @Test
-    fun `handles tools list request returning send_discord_message specification`() =
+    fun `handles tools list request returning send_discord_message and list_targets specification`() =
         runTest {
             val requestJson =
                 """{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}"""
@@ -98,64 +98,79 @@ class McpProtocolHandlerTest {
             val root = Json.parseToJsonElement(response).jsonObject
             val tools = root["result"]?.jsonObject?.get("tools")?.jsonArray
             assertNotNull(tools)
-            assertEquals(1, tools.size)
+            assertEquals(2, tools.size)
 
-            val tool = tools[0].jsonObject
-            assertEquals("send_discord_message", tool["name"]?.jsonPrimitive?.content)
-            val inputSchema = tool["inputSchema"]?.jsonObject
-            assertNotNull(inputSchema)
-            assertEquals("object", inputSchema["type"]?.jsonPrimitive?.content)
-            val required = inputSchema["required"]?.jsonArray
-            assertNotNull(required)
-            assertTrue(required.any { it.jsonPrimitive.content == "message" })
-            assertNotNull(inputSchema["properties"]?.jsonObject?.get("message"))
+            val sendMessageTool = tools.firstOrNull { it.jsonObject["name"]?.jsonPrimitive?.content == "send_discord_message" }?.jsonObject
+            assertNotNull(sendMessageTool)
+            assertEquals(
+                "Send a message to registered Discord channels via webhooks. Specify 'target' with a specific tag name or 'all' to broadcast to all channels.",
+                sendMessageTool["description"]?.jsonPrimitive?.content,
+            )
+            val sendSchema = sendMessageTool["inputSchema"]?.jsonObject
+            assertNotNull(sendSchema)
+            assertEquals("object", sendSchema["type"]?.jsonPrimitive?.content)
+            val sendRequired = sendSchema["required"]?.jsonArray?.map { it.jsonPrimitive.content }
+            assertNotNull(sendRequired)
+            assertTrue(sendRequired.contains("content"))
+            assertTrue(sendRequired.contains("target"))
+            assertNotNull(sendSchema["properties"]?.jsonObject?.get("content"))
+            assertNotNull(sendSchema["properties"]?.jsonObject?.get("target"))
+
+            val listTargetsTool = tools.firstOrNull { it.jsonObject["name"]?.jsonPrimitive?.content == "list_targets" }?.jsonObject
+            assertNotNull(listTargetsTool)
+            assertEquals(
+                "List all registered Discord channel tags and quota status for the authenticated client",
+                listTargetsTool["description"]?.jsonPrimitive?.content,
+            )
+            val listSchema = listTargetsTool["inputSchema"]?.jsonObject
+            assertNotNull(listSchema)
+            assertEquals("object", listSchema["type"]?.jsonPrimitive?.content)
+            assertNotNull(listSchema["properties"]?.jsonObject)
         }
 
     @Test
-    fun `handles tools call request executing send_discord_message with webhooks`() =
+    fun `handles list_targets returning client tags and quota status`() =
         runTest {
             transaction(database) {
                 McpWebhooksTable.insert {
-                    it[id] = "wh-1"
+                    it[id] = "wh-client-1"
+                    it[clientId] = "client-alpha"
+                    it[tag] = "general"
                     it[guildId] = "g-1"
                     it[channelId] = "c-1"
-                    it[webhookUrl] = "https://discord.com/api/webhooks/111/token1"
-                    it[createdAt] = System.currentTimeMillis()
+                    it[webhookUrl] = "https://discord.com/api/webhooks/111/alpha1"
+                    it[createdAt] = 1000L
+                }
+                McpWebhooksTable.insert {
+                    it[id] = "wh-client-2"
+                    it[clientId] = "client-alpha"
+                    it[tag] = "alerts"
+                    it[guildId] = "g-1"
+                    it[channelId] = "c-2"
+                    it[webhookUrl] = "https://discord.com/api/webhooks/111/alpha2"
+                    it[createdAt] = 2000L
+                }
+                McpWebhooksTable.insert {
+                    it[id] = "wh-other"
+                    it[clientId] = "client-beta"
+                    it[tag] = "other"
+                    it[guildId] = "g-2"
+                    it[channelId] = "c-3"
+                    it[webhookUrl] = "https://discord.com/api/webhooks/222/beta"
+                    it[createdAt] = 3000L
                 }
             }
 
             val requestJson =
-                """{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"send_discord_message","arguments":{"message":"Hello world!"}}}"""
-            val response = handler.handle(requestJson)
+                """{"jsonrpc":"2.0","id":10,"method":"tools/call","params":{"name":"list_targets","arguments":{}}}"""
+            val response = handler.handle(requestJson, clientId = "client-alpha")
             assertNotNull(response)
 
             val root = Json.parseToJsonElement(response).jsonObject
             val result = root["result"]?.jsonObject
             assertNotNull(result)
-            val contentArray = result["content"]?.jsonArray
-            assertNotNull(contentArray)
-            assertEquals(1, contentArray.size)
-
-            val contentObj = contentArray[0].jsonObject
-            assertEquals("text", contentObj["type"]?.jsonPrimitive?.content)
-            val text = contentObj["text"]?.jsonPrimitive?.content.orEmpty()
-            val payload = Json.parseToJsonElement(text).jsonObject
-            assertEquals("success", payload["status"]?.jsonPrimitive?.content)
-            assertEquals(1, payload["delivered_channels"]?.jsonPrimitive?.content?.toInt())
             assertEquals(false, result["isError"]?.jsonPrimitive?.booleanOrNull)
-        }
 
-    @Test
-    fun `handles tools call request when no channels are registered`() =
-        runTest {
-            val requestJson =
-                """{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"send_discord_message","arguments":{"message":"Hello world!"}}}"""
-            val response = handler.handle(requestJson)
-            assertNotNull(response)
-
-            val root = Json.parseToJsonElement(response).jsonObject
-            val result = root["result"]?.jsonObject
-            assertNotNull(result)
             val text =
                 result["content"]
                     ?.jsonArray
@@ -166,8 +181,269 @@ class McpProtocolHandlerTest {
                     ?.content
                     .orEmpty()
             val payload = Json.parseToJsonElement(text).jsonObject
-            assertEquals("no_channels_registered", payload["status"]?.jsonPrimitive?.content)
-            assertEquals(0, payload["delivered_channels"]?.jsonPrimitive?.content?.toInt())
+            val tags = payload["tags"]?.jsonArray?.map { it.jsonPrimitive.content }
+            assertEquals(listOf("general", "alerts"), tags)
+            assertEquals(2, payload["count"]?.jsonPrimitive?.content?.toInt())
+            assertEquals(10, payload["maxQuota"]?.jsonPrimitive?.content?.toInt())
+        }
+
+    @Test
+    fun `send_discord_message with target tag only delivers to matching tag`() =
+        runTest {
+            val dispatchedUrls = mutableListOf<String>()
+            val client =
+                HttpClient(
+                    MockEngine { req ->
+                        dispatchedUrls.add(req.url.toString())
+                        respond("{}", HttpStatusCode.NoContent)
+                    },
+                ) {
+                    install(io.ktor.client.plugins.contentnegotiation.ContentNegotiation) { json() }
+                }
+            val broadcasterWithCapture = DiscordWebhookBroadcaster(repository, client)
+            val customHandler = McpProtocolHandler(broadcasterWithCapture, repository)
+
+            transaction(database) {
+                McpWebhooksTable.insert {
+                    it[id] = "wh-1"
+                    it[clientId] = "client-1"
+                    it[tag] = "alerts"
+                    it[guildId] = "g-1"
+                    it[channelId] = "c-1"
+                    it[webhookUrl] = "https://discord.com/api/webhooks/111/alerts"
+                    it[createdAt] = 1000L
+                }
+                McpWebhooksTable.insert {
+                    it[id] = "wh-2"
+                    it[clientId] = "client-1"
+                    it[tag] = "general"
+                    it[guildId] = "g-1"
+                    it[channelId] = "c-2"
+                    it[webhookUrl] = "https://discord.com/api/webhooks/111/general"
+                    it[createdAt] = 2000L
+                }
+            }
+
+            val requestJson =
+                """{"jsonrpc":"2.0","id":11,"method":"tools/call","params":{"name":"send_discord_message","arguments":{"content":"Deploy alert","target":"alerts"}}}"""
+            val response = customHandler.handle(requestJson, clientId = "client-1")
+            assertNotNull(response)
+
+            val root = Json.parseToJsonElement(response).jsonObject
+            val result = root["result"]?.jsonObject
+            assertNotNull(result)
+            assertEquals(false, result["isError"]?.jsonPrimitive?.booleanOrNull)
+
+            val text =
+                result["content"]
+                    ?.jsonArray
+                    ?.get(0)
+                    ?.jsonObject
+                    ?.get("text")
+                    ?.jsonPrimitive
+                    ?.content
+                    .orEmpty()
+            assertEquals("✅ 已成功將訊息發送至 1 個頻道 [alerts]", text)
+            assertEquals(listOf("https://discord.com/api/webhooks/111/alerts"), dispatchedUrls)
+        }
+
+    @Test
+    fun `send_discord_message with target all delivers to all client webhooks`() =
+        runTest {
+            val dispatchedUrls = mutableListOf<String>()
+            val client =
+                HttpClient(
+                    MockEngine { req ->
+                        dispatchedUrls.add(req.url.toString())
+                        respond("{}", HttpStatusCode.NoContent)
+                    },
+                ) {
+                    install(io.ktor.client.plugins.contentnegotiation.ContentNegotiation) { json() }
+                }
+            val broadcasterWithCapture = DiscordWebhookBroadcaster(repository, client)
+            val customHandler = McpProtocolHandler(broadcasterWithCapture, repository)
+
+            transaction(database) {
+                McpWebhooksTable.insert {
+                    it[id] = "wh-1"
+                    it[clientId] = "client-1"
+                    it[tag] = "general"
+                    it[guildId] = "g-1"
+                    it[channelId] = "c-1"
+                    it[webhookUrl] = "https://discord.com/api/webhooks/111/general"
+                    it[createdAt] = 1000L
+                }
+                McpWebhooksTable.insert {
+                    it[id] = "wh-2"
+                    it[clientId] = "client-1"
+                    it[tag] = "alerts"
+                    it[guildId] = "g-1"
+                    it[channelId] = "c-2"
+                    it[webhookUrl] = "https://discord.com/api/webhooks/111/alerts"
+                    it[createdAt] = 2000L
+                }
+            }
+
+            val requestJson =
+                """{"jsonrpc":"2.0","id":12,"method":"tools/call","params":{"name":"send_discord_message","arguments":{"content":"Broadcast to all","target":"all"}}}"""
+            val response = customHandler.handle(requestJson, clientId = "client-1")
+            assertNotNull(response)
+
+            val root = Json.parseToJsonElement(response).jsonObject
+            val result = root["result"]?.jsonObject
+            assertNotNull(result)
+            assertEquals(false, result["isError"]?.jsonPrimitive?.booleanOrNull)
+
+            val text =
+                result["content"]
+                    ?.jsonArray
+                    ?.get(0)
+                    ?.jsonObject
+                    ?.get("text")
+                    ?.jsonPrimitive
+                    ?.content
+                    .orEmpty()
+            assertEquals("✅ 已成功將訊息發送至 2 個頻道 [general, alerts]", text)
+            assertEquals(2, dispatchedUrls.size)
+            assertTrue(dispatchedUrls.contains("https://discord.com/api/webhooks/111/general"))
+            assertTrue(dispatchedUrls.contains("https://discord.com/api/webhooks/111/alerts"))
+        }
+
+    @Test
+    fun `send_discord_message with unknown tag returns Traditional Chinese guidance error`() =
+        runTest {
+            transaction(database) {
+                McpWebhooksTable.insert {
+                    it[id] = "wh-1"
+                    it[clientId] = "client-1"
+                    it[tag] = "general"
+                    it[guildId] = "g-1"
+                    it[channelId] = "c-1"
+                    it[webhookUrl] = "https://discord.com/api/webhooks/111/general"
+                    it[createdAt] = 1000L
+                }
+            }
+
+            val requestJson =
+                """{"jsonrpc":"2.0","id":13,"method":"tools/call","params":{"name":"send_discord_message","arguments":{"content":"Hello","target":"nonexistent"}}}"""
+            val response = handler.handle(requestJson, clientId = "client-1")
+            assertNotNull(response)
+
+            val root = Json.parseToJsonElement(response).jsonObject
+            val result = root["result"]?.jsonObject
+            assertNotNull(result)
+            assertEquals(true, result["isError"]?.jsonPrimitive?.booleanOrNull)
+
+            val text =
+                result["content"]
+                    ?.jsonArray
+                    ?.get(0)
+                    ?.jsonObject
+                    ?.get("text")
+                    ?.jsonPrimitive
+                    ?.content
+                    .orEmpty()
+            assertEquals("❌ 發送失敗：找不到標籤為 'nonexistent' 的 Webhook。請先在 Discord 使用 /mcp webhook add tag:nonexistent 綁定頻道，或調用 list_targets 查看現有可用標籤。", text)
+        }
+
+    @Test
+    fun `send_discord_message with empty webhooks returns Traditional Chinese guidance error`() =
+        runTest {
+            val requestJson =
+                """{"jsonrpc":"2.0","id":14,"method":"tools/call","params":{"name":"send_discord_message","arguments":{"content":"Hello","target":"general"}}}"""
+            val response = handler.handle(requestJson, clientId = "client-empty")
+            assertNotNull(response)
+
+            val root = Json.parseToJsonElement(response).jsonObject
+            val result = root["result"]?.jsonObject
+            assertNotNull(result)
+            assertEquals(true, result["isError"]?.jsonPrimitive?.booleanOrNull)
+
+            val text =
+                result["content"]
+                    ?.jsonArray
+                    ?.get(0)
+                    ?.jsonObject
+                    ?.get("text")
+                    ?.jsonPrimitive
+                    ?.content
+                    .orEmpty()
+            assertEquals("❌ 發送失敗：尚未綁定任何 Discord 頻道 Webhook。請在 Discord 中執行 /mcp webhook add tag:<標籤> 進行綁定。", text)
+        }
+
+    @Test
+    fun `multi-tenant isolation Client A cannot see or deliver to Client B webhooks with same tag`() =
+        runTest {
+            val dispatchedUrls = mutableListOf<String>()
+            val client =
+                HttpClient(
+                    MockEngine { req ->
+                        dispatchedUrls.add(req.url.toString())
+                        respond("{}", HttpStatusCode.NoContent)
+                    },
+                ) {
+                    install(io.ktor.client.plugins.contentnegotiation.ContentNegotiation) { json() }
+                }
+            val broadcasterWithCapture = DiscordWebhookBroadcaster(repository, client)
+            val customHandler = McpProtocolHandler(broadcasterWithCapture, repository)
+
+            transaction(database) {
+                McpWebhooksTable.insert {
+                    it[id] = "wh-a"
+                    it[clientId] = "client-A"
+                    it[tag] = "production"
+                    it[guildId] = "guild-A"
+                    it[channelId] = "chan-A"
+                    it[webhookUrl] = "https://discord.com/api/webhooks/AAA/production"
+                    it[createdAt] = 1000L
+                }
+                McpWebhooksTable.insert {
+                    it[id] = "wh-b"
+                    it[clientId] = "client-B"
+                    it[tag] = "production"
+                    it[guildId] = "guild-B"
+                    it[channelId] = "chan-B"
+                    it[webhookUrl] = "https://discord.com/api/webhooks/BBB/production"
+                    it[createdAt] = 2000L
+                }
+            }
+
+            // Client A calls send_discord_message for "production"
+            val requestJson =
+                """{"jsonrpc":"2.0","id":15,"method":"tools/call","params":{"name":"send_discord_message","arguments":{"content":"Hello from A","target":"production"}}}"""
+            val responseA = customHandler.handle(requestJson, clientId = "client-A")
+            assertNotNull(responseA)
+
+            val rootA = Json.parseToJsonElement(responseA).jsonObject
+            assertEquals(
+                false,
+                rootA["result"]
+                    ?.jsonObject
+                    ?.get("isError")
+                    ?.jsonPrimitive
+                    ?.booleanOrNull,
+            )
+            assertEquals(1, dispatchedUrls.size)
+            assertEquals("https://discord.com/api/webhooks/AAA/production", dispatchedUrls[0])
+
+            // Verify Client A list_targets only sees Client A's webhooks
+            val listReq = """{"jsonrpc":"2.0","id":16,"method":"tools/call","params":{"name":"list_targets","arguments":{}}}"""
+            val listRespA = customHandler.handle(listReq, clientId = "client-A")
+            assertNotNull(listRespA)
+            val listResultA = Json.parseToJsonElement(listRespA).jsonObject["result"]?.jsonObject
+            val listTextA =
+                listResultA
+                    ?.get("content")
+                    ?.jsonArray
+                    ?.get(0)
+                    ?.jsonObject
+                    ?.get("text")
+                    ?.jsonPrimitive
+                    ?.content
+                    .orEmpty()
+            val listJsonA = Json.parseToJsonElement(listTextA).jsonObject
+            assertEquals(1, listJsonA["count"]?.jsonPrimitive?.content?.toInt())
+            assertEquals(listOf("production"), listJsonA["tags"]?.jsonArray?.map { it.jsonPrimitive.content })
         }
 
     @Test

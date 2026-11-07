@@ -1,7 +1,6 @@
 package luna.mcp
 
 import org.jetbrains.exposed.v1.core.ResultRow
-import org.jetbrains.exposed.v1.core.Table
 import org.jetbrains.exposed.v1.core.and
 import org.jetbrains.exposed.v1.core.eq
 import org.jetbrains.exposed.v1.jdbc.Database
@@ -10,17 +9,8 @@ import org.jetbrains.exposed.v1.jdbc.deleteWhere
 import org.jetbrains.exposed.v1.jdbc.insert
 import org.jetbrains.exposed.v1.jdbc.selectAll
 import org.jetbrains.exposed.v1.jdbc.transactions.transaction
+import java.io.File
 import java.util.UUID
-
-object McpWebhooksTable : Table("mcp_webhooks") {
-    val id = varchar("id", 64)
-    val guildId = varchar("guild_id", 32)
-    val channelId = varchar("channel_id", 32)
-    val webhookUrl = text("webhook_url")
-    val createdAt = long("created_at")
-
-    override val primaryKey = PrimaryKey(id)
-}
 
 data class McpWebhook(
     val id: String,
@@ -31,12 +21,16 @@ data class McpWebhook(
 )
 
 class McpWebhookStorage(
-    private val database: Database,
+    internal val database: Database,
 ) {
     init {
         transaction(database) {
+            if (db.vendor.contains("sqlite", ignoreCase = true)) {
+                exec("PRAGMA journal_mode=WAL;")
+                exec("PRAGMA busy_timeout=5000;")
+            }
             @Suppress("DEPRECATION")
-            SchemaUtils.createMissingTablesAndColumns(McpWebhooksTable)
+            SchemaUtils.createMissingTablesAndColumns(McpWebhooksTable, McpClientsTable)
         }
     }
 
@@ -44,6 +38,8 @@ class McpWebhookStorage(
         guildId: String,
         channelId: String,
         webhookUrl: String,
+        clientId: String = "luna-mcp-client",
+        tag: String = "wh-${UUID.randomUUID().toString().take(8)}",
     ): McpWebhook =
         transaction(database) {
             val existing =
@@ -63,9 +59,12 @@ class McpWebhookStorage(
             val now = System.currentTimeMillis()
             McpWebhooksTable.insert {
                 it[McpWebhooksTable.id] = id
+                it[McpWebhooksTable.clientId] = clientId
+                it[McpWebhooksTable.tag] = tag
                 it[McpWebhooksTable.guildId] = guildId
                 it[McpWebhooksTable.channelId] = channelId
                 it[McpWebhooksTable.webhookUrl] = webhookUrl
+                it[McpWebhooksTable.isAutoProvisioned] = true
                 it[McpWebhooksTable.createdAt] = now
             }
             McpWebhook(
@@ -129,4 +128,27 @@ class McpWebhookStorage(
             webhookUrl = row[McpWebhooksTable.webhookUrl],
             createdAt = row[McpWebhooksTable.createdAt],
         )
+
+    companion object {
+        fun create(dbPath: String = "data/urls.db"): McpWebhookStorage {
+            val file = File(dbPath)
+            file.parentFile?.mkdirs()
+            val database =
+                Database.connect(
+                    "jdbc:sqlite:$dbPath",
+                    driver = "org.sqlite.JDBC",
+                    setupConnection = { connection ->
+                        val meta = connection.metaData
+                        val isSqlite = meta.databaseProductName.contains("SQLite", ignoreCase = true) || (meta.url?.startsWith("jdbc:sqlite") == true)
+                        if (isSqlite) {
+                            connection.createStatement().use { stmt ->
+                                stmt.execute("PRAGMA journal_mode=WAL;")
+                                stmt.execute("PRAGMA busy_timeout=5000;")
+                            }
+                        }
+                    },
+                )
+            return McpWebhookStorage(database)
+        }
+    }
 }

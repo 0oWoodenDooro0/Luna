@@ -35,14 +35,19 @@ data class JsonRpcError(
 )
 
 class McpProtocolHandler(
-    private val broadcaster: DiscordWebhookBroadcaster,
+    val broadcaster: DiscordWebhookBroadcaster,
+    val repository: McpWebhookRepository = broadcaster.repository,
+    private val defaultClientId: String = DEFAULT_CLIENT_ID,
     private val json: Json =
         Json {
             ignoreUnknownKeys = true
             encodeDefaults = true
         },
 ) {
-    suspend fun handle(requestBody: String): String? {
+    suspend fun handle(
+        requestBody: String,
+        clientId: String = defaultClientId,
+    ): String? {
         val request =
             runCatching {
                 json.decodeFromString<JsonRpcRequest>(requestBody)
@@ -55,11 +60,14 @@ class McpProtocolHandler(
                 return json.encodeToString(JsonRpcResponse.serializer(), errorResponse)
             }
 
-        val response = handleRequest(request) ?: return null
+        val response = handleRequest(request, clientId) ?: return null
         return json.encodeToString(JsonRpcResponse.serializer(), response)
     }
 
-    suspend fun handleRequest(request: JsonRpcRequest): JsonRpcResponse? =
+    suspend fun handleRequest(
+        request: JsonRpcRequest,
+        clientId: String = defaultClientId,
+    ): JsonRpcResponse? =
         when (request.method) {
             "initialize" -> {
                 handleInitialize(request)
@@ -78,7 +86,7 @@ class McpProtocolHandler(
             }
 
             "tools/call" -> {
-                handleToolsCall(request)
+                handleToolsCall(request, clientId)
             }
 
             else -> {
@@ -114,19 +122,43 @@ class McpProtocolHandler(
                 putJsonArray("tools") {
                     add(
                         buildJsonObject {
-                            put("name", TOOL_NAME)
-                            put("description", "Send a message to all registered Discord channels via webhooks")
+                            put("name", TOOL_SEND_MESSAGE)
+                            put(
+                                "description",
+                                "Send a message to registered Discord channels via webhooks. Specify 'target' with a specific tag name or 'all' to broadcast to all channels.",
+                            )
                             putJsonObject("inputSchema") {
                                 put("type", "object")
                                 putJsonObject("properties") {
-                                    putJsonObject("message") {
+                                    putJsonObject("content") {
                                         put("type", "string")
                                         put("description", "The message text to send to Discord")
                                     }
+                                    putJsonObject("target") {
+                                        put("type", "string")
+                                        put(
+                                            "description",
+                                            "The target Discord channel tag name, or 'all' to send to all registered channels",
+                                        )
+                                    }
                                 }
                                 putJsonArray("required") {
-                                    add(kotlinx.serialization.json.JsonPrimitive("message"))
+                                    add(kotlinx.serialization.json.JsonPrimitive("content"))
+                                    add(kotlinx.serialization.json.JsonPrimitive("target"))
                                 }
+                            }
+                        },
+                    )
+                    add(
+                        buildJsonObject {
+                            put("name", TOOL_LIST_TARGETS)
+                            put(
+                                "description",
+                                "List all registered Discord channel tags and quota status for the authenticated client",
+                            )
+                            putJsonObject("inputSchema") {
+                                put("type", "object")
+                                putJsonObject("properties") {}
                             }
                         },
                     )
@@ -135,43 +167,122 @@ class McpProtocolHandler(
         return JsonRpcResponse(id = request.id, result = result)
     }
 
-    private suspend fun handleToolsCall(request: JsonRpcRequest): JsonRpcResponse {
+    private suspend fun handleToolsCall(
+        request: JsonRpcRequest,
+        clientId: String,
+    ): JsonRpcResponse {
         val toolName =
             request.params
                 ?.get("name")
                 ?.jsonPrimitive
                 ?.content
-        if (toolName != TOOL_NAME) {
+
+        return when (toolName) {
+            TOOL_LIST_TARGETS -> {
+                handleListTargets(request, clientId)
+            }
+
+            TOOL_SEND_MESSAGE -> {
+                handleSendDiscordMessage(request, clientId)
+            }
+
+            else -> {
+                JsonRpcResponse(
+                    id = request.id,
+                    error = JsonRpcError(code = -32601, message = "Unknown tool: $toolName"),
+                )
+            }
+        }
+    }
+
+    private fun handleListTargets(
+        request: JsonRpcRequest,
+        clientId: String,
+    ): JsonRpcResponse {
+        val webhooks = repository.listByClientId(clientId)
+        val tags = webhooks.map { it.tag }
+        val payload =
+            buildJsonObject {
+                putJsonArray("tags") {
+                    for (tag in tags) {
+                        add(kotlinx.serialization.json.JsonPrimitive(tag))
+                    }
+                }
+                put("quota", "${tags.size}/$MAX_WEBHOOK_QUOTA")
+                put("count", tags.size)
+                put("maxQuota", MAX_WEBHOOK_QUOTA)
+            }
+
+        return toolResult(request.id, payload.toString(), isError = false)
+    }
+
+    private suspend fun handleSendDiscordMessage(
+        request: JsonRpcRequest,
+        clientId: String,
+    ): JsonRpcResponse {
+        val arguments = request.params?.get("arguments")?.jsonObject
+        val content = arguments?.get("content")?.jsonPrimitive?.content
+        val target = arguments?.get("target")?.jsonPrimitive?.content
+
+        if (content.isNullOrBlank() || target.isNullOrBlank()) {
             return JsonRpcResponse(
                 id = request.id,
-                error = JsonRpcError(code = -32601, message = "Unknown tool: $toolName"),
+                error = JsonRpcError(code = -32602, message = "Missing or blank required argument 'content' or 'target'"),
             )
         }
 
-        val arguments = request.params["arguments"]?.jsonObject
-        val message = arguments?.get("message")?.jsonPrimitive?.content
-        if (message == null) {
-            return JsonRpcResponse(
+        val webhooks = repository.listByClientId(clientId)
+        if (webhooks.isEmpty()) {
+            return toolResult(
                 id = request.id,
-                error = JsonRpcError(code = -32602, message = "Missing required argument 'message'"),
+                text = "❌ 發送失敗：尚未綁定任何 Discord 頻道 Webhook。請在 Discord 中執行 /mcp webhook add tag:<標籤> 進行綁定。",
+                isError = true,
             )
         }
 
-        val broadcastResult = broadcaster.broadcast(message)
+        val matchedWebhooks =
+            if (target == "all") {
+                webhooks
+            } else {
+                webhooks.filter { it.tag == target }
+            }
+
+        if (matchedWebhooks.isEmpty()) {
+            return toolResult(
+                id = request.id,
+                text = "❌ 發送失敗：找不到標籤為 '$target' 的 Webhook。請先在 Discord 使用 /mcp webhook add tag:$target 綁定頻道，或調用 list_targets 查看現有可用標籤。",
+                isError = true,
+            )
+        }
+
+        broadcaster.broadcastToWebhooks(matchedWebhooks, content)
+
+        val successText = "✅ 已成功將訊息發送至 ${matchedWebhooks.size} 個頻道 [${matchedWebhooks.joinToString { it.tag }}]"
+        return toolResult(
+            id = request.id,
+            text = successText,
+            isError = false,
+        )
+    }
+
+    private fun toolResult(
+        id: JsonElement?,
+        text: String,
+        isError: Boolean,
+    ): JsonRpcResponse {
         val result =
             buildJsonObject {
                 putJsonArray("content") {
                     add(
                         buildJsonObject {
                             put("type", "text")
-                            put("text", broadcastResult.toJsonString())
+                            put("text", text)
                         },
                     )
                 }
-                put("isError", false)
+                put("isError", isError)
             }
-
-        return JsonRpcResponse(id = request.id, result = result)
+        return JsonRpcResponse(id = id, result = result)
     }
 
     companion object {
@@ -179,5 +290,9 @@ class McpProtocolHandler(
         const val SERVER_NAME = "luna-mcp-server"
         const val SERVER_VERSION = "1.0.0"
         const val TOOL_NAME = "send_discord_message"
+        const val TOOL_SEND_MESSAGE = "send_discord_message"
+        const val TOOL_LIST_TARGETS = "list_targets"
+        const val MAX_WEBHOOK_QUOTA = 10
+        const val DEFAULT_CLIENT_ID = "luna-mcp-client"
     }
 }

@@ -20,10 +20,12 @@ data class AccessToken(
     val refreshToken: String,
     val clientId: String,
     val expiresAt: Long,
+    val issuedAt: Long = System.currentTimeMillis(),
 )
 
 class McpOAuthProvider(
     val config: McpOAuthConfig = McpOAuthConfig(),
+    var clientRepository: McpClientRepository? = null,
     private val maxCodes: Int = MAX_AUTH_CODES,
     private val maxTokens: Int = MAX_ACCESS_TOKENS,
 ) {
@@ -178,24 +180,81 @@ class McpOAuthProvider(
         return newAccessToken
     }
 
-    fun isValidAccessToken(token: String?): Boolean {
-        if (token.isNullOrBlank()) return false
-        if (!config.staticAuthToken.isNullOrBlank() && token == config.staticAuthToken) {
+    fun findClient(clientId: String?): McpClientRecord? = if (clientId.isNullOrBlank()) null else clientRepository?.findByClientId(clientId)
+
+    fun isValidClientId(clientId: String?): Boolean {
+        if (clientId.isNullOrBlank()) return false
+        if (clientRepository?.findByClientId(clientId) != null) return true
+        return !config.clientId.isNullOrBlank() && clientId == config.clientId
+    }
+
+    fun verifyClientSecret(
+        clientId: String,
+        clientSecret: String?,
+    ): Boolean {
+        val dynamicClient = findClient(clientId)
+        if (dynamicClient != null) {
+            if (clientSecret.isNullOrBlank()) return false
+            return McpOAuthSecurity.verifySecret(clientSecret, dynamicClient.secretSalt, dynamicClient.secretHash)
+        }
+        if (!config.clientId.isNullOrBlank() && clientId == config.clientId) {
+            if (!config.clientSecret.isNullOrBlank()) {
+                return clientSecret != null &&
+                    MessageDigest.isEqual(
+                        clientSecret.toByteArray(StandardCharsets.UTF_8),
+                        config.clientSecret.toByteArray(StandardCharsets.UTF_8),
+                    )
+            }
             return true
+        }
+        return false
+    }
+
+    fun getClientIdFromToken(token: String?): String? {
+        if (token.isNullOrBlank()) return null
+        if (!config.staticAuthToken.isNullOrBlank() && token == config.staticAuthToken) {
+            return config.clientId
         }
 
         val accessToken =
             synchronized(lock) {
                 accessTokens[token]
-            } ?: return false
+            } ?: return null
 
         if (System.currentTimeMillis() > accessToken.expiresAt) {
             synchronized(lock) {
                 accessTokens.remove(token)
+                refreshTokens.remove(accessToken.refreshToken)
             }
-            return false
+            return null
         }
-        return true
+
+        val repo = clientRepository
+        if (repo != null && accessToken.clientId != config.clientId) {
+            val clientRecord = repo.findByClientId(accessToken.clientId)
+            if (clientRecord == null || accessToken.issuedAt < clientRecord.updatedAt) {
+                synchronized(lock) {
+                    accessTokens.remove(token)
+                    refreshTokens.remove(accessToken.refreshToken)
+                }
+                return null
+            }
+        }
+
+        return accessToken.clientId
+    }
+
+    fun isValidAccessToken(token: String?): Boolean = getClientIdFromToken(token) != null
+
+    fun revokeClientTokens(clientId: String) {
+        synchronized(lock) {
+            val tokensToRemove = accessTokens.values.filter { it.clientId == clientId }
+            for (at in tokensToRemove) {
+                accessTokens.remove(at.token)
+                refreshTokens.remove(at.refreshToken)
+            }
+            authCodes.entries.removeIf { it.value.clientId == clientId }
+        }
     }
 
     companion object {

@@ -34,7 +34,7 @@ Unified environment configuration architecture and navigation pointers between `
 
 ### Library & dependency exploration
 
-Inspect library APIs and dependencies directly via their `build.gradle.kts` declarations and source/interface definitions rather than running shell classpath extraction scripts.
+Inspect library APIs and dependencies directly via their `build.gradle.kts` declarations, source/interface definitions, or pre-documented cheatsheets (such as [`docs/kord-recipes.md`](docs/kord-recipes.md)) rather than running shell classpath extraction scripts or decompiling JARs with `javap`.
 
 ## Git & Conflict Resolution
 
@@ -47,14 +47,11 @@ Inspect library APIs and dependencies directly via their `build.gradle.kts` decl
 
 ## Verification
 
-- **Inner development & remediation loop (fast targeted tests)**: While iterating on code or fixing code review findings, run only narrow targeted tests to avoid monorepo build overhead and token waste. Never run full monorepo test suites or `docker build` on intermediate edits:
+- **Subagents & Inner development loop (strictly targeted tests)**: Subagents and developers iterating on code must run only narrow targeted tests. Never run full monorepo `./gradlew test` during ticket implementation or TDD cycles:
   ```bash
+  ./gradlew test --tests "luna.mcp.*"
+  ./gradlew :mcp-server:test --tests "luna.mcp.server.*"
   ./gradlew test --tests "luna.summarizer.*"
-  ./gradlew test --tests "luna.summarizer.ConversationSliceCollectorTest"
-  ./gradlew test --tests "luna.summarizer.GeminiSummarizerTest"
-  ./gradlew test --tests "luna.summarizer.SummaryServiceTest"
-  ./gradlew test --tests "luna.summarizer.SummaryServiceWebhookTest"
-  ./gradlew test --tests "luna.core.CodingStandardsTest"
   ./gradlew :mcp-server:test
   ./gradlew :libs:socialpeek:test
   ```
