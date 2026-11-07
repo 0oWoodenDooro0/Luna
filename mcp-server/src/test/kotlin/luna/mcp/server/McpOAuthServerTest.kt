@@ -27,13 +27,294 @@ import kotlin.test.assertTrue
 class McpOAuthServerTest {
     private lateinit var database: Database
     private lateinit var repository: McpWebhookRepository
+    private lateinit var clientRepository: McpClientRepository
 
     @BeforeTest
     fun setUp() {
         val dbName = "test_oauth_${UUID.randomUUID()}"
         database = Database.connect("jdbc:h2:mem:$dbName;DB_CLOSE_DELAY=-1;", driver = "org.h2.Driver")
         repository = McpWebhookRepository(database)
+        clientRepository = McpClientRepository(database)
     }
+
+    @Test
+    fun `GET oauth authorize with dynamic client in DB succeeds and redirects to Google URL`() =
+        testApplication {
+            val broadcaster = DiscordWebhookBroadcaster(repository)
+            val now = System.currentTimeMillis()
+            val clientRecord =
+                McpClientRecord(
+                    clientId = "dynamic-client-google",
+                    userId = "user-123",
+                    clientName = "Dynamic Google Client",
+                    secretHash = "dummy-hash",
+                    secretSalt = "dummy-salt",
+                    createdAt = now,
+                    updatedAt = now,
+                )
+            clientRepository.createClient(clientRecord)
+
+            application {
+                mcpServerModule(
+                    broadcaster = broadcaster,
+                    clientRepository = clientRepository,
+                )
+            }
+
+            val client = createClient { followRedirects = false }
+            val redirectUri = "https://oauth-redirect.googleusercontent.com/r/my-project"
+            val response =
+                client.get("/oauth/authorize") {
+                    url {
+                        parameters.append("client_id", "dynamic-client-google")
+                        parameters.append("redirect_uri", redirectUri)
+                        parameters.append("response_type", "code")
+                        parameters.append("state", "testStateDynamic")
+                    }
+                }
+
+            assertEquals(HttpStatusCode.Found, response.status)
+            val location = response.headers["Location"]
+            assertNotNull(location)
+            assertTrue(location.startsWith(redirectUri))
+            assertTrue(location.contains("code="))
+            assertTrue(location.contains("state=testStateDynamic"))
+        }
+
+    @Test
+    fun `GET oauth authorize with unknown client_id returns 400 invalid_client`() =
+        testApplication {
+            val broadcaster = DiscordWebhookBroadcaster(repository)
+            application {
+                mcpServerModule(
+                    broadcaster = broadcaster,
+                    clientRepository = clientRepository,
+                )
+            }
+
+            val client = createClient { followRedirects = false }
+            val response =
+                client.get("/oauth/authorize") {
+                    url {
+                        parameters.append("client_id", "unknown-client-id")
+                        parameters.append("redirect_uri", "https://oauth-redirect.googleusercontent.com/r/my-project")
+                        parameters.append("response_type", "code")
+                    }
+                }
+
+            assertEquals(HttpStatusCode.BadRequest, response.status)
+            val json = Json.parseToJsonElement(response.bodyAsText()).jsonObject
+            assertEquals("invalid_client", json["error"]?.jsonPrimitive?.content)
+            assertEquals("Unknown or invalid client_id", json["error_description"]?.jsonPrimitive?.content)
+        }
+
+    @Test
+    fun `GET oauth authorize with disallowed redirect URI returns 400 invalid_request`() =
+        testApplication {
+            val broadcaster = DiscordWebhookBroadcaster(repository)
+            val now = System.currentTimeMillis()
+            val clientRecord =
+                McpClientRecord(
+                    clientId = "dynamic-client-1",
+                    userId = "user-1",
+                    clientName = "Client 1",
+                    secretHash = "hash1",
+                    secretSalt = "salt1",
+                    createdAt = now,
+                    updatedAt = now,
+                )
+            clientRepository.createClient(clientRecord)
+
+            application {
+                mcpServerModule(
+                    broadcaster = broadcaster,
+                    clientRepository = clientRepository,
+                )
+            }
+
+            val client = createClient { followRedirects = false }
+            val response =
+                client.get("/oauth/authorize") {
+                    url {
+                        parameters.append("client_id", "dynamic-client-1")
+                        parameters.append("redirect_uri", "https://malicious.attacker.com/oauth")
+                        parameters.append("response_type", "code")
+                    }
+                }
+
+            assertEquals(HttpStatusCode.BadRequest, response.status)
+            val json = Json.parseToJsonElement(response.bodyAsText()).jsonObject
+            assertEquals("invalid_request", json["error"]?.jsonPrimitive?.content)
+            assertEquals("Unauthorized or invalid redirect_uri", json["error_description"]?.jsonPrimitive?.content)
+        }
+
+    @Test
+    fun `POST oauth token with valid secret and PKCE verifier returns access_token tagged with client_id`() =
+        testApplication {
+            val broadcaster = DiscordWebhookBroadcaster(repository)
+            val plainSecret = "super-secret-passphrase"
+            val salt = "secure-salt-123"
+            val hash = McpOAuthSecurity.hashSecret(plainSecret, salt)
+            val clientId = "dynamic-client-token-test"
+            val now = System.currentTimeMillis()
+
+            val clientRecord =
+                McpClientRecord(
+                    clientId = clientId,
+                    userId = "user-token-test",
+                    clientName = "Token Test Client",
+                    secretHash = hash,
+                    secretSalt = salt,
+                    createdAt = now,
+                    updatedAt = now,
+                )
+            clientRepository.createClient(clientRecord)
+
+            val provider = McpOAuthProvider(clientRepository = clientRepository)
+            application {
+                mcpServerModule(
+                    broadcaster = broadcaster,
+                    clientRepository = clientRepository,
+                    oAuthProvider = provider,
+                )
+            }
+
+            val verifier = "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"
+            val challenge = "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM"
+            val redirectUri = "https://oauth-redirect.googleusercontent.com/r/my-project"
+
+            val code =
+                provider.issueAuthorizationCode(
+                    clientId = clientId,
+                    redirectUri = redirectUri,
+                    codeChallenge = challenge,
+                    codeChallengeMethod = "S256",
+                )
+
+            val response =
+                client.post("/oauth/token") {
+                    setBody(
+                        io.ktor.client.request.forms.FormDataContent(
+                            io.ktor.http.parameters {
+                                append("grant_type", "authorization_code")
+                                append("code", code)
+                                append("redirect_uri", redirectUri)
+                                append("client_id", clientId)
+                                append("client_secret", plainSecret)
+                                append("code_verifier", verifier)
+                            },
+                        ),
+                    )
+                }
+
+            assertEquals(HttpStatusCode.OK, response.status)
+            val json = Json.parseToJsonElement(response.bodyAsText()).jsonObject
+            val accessToken = json["access_token"]?.jsonPrimitive?.content
+            assertNotNull(accessToken)
+            assertTrue(accessToken.startsWith("luna_at_"))
+            assertEquals("Bearer", json["token_type"]?.jsonPrimitive?.content)
+            assertEquals(3600, json["expires_in"]?.jsonPrimitive?.content?.toInt())
+            assertTrue(provider.isValidAccessToken(accessToken))
+            assertEquals(clientId, provider.getClientIdFromToken(accessToken))
+        }
+
+    @Test
+    fun `POST oauth token with wrong secret returns 401 invalid_client`() =
+        testApplication {
+            val broadcaster = DiscordWebhookBroadcaster(repository)
+            val plainSecret = "correct-client-secret"
+            val salt = "salt-456"
+            val hash = McpOAuthSecurity.hashSecret(plainSecret, salt)
+            val clientId = "dynamic-client-wrong-secret"
+            val now = System.currentTimeMillis()
+
+            val clientRecord =
+                McpClientRecord(
+                    clientId = clientId,
+                    userId = "user-wrong-secret",
+                    clientName = "Wrong Secret Test Client",
+                    secretHash = hash,
+                    secretSalt = salt,
+                    createdAt = now,
+                    updatedAt = now,
+                )
+            clientRepository.createClient(clientRecord)
+
+            val provider = McpOAuthProvider(clientRepository = clientRepository)
+            application {
+                mcpServerModule(
+                    broadcaster = broadcaster,
+                    clientRepository = clientRepository,
+                    oAuthProvider = provider,
+                )
+            }
+
+            val response =
+                client.post("/oauth/token") {
+                    setBody(
+                        io.ktor.client.request.forms.FormDataContent(
+                            io.ktor.http.parameters {
+                                append("grant_type", "authorization_code")
+                                append("code", "some-code")
+                                append("redirect_uri", "https://oauth-redirect.googleusercontent.com/r/my-project")
+                                append("client_id", clientId)
+                                append("client_secret", "wrong-secret-value")
+                            },
+                        ),
+                    )
+                }
+
+            assertEquals(HttpStatusCode.Unauthorized, response.status)
+            val json = Json.parseToJsonElement(response.bodyAsText()).jsonObject
+            assertEquals("invalid_client", json["error"]?.jsonPrimitive?.content)
+            assertEquals("Client authentication failed", json["error_description"]?.jsonPrimitive?.content)
+        }
+
+    @Test
+    fun `revokeClientTokens purges tokens and causes subsequent token validation to fail`() =
+        testApplication {
+            val broadcaster = DiscordWebhookBroadcaster(repository)
+            val authConfig = McpOAuthConfig(requireAuth = true)
+            val provider = McpOAuthProvider(config = authConfig, clientRepository = clientRepository)
+            val clientId = "client-to-revoke"
+            val issuedToken = provider.issueAccessToken(clientId)
+
+            application {
+                mcpServerModule(
+                    broadcaster = broadcaster,
+                    authConfig = authConfig,
+                    clientRepository = clientRepository,
+                    oAuthProvider = provider,
+                )
+            }
+
+            // Before revocation: token is valid and returns client ID
+            assertTrue(provider.isValidAccessToken(issuedToken.token))
+            assertEquals(clientId, provider.getClientIdFromToken(issuedToken.token))
+
+            val responseBefore =
+                client.post("/mcp/messages") {
+                    headers.append(io.ktor.http.HttpHeaders.Authorization, "Bearer ${issuedToken.token}")
+                    contentType(io.ktor.http.ContentType.Application.Json)
+                    setBody("""{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05"}}""")
+                }
+            assertEquals(HttpStatusCode.OK, responseBefore.status)
+
+            // Revoke client tokens
+            provider.revokeClientTokens(clientId)
+
+            // After revocation: token is no longer valid
+            kotlin.test.assertFalse(provider.isValidAccessToken(issuedToken.token))
+            kotlin.test.assertNull(provider.getClientIdFromToken(issuedToken.token))
+
+            val responseAfter =
+                client.post("/mcp/messages") {
+                    headers.append(io.ktor.http.HttpHeaders.Authorization, "Bearer ${issuedToken.token}")
+                    contentType(io.ktor.http.ContentType.Application.Json)
+                    setBody("""{"jsonrpc":"2.0","id":2,"method":"initialize","params":{"protocolVersion":"2024-11-05"}}""")
+                }
+            assertEquals(HttpStatusCode.Unauthorized, responseAfter.status)
+        }
 
     @Test
     fun `GET well-known oauth authorization server returns RFC 8414 metadata json`() =
@@ -759,5 +1040,104 @@ class McpOAuthServerTest {
             val refreshJson = Json.parseToJsonElement(refreshResponse.bodyAsText()).jsonObject
             assertNotNull(refreshJson["access_token"]?.jsonPrimitive?.content)
             assertEquals(refreshToken, refreshJson["refresh_token"]?.jsonPrimitive?.content)
+        }
+
+    @Test
+    fun `POST oauth token with dynamic client refresh_token verifies client secret and issues refreshed access_token`() =
+        testApplication {
+            val broadcaster = DiscordWebhookBroadcaster(repository)
+            val plainSecret = "dyn-refresh-secret-789"
+            val salt = "salt-refresh-789"
+            val hash = McpOAuthSecurity.hashSecret(plainSecret, salt)
+            val clientId = "dyn-refresh-client"
+            val now = System.currentTimeMillis()
+
+            val clientRecord =
+                McpClientRecord(
+                    clientId = clientId,
+                    userId = "user-refresh-789",
+                    clientName = "Refresh Test Client",
+                    secretHash = hash,
+                    secretSalt = salt,
+                    createdAt = now,
+                    updatedAt = now,
+                )
+            clientRepository.createClient(clientRecord)
+
+            val provider = McpOAuthProvider(clientRepository = clientRepository)
+            application {
+                mcpServerModule(
+                    broadcaster = broadcaster,
+                    clientRepository = clientRepository,
+                    oAuthProvider = provider,
+                )
+            }
+
+            val redirectUri = "https://oauth-redirect.googleusercontent.com/r/refresh-test"
+            val code = provider.issueAuthorizationCode(clientId, redirectUri, null, null)
+
+            val tokenResponse =
+                client.post("/oauth/token") {
+                    setBody(
+                        io.ktor.client.request.forms.FormDataContent(
+                            io.ktor.http.parameters {
+                                append("grant_type", "authorization_code")
+                                append("code", code)
+                                append("client_id", clientId)
+                                append("client_secret", plainSecret)
+                                append("redirect_uri", redirectUri)
+                            },
+                        ),
+                    )
+                }
+
+            assertEquals(HttpStatusCode.OK, tokenResponse.status)
+            val tokenJson = Json.parseToJsonElement(tokenResponse.bodyAsText()).jsonObject
+            val initialAccessToken = tokenJson["access_token"]?.jsonPrimitive?.content
+            val refreshToken = tokenJson["refresh_token"]?.jsonPrimitive?.content
+            assertNotNull(initialAccessToken)
+            assertNotNull(refreshToken)
+            assertEquals(clientId, provider.getClientIdFromToken(initialAccessToken))
+
+            // Refresh with valid secret succeeds
+            val refreshSuccessResponse =
+                client.post("/oauth/token") {
+                    setBody(
+                        io.ktor.client.request.forms.FormDataContent(
+                            io.ktor.http.parameters {
+                                append("grant_type", "refresh_token")
+                                append("refresh_token", refreshToken)
+                                append("client_id", clientId)
+                                append("client_secret", plainSecret)
+                            },
+                        ),
+                    )
+                }
+
+            assertEquals(HttpStatusCode.OK, refreshSuccessResponse.status)
+            val refreshSuccessJson = Json.parseToJsonElement(refreshSuccessResponse.bodyAsText()).jsonObject
+            val refreshedAccessToken = refreshSuccessJson["access_token"]?.jsonPrimitive?.content
+            assertNotNull(refreshedAccessToken)
+            assertEquals(clientId, provider.getClientIdFromToken(refreshedAccessToken))
+
+            // Refresh with wrong secret returns 401 invalid_client
+            val refreshFailResponse =
+                client.post("/oauth/token") {
+                    setBody(
+                        io.ktor.client.request.forms.FormDataContent(
+                            io.ktor.http.parameters {
+                                append("grant_type", "refresh_token")
+                                append("refresh_token", refreshToken)
+                                append("client_id", clientId)
+                                append("client_secret", "bad-secret")
+                            },
+                        ),
+                    )
+                }
+
+            assertEquals(HttpStatusCode.Unauthorized, refreshFailResponse.status)
+            val failJson = Json.parseToJsonElement(refreshFailResponse.bodyAsText()).jsonObject
+            assertEquals("invalid_client", failJson["error"]?.jsonPrimitive?.content)
+            assertEquals("Client authentication failed", failJson["error_description"]?.jsonPrimitive?.content)
         }
 }
