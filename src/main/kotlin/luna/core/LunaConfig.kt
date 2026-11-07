@@ -26,7 +26,12 @@ internal fun failValidation(message: String): Nothing {
 }
 
 /**
- * Strongly-typed data model encapsulating validated core Luna bot settings.
+ * Navigation Pointer:
+ * Configuration parsing (parseDotenv), secret masking (maskConfig, isSensitiveKey),
+ * and port validation rules are coordinated with the decoupled :mcp-server module in
+ * [McpServerConfig](file:///home/user/IdeaProjects/Luna/mcp-server/src/main/kotlin/luna/mcp/server/McpServerConfig.kt).
+ * Any changes to masking patterns or parsing behavior must be synchronized across both modules.
+ * See also: [configuration.md](file:///home/user/IdeaProjects/Luna/docs/architecture/configuration.md).
  */
 data class LunaCoreConfig(
     val botToken: String,
@@ -160,6 +165,8 @@ object ConfigLoader {
             "YOUTUBE_API_KEY",
             "MCP_AUTH_TOKEN",
             "MCP_OAUTH_CLIENT_SECRET",
+            "clientSecret",
+            "staticAuthToken",
         )
 
     private val PLACEHOLDER_REGEX = Regex("""\$\{\??([^}:]+)(?::([^}]*))?\}""")

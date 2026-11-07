@@ -16,7 +16,12 @@ class McpConfigValidationException(
 typealias ConfigValidationException = McpConfigValidationException
 
 /**
- * Strongly-typed data model encapsulating validated standalone MCP server configuration.
+ * Navigation Pointer:
+ * Configuration parsing (parseDotenv), secret masking (maskConfig, isSensitiveKey),
+ * and port validation rules are coordinated with the Luna bot host module in
+ * [LunaConfig](file:///home/user/IdeaProjects/Luna/src/main/kotlin/luna/core/LunaConfig.kt).
+ * Any changes to masking patterns or parsing behavior must be synchronized across both modules.
+ * See also: [configuration.md](file:///home/user/IdeaProjects/Luna/docs/architecture/configuration.md).
  */
 data class McpServerConfig(
     val port: Int = DEFAULT_PORT,
@@ -85,6 +90,10 @@ data class McpServerConfig(
 
         private val SENSITIVE_EXPLICIT_KEYS =
             setOf(
+                "DISCORD_TOKEN",
+                "DISCORD_CLIENT_SECRET",
+                "GEMINI_API_KEY",
+                "YOUTUBE_API_KEY",
                 "MCP_AUTH_TOKEN",
                 "MCP_OAUTH_CLIENT_SECRET",
                 "clientSecret",
