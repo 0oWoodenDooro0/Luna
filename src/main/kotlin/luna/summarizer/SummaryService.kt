@@ -74,68 +74,17 @@ class SummaryService(
             }
         }
     },
-    kord: Kord? = null,
 ) {
     private val logger = LoggerFactory.getLogger(SummaryService::class.java)
     private val statusCache = BoundedStatusCache()
-    private var kordInstance: Kord? = kord
-
-    constructor(
-        summarizer: GeminiSummarizer = GeminiSummarizer(),
-        peekResolver: suspend (String) -> PeekPost? = { SocialPeek.peekOrNull(it) },
-        replySender: suspend (message: Message, content: String) -> Unit = { message, content ->
-            message.reply {
-                this.messageReference = message.id
-                this.content = content
-                allowedMentions {
-                    repliedUser = false
-                }
-            }
-        },
-        configuredEmoji: String? = null,
-        maxHistoryMessages: Int = ConversationSliceCollector.DEFAULT_MAX_HISTORY_MESSAGES,
-        inactivityGap: Duration = ConversationSliceCollector.DEFAULT_INACTIVITY_GAP,
-        maxCharacterBudget: Int = ConversationSliceCollector.DEFAULT_MAX_CHARACTER_BUDGET,
-        maxImages: Int = ConversationSliceCollector.DEFAULT_MAX_IMAGES,
-        maxLookbackMessages: Int = ConversationSliceCollector.DEFAULT_MAX_LOOKBACK_MESSAGES,
-        noiseFilter: DialogueNoiseFilter? = null,
-        historyFetcher: suspend (message: Message, limit: Int) -> List<Message> = { message, limit ->
-            message.channel
-                .getMessagesBefore(message.id, limit = limit)
-                .toList()
-                .reversed()
-        },
-        isLunaWebhook: (suspend (Snowflake) -> Boolean)? = null,
-        kord: Kord? = null,
-    ) : this(
-        summarizer = summarizer,
-        collector =
-            ConversationSliceCollector(
-                maxHistoryMessages = maxHistoryMessages,
-                inactivityGap = inactivityGap,
-                maxCharacterBudget = maxCharacterBudget,
-                maxImages = maxImages,
-                maxLookbackMessages = maxLookbackMessages,
-                noiseFilter = noiseFilter ?: DialogueNoiseFilter(isLunaWebhook = isLunaWebhook, kord = kord),
-                peekResolver = peekResolver,
-                historyFetcher = historyFetcher,
-            ),
-        configuredEmoji = configuredEmoji,
-        replySender = replySender,
-        kord = kord,
-    )
 
     fun register(kord: Kord) {
-        this.kordInstance = kord
-        collector.setKord(kord)
         kord.on<ReactionAddEvent> {
             handleReaction(this)
         }
         logger.info(
-            "SummaryService registered successfully with Summary Reaction emoji: {}, maxHistory: {}, inactivityGap: {}m",
+            "SummaryService registered successfully with Summary Reaction emoji: {}",
             configuredEmoji ?: DEFAULT_EMOJI,
-            collector.maxHistoryMessages,
-            collector.inactivityGap.inWholeMinutes,
         )
     }
 

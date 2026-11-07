@@ -1,7 +1,6 @@
 package luna.summarizer
 
 import dev.kord.common.entity.Snowflake
-import dev.kord.core.Kord
 import dev.kord.core.entity.Message
 import dev.socialpeek.SocialPeek
 import dev.socialpeek.model.PeekPost
@@ -47,10 +46,6 @@ open class ConversationSliceCollector(
     },
 ) {
     private val logger = LoggerFactory.getLogger(ConversationSliceCollector::class.java)
-
-    fun setKord(kord: Kord) {
-        noiseFilter.setKord(kord)
-    }
 
     fun clearCache() {
         noiseFilter.clearWebhookCache()
