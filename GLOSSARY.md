@@ -28,6 +28,10 @@ _Avoid_: Quote-tweet, retweet with comment, nested tweet
 The bounded chronological sequence of messages leading up to a target message, collected to provide conversational context for a Summary Reaction.
 _Avoid_: Chat chunk, message window, backscroll buffer
 
+**Conversation Slice Collector**:
+The internal engine responsible for Dual-Boundary Backtracking, Dialogue Noise Filtering, Chat Image Attachment extraction, and transcript formatting to produce an assembled context for the Summary Pipeline.
+_Avoid_: Context builder, history aggregator, message preprocessor
+
 **Dual-Boundary Backtracking**:
 The history traversal algorithm that walks backward from the reaction target message up to a configurable upper bound (default 50 messages, configurable via `SUMMARY_MAX_HISTORY_MESSAGES`), halting if an inactivity gap (default 15 minutes, configurable via `SUMMARY_INACTIVITY_GAP_MINUTES`), accumulated character budget, or a previous bot summary is encountered.
 _Avoid_: Reverse history search, boundary walk, message scraper

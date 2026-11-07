@@ -27,7 +27,7 @@ Luna is a multi-project Gradle monorepo (`:libs:socialpeek`, `:libs:curtly`, and
 
 ## 4. Agent Worktree & Pipeline Seam Isolation
 
-- **Decouple parallel vertical slices**: When decomposing pipeline features into parallel agent worktrees (or subagents), vertical slices must not contend on the same monolithic service file. Isolate distinct pipeline stages into independent collaborator components (e.g., `DialogueNoiseFilter`, `ChatImageResolver`, `ContextUrlResolver`) or establish explicit interface seams in trunk tickets before scheduling parallel branches.
+- **Decouple parallel vertical slices**: When decomposing pipeline features into parallel agent worktrees (or subagents), vertical slices must not contend on the same monolithic service file. Isolate distinct pipeline stages into independent collaborator components (e.g., `DialogueNoiseFilter`, `ConversationSliceCollector`, `ContextUrlResolver`) or establish explicit interface seams in trunk tickets before scheduling parallel branches.
 - **Collaborator seam extraction**: When extending service pipelines with specialized entity parsing, attachment extraction, media validation, or byte-budget filtering, extract them into dedicated collaborator components with clean companion constants rather than inlining extraction heuristics into service coordinators.
 
 ## 5. Kotlin Test Naming & Observability

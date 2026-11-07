@@ -19,18 +19,21 @@ import io.ktor.serialization.kotlinx.json.json
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.delay
 import kotlinx.serialization.json.Json
+import org.slf4j.LoggerFactory
 import java.net.SocketTimeoutException
 
 /**
  * AI client service that formats prompts and invokes Google Gemini API
  * to produce structured, emoji-free text summaries.
  */
-class GeminiSummarizer(
+open class GeminiSummarizer(
     private val config: GeminiConfig = GeminiConfig.fromEnv(),
     private val httpClient: HttpClient = createDefaultHttpClient(),
     private val pollingDelayMs: Long = 2000L,
     private val maxPollingAttempts: Int = 30,
 ) : AutoCloseable {
+    private val logger = LoggerFactory.getLogger(GeminiSummarizer::class.java)
+
     suspend fun summarize(
         content: String,
         comments: List<String> = emptyList(),
@@ -46,17 +49,10 @@ class GeminiSummarizer(
             ),
         )
 
-    suspend fun summarize(
+    private suspend fun summarizeDirect(
         input: SummaryInput,
         tools: List<GeminiTool>? = input.tools,
     ): SummaryResult {
-        if (!config.isConfigured) {
-            return SummaryResult.Error.MissingApiKey()
-        }
-        if (input.content.isBlank()) {
-            return SummaryResult.Error.Generic("Content to summarize cannot be blank")
-        }
-
         val mode =
             if (!input.videoUri.isNullOrBlank()) {
                 GeminiPromptBuilder.resolveProcessingMode(input.videoDurationSeconds)
@@ -70,6 +66,108 @@ class GeminiSummarizer(
             summarizeStatic(input, tools)
         }
     }
+
+    open suspend fun summarize(
+        input: SummaryInput,
+        lookbackProvider: (suspend (reason: String) -> String?)? = null,
+    ): SummaryResult {
+        if (!config.isConfigured) {
+            return SummaryResult.Error.MissingApiKey()
+        }
+        if (input.content.isBlank()) {
+            return SummaryResult.Error.Generic("Content to summarize cannot be blank")
+        }
+
+        val effectiveLookbackProvider = lookbackProvider ?: input.lookbackProvider
+        if (effectiveLookbackProvider == null) {
+            return summarizeDirect(input, tools = input.tools)
+        }
+
+        val baselineInput = input.copy(tools = null)
+        val toolEnabledInput = input.copy(tools = listOf(GeminiTools.FETCH_EARLIER_MESSAGES_TOOL))
+
+        var result: SummaryResult =
+            try {
+                summarizeDirect(toolEnabledInput, tools = toolEnabledInput.tools)
+            } catch (e: Exception) {
+                logger.warn("Tool-enabled summarization failed: {}. Retrying baseline fallback.", e.message)
+                retryBaseline(baselineInput)
+            }
+
+        if (result is SummaryResult.Error) {
+            logger.warn("Tool-enabled summarization returned error: {}. Retrying baseline fallback.", result.message)
+            result = retryBaseline(baselineInput)
+        }
+
+        if (result is SummaryResult.ToolCall) {
+            if (result.name == GeminiTools.FETCH_EARLIER_MESSAGES) {
+                val reason = result.args["reason"] ?: ""
+                logger.info("Gemini invoked fetch_earlier_messages with reason='{}'", reason)
+                val continuation = result.continuation
+                if (continuation != null) {
+                    val toolOutput =
+                        try {
+                            effectiveLookbackProvider(reason) ?: ConversationSliceCollector.NO_FURTHER_HISTORY_MESSAGE
+                        } catch (e: Exception) {
+                            logger.warn("Lookback provider failed: {}", e.message)
+                            null
+                        }
+
+                    if (toolOutput != null) {
+                        val lookbackResult =
+                            try {
+                                continuation(toolOutput)
+                            } catch (e: Exception) {
+                                logger.warn("Lookback continuation failed: {}", e.message)
+                                null
+                            }
+
+                        if (lookbackResult is SummaryResult.Success) {
+                            result = lookbackResult
+                        } else {
+                            logger.warn("Lookback continuation returned non-success: {}. Falling back to baseline.", lookbackResult)
+                            result = retryBaseline(baselineInput)
+                        }
+                    } else {
+                        result = retryBaseline(baselineInput)
+                    }
+                } else {
+                    logger.warn("No continuation provided for tool call, falling back to baseline")
+                    result = retryBaseline(baselineInput)
+                }
+            } else {
+                logger.warn("Unhandled tool call {}, falling back to baseline", result.name)
+                result = retryBaseline(baselineInput)
+            }
+        }
+
+        if (result is SummaryResult.Error && input.imageAttachments.isNotEmpty()) {
+            logger.warn("Multimodal summarization failed: {}. Retrying text-only fallback.", result.message)
+            result = retryBaseline(baselineInput.copy(imageAttachments = emptyList()))
+        }
+
+        return result
+    }
+
+    private suspend fun retryBaseline(input: SummaryInput): SummaryResult =
+        try {
+            val res = summarizeDirect(input, tools = null)
+            if (res is SummaryResult.Error && input.imageAttachments.isNotEmpty()) {
+                summarizeDirect(input.copy(imageAttachments = emptyList()), tools = null)
+            } else {
+                res
+            }
+        } catch (e: Exception) {
+            if (input.imageAttachments.isNotEmpty()) {
+                try {
+                    summarizeDirect(input.copy(imageAttachments = emptyList()), tools = null)
+                } catch (e2: Exception) {
+                    SummaryResult.Error.Generic("Baseline fallback failed: ${e2.message}", cause = e2)
+                }
+            } else {
+                SummaryResult.Error.Generic("Baseline fallback failed: ${e.message}", cause = e)
+            }
+        }
 
     private suspend fun summarizeStatic(
         input: SummaryInput,
@@ -171,7 +269,7 @@ class GeminiSummarizer(
         maxTurns: Int = 3,
         toolExecutor: suspend (name: String, args: Map<String, String>) -> String,
     ): SummaryResult {
-        var result = summarize(input = input, tools = tools)
+        var result = summarizeDirect(input = input, tools = tools)
         var turn = 0
 
         while (result is SummaryResult.ToolCall && turn < maxTurns) {

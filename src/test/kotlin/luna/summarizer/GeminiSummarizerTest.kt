@@ -1256,4 +1256,151 @@ class GeminiSummarizerTest {
             assertIs<SummaryResult.Error.Generic>(result)
             assertTrue(result.message.contains("maximum tool call turns", ignoreCase = true))
         }
+
+    @Test
+    fun `summarize coordinates lookbackProvider automatically when model requests fetch_earlier_messages`() =
+        runTest {
+            var requestCount = 0
+            val toolCallResponse =
+                """
+                {
+                  "candidates": [
+                    {
+                      "content": {
+                        "role": "model",
+                        "parts": [
+                          {
+                            "functionCall": {
+                              "name": "fetch_earlier_messages",
+                              "args": {
+                                "reason": "Requires earlier context"
+                              }
+                            }
+                          }
+                        ]
+                      }
+                    }
+                  ]
+                }
+                """.trimIndent()
+
+            val finalSummaryResponse =
+                """
+                {
+                  "candidates": [
+                    {
+                      "content": {
+                        "parts": [
+                          {
+                            "text": "TL;DR:\nLookback succeeded\n\n核心重點:\n• 成功擴充對話背景"
+                          }
+                        ]
+                      }
+                    }
+                  ]
+                }
+                """.trimIndent()
+
+            val mockEngine =
+                MockEngine {
+                    requestCount++
+                    val content = if (requestCount == 1) toolCallResponse else finalSummaryResponse
+                    respond(
+                        content = content,
+                        status = HttpStatusCode.OK,
+                        headers = headersOf(HttpHeaders.ContentType, "application/json"),
+                    )
+                }
+
+            val summarizer =
+                GeminiSummarizer(
+                    config = GeminiConfig(apiKey = "test-key"),
+                    httpClient = createTestClient(mockEngine),
+                )
+
+            var lookbackCalled = false
+            val input = SummaryInput(content = "Baseline conversation")
+            val result =
+                summarizer.summarize(input) { reason ->
+                    lookbackCalled = true
+                    assertEquals("Requires earlier context", reason)
+                    "Expanded earlier history"
+                }
+
+            assertIs<SummaryResult.Success>(result)
+            assertTrue(lookbackCalled)
+            assertTrue(result.text.contains("Lookback succeeded"))
+            assertEquals(2, requestCount)
+        }
+
+    @Test
+    fun `summarize falls back to baseline when lookback provider fails`() =
+        runTest {
+            var requestCount = 0
+            val toolCallResponse =
+                """
+                {
+                  "candidates": [
+                    {
+                      "content": {
+                        "role": "model",
+                        "parts": [
+                          {
+                            "functionCall": {
+                              "name": "fetch_earlier_messages",
+                              "args": {
+                                "reason": "Requires earlier context"
+                              }
+                            }
+                          }
+                        ]
+                      }
+                    }
+                  ]
+                }
+                """.trimIndent()
+
+            val baselineResponse =
+                """
+                {
+                  "candidates": [
+                    {
+                      "content": {
+                        "parts": [
+                          {
+                            "text": "TL;DR:\nBaseline summary fallback\n\n核心重點:\n• 摘要降級成功"
+                          }
+                        ]
+                      }
+                    }
+                  ]
+                }
+                """.trimIndent()
+
+            val mockEngine =
+                MockEngine {
+                    requestCount++
+                    val content = if (requestCount == 1) toolCallResponse else baselineResponse
+                    respond(
+                        content = content,
+                        status = HttpStatusCode.OK,
+                        headers = headersOf(HttpHeaders.ContentType, "application/json"),
+                    )
+                }
+
+            val summarizer =
+                GeminiSummarizer(
+                    config = GeminiConfig(apiKey = "test-key"),
+                    httpClient = createTestClient(mockEngine),
+                )
+
+            val input = SummaryInput(content = "Baseline conversation")
+            val result =
+                summarizer.summarize(input) { _ ->
+                    throw RuntimeException("Database timeout on history fetch")
+                }
+
+            assertIs<SummaryResult.Success>(result)
+            assertTrue(result.text.contains("Baseline summary fallback"))
+        }
 }
