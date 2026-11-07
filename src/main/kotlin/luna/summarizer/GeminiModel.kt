@@ -237,26 +237,6 @@ data class GeminiFunctionResponse(
                         put("content", content)
                     },
             )
-
-        fun of(
-            name: String,
-            responseData: Map<String, Any?>,
-        ): GeminiFunctionResponse =
-            GeminiFunctionResponse(
-                name = name,
-                response =
-                    buildJsonObject {
-                        for ((k, v) in responseData) {
-                            when (v) {
-                                is String -> put(k, v)
-                                is Number -> put(k, v)
-                                is Boolean -> put(k, v)
-                                null -> put(k, JsonNull)
-                                else -> put(k, v.toString())
-                            }
-                        }
-                    },
-            )
     }
 }
 

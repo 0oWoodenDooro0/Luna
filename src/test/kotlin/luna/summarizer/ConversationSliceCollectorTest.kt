@@ -120,7 +120,7 @@ class ConversationSliceCollectorTest {
             assertTrue(slice.summaryInput.content.contains("[Alice]: Meeting start"))
             assertTrue(slice.summaryInput.content.contains("[Bob]: Agreed on plan"))
             assertTrue(slice.summaryInput.content.contains("[Charlie]: Let's summarize"))
-            assertEquals(listOf(GeminiTools.FETCH_EARLIER_MESSAGES_TOOL), slice.summaryInput.tools)
+            assertNull(slice.summaryInput.tools)
         }
 
     @Test

@@ -234,7 +234,6 @@ open class ConversationSliceCollector(
                     content = formattedContent,
                     url = primaryUrl,
                     imageAttachments = sliceImageAttachments,
-                    tools = listOf(GeminiTools.FETCH_EARLIER_MESSAGES_TOOL),
                 ),
             primaryUrl = primaryUrl,
             durationExceeded = false,

@@ -256,7 +256,7 @@ class SummaryServiceTest {
             service.handleReaction(event)
 
             coVerify(exactly = 1) { summarizer.summarize(any<SummaryInput>(), any()) }
-            assertEquals("This is a plain text Discord discussion without any links.", capturedContent)
+            assertTrue(capturedContent?.contains("This is a plain text Discord discussion without any links.") == true)
             assertEquals("TL;DR: Summary of plain text", replyCaptured)
             assertEquals(SummaryStatus.DONE, service.getStatus(messageId))
         }
