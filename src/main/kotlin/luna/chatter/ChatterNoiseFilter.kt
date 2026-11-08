@@ -64,6 +64,7 @@ open class ChatterNoiseFilter(
     fun evaluate(
         message: Message,
         channel: Channel? = null,
+        isDirectMention: Boolean = false,
     ): ChatterFilterResult {
         // 1. Check if chatter is disabled globally
         if (!enabled) {
@@ -80,8 +81,8 @@ open class ChatterNoiseFilter(
             )
         }
 
-        // 3. Check if channel is on cooldown
-        if (cooldownCache.isOnCooldown(channelId, cooldownDurationMs)) {
+        // 3. Check if channel is on cooldown (bypassed for direct bot mentions)
+        if (!isDirectMention && cooldownCache.isOnCooldown(channelId, cooldownDurationMs)) {
             return ChatterFilterResult.Rejected(
                 RejectionReason.CHANNEL_ON_COOLDOWN,
                 "Channel $channelId is currently on cooldown",
@@ -146,12 +147,50 @@ open class ChatterNoiseFilter(
     fun shouldProcess(
         message: Message,
         channel: Channel? = null,
-    ): Boolean = evaluate(message, channel) is ChatterFilterResult.Allowed
+        isDirectMention: Boolean = false,
+    ): Boolean = evaluate(message, channel, isDirectMention) is ChatterFilterResult.Allowed
 
     fun shouldEvaluate(
         message: Message,
         channel: Channel? = null,
-    ): Boolean = shouldProcess(message, channel)
+        isDirectMention: Boolean = false,
+    ): Boolean = shouldProcess(message, channel, isDirectMention)
+
+    fun isDirectBotMention(
+        message: Message,
+        kordSelfId: Snowflake? = null,
+    ): Boolean {
+        if (kordSelfId != null && runCatching { message.mentionedUserIds.contains(kordSelfId) }.getOrDefault(false)) {
+            return true
+        }
+        if (kordSelfId != null) {
+            val content = message.content
+            if (content.contains("<@$kordSelfId>") || content.contains("<@!$kordSelfId>")) {
+                return true
+            }
+        }
+        val refAuthorId = runCatching { message.referencedMessage?.author?.id }.getOrNull()
+        if (kordSelfId != null && refAuthorId == kordSelfId) {
+            return true
+        }
+        val trimmed = message.content.trim()
+        if (trimmed.startsWith("@luna", ignoreCase = true) || trimmed.contains("@luna", ignoreCase = true)) {
+            return true
+        }
+        return false
+    }
+
+    fun isEligibleForLayaEvaluation(content: String): Boolean {
+        val trimmed = content.trim()
+        if (trimmed.isBlank()) return false
+        if (trimmed.contains("luna", ignoreCase = true) || trimmed.contains("露娜")) {
+            return true
+        }
+        if (trimmed.contains('?') || trimmed.contains('？')) {
+            return true
+        }
+        return trimmed.length >= MIN_LAYA_CONTENT_LENGTH
+    }
 
     fun toChatMessageOrNull(
         message: Message,
@@ -215,6 +254,7 @@ open class ChatterNoiseFilter(
     }
 
     companion object {
+        const val MIN_LAYA_CONTENT_LENGTH = 5
         val DEFAULT_BOT_PREFIXES = setOf("!", "~", "?")
     }
 }

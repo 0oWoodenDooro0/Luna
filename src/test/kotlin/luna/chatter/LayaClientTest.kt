@@ -533,6 +533,35 @@ class LayaClientTest {
         assertEquals("ctx-api-key", config.apiKey)
         assertEquals(0.65, config.threshold)
         assertEquals("https://api.laya.studio/v1/systemone", config.endpoint)
+        assertEquals(10_000L, config.timeoutMillis)
         assertTrue(config.isConfigured)
+    }
+
+    @Test
+    fun `loads timeoutMillis correctly from environment map and plugin context`() {
+        val envSeconds =
+            mapOf(
+                "LAYA_API_KEY" to "key",
+                "LAYA_TIMEOUT_SECONDS" to "15",
+            )
+        val configSec = LayaConfig.fromEnv(envSeconds)
+        assertEquals(15_000L, configSec.timeoutMillis)
+
+        val defaultConf = LayaConfig.fromEnv(emptyMap())
+        assertEquals(10_000L, defaultConf.timeoutMillis)
+
+        val mockContext =
+            DefaultPluginContext(
+                kord = io.mockk.mockk(relaxed = true),
+                routing = io.mockk.mockk(relaxed = true),
+                database = io.mockk.mockk(relaxed = true),
+                configMap =
+                    mapOf(
+                        "LAYA_API_KEY" to "key",
+                        "LAYA_TIMEOUT_SECONDS" to 20L,
+                    ),
+            )
+        val contextConf = LayaConfig.fromPluginContext(mockContext)
+        assertEquals(20_000L, contextConf.timeoutMillis)
     }
 }

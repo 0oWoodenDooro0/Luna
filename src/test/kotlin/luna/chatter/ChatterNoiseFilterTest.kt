@@ -39,6 +39,8 @@ class ChatterNoiseFilterTest {
         webhookId: Snowflake? = null,
         type: MessageType = MessageType.Default,
         authorIsNull: Boolean = false,
+        mentionedUserIds: Set<Snowflake> = emptySet(),
+        referencedMessage: Message? = null,
     ): Message {
         val author =
             if (authorIsNull) {
@@ -68,6 +70,8 @@ class ChatterNoiseFilterTest {
         every { msg.type } returns type
         every { msg.webhookId } returns webhookId
         every { msg.attachments } returns emptySet()
+        every { msg.mentionedUserIds } returns mentionedUserIds
+        every { msg.referencedMessage } returns referencedMessage
         return msg
     }
 
@@ -396,4 +400,87 @@ class ChatterNoiseFilterTest {
             assertTrue(boundedCache.contains(Snowflake(3L)))
             assertTrue(boundedCache.contains(Snowflake(4L)))
         }
+
+    @Test
+    fun `direct bot mention bypasses channel cooldown in evaluate and shouldProcess`() =
+        runTest {
+            val channelId = 100L
+            cooldownCache.record(channelId, simulatedTime)
+            assertTrue(cooldownCache.isOnCooldown(channelId))
+
+            val botSelfId = Snowflake(9999L)
+            val message =
+                createMockMessage(
+                    channelId = channelId,
+                    content = "<@9999> hello there",
+                    mentionedUserIds = setOf(botSelfId),
+                )
+
+            // When isDirectMention = false, cooldown blocks it
+            val rejected = filter.evaluate(message, isDirectMention = false)
+            assertIs<ChatterFilterResult.Rejected>(rejected)
+            assertEquals(RejectionReason.CHANNEL_ON_COOLDOWN, rejected.reason)
+            assertFalse(filter.shouldProcess(message, isDirectMention = false))
+
+            // When isDirectMention = true, cooldown is bypassed
+            val allowed = filter.evaluate(message, isDirectMention = true)
+            assertIs<ChatterFilterResult.Allowed>(allowed)
+            assertTrue(filter.shouldProcess(message, isDirectMention = true))
+        }
+
+    @Test
+    fun `isDirectBotMention detects user mentions, string mentions, reply references, and text prefix`() {
+        val botSelfId = Snowflake(9999L)
+
+        // 1. MentionedUserIds contains bot self ID
+        val msg1 = createMockMessage(content = "hey bot", mentionedUserIds = setOf(botSelfId))
+        assertTrue(filter.isDirectBotMention(msg1, botSelfId))
+
+        // 2. Content contains <@9999> or <@!9999>
+        val msg2 = createMockMessage(content = "hello <@9999> how are you")
+        assertTrue(filter.isDirectBotMention(msg2, botSelfId))
+        val msg3 = createMockMessage(content = "hello <@!9999> how are you")
+        assertTrue(filter.isDirectBotMention(msg3, botSelfId))
+
+        // 3. Replied-to message author matches bot self ID
+        val lunaMsg = createMockMessage(id = 888L, isBot = true)
+        val userAuthor = mockk<User>()
+        every { userAuthor.id } returns botSelfId
+        every { lunaMsg.author } returns userAuthor
+        val msg4 = createMockMessage(content = "I agree with your point", referencedMessage = lunaMsg)
+        assertTrue(filter.isDirectBotMention(msg4, botSelfId))
+
+        // 4. Content starts with or contains @Luna
+        val msg5 = createMockMessage(content = "@Luna what is the weather today?")
+        assertTrue(filter.isDirectBotMention(msg5, null))
+        val msg6 = createMockMessage(content = "Hey @luna, tell me a joke")
+        assertTrue(filter.isDirectBotMention(msg6, botSelfId))
+
+        // 5. Unrelated message does not match
+        val msg7 = createMockMessage(content = "What is everyone doing tonight?")
+        assertFalse(filter.isDirectBotMention(msg7, botSelfId))
+    }
+
+    @Test
+    fun `isEligibleForLayaEvaluation validates question marks, luna keyword, and substantive message length`() {
+        // Trivial messages (< 5 chars, no ? or luna) -> false
+        assertFalse(filter.isEligibleForLayaEvaluation("ok"))
+        assertFalse(filter.isEligibleForLayaEvaluation("好"))
+        assertFalse(filter.isEligibleForLayaEvaluation("++"))
+        assertFalse(filter.isEligibleForLayaEvaluation("111"))
+        assertFalse(filter.isEligibleForLayaEvaluation("    "))
+
+        // Questions (? or ？) -> true regardless of length
+        assertTrue(filter.isEligibleForLayaEvaluation("在嗎?"))
+        assertTrue(filter.isEligibleForLayaEvaluation("吃飽了嗎？"))
+
+        // Luna keywords -> true regardless of length
+        assertTrue(filter.isEligibleForLayaEvaluation("luna"))
+        assertTrue(filter.isEligibleForLayaEvaluation("嗨Luna"))
+        assertTrue(filter.isEligibleForLayaEvaluation("露娜在嗎"))
+
+        // Substantive messages (>= 5 characters) -> true
+        assertTrue(filter.isEligibleForLayaEvaluation("今天天氣真好"))
+        assertTrue(filter.isEligibleForLayaEvaluation("週末大家有什麼安排呢"))
+    }
 }

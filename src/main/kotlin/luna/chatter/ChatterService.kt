@@ -62,13 +62,16 @@ open class ChatterService(
      */
     suspend fun processMessage(message: Message): Boolean {
         try {
-            // 1. Pre-checks filter: filter.shouldEvaluate(message) (and checks channel cooldown)
-            if (!filter.shouldEvaluate(message)) {
+            val selfId = runCatching { message.kord.selfId }.getOrNull()
+            val isDirectMention = filter.isDirectBotMention(message, selfId)
+
+            // 1. Pre-checks filter: filter.shouldEvaluate(message, isDirectMention = isDirectMention)
+            if (!filter.shouldEvaluate(message, isDirectMention = isDirectMention)) {
                 logger.debug("ChatterNoiseFilter rejected message {}", message.id)
                 return false
             }
 
-            // 2. Gathers recent messages from channel slice to construct state for Laya
+            // 2. Gathers recent messages from channel slice to construct state / history
             val previousMessages =
                 try {
                     historyFetcher(message, historyMessageCount)
@@ -78,32 +81,40 @@ open class ChatterService(
                 }
 
             val allRaw = previousMessages + message
-            val selfId = runCatching { message.kord.selfId }.getOrNull()
             val chatHistory = filter.filterHistory(allRaw, selfId)
             if (chatHistory.isEmpty()) {
                 logger.debug("No valid chat messages found in history for message {}", message.id)
                 return false
             }
 
-            val layaSlice = chatHistory.takeLast(layaMessageCount.coerceAtLeast(1))
-            val layaState = ChatterPromptBuilder.formatTranscript(layaSlice)
-            if (layaState.isBlank()) {
-                logger.debug("Assembled Laya dialogue state is blank; skipping evaluation")
-                return false
-            }
-
-            // 3. Calls layaClient.evaluateParticipation(state)
-            val decision =
-                try {
-                    layaClient.evaluateParticipation(layaState)
-                } catch (e: Exception) {
-                    logger.warn("Laya evaluation threw error for state: {}", e.message)
-                    LayaDecision(shouldParticipate = false)
+            // 3. System 1 evaluation: bypass for direct bot mentions; pre-filter ambient messages
+            if (!isDirectMention) {
+                if (!filter.isEligibleForLayaEvaluation(message.content)) {
+                    logger.debug("Ambient message {} does not meet Laya evaluation criteria; skipping Laya call", message.id)
+                    return false
                 }
 
-            if (!decision.shouldParticipate) {
-                logger.debug("Laya evaluated shouldParticipate=false for message {}", message.id)
-                return false
+                val layaSlice = chatHistory.takeLast(layaMessageCount.coerceAtLeast(1))
+                val layaState = ChatterPromptBuilder.formatTranscript(layaSlice)
+                if (layaState.isBlank()) {
+                    logger.debug("Assembled Laya dialogue state is blank; skipping evaluation")
+                    return false
+                }
+
+                val decision =
+                    try {
+                        layaClient.evaluateParticipation(layaState)
+                    } catch (e: Exception) {
+                        logger.warn("Laya evaluation threw error for state: {}", e.message)
+                        LayaDecision(shouldParticipate = false)
+                    }
+
+                if (!decision.shouldParticipate) {
+                    logger.debug("Laya evaluated shouldParticipate=false for message {}", message.id)
+                    return false
+                }
+            } else {
+                logger.info("Direct bot mention detected on message {}; bypassing Laya evaluation", message.id)
             }
 
             // 4. Laya confirms participation: trigger channel.type()

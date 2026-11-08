@@ -36,7 +36,7 @@ import java.net.SocketTimeoutException
  */
 class LayaClient(
     val config: LayaConfig = LayaConfig.fromEnv(),
-    private val httpClient: HttpClient = createDefaultHttpClient(),
+    private val httpClient: HttpClient = createDefaultHttpClient(config.timeoutMillis),
     val defaultInstructions: String = DEFAULT_INSTRUCTIONS,
 ) : AutoCloseable {
     private val logger = LoggerFactory.getLogger(LayaClient::class.java)
@@ -86,19 +86,19 @@ class LayaClient(
                     header(HttpHeaders.Authorization, "Bearer ${config.apiKey}")
                     contentType(ContentType.Application.Json)
                     timeout {
-                        requestTimeoutMillis = TIMEOUT_MILLIS
-                        socketTimeoutMillis = TIMEOUT_MILLIS
-                        connectTimeoutMillis = TIMEOUT_MILLIS
+                        requestTimeoutMillis = config.timeoutMillis
+                        socketTimeoutMillis = config.timeoutMillis
+                        connectTimeoutMillis = config.timeoutMillis
                     }
                     setBody(requestPayload)
                 }
 
             handleResponse(response)
         } catch (e: HttpRequestTimeoutException) {
-            logger.warn("Laya Studio API request timed out after {}ms: {}", TIMEOUT_MILLIS, e.message)
+            logger.warn("Laya Studio API request timed out after {}ms: {}", config.timeoutMillis, e.message)
             LayaDecision(shouldParticipate = false)
         } catch (e: SocketTimeoutException) {
-            logger.warn("Laya Studio API socket timed out after {}ms: {}", TIMEOUT_MILLIS, e.message)
+            logger.warn("Laya Studio API socket timed out after {}ms: {}", config.timeoutMillis, e.message)
             LayaDecision(shouldParticipate = false)
         } catch (e: TimeoutCancellationException) {
             logger.warn("Laya Studio API coroutine timed out: {}", e.message)
@@ -185,7 +185,8 @@ class LayaClient(
     }
 
     companion object {
-        const val TIMEOUT_MILLIS = 3_000L
+        const val DEFAULT_TIMEOUT_MILLIS = 10_000L
+        const val TIMEOUT_MILLIS = DEFAULT_TIMEOUT_MILLIS
         const val QUESTION_SHOULD_PARTICIPATE = "should_participate"
 
         const val DEFAULT_INSTRUCTIONS =
@@ -202,15 +203,15 @@ class LayaClient(
                 explicitNulls = false
             }
 
-        private fun createDefaultHttpClient(): HttpClient =
+        fun createDefaultHttpClient(timeoutMillis: Long = DEFAULT_TIMEOUT_MILLIS): HttpClient =
             HttpClient(CIO) {
                 install(ContentNegotiation) {
                     json(jsonParser)
                 }
                 install(HttpTimeout) {
-                    requestTimeoutMillis = TIMEOUT_MILLIS
-                    connectTimeoutMillis = TIMEOUT_MILLIS
-                    socketTimeoutMillis = TIMEOUT_MILLIS
+                    requestTimeoutMillis = timeoutMillis
+                    connectTimeoutMillis = timeoutMillis
+                    socketTimeoutMillis = timeoutMillis
                 }
             }
     }
