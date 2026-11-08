@@ -591,10 +591,20 @@ open class ConversationSliceCollector(
         return previews.joinToString(" ")
     }
 
-    internal fun resolveAuthorName(message: Message): String =
-        message.author?.username
+    internal fun resolveAuthorName(message: Message): String {
+        val selfId = noiseFilter.selfId
+        if (selfId != null) {
+            val authorId =
+                runCatching { message.author?.id }.getOrNull()
+                    ?: runCatching { message.data.author.id }.getOrNull()
+            if (authorId == selfId) {
+                return "Luna"
+            }
+        }
+        return runCatching { message.author?.username }.getOrNull()
             ?: runCatching { message.data.author.username }.getOrNull()
             ?: "Unknown"
+    }
 
     companion object {
         const val DEFAULT_MAX_HISTORY_MESSAGES = 50

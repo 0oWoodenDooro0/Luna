@@ -5,6 +5,8 @@ import dev.kord.common.entity.Snowflake
 import dev.kord.core.Kord
 import dev.kord.core.entity.Message
 import luna.core.LunaWebhookRegistry
+import luna.core.SummaryMessageRegistry
+import luna.core.SummaryRegistry
 import luna.core.WebhookRegistry
 import org.slf4j.LoggerFactory
 import java.util.Collections
@@ -47,9 +49,14 @@ open class DialogueNoiseFilter(
     kord: Kord? = null,
     val webhookCache: BoundedWebhookCache = BoundedWebhookCache(),
     val webhookRegistry: WebhookRegistry = LunaWebhookRegistry,
+    val summaryRegistry: SummaryRegistry = SummaryMessageRegistry,
 ) {
     private val logger = LoggerFactory.getLogger(DialogueNoiseFilter::class.java)
-    private var kordInstance: Kord? = kord
+    var kordInstance: Kord? = kord
+        private set
+
+    val selfId: Snowflake?
+        get() = runCatching { kordInstance?.selfId }.getOrNull()
 
     fun setKord(kord: Kord) {
         this.kordInstance = kord
@@ -104,11 +111,10 @@ open class DialogueNoiseFilter(
         if (webhookId != null && isLunaWebhook(webhookId)) {
             return false
         }
-        return message.author?.isBot == true &&
-            (
-                message.content.startsWith("TL;DR:") || message.content.startsWith("TL;DR") || message.content.contains("重點摘要") ||
-                    message.content.contains("Previous summary")
-            )
+        if (summaryRegistry.contains(message.id)) {
+            return true
+        }
+        return message.author?.isBot == true && SummaryRegistry.isSummaryContent(message.content)
     }
 
     open suspend fun isNoiseMessage(message: Message): Boolean {
@@ -120,8 +126,16 @@ open class DialogueNoiseFilter(
             return true
         }
 
-        // Exclude bot or missing author (unless it's a Luna Webhook Replacement)
-        if (!isLuna && (message.author == null || message.author?.isBot == true)) {
+        val currentSelfId = this.selfId
+        val authorId = runCatching { message.author?.id }.getOrNull()
+        val isLunaBot = currentSelfId != null && authorId == currentSelfId
+
+        if (isLunaBot) {
+            if (isBotSummaryMessage(message)) {
+                return true
+            }
+        } else if (!isLuna && (message.author == null || message.author?.isBot == true)) {
+            // Exclude bot or missing author (unless it's a Luna Webhook Replacement)
             return true
         }
 

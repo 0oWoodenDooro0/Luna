@@ -29,7 +29,9 @@ object SummaryTestFixtures {
         webhookId: Snowflake? = null,
         embeds: List<dev.kord.core.entity.Embed> = emptyList(),
         authorIsNull: Boolean = false,
+        authorId: Snowflake? = null,
     ): Message {
+        val resolvedAuthorId = authorId ?: webhookId ?: Snowflake(id)
         val author =
             if (authorIsNull) {
                 null
@@ -37,12 +39,13 @@ object SummaryTestFixtures {
                 val mockUser = mockk<User>()
                 every { mockUser.username } returns username
                 every { mockUser.isBot } returns isBot
+                every { mockUser.id } returns resolvedAuthorId
                 mockUser
             }
 
         val userData = mockk<dev.kord.core.cache.data.UserData>()
         every { userData.username } returns username
-        every { userData.id } returns (webhookId ?: Snowflake(id))
+        every { userData.id } returns resolvedAuthorId
 
         val messageData = mockk<dev.kord.core.cache.data.MessageData>()
         every { messageData.author } returns userData

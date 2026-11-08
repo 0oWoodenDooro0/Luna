@@ -25,6 +25,7 @@ class ConversationSliceCollectorTest {
     @BeforeEach
     fun setUp() {
         luna.core.LunaWebhookRegistry.clear()
+        luna.core.SummaryMessageRegistry.clear()
     }
 
     private fun createMockAttachment(
@@ -50,10 +51,12 @@ class ConversationSliceCollectorTest {
         attachments: Set<Attachment> = emptySet(),
         type: MessageType = MessageType.Default,
         referencedMessage: Message? = null,
+        authorId: Snowflake? = null,
     ): Message {
         val author = mockk<User>()
         every { author.username } returns username
         every { author.isBot } returns isBot
+        every { author.id } returns (authorId ?: Snowflake(id))
 
         val message = mockk<Message>()
         every { message.id } returns Snowflake(id)
@@ -705,5 +708,125 @@ class ConversationSliceCollectorTest {
             val content = slice.summaryInput.content
             val expectedExcerpt = "A".repeat(37) + "..."
             assertTrue(content.contains("[Bob 回覆 Alice「$expectedExcerpt」]: Comment"))
+        }
+
+    @Test
+    fun `collectSlice admits Luna chatter message into Conversation Slice with Luna author attribution`() =
+        runTest {
+            val baseTime = Instant.parse("2026-11-06T12:00:00Z")
+            val selfId = Snowflake(42L)
+            val kordMock = mockk<dev.kord.core.Kord>()
+            every { kordMock.selfId } returns selfId
+
+            val filter = DialogueNoiseFilter(kord = kordMock)
+            val userMsg = createMockMessage(3001L, "Alice", "What do you think about Kotlin 2.0?", timestamp = baseTime)
+            val lunaChatterMsg =
+                createMockMessage(
+                    id = 3002L,
+                    username = "Luna",
+                    content = "The K2 compiler makes compilation much faster!",
+                    isBot = true,
+                    timestamp = baseTime + 1.minutes,
+                    authorId = selfId,
+                )
+            val targetMsg = createMockMessage(3003L, "Bob", "Agreed, great point!", timestamp = baseTime + 2.minutes)
+
+            val collector =
+                ConversationSliceCollector(
+                    noiseFilter = filter,
+                    historyFetcher = { _, _ -> listOf(userMsg, lunaChatterMsg) },
+                    forwardFetcher = { _, _ -> emptyList() },
+                )
+
+            val slice = collector.collectSlice(targetMsg)
+            assertNotNull(slice)
+            val content = slice.summaryInput.content
+            assertTrue(content.contains("[Alice]: What do you think about Kotlin 2.0?"))
+            assertTrue(content.contains("[Luna]: The K2 compiler makes compilation much faster!"))
+            assertTrue(content.contains("[Bob]: Agreed, great point!"))
+        }
+
+    @Test
+    fun `collectSlice halts history backtracking when encountering Luna summary message in registry`() =
+        runTest {
+            val baseTime = Instant.parse("2026-11-06T12:00:00Z")
+            val selfId = Snowflake(42L)
+            val kordMock = mockk<dev.kord.core.Kord>()
+            every { kordMock.selfId } returns selfId
+
+            val registry = luna.core.BoundedSummaryRegistry()
+            val summaryId = Snowflake(3012L)
+            registry.register(summaryId)
+
+            val filter = DialogueNoiseFilter(kord = kordMock, summaryRegistry = registry)
+
+            val beforeSummary = createMockMessage(3011L, "Alice", "Old topic before summary", timestamp = baseTime)
+            val lunaSummaryMsg =
+                createMockMessage(
+                    id = 3012L,
+                    username = "Luna",
+                    content = "Summary of old topic without standard prefix",
+                    isBot = true,
+                    timestamp = baseTime + 1.minutes,
+                    authorId = selfId,
+                )
+            val afterSummary = createMockMessage(3013L, "Bob", "Starting new discussion", timestamp = baseTime + 2.minutes)
+            val targetMsg = createMockMessage(3014L, "Charlie", "Replying to new discussion", timestamp = baseTime + 3.minutes)
+
+            val collector =
+                ConversationSliceCollector(
+                    noiseFilter = filter,
+                    historyFetcher = { _, _ -> listOf(beforeSummary, lunaSummaryMsg, afterSummary) },
+                    forwardFetcher = { _, _ -> emptyList() },
+                )
+
+            val slice = collector.collectSlice(targetMsg)
+            assertNotNull(slice)
+            val content = slice.summaryInput.content
+            assertFalse(content.contains("Old topic before summary"))
+            assertFalse(content.contains("Summary of old topic without standard prefix"))
+            assertTrue(content.contains("[Bob]: Starting new discussion"))
+            assertTrue(content.contains("[Charlie]: Replying to new discussion"))
+        }
+
+    @Test
+    fun `collectSlice halts history backtracking when encountering Luna summary message with structural marker`() =
+        runTest {
+            val baseTime = Instant.parse("2026-11-06T12:00:00Z")
+            val selfId = Snowflake(42L)
+            val kordMock = mockk<dev.kord.core.Kord>()
+            every { kordMock.selfId } returns selfId
+
+            // In-memory registry is fresh (e.g. after daemon restart)
+            val registry = luna.core.BoundedSummaryRegistry()
+            val filter = DialogueNoiseFilter(kord = kordMock, summaryRegistry = registry)
+
+            val beforeSummary = createMockMessage(3021L, "Alice", "Discussion prior to rebooted summary", timestamp = baseTime)
+            val lunaSummaryMsg =
+                createMockMessage(
+                    id = 3022L,
+                    username = "Luna",
+                    content = "TL;DR: Historic summary prior to reboot",
+                    isBot = true,
+                    timestamp = baseTime + 1.minutes,
+                    authorId = selfId,
+                )
+            val afterSummary = createMockMessage(3023L, "Bob", "Active topic", timestamp = baseTime + 2.minutes)
+            val targetMsg = createMockMessage(3024L, "Charlie", "Target msg", timestamp = baseTime + 3.minutes)
+
+            val collector =
+                ConversationSliceCollector(
+                    noiseFilter = filter,
+                    historyFetcher = { _, _ -> listOf(beforeSummary, lunaSummaryMsg, afterSummary) },
+                    forwardFetcher = { _, _ -> emptyList() },
+                )
+
+            val slice = collector.collectSlice(targetMsg)
+            assertNotNull(slice)
+            val content = slice.summaryInput.content
+            assertFalse(content.contains("Discussion prior to rebooted summary"))
+            assertFalse(content.contains("TL;DR: Historic summary prior to reboot"))
+            assertTrue(content.contains("[Bob]: Active topic"))
+            assertTrue(content.contains("[Charlie]: Target msg"))
         }
 }

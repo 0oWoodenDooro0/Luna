@@ -25,6 +25,7 @@ class ChatterNoiseFilterTest {
     @BeforeEach
     fun setUp() {
         LunaWebhookRegistry.clear()
+        luna.core.SummaryMessageRegistry.clear()
         simulatedTime = 1_000_000L
         cooldownCache = BoundedChannelCooldownCache(timeSource = { simulatedTime })
         filter = ChatterNoiseFilter(cooldownCache = cooldownCache)
@@ -41,7 +42,9 @@ class ChatterNoiseFilterTest {
         authorIsNull: Boolean = false,
         mentionedUserIds: Set<Snowflake> = emptySet(),
         referencedMessage: Message? = null,
+        authorId: Snowflake? = null,
     ): Message {
+        val resolvedAuthorId = authorId ?: webhookId ?: Snowflake(id)
         val author =
             if (authorIsNull) {
                 null
@@ -49,12 +52,13 @@ class ChatterNoiseFilterTest {
                 val user = mockk<User>()
                 every { user.username } returns username
                 every { user.isBot } returns isBot
+                every { user.id } returns resolvedAuthorId
                 user
             }
 
         val userData = mockk<dev.kord.core.cache.data.UserData>()
         every { userData.username } returns username
-        every { userData.id } returns (webhookId ?: Snowflake(id))
+        every { userData.id } returns resolvedAuthorId
 
         val messageData = mockk<dev.kord.core.cache.data.MessageData>()
         every { messageData.author } returns userData
@@ -483,4 +487,288 @@ class ChatterNoiseFilterTest {
         assertTrue(filter.isEligibleForLayaEvaluation("今天天氣真好"))
         assertTrue(filter.isEligibleForLayaEvaluation("週末大家有什麼安排呢"))
     }
+
+    @Test
+    fun `toChatMessageOrNull converts Luna bot chatter message to ChatMessage with speaker Luna`() {
+        val botSelfId = Snowflake(42L)
+        val chatterMsg =
+            createMockMessage(
+                id = 501L,
+                username = "Luna",
+                content = "I really enjoyed reading this article!",
+                isBot = true,
+                authorId = botSelfId,
+            )
+
+        val chatMessage = filter.toChatMessageOrNull(chatterMsg, botSelfId)
+        assertNotNull(chatMessage)
+        assertEquals("Luna", chatMessage.author)
+        assertEquals("I really enjoyed reading this article!", chatMessage.content)
+    }
+
+    @Test
+    fun `toChatMessageOrNull excludes Luna bot summary message registered in SummaryMessageRegistry`() {
+        val botSelfId = Snowflake(42L)
+        val registry = luna.core.BoundedSummaryRegistry()
+        val customFilter = ChatterNoiseFilter(summaryRegistry = registry)
+
+        val summaryId = Snowflake(502L)
+        registry.register(summaryId)
+
+        val summaryMsg =
+            createMockMessage(
+                id = 502L,
+                username = "Luna",
+                content = "Custom formatted summary without standard markers",
+                isBot = true,
+                authorId = botSelfId,
+            )
+
+        val chatMessage = customFilter.toChatMessageOrNull(summaryMsg, botSelfId)
+        kotlin.test.assertNull(chatMessage)
+    }
+
+    @Test
+    fun `toChatMessageOrNull excludes Luna bot summary message with structural marker even when registry is empty`() {
+        val botSelfId = Snowflake(42L)
+        val registry = luna.core.BoundedSummaryRegistry()
+        val customFilter = ChatterNoiseFilter(summaryRegistry = registry)
+
+        val tldrMsg =
+            createMockMessage(
+                id = 503L,
+                username = "Luna",
+                content = "TL;DR: Summary generated before bot was restarted",
+                isBot = true,
+                authorId = botSelfId,
+            )
+        val keypointsMsg =
+            createMockMessage(
+                id = 504L,
+                username = "Luna",
+                content = "討論重點摘要:\n• 重點一\n• 重點二",
+                isBot = true,
+                authorId = botSelfId,
+            )
+
+        kotlin.test.assertNull(customFilter.toChatMessageOrNull(tldrMsg, botSelfId))
+        kotlin.test.assertNull(customFilter.toChatMessageOrNull(keypointsMsg, botSelfId))
+    }
+
+    @Test
+    fun `toChatMessageOrNull excludes third party bot messages`() {
+        val botSelfId = Snowflake(42L)
+        val thirdPartyBotId = Snowflake(9999L)
+        val thirdPartyMsg =
+            createMockMessage(
+                id = 505L,
+                username = "MusicBot",
+                content = "Now playing: track 1",
+                isBot = true,
+                authorId = thirdPartyBotId,
+            )
+
+        val chatMessage = filter.toChatMessageOrNull(thirdPartyMsg, botSelfId)
+        kotlin.test.assertNull(chatMessage)
+    }
+
+    @Test
+    fun `toChatMessageOrNull excludes unverified webhook messages`() {
+        val botSelfId = Snowflake(42L)
+        val unverifiedWebhookId = Snowflake(8888L)
+        val webhookMsg =
+            createMockMessage(
+                id = 506L,
+                username = "ExternalWebhook",
+                content = "New deployment finished",
+                isBot = true,
+                webhookId = unverifiedWebhookId,
+            )
+
+        val chatMessage = filter.toChatMessageOrNull(webhookMsg, botSelfId)
+        kotlin.test.assertNull(chatMessage)
+    }
+
+    @Test
+    fun `stripLunaMentions strips raw discord bot mention and nickname mention`() {
+        val botSelfId = Snowflake(42L)
+        val otherUserId = Snowflake(9999L)
+
+        // Raw mention and nickname mention of Luna are stripped
+        assertEquals("", filter.stripLunaMentions("<@42>", botSelfId))
+        assertEquals("", filter.stripLunaMentions("<@!42>", botSelfId))
+
+        // Other users' mentions are preserved intact
+        assertEquals("<@9999>", filter.stripLunaMentions("<@9999>", botSelfId))
+        assertEquals("<@!9999>", filter.stripLunaMentions("<@!9999>", botSelfId))
+
+        // When botSelfId is null, raw mentions are not stripped to avoid affecting other users
+        assertEquals("<@42>", filter.stripLunaMentions("<@42>", null))
+    }
+
+    @Test
+    fun `stripLunaMentions strips text mentions of Luna case-insensitively with word boundary`() {
+        val botSelfId = Snowflake(42L)
+
+        // Case-insensitive triggers
+        assertEquals("", filter.stripLunaMentions("@Luna", botSelfId))
+        assertEquals("", filter.stripLunaMentions("@luna", botSelfId))
+        assertEquals("", filter.stripLunaMentions("@LUNA", botSelfId))
+        assertEquals("", filter.stripLunaMentions("@LuNa", botSelfId))
+
+        // Word boundary protects false positives
+        assertEquals("@Lunar", filter.stripLunaMentions("@Lunar", botSelfId))
+        assertEquals("@lunatic", filter.stripLunaMentions("@lunatic", botSelfId))
+        assertEquals("@luna1", filter.stripLunaMentions("@luna1", botSelfId))
+        assertEquals("user@luna.com", filter.stripLunaMentions("user@luna.com", botSelfId))
+    }
+
+    @Test
+    fun `stripLunaMentions cleans surrounding whitespace left by stripped tags`() {
+        val botSelfId = Snowflake(42L)
+
+        assertEquals("今天天氣如何", filter.stripLunaMentions("@Luna 今天天氣如何", botSelfId))
+        assertEquals("今天天氣如何", filter.stripLunaMentions("<@42> 今天天氣如何", botSelfId))
+        assertEquals("今天天氣如何", filter.stripLunaMentions("<@!42> 今天天氣如何", botSelfId))
+        assertEquals("今天天氣如何", filter.stripLunaMentions("今天天氣如何 @Luna", botSelfId))
+        assertEquals("Hello world", filter.stripLunaMentions("Hello <@42> world", botSelfId))
+        assertEquals("", filter.stripLunaMentions("   @Luna   ", botSelfId))
+        assertEquals("", filter.stripLunaMentions("<@42>   @luna", botSelfId))
+    }
+
+    @Test
+    fun `toChatMessageOrNull falls back to callout greeting for pure bot mention message`() {
+        val botSelfId = Snowflake(42L)
+
+        val atLunaMsg = createMockMessage(id = 601L, username = "Alice", content = "@Luna")
+        val atLunaLowerMsg = createMockMessage(id = 602L, username = "Alice", content = "@luna")
+        val rawMentionMsg = createMockMessage(id = 603L, username = "Alice", content = "<@42>")
+        val nickMentionMsg = createMockMessage(id = 604L, username = "Alice", content = "<@!42>")
+        val multiMentionMsg = createMockMessage(id = 605L, username = "Alice", content = "<@42> @Luna")
+        val whitespaceMentionMsg = createMockMessage(id = 606L, username = "Alice", content = "   @Luna   ")
+
+        val res1 = filter.toChatMessageOrNull(atLunaMsg, botSelfId)
+        assertNotNull(res1)
+        assertEquals("Alice", res1.author)
+        assertEquals(ChatterNoiseFilter.CALLOUT_GREETING, res1.content)
+        assertEquals("你好", res1.content)
+
+        val res2 = filter.toChatMessageOrNull(atLunaLowerMsg, botSelfId)
+        assertNotNull(res2)
+        assertEquals("Alice", res2.author)
+        assertEquals(ChatterNoiseFilter.CALLOUT_GREETING, res2.content)
+
+        val res3 = filter.toChatMessageOrNull(rawMentionMsg, botSelfId)
+        assertNotNull(res3)
+        assertEquals("Alice", res3.author)
+        assertEquals(ChatterNoiseFilter.CALLOUT_GREETING, res3.content)
+
+        val res4 = filter.toChatMessageOrNull(nickMentionMsg, botSelfId)
+        assertNotNull(res4)
+        assertEquals("Alice", res4.author)
+        assertEquals(ChatterNoiseFilter.CALLOUT_GREETING, res4.content)
+
+        val res5 = filter.toChatMessageOrNull(multiMentionMsg, botSelfId)
+        assertNotNull(res5)
+        assertEquals("Alice", res5.author)
+        assertEquals(ChatterNoiseFilter.CALLOUT_GREETING, res5.content)
+
+        val res6 = filter.toChatMessageOrNull(whitespaceMentionMsg, botSelfId)
+        assertNotNull(res6)
+        assertEquals("Alice", res6.author)
+        assertEquals(ChatterNoiseFilter.CALLOUT_GREETING, res6.content)
+    }
+
+    @Test
+    fun `toChatMessageOrNull preserves trimmed text for mixed message containing mention`() {
+        val botSelfId = Snowflake(42L)
+
+        val msg1 = createMockMessage(id = 611L, username = "Bob", content = "@Luna 今天天氣如何")
+        val msg2 = createMockMessage(id = 612L, username = "Bob", content = "<@42> 今天天氣如何")
+        val msg3 = createMockMessage(id = 613L, username = "Bob", content = "<@!42> 今天天氣如何")
+        val msg4 = createMockMessage(id = 614L, username = "Bob", content = "今天天氣如何 @luna")
+
+        val res1 = filter.toChatMessageOrNull(msg1, botSelfId)
+        assertNotNull(res1)
+        assertEquals("Bob", res1.author)
+        assertEquals("今天天氣如何", res1.content)
+
+        val res2 = filter.toChatMessageOrNull(msg2, botSelfId)
+        assertNotNull(res2)
+        assertEquals("Bob", res2.author)
+        assertEquals("今天天氣如何", res2.content)
+
+        val res3 = filter.toChatMessageOrNull(msg3, botSelfId)
+        assertNotNull(res3)
+        assertEquals("Bob", res3.author)
+        assertEquals("今天天氣如何", res3.content)
+
+        val res4 = filter.toChatMessageOrNull(msg4, botSelfId)
+        assertNotNull(res4)
+        assertEquals("Bob", res4.author)
+        assertEquals("今天天氣如何", res4.content)
+    }
+
+    @Test
+    fun `toChatMessageOrNull preserves other user mentions and normal messages without alteration`() {
+        val botSelfId = Snowflake(42L)
+
+        val otherMentionMsg = createMockMessage(id = 621L, username = "Charlie", content = "<@9999>")
+        val otherMixedMsg = createMockMessage(id = 622L, username = "Charlie", content = "<@9999> check this out")
+        val normalMsg = createMockMessage(id = 623L, username = "Charlie", content = "Just a regular chat message")
+        val mixedWithBothMsg = createMockMessage(id = 624L, username = "Charlie", content = "@Luna <@9999> hello")
+
+        val res1 = filter.toChatMessageOrNull(otherMentionMsg, botSelfId)
+        assertNotNull(res1)
+        assertEquals("Charlie", res1.author)
+        assertEquals("<@9999>", res1.content)
+
+        val res2 = filter.toChatMessageOrNull(otherMixedMsg, botSelfId)
+        assertNotNull(res2)
+        assertEquals("Charlie", res2.author)
+        assertEquals("<@9999> check this out", res2.content)
+
+        val res3 = filter.toChatMessageOrNull(normalMsg, botSelfId)
+        assertNotNull(res3)
+        assertEquals("Charlie", res3.author)
+        assertEquals("Just a regular chat message", res3.content)
+
+        val res4 = filter.toChatMessageOrNull(mixedWithBothMsg, botSelfId)
+        assertNotNull(res4)
+        assertEquals("Charlie", res4.author)
+        assertEquals("<@9999> hello", res4.content)
+    }
+
+    @Test
+    fun `evaluate does not reject direct mention message as empty when content is pure mention`() =
+        runTest {
+            val botSelfId = Snowflake(42L)
+
+            val atLunaMsg = createMockMessage(id = 631L, username = "Dave", content = "@Luna")
+            val rawMentionMsg = createMockMessage(id = 632L, username = "Dave", content = "<@42>")
+            val emptyDirectMentionMsg = createMockMessage(id = 633L, username = "Dave", content = "")
+
+            // @Luna should be allowed and content cleansed to greeting fallback
+            val res1 = filter.evaluate(atLunaMsg, isDirectMention = true, kordSelfId = botSelfId)
+            assertIs<ChatterFilterResult.Allowed>(res1)
+            assertEquals("Dave", res1.speakerName)
+            assertEquals(ChatterNoiseFilter.CALLOUT_GREETING, res1.content)
+            assertTrue(filter.shouldProcess(atLunaMsg, isDirectMention = true, kordSelfId = botSelfId))
+
+            // <@42> should be allowed with greeting fallback
+            val res2 = filter.evaluate(rawMentionMsg, isDirectMention = true, kordSelfId = botSelfId)
+            assertIs<ChatterFilterResult.Allowed>(res2)
+            assertEquals("Dave", res2.speakerName)
+            assertEquals(ChatterNoiseFilter.CALLOUT_GREETING, res2.content)
+
+            // Direct mention with empty text (e.g. mention-only interaction) allowed with greeting fallback
+            val res3 = filter.evaluate(emptyDirectMentionMsg, isDirectMention = true, kordSelfId = botSelfId)
+            assertIs<ChatterFilterResult.Allowed>(res3)
+            assertEquals(ChatterNoiseFilter.CALLOUT_GREETING, res3.content)
+
+            // Pure empty message without direct mention flag remains rejected
+            val res4 = filter.evaluate(emptyDirectMentionMsg, isDirectMention = false, kordSelfId = botSelfId)
+            assertIs<ChatterFilterResult.Rejected>(res4)
+            assertEquals(RejectionReason.EMPTY_MESSAGE, res4.reason)
+        }
 }

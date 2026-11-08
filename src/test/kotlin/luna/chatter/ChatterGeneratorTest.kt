@@ -121,9 +121,40 @@ class ChatterGeneratorTest {
     fun `ChatterPromptBuilder system instruction defines Luna friendly community peer persona`() {
         val systemPrompt = ChatterPromptBuilder.buildSystemInstruction()
         assertTrue(systemPrompt.contains("Luna"))
-        assertTrue(systemPrompt.contains("社群夥伴") || systemPrompt.contains("社群") || systemPrompt.contains("同儕"))
+        assertTrue(systemPrompt.contains("社群夥伴") || systemPrompt.contains("社群") || systemPrompt.contains("同儕") || systemPrompt.contains("群友"))
         assertTrue(systemPrompt.contains("繁體中文") || systemPrompt.contains("zh-TW"))
         assertTrue(systemPrompt.contains("AI") && (systemPrompt.contains("開場白") || systemPrompt.contains("套話") || systemPrompt.contains("禁止")))
+    }
+
+    @Test
+    fun `ChatterPromptBuilder system instruction strictly forbids emoji and standard punctuation while requiring concise sentences`() {
+        val systemPrompt = ChatterPromptBuilder.buildSystemInstruction()
+        assertTrue(systemPrompt.contains("emoji") || systemPrompt.contains("表情符號") || systemPrompt.contains("顏文字"))
+        assertTrue(systemPrompt.contains("標點符號"))
+        assertTrue(systemPrompt.contains("逗號") || systemPrompt.contains("句號"))
+        assertTrue(systemPrompt.contains("空格") || systemPrompt.contains("分行"))
+        assertTrue(systemPrompt.contains("極簡") || systemPrompt.contains("口語"))
+        assertTrue(systemPrompt.contains("重點") || systemPrompt.contains("短句"))
+    }
+
+    @Test
+    fun `ChatterPromptBuilder user prompt reinforces casual short emoji-free and punctuation-free instructions`() {
+        val userPrompt = ChatterPromptBuilder.buildUserPrompt("Alice: 早安")
+        assertTrue(userPrompt.contains("Alice: 早安"))
+        assertTrue(userPrompt.contains("標點符號"))
+        assertTrue(userPrompt.contains("空格") || userPrompt.contains("分行"))
+        assertTrue(userPrompt.contains("emoji") || userPrompt.contains("表情符號"))
+        assertTrue(userPrompt.contains("重點") || userPrompt.contains("短句"))
+        assertTrue(userPrompt.contains("順著最新") || userPrompt.contains("舊句子"))
+
+        val systemPrompt = ChatterPromptBuilder.buildSystemInstruction()
+        assertTrue(systemPrompt.contains("最新") && (systemPrompt.contains("舊句子") || systemPrompt.contains("切勿回頭")))
+    }
+
+    @Test
+    fun `ChatterPromptBuilder buildRequest configures maxOutputTokens bounded to 200`() {
+        val request = ChatterPromptBuilder.buildRequest("test transcript")
+        assertEquals(200, request.generationConfig?.maxOutputTokens)
     }
 
     @Test
