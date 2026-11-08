@@ -78,7 +78,8 @@ open class ChatterService(
                 }
 
             val allRaw = previousMessages + message
-            val chatHistory = filter.filterHistory(allRaw)
+            val selfId = runCatching { message.kord.selfId }.getOrNull()
+            val chatHistory = filter.filterHistory(allRaw, selfId)
             if (chatHistory.isEmpty()) {
                 logger.debug("No valid chat messages found in history for message {}", message.id)
                 return false
@@ -151,7 +152,7 @@ open class ChatterService(
             }
 
             // Refreshes channel cooldown timestamp
-            cooldownCache.recordActivity(message.channelId)
+            cooldownCache.record(message.channelId)
             logger.info("Chatter sent reply to channel {}: {}", message.channelId, replyText)
             return true
         } catch (e: Exception) {

@@ -86,6 +86,7 @@ class ChatterServiceTest {
                 val user = mockk<User>()
                 every { user.username } returns username
                 every { user.isBot } returns isBot
+                every { user.id } returns Snowflake(id)
                 user
             }
 
@@ -108,6 +109,7 @@ class ChatterServiceTest {
         every { msg.content } returns content
         every { msg.type } returns type
         every { msg.webhookId } returns webhookId
+        every { msg.attachments } returns emptySet()
         every { msg.channel } returns channel
         coEvery { msg.getChannel() } returns channel
         return msg

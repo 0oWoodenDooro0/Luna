@@ -1,5 +1,8 @@
 package luna.chatter
 
+import luna.plugin.PluginContext
+import luna.plugin.config
+
 /**
  * Configuration for Google Gemini Conversational Dialogue Generator (Chatter).
  *
@@ -65,6 +68,34 @@ data class ChatterConfig(
                 (config["GEMINI_BASE_URL"] as? String)?.trim()?.ifBlank { null }
                     ?: (config["gemini.baseUrl"] as? String)?.trim()?.ifBlank { null }
                     ?: (config["chatter.baseUrl"] as? String)?.trim()?.ifBlank { null }
+            val baseUrl = if (!rawBaseUrl.isNullOrBlank()) rawBaseUrl.trimEnd('/').removeSuffix("/v1beta") else DEFAULT_BASE_URL
+
+            return ChatterConfig(
+                apiKey = key,
+                model = model,
+                baseUrl = baseUrl,
+            )
+        }
+
+        fun fromPluginContext(context: PluginContext): ChatterConfig {
+            val key =
+                context.config<String>("GEMINI_API_KEY")?.trim()?.ifBlank { null }
+                    ?: context.config<String>("gemini.apiKey")?.trim()?.ifBlank { null }
+                    ?: context.config<String>("chatter.apiKey")?.trim()?.ifBlank { null }
+                    ?: ""
+
+            val rawModel =
+                context.config<String>("CHATTER_GEMINI_MODEL")?.trim()?.ifBlank { null }
+                    ?: context.config<String>("chatter.gemini.model")?.trim()?.ifBlank { null }
+                    ?: context.config<String>("chatter.model")?.trim()?.ifBlank { null }
+                    ?: context.config<String>("GEMINI_MODEL")?.trim()?.ifBlank { null }
+                    ?: context.config<String>("gemini.model")?.trim()?.ifBlank { null }
+            val model = if (!rawModel.isNullOrBlank()) rawModel.removePrefix("models/") else DEFAULT_MODEL
+
+            val rawBaseUrl =
+                context.config<String>("GEMINI_BASE_URL")?.trim()?.ifBlank { null }
+                    ?: context.config<String>("gemini.baseUrl")?.trim()?.ifBlank { null }
+                    ?: context.config<String>("chatter.baseUrl")?.trim()?.ifBlank { null }
             val baseUrl = if (!rawBaseUrl.isNullOrBlank()) rawBaseUrl.trimEnd('/').removeSuffix("/v1beta") else DEFAULT_BASE_URL
 
             return ChatterConfig(

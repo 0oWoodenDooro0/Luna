@@ -124,11 +124,12 @@ open class ChatterNoiseFilter(
             )
         }
 
-        // 7. Check empty / whitespace-only messages
-        if (message.content.isBlank()) {
+        // 7. Check empty / whitespace-only messages without media attachments (CODING_STANDARDS.md §3)
+        val hasAttachments = runCatching { message.attachments.isNotEmpty() }.getOrDefault(false)
+        if (message.content.isBlank() && !hasAttachments) {
             return ChatterFilterResult.Rejected(
                 RejectionReason.EMPTY_MESSAGE,
-                "Message content is blank or empty",
+                "Message content is blank or empty without attachments",
             )
         }
 
@@ -152,34 +153,32 @@ open class ChatterNoiseFilter(
         channel: Channel? = null,
     ): Boolean = shouldProcess(message, channel)
 
-    fun isAllowed(
+    fun toChatMessageOrNull(
         message: Message,
-        channel: Channel? = null,
-    ): Boolean = shouldProcess(message, channel)
-
-    fun isNoise(
-        message: Message,
-        channel: Channel? = null,
-    ): Boolean = !shouldProcess(message, channel)
-
-    fun isNoiseMessage(
-        message: Message,
-        channel: Channel? = null,
-    ): Boolean = isNoise(message, channel)
-
-    fun toChatMessageOrNull(message: Message): ChatMessage? {
+        kordSelfId: Snowflake? = null,
+    ): ChatMessage? {
         val type = runCatching { message.type }.getOrNull() ?: MessageType.Default
         if (isCommand(message.content, type)) return null
         if (isSystemNotice(type)) return null
         val webhookId = runCatching { message.webhookId }.getOrNull()
         val isLunaWebhook = webhookId != null && webhookRegistry.contains(webhookId)
         if (webhookId != null && !isLunaWebhook) return null
-        if (!isLunaWebhook && (message.author == null || message.author?.isBot == true)) return null
-        if (message.content.isBlank()) return null
-        return ChatMessage(speakerName(message), message.content)
+
+        val isLunaBot = kordSelfId != null && runCatching { message.author?.id }.getOrNull() == kordSelfId
+        if (!isLunaWebhook && !isLunaBot && (message.author == null || message.author?.isBot == true)) return null
+
+        val hasAttachments = runCatching { message.attachments.isNotEmpty() }.getOrDefault(false)
+        if (message.content.isBlank() && !hasAttachments) return null
+
+        val content = if (message.content.isBlank()) "[Attachment]" else message.content
+        val speaker = if (isLunaBot) "Luna" else extractSpeakerName(message)
+        return ChatMessage(speaker, content)
     }
 
-    fun filterHistory(messages: List<Message>): List<ChatMessage> = messages.mapNotNull { toChatMessageOrNull(it) }
+    fun filterHistory(
+        messages: List<Message>,
+        kordSelfId: Snowflake? = null,
+    ): List<ChatMessage> = messages.mapNotNull { toChatMessageOrNull(it, kordSelfId) }
 
     fun speakerName(message: Message): String = extractSpeakerName(message)
 
@@ -187,72 +186,6 @@ open class ChatterNoiseFilter(
         message.author?.username
             ?: runCatching { message.data.author.username }.getOrNull()
             ?: "Unknown"
-
-    fun recordReply(
-        channelId: Snowflake,
-        timestamp: Long? = null,
-    ) {
-        if (timestamp != null) {
-            cooldownCache.record(channelId, timestamp)
-        } else {
-            cooldownCache.record(channelId)
-        }
-    }
-
-    fun recordActivity(
-        channelId: Snowflake,
-        timestamp: Long? = null,
-    ) {
-        recordReply(channelId, timestamp)
-    }
-
-    fun recordActivity(
-        channelId: Long,
-        timestamp: Long? = null,
-    ) {
-        recordReply(Snowflake(channelId), timestamp)
-    }
-
-    fun recordReply(
-        channel: Channel,
-        timestamp: Long? = null,
-    ) {
-        recordReply(channel.id, timestamp)
-    }
-
-    fun recordReply(
-        channelId: Long,
-        timestamp: Long? = null,
-    ) {
-        recordReply(Snowflake(channelId), timestamp)
-    }
-
-    fun recordTrigger(
-        channelId: Snowflake,
-        timestamp: Long? = null,
-    ) {
-        recordReply(channelId, timestamp)
-    }
-
-    fun recordTrigger(
-        channel: Channel,
-        timestamp: Long? = null,
-    ) {
-        recordReply(channel.id, timestamp)
-    }
-
-    fun markChannelActive(
-        channelId: Snowflake,
-        timestamp: Long? = null,
-    ) {
-        recordReply(channelId, timestamp)
-    }
-
-    fun isOnCooldown(channelId: Snowflake): Boolean = cooldownCache.isOnCooldown(channelId, cooldownDurationMs)
-
-    fun isOnCooldown(channel: Channel): Boolean = isOnCooldown(channel.id)
-
-    fun isOnCooldown(channelId: Long): Boolean = isOnCooldown(Snowflake(channelId))
 
     private fun isSystemNotice(type: MessageType): Boolean =
         when (type) {

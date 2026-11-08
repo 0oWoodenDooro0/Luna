@@ -57,23 +57,8 @@ class ChatterPlugin(
     private var registrationJob: Job? = null
 
     override suspend fun initialize(context: PluginContext) {
-        val layaApiKey =
-            context.config<String>("LAYA_API_KEY")?.trim()?.ifBlank { null }
-                ?: context.config<String>("laya.apiKey")?.trim()?.ifBlank { null }
-                ?: context.config<String>("laya.api_key")?.trim()?.ifBlank { null }
-                ?: ""
-
-        val rawThreshold =
-            context.config<Double>("LAYA_THRESHOLD")
-                ?: context.config<String>("LAYA_THRESHOLD")?.toDoubleOrNull()
-                ?: context.config<Double>("laya.threshold")
-                ?: context.config<String>("laya.threshold")?.toDoubleOrNull()
-                ?: LayaConfig.DEFAULT_THRESHOLD
-
-        val layaEndpoint =
-            context.config<String>("LAYA_ENDPOINT")?.trim()?.ifBlank { null }
-                ?: context.config<String>("laya.endpoint")?.trim()?.ifBlank { null }
-                ?: LayaConfig.DEFAULT_ENDPOINT
+        val layaConfig = LayaConfig.fromPluginContext(context)
+        val layaApiKey = layaConfig.apiKey
 
         val chatterEnabledConfig =
             context.config<Boolean>("CHATTER_ENABLED")
@@ -112,41 +97,10 @@ class ChatterPlugin(
                 ?: 30L
         val cooldownDurationMs = cooldownSeconds * 1000L
 
-        val geminiApiKey =
-            context.config<String>("GEMINI_API_KEY")?.trim()?.ifBlank { null }
-                ?: context.config<String>("gemini.apiKey")?.trim()?.ifBlank { null }
-                ?: context.config<String>("gemini.api_key")?.trim()?.ifBlank { null }
-                ?: ""
-
-        val rawGeminiModel =
-            context.config<String>("CHATTER_GEMINI_MODEL")?.trim()?.ifBlank { null }
-                ?: context.config<String>("chatter.gemini.model")?.trim()?.ifBlank { null }
-                ?: context.config<String>("chatter.model")?.trim()?.ifBlank { null }
-                ?: context.config<String>("GEMINI_MODEL")?.trim()?.ifBlank { null }
-                ?: context.config<String>("gemini.model")?.trim()?.ifBlank { null }
-                ?: ChatterConfig.DEFAULT_MODEL
-        val geminiModel = rawGeminiModel.removePrefix("models/")
-
-        val geminiBaseUrl =
-            context.config<String>("GEMINI_BASE_URL")?.trim()?.ifBlank { null }
-                ?: context.config<String>("gemini.baseUrl")?.trim()?.ifBlank { null }
-                ?: ChatterConfig.DEFAULT_BASE_URL
-
-        val layaConfig =
-            LayaConfig(
-                apiKey = layaApiKey,
-                threshold = rawThreshold,
-                endpoint = layaEndpoint,
-            )
         val laya = layaClientFactory?.invoke(layaConfig) ?: LayaClient(config = layaConfig)
         this.layaClient = laya
 
-        val chatterConfig =
-            ChatterConfig(
-                apiKey = geminiApiKey,
-                model = geminiModel,
-                baseUrl = geminiBaseUrl,
-            )
+        val chatterConfig = ChatterConfig.fromPluginContext(context)
         val generator = generatorFactory?.invoke(chatterConfig) ?: ChatterGenerator(config = chatterConfig)
         this.chatterGenerator = generator
 

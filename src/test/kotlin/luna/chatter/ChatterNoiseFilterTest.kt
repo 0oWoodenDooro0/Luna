@@ -67,6 +67,7 @@ class ChatterNoiseFilterTest {
         every { msg.content } returns content
         every { msg.type } returns type
         every { msg.webhookId } returns webhookId
+        every { msg.attachments } returns emptySet()
         return msg
     }
 
@@ -86,7 +87,6 @@ class ChatterNoiseFilterTest {
             assertEquals("Alice", result.speakerName)
             assertEquals("Good morning everyone", result.content)
             assertTrue(filter.shouldProcess(message))
-            assertFalse(filter.isNoise(message))
         }
 
     @Test
@@ -99,7 +99,6 @@ class ChatterNoiseFilterTest {
             assertIs<ChatterFilterResult.Rejected>(result)
             assertEquals(RejectionReason.CHATTER_DISABLED, result.reason)
             assertFalse(filter.shouldProcess(message))
-            assertTrue(filter.isNoise(message))
         }
 
     @Test
@@ -138,7 +137,6 @@ class ChatterNoiseFilterTest {
             assertIs<ChatterFilterResult.Rejected>(result)
             assertEquals(RejectionReason.BOT_MESSAGE, result.reason)
             assertFalse(filter.shouldProcess(botMessage))
-            assertTrue(filter.isNoise(botMessage))
         }
 
     @Test
@@ -158,7 +156,6 @@ class ChatterNoiseFilterTest {
             assertIs<ChatterFilterResult.Rejected>(result)
             assertEquals(RejectionReason.UNVERIFIED_WEBHOOK, result.reason)
             assertFalse(filter.shouldProcess(webhookMsg))
-            assertTrue(filter.isNoise(webhookMsg))
         }
 
     @Test
@@ -181,7 +178,6 @@ class ChatterNoiseFilterTest {
             assertEquals("AliceMasquerade", result.speakerName)
             assertEquals("AliceMasquerade", filter.extractSpeakerName(masqueradedMsg))
             assertTrue(filter.shouldProcess(masqueradedMsg))
-            assertFalse(filter.isNoise(masqueradedMsg))
         }
 
     @Test
@@ -281,6 +277,22 @@ class ChatterNoiseFilterTest {
         }
 
     @Test
+    fun `preserves blank message with media attachments in conversational context`() =
+        runTest {
+            val attachment = mockk<dev.kord.core.entity.Attachment>()
+            val message = createMockMessage(channelId = 400L, content = "")
+            every { message.attachments } returns setOf(attachment)
+
+            val allowedResult = filter.evaluate(message)
+            assertIs<ChatterFilterResult.Allowed>(allowedResult)
+            assertTrue(filter.shouldProcess(message))
+
+            val chatMessage = filter.toChatMessageOrNull(message)
+            assertNotNull(chatMessage)
+            assertEquals("[Attachment]", chatMessage.content)
+        }
+
+    @Test
     fun `suppresses chatter triggers when channel is within cooldown window`() =
         runTest {
             val channel = createMockChannel(401L)
@@ -290,9 +302,8 @@ class ChatterNoiseFilterTest {
             assertTrue(filter.shouldProcess(message))
 
             // Record active/reply trigger at simulatedTime = 1_000_000
-            filter.recordReply(channel)
+            cooldownCache.record(channel.id)
             assertTrue(cooldownCache.isOnCooldown(channel.id))
-            assertTrue(filter.isOnCooldown(channel))
 
             // Subsequent message 10 seconds later (within 30s cooldown window)
             simulatedTime += 10_000L
@@ -300,7 +311,6 @@ class ChatterNoiseFilterTest {
             assertIs<ChatterFilterResult.Rejected>(suppressedResult)
             assertEquals(RejectionReason.CHANNEL_ON_COOLDOWN, suppressedResult.reason)
             assertFalse(filter.shouldProcess(message))
-            assertTrue(filter.isNoise(message))
         }
 
     @Test
@@ -310,8 +320,8 @@ class ChatterNoiseFilterTest {
             val message = createMockMessage(channelId = 402L, content = "Trigger after cooldown")
 
             // Record reply at simulatedTime = 1_000_000
-            filter.recordReply(channelId)
-            assertTrue(filter.isOnCooldown(channelId))
+            cooldownCache.record(channelId)
+            assertTrue(cooldownCache.isOnCooldown(channelId))
 
             // Advance time to 29.999 seconds later: still on cooldown
             simulatedTime += 29_999L
@@ -320,7 +330,6 @@ class ChatterNoiseFilterTest {
             // Advance time past 30.000 seconds (e.g. 30.001s total)
             simulatedTime += 2L
             assertFalse(cooldownCache.isOnCooldown(channelId))
-            assertFalse(filter.isOnCooldown(channelId))
 
             val allowedResult = filter.evaluate(message)
             assertIs<ChatterFilterResult.Allowed>(allowedResult)
@@ -338,7 +347,7 @@ class ChatterNoiseFilterTest {
             val customFilter = ChatterNoiseFilter(cooldownCache = customCache, cooldownDurationMs = 15_000L)
             val message = createMockMessage(channelId = 403L, content = "Custom cooldown test")
 
-            customFilter.recordReply(message.channelId)
+            customCache.record(message.channelId)
             simulatedTime += 14_000L
             assertFalse(customFilter.shouldProcess(message))
 
