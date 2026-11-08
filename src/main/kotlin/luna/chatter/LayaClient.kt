@@ -50,6 +50,11 @@ class LayaClient(
     suspend fun shouldParticipate(state: String): Boolean = decide(state).shouldParticipate
 
     /**
+     * Evaluates conversation state and returns [LayaDecision] detailing participation outcome.
+     */
+    suspend fun evaluateParticipation(state: String): LayaDecision = decide(state)
+
+    /**
      * Queries Laya System 1 decision API and returns the detailed [LayaDecision] outcome.
      */
     suspend fun decide(state: String): LayaDecision {

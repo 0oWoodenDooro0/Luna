@@ -24,7 +24,7 @@ import java.net.SocketTimeoutException
  * invokes Google Gemini API, and enforces Discord's 2,000-character payload bound.
  */
 open class ChatterGenerator(
-    private val config: ChatterConfig = ChatterConfig.fromEnv(),
+    val config: ChatterConfig = ChatterConfig.fromEnv(),
     private val httpClient: HttpClient = createDefaultHttpClient(),
 ) : AutoCloseable {
     private val logger = LoggerFactory.getLogger(ChatterGenerator::class.java)

@@ -147,6 +147,11 @@ open class ChatterNoiseFilter(
         channel: Channel? = null,
     ): Boolean = evaluate(message, channel) is ChatterFilterResult.Allowed
 
+    fun shouldEvaluate(
+        message: Message,
+        channel: Channel? = null,
+    ): Boolean = shouldProcess(message, channel)
+
     fun isAllowed(
         message: Message,
         channel: Channel? = null,
@@ -162,6 +167,22 @@ open class ChatterNoiseFilter(
         channel: Channel? = null,
     ): Boolean = isNoise(message, channel)
 
+    fun toChatMessageOrNull(message: Message): ChatMessage? {
+        val type = runCatching { message.type }.getOrNull() ?: MessageType.Default
+        if (isCommand(message.content, type)) return null
+        if (isSystemNotice(type)) return null
+        val webhookId = runCatching { message.webhookId }.getOrNull()
+        val isLunaWebhook = webhookId != null && webhookRegistry.contains(webhookId)
+        if (webhookId != null && !isLunaWebhook) return null
+        if (!isLunaWebhook && (message.author == null || message.author?.isBot == true)) return null
+        if (message.content.isBlank()) return null
+        return ChatMessage(speakerName(message), message.content)
+    }
+
+    fun filterHistory(messages: List<Message>): List<ChatMessage> = messages.mapNotNull { toChatMessageOrNull(it) }
+
+    fun speakerName(message: Message): String = extractSpeakerName(message)
+
     fun extractSpeakerName(message: Message): String =
         message.author?.username
             ?: runCatching { message.data.author.username }.getOrNull()
@@ -176,6 +197,20 @@ open class ChatterNoiseFilter(
         } else {
             cooldownCache.record(channelId)
         }
+    }
+
+    fun recordActivity(
+        channelId: Snowflake,
+        timestamp: Long? = null,
+    ) {
+        recordReply(channelId, timestamp)
+    }
+
+    fun recordActivity(
+        channelId: Long,
+        timestamp: Long? = null,
+    ) {
+        recordReply(Snowflake(channelId), timestamp)
     }
 
     fun recordReply(

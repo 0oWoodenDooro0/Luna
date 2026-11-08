@@ -41,6 +41,20 @@ class BoundedChannelCooldownCache(
         record(Snowflake(channelId), timestamp)
     }
 
+    fun recordActivity(
+        channelId: Snowflake,
+        timestamp: Long = timeSource(),
+    ) {
+        record(channelId, timestamp)
+    }
+
+    fun recordActivity(
+        channelId: Long,
+        timestamp: Long = timeSource(),
+    ) {
+        record(channelId, timestamp)
+    }
+
     fun isOnCooldown(
         channelId: Snowflake,
         cooldownDurationMs: Long = defaultCooldownDurationMs,
