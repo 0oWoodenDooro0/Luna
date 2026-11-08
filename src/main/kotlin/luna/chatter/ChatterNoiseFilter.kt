@@ -70,6 +70,7 @@ open class ChatterNoiseFilter(
         message: Message,
         channel: Channel? = null,
         isDirectMention: Boolean = false,
+        kordSelfId: Snowflake? = null,
     ): ChatterFilterResult {
         // 1. Check if chatter is disabled globally
         if (!enabled) {
@@ -86,8 +87,11 @@ open class ChatterNoiseFilter(
             )
         }
 
+        val resolvedSelfId = kordSelfId ?: runCatching { message.kord.selfId }.getOrNull()
+        val directMention = isDirectMention || isDirectBotMention(message, resolvedSelfId)
+
         // 3. Check if channel is on cooldown (bypassed for direct bot mentions)
-        if (!isDirectMention && cooldownCache.isOnCooldown(channelId, cooldownDurationMs)) {
+        if (!directMention && cooldownCache.isOnCooldown(channelId, cooldownDurationMs)) {
             return ChatterFilterResult.Rejected(
                 RejectionReason.CHANNEL_ON_COOLDOWN,
                 "Channel $channelId is currently on cooldown",
@@ -132,12 +136,21 @@ open class ChatterNoiseFilter(
 
         // 7. Check empty / whitespace-only messages without media attachments (CODING_STANDARDS.md §3)
         val hasAttachments = runCatching { message.attachments.isNotEmpty() }.getOrDefault(false)
-        if (message.content.isBlank() && !hasAttachments) {
+        if (message.content.isBlank() && !hasAttachments && !directMention) {
             return ChatterFilterResult.Rejected(
                 RejectionReason.EMPTY_MESSAGE,
                 "Message content is blank or empty without attachments",
             )
         }
+
+        val stripped = stripLunaMentions(message.content, resolvedSelfId)
+        val finalContent =
+            when {
+                stripped.isNotBlank() -> stripped
+                directMention -> CALLOUT_GREETING
+                hasAttachments -> "[Attachment]"
+                else -> message.content
+            }
 
         val speakerName = extractSpeakerName(message)
 
@@ -145,7 +158,7 @@ open class ChatterNoiseFilter(
             speakerName = speakerName,
             channelId = channelId,
             messageId = message.id,
-            content = message.content,
+            content = finalContent,
         )
     }
 
@@ -153,33 +166,35 @@ open class ChatterNoiseFilter(
         message: Message,
         channel: Channel? = null,
         isDirectMention: Boolean = false,
-    ): Boolean = evaluate(message, channel, isDirectMention) is ChatterFilterResult.Allowed
+        kordSelfId: Snowflake? = null,
+    ): Boolean = evaluate(message, channel, isDirectMention, kordSelfId) is ChatterFilterResult.Allowed
 
     fun shouldEvaluate(
         message: Message,
         channel: Channel? = null,
         isDirectMention: Boolean = false,
-    ): Boolean = shouldProcess(message, channel, isDirectMention)
+        kordSelfId: Snowflake? = null,
+    ): Boolean = shouldProcess(message, channel, isDirectMention, kordSelfId)
 
     fun isDirectBotMention(
         message: Message,
         kordSelfId: Snowflake? = null,
     ): Boolean {
-        if (kordSelfId != null && runCatching { message.mentionedUserIds.contains(kordSelfId) }.getOrDefault(false)) {
+        val resolvedSelfId = kordSelfId ?: runCatching { message.kord.selfId }.getOrNull()
+        if (resolvedSelfId != null && runCatching { message.mentionedUserIds.contains(resolvedSelfId) }.getOrDefault(false)) {
             return true
         }
-        if (kordSelfId != null) {
+        if (resolvedSelfId != null) {
             val content = message.content
-            if (content.contains("<@$kordSelfId>") || content.contains("<@!$kordSelfId>")) {
+            if (content.contains("<@$resolvedSelfId>") || content.contains("<@!$resolvedSelfId>")) {
                 return true
             }
         }
         val refAuthorId = runCatching { message.referencedMessage?.author?.id }.getOrNull()
-        if (kordSelfId != null && refAuthorId == kordSelfId) {
+        if (resolvedSelfId != null && refAuthorId == resolvedSelfId) {
             return true
         }
-        val trimmed = message.content.trim()
-        if (trimmed.startsWith("@luna", ignoreCase = true) || trimmed.contains("@luna", ignoreCase = true)) {
+        if (LUNA_MENTION_REGEX.containsMatchIn(message.content)) {
             return true
         }
         return false
@@ -197,6 +212,20 @@ open class ChatterNoiseFilter(
         return trimmed.length >= MIN_LAYA_CONTENT_LENGTH
     }
 
+    fun stripLunaMentions(
+        content: String,
+        botSelfId: Snowflake? = null,
+    ): String {
+        var result = content
+        if (botSelfId != null) {
+            val botIdStr = botSelfId.toString()
+            result = result.replace(Regex("""<@!?$botIdStr>"""), "")
+        }
+        result = result.replace(LUNA_MENTION_REGEX, "")
+        result = result.replace(MULTIPLE_SPACES_REGEX, " ")
+        return result.lines().joinToString("\n") { it.trim() }.trim()
+    }
+
     fun toChatMessageOrNull(
         message: Message,
         kordSelfId: Snowflake? = null,
@@ -208,7 +237,8 @@ open class ChatterNoiseFilter(
         val isLunaWebhook = webhookId != null && webhookRegistry.contains(webhookId)
         if (webhookId != null && !isLunaWebhook) return null
 
-        val isLunaBot = kordSelfId != null && runCatching { message.author?.id }.getOrNull() == kordSelfId
+        val resolvedSelfId = kordSelfId ?: runCatching { message.kord.selfId }.getOrNull()
+        val isLunaBot = resolvedSelfId != null && runCatching { message.author?.id }.getOrNull() == resolvedSelfId
         if (!isLunaWebhook && !isLunaBot && (message.author == null || message.author?.isBot == true)) return null
 
         if (isLunaBot) {
@@ -221,7 +251,14 @@ open class ChatterNoiseFilter(
         val hasAttachments = runCatching { message.attachments.isNotEmpty() }.getOrDefault(false)
         if (message.content.isBlank() && !hasAttachments) return null
 
-        val content = if (message.content.isBlank()) "[Attachment]" else message.content
+        val stripped = stripLunaMentions(message.content, resolvedSelfId)
+        val content =
+            when {
+                stripped.isNotBlank() -> stripped
+                hasAttachments -> "[Attachment]"
+                message.content.isNotBlank() -> CALLOUT_GREETING
+                else -> return null
+            }
         val speaker = if (isLunaBot) "Luna" else extractSpeakerName(message)
         return ChatMessage(speaker, content)
     }
@@ -268,5 +305,8 @@ open class ChatterNoiseFilter(
     companion object {
         const val MIN_LAYA_CONTENT_LENGTH = 5
         val DEFAULT_BOT_PREFIXES = setOf("!", "~", "?")
+        const val CALLOUT_GREETING = "你好"
+        private val LUNA_MENTION_REGEX = Regex("""(?i)(?<!\w)@luna\b""")
+        private val MULTIPLE_SPACES_REGEX = Regex("""[ \t]+""")
     }
 }

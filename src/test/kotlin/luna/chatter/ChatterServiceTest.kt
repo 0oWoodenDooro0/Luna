@@ -149,6 +149,72 @@ class ChatterServiceTest {
         }
 
     @Test
+    fun `direct pure bot mention triggers reply with callout greeting fallback passed to chatter generator`() =
+        runTest {
+            val botSelfId = Snowflake(9999L)
+            val channelId = 500L
+
+            val message =
+                createMockMessage(
+                    id = 110L,
+                    channelId = channelId,
+                    username = "Alice",
+                    content = "<@9999>",
+                    mentionedUserIds = setOf(botSelfId),
+                    selfId = botSelfId,
+                )
+            val replyText = "你好！很高興見到你！"
+
+            coEvery { chatterGenerator.generateReply(any<List<ChatMessage>>()) } returns replyText
+
+            val result = service.processMessage(message)
+
+            assertTrue(result, "Expected processMessage to reply to direct pure bot mention")
+            coVerify(exactly = 1) { channel.type() }
+            coVerify(exactly = 1) {
+                chatterGenerator.generateReply(
+                    match<List<ChatMessage>> { list ->
+                        list.any { it.author == "Alice" && it.content == ChatterNoiseFilter.CALLOUT_GREETING }
+                    },
+                )
+            }
+            coVerify(exactly = 1) { channel.createMessage(replyText) }
+        }
+
+    @Test
+    fun `mixed bot mention message strips mention tag before passing to chatter generator`() =
+        runTest {
+            val botSelfId = Snowflake(9999L)
+            val channelId = 500L
+
+            val message =
+                createMockMessage(
+                    id = 111L,
+                    channelId = channelId,
+                    username = "Alice",
+                    content = "@Luna 今天天氣如何",
+                    mentionedUserIds = setOf(botSelfId),
+                    selfId = botSelfId,
+                )
+            val replyText = "今天天氣晴朗，很適合出門走走！"
+
+            coEvery { chatterGenerator.generateReply(any<List<ChatMessage>>()) } returns replyText
+
+            val result = service.processMessage(message)
+
+            assertTrue(result, "Expected processMessage to reply to mixed bot mention message")
+            coVerify(exactly = 1) { channel.type() }
+            coVerify(exactly = 1) {
+                chatterGenerator.generateReply(
+                    match<List<ChatMessage>> { list ->
+                        list.any { it.author == "Alice" && it.content == "今天天氣如何" }
+                    },
+                )
+            }
+            coVerify(exactly = 1) { channel.createMessage(replyText) }
+        }
+
+    @Test
     fun `trivial ambient message without bot mention, question, or substantive content does not call laya`() =
         runTest {
             val channelId = 500L
