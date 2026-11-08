@@ -7,6 +7,7 @@ import io.ktor.server.request.receiveText
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.jsonObject
+import java.net.URLDecoder
 import java.nio.charset.StandardCharsets
 import java.util.Base64
 
@@ -23,11 +24,16 @@ object OAuthTokenRequestParser {
         if (authHeader != null && authHeader.startsWith("Basic ", ignoreCase = true)) {
             runCatching {
                 val base64Credentials = authHeader.substring(6).trim()
-                val decoded = String(Base64.getDecoder().decode(base64Credentials), StandardCharsets.UTF_8)
+                val decodedBytes =
+                    runCatching { Base64.getDecoder().decode(base64Credentials) }
+                        .getOrElse { Base64.getMimeDecoder().decode(base64Credentials) }
+                val decoded = String(decodedBytes, StandardCharsets.UTF_8)
                 val colonIndex = decoded.indexOf(':')
                 if (colonIndex != -1) {
-                    basicClientId = decoded.substring(0, colonIndex)
-                    basicClientSecret = decoded.substring(colonIndex + 1)
+                    val rawClientId = decoded.substring(0, colonIndex)
+                    val rawClientSecret = decoded.substring(colonIndex + 1)
+                    basicClientId = runCatching { URLDecoder.decode(rawClientId, StandardCharsets.UTF_8.name()) }.getOrDefault(rawClientId)
+                    basicClientSecret = runCatching { URLDecoder.decode(rawClientSecret, StandardCharsets.UTF_8.name()) }.getOrDefault(rawClientSecret)
                 }
             }
         }
@@ -84,13 +90,13 @@ object OAuthTokenRequestParser {
                 ?: call.request.queryParameters["refresh_token"]
 
         return OAuthTokenRequest(
-            grantType = grantType,
-            code = code,
-            redirectUri = redirectUri,
-            clientId = clientId,
-            clientSecret = clientSecret,
-            codeVerifier = codeVerifier,
-            refreshToken = refreshToken,
+            grantType = grantType?.trim(),
+            code = code?.trim(),
+            redirectUri = redirectUri?.trim(),
+            clientId = clientId?.trim(),
+            clientSecret = clientSecret?.trim(),
+            codeVerifier = codeVerifier?.trim(),
+            refreshToken = refreshToken?.trim(),
         )
     }
 }
