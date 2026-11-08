@@ -22,6 +22,7 @@ class DialogueNoiseFilterTest {
     @BeforeEach
     fun setUp() {
         LunaWebhookRegistry.clear()
+        luna.core.SummaryMessageRegistry.clear()
     }
 
     @Test
@@ -359,5 +360,118 @@ class DialogueNoiseFilterTest {
 
             assertTrue(filter.isNoiseMessage(msg))
             assertFalse(luna.core.LunaWebhookRegistry.contains(thirdPartyId))
+        }
+
+    @Test
+    fun `identifies bot summary message when registered in summary registry`() =
+        runTest {
+            val registry = luna.core.BoundedSummaryRegistry()
+            val customFilter = DialogueNoiseFilter(summaryRegistry = registry)
+            val msgId = Snowflake(777111L)
+            val summaryMsg = createMockMessage(777111L, "Luna", "Custom format without markers", isBot = true)
+
+            assertFalse(customFilter.isBotSummaryMessage(summaryMsg))
+            registry.register(msgId)
+            assertTrue(customFilter.isBotSummaryMessage(summaryMsg))
+        }
+
+    @Test
+    fun `identifies bot summary message from structural markers even when registry is empty`() =
+        runTest {
+            val registry = luna.core.BoundedSummaryRegistry()
+            val customFilter = DialogueNoiseFilter(summaryRegistry = registry)
+            val tldrMsg = createMockMessage(1L, "Luna", "TL;DR: rebooted bot summary", isBot = true)
+            val keypointsMsg = createMockMessage(2L, "Luna", "重點摘要: rebooted bot summary", isBot = true)
+
+            assertTrue(customFilter.isBotSummaryMessage(tldrMsg))
+            assertTrue(customFilter.isBotSummaryMessage(keypointsMsg))
+        }
+
+    @Test
+    fun `permits Luna bot chatter messages as dialogue input when not a summary message`() =
+        runTest {
+            val selfId = Snowflake(42L)
+            val kordMock = mockk<dev.kord.core.Kord>()
+            io.mockk.every { kordMock.selfId } returns selfId
+
+            val filter = DialogueNoiseFilter(kord = kordMock)
+            val chatterMsg =
+                createMockMessage(
+                    id = 101L,
+                    username = "Luna",
+                    content = "That sounds like a great idea!",
+                    isBot = true,
+                    authorId = selfId,
+                )
+
+            assertFalse(filter.isNoiseMessage(chatterMsg))
+        }
+
+    @Test
+    fun `rejects Luna bot summary messages registered in summary registry as noise`() =
+        runTest {
+            val selfId = Snowflake(42L)
+            val kordMock = mockk<dev.kord.core.Kord>()
+            io.mockk.every { kordMock.selfId } returns selfId
+
+            val registry = luna.core.BoundedSummaryRegistry()
+            val filter = DialogueNoiseFilter(kord = kordMock, summaryRegistry = registry)
+
+            val summaryMsgId = Snowflake(202L)
+            registry.register(summaryMsgId)
+
+            val summaryMsg =
+                createMockMessage(
+                    id = 202L,
+                    username = "Luna",
+                    content = "Discussion conclusion without standard prefix",
+                    isBot = true,
+                    authorId = selfId,
+                )
+
+            assertTrue(filter.isNoiseMessage(summaryMsg))
+        }
+
+    @Test
+    fun `rejects Luna bot summary messages with structural markers as noise even when registry is empty`() =
+        runTest {
+            val selfId = Snowflake(42L)
+            val kordMock = mockk<dev.kord.core.Kord>()
+            io.mockk.every { kordMock.selfId } returns selfId
+
+            val registry = luna.core.BoundedSummaryRegistry()
+            val filter = DialogueNoiseFilter(kord = kordMock, summaryRegistry = registry)
+
+            val tldrMsg =
+                createMockMessage(
+                    id = 303L,
+                    username = "Luna",
+                    content = "TL;DR: Historic summary after daemon reboot",
+                    isBot = true,
+                    authorId = selfId,
+                )
+
+            assertTrue(filter.isNoiseMessage(tldrMsg))
+        }
+
+    @Test
+    fun `rejects third-party bot messages as noise`() =
+        runTest {
+            val selfId = Snowflake(42L)
+            val kordMock = mockk<dev.kord.core.Kord>()
+            io.mockk.every { kordMock.selfId } returns selfId
+
+            val filter = DialogueNoiseFilter(kord = kordMock)
+            val thirdPartyBotId = Snowflake(9999L)
+            val thirdPartyMsg =
+                createMockMessage(
+                    id = 404L,
+                    username = "MusicBot",
+                    content = "Now playing: track 1",
+                    isBot = true,
+                    authorId = thirdPartyBotId,
+                )
+
+            assertTrue(filter.isNoiseMessage(thirdPartyMsg))
         }
 }

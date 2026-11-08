@@ -36,6 +36,7 @@ class SummaryServiceTest {
     @BeforeEach
     fun setUp() {
         luna.core.LunaWebhookRegistry.clear()
+        luna.core.SummaryMessageRegistry.clear()
     }
 
     @Test
@@ -1717,5 +1718,27 @@ class SummaryServiceTest {
             assertNotNull(reply)
             assertEquals(2000, reply.length)
             assertTrue(reply.endsWith("..."))
+        }
+
+    @Test
+    fun `default replySender registers created reply message ID into SummaryMessageRegistry`() =
+        runTest {
+            val registry = luna.core.BoundedSummaryRegistry()
+            val replyMessage = mockk<Message>()
+            val replyId = Snowflake(998877L)
+            every { replyMessage.id } returns replyId
+
+            val originalMessage = mockk<Message>()
+            every { originalMessage.id } returns Snowflake(112233L)
+
+            SummaryService.defaultReplySender(
+                message = originalMessage,
+                content = "Summary content",
+                summaryRegistry = registry,
+                replyAction = { _, _ -> replyMessage },
+            )
+
+            assertTrue(registry.contains(replyId))
+            assertEquals(1, registry.size)
         }
 }

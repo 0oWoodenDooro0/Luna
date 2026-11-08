@@ -25,6 +25,7 @@ class ChatterNoiseFilterTest {
     @BeforeEach
     fun setUp() {
         LunaWebhookRegistry.clear()
+        luna.core.SummaryMessageRegistry.clear()
         simulatedTime = 1_000_000L
         cooldownCache = BoundedChannelCooldownCache(timeSource = { simulatedTime })
         filter = ChatterNoiseFilter(cooldownCache = cooldownCache)
@@ -41,7 +42,9 @@ class ChatterNoiseFilterTest {
         authorIsNull: Boolean = false,
         mentionedUserIds: Set<Snowflake> = emptySet(),
         referencedMessage: Message? = null,
+        authorId: Snowflake? = null,
     ): Message {
+        val resolvedAuthorId = authorId ?: webhookId ?: Snowflake(id)
         val author =
             if (authorIsNull) {
                 null
@@ -49,12 +52,13 @@ class ChatterNoiseFilterTest {
                 val user = mockk<User>()
                 every { user.username } returns username
                 every { user.isBot } returns isBot
+                every { user.id } returns resolvedAuthorId
                 user
             }
 
         val userData = mockk<dev.kord.core.cache.data.UserData>()
         every { userData.username } returns username
-        every { userData.id } returns (webhookId ?: Snowflake(id))
+        every { userData.id } returns resolvedAuthorId
 
         val messageData = mockk<dev.kord.core.cache.data.MessageData>()
         every { messageData.author } returns userData
@@ -482,5 +486,106 @@ class ChatterNoiseFilterTest {
         // Substantive messages (>= 5 characters) -> true
         assertTrue(filter.isEligibleForLayaEvaluation("今天天氣真好"))
         assertTrue(filter.isEligibleForLayaEvaluation("週末大家有什麼安排呢"))
+    }
+
+    @Test
+    fun `toChatMessageOrNull converts Luna bot chatter message to ChatMessage with speaker Luna`() {
+        val botSelfId = Snowflake(42L)
+        val chatterMsg =
+            createMockMessage(
+                id = 501L,
+                username = "Luna",
+                content = "I really enjoyed reading this article!",
+                isBot = true,
+                authorId = botSelfId,
+            )
+
+        val chatMessage = filter.toChatMessageOrNull(chatterMsg, botSelfId)
+        assertNotNull(chatMessage)
+        assertEquals("Luna", chatMessage.author)
+        assertEquals("I really enjoyed reading this article!", chatMessage.content)
+    }
+
+    @Test
+    fun `toChatMessageOrNull excludes Luna bot summary message registered in SummaryMessageRegistry`() {
+        val botSelfId = Snowflake(42L)
+        val registry = luna.core.BoundedSummaryRegistry()
+        val customFilter = ChatterNoiseFilter(summaryRegistry = registry)
+
+        val summaryId = Snowflake(502L)
+        registry.register(summaryId)
+
+        val summaryMsg =
+            createMockMessage(
+                id = 502L,
+                username = "Luna",
+                content = "Custom formatted summary without standard markers",
+                isBot = true,
+                authorId = botSelfId,
+            )
+
+        val chatMessage = customFilter.toChatMessageOrNull(summaryMsg, botSelfId)
+        kotlin.test.assertNull(chatMessage)
+    }
+
+    @Test
+    fun `toChatMessageOrNull excludes Luna bot summary message with structural marker even when registry is empty`() {
+        val botSelfId = Snowflake(42L)
+        val registry = luna.core.BoundedSummaryRegistry()
+        val customFilter = ChatterNoiseFilter(summaryRegistry = registry)
+
+        val tldrMsg =
+            createMockMessage(
+                id = 503L,
+                username = "Luna",
+                content = "TL;DR: Summary generated before bot was restarted",
+                isBot = true,
+                authorId = botSelfId,
+            )
+        val keypointsMsg =
+            createMockMessage(
+                id = 504L,
+                username = "Luna",
+                content = "討論重點摘要:\n• 重點一\n• 重點二",
+                isBot = true,
+                authorId = botSelfId,
+            )
+
+        kotlin.test.assertNull(customFilter.toChatMessageOrNull(tldrMsg, botSelfId))
+        kotlin.test.assertNull(customFilter.toChatMessageOrNull(keypointsMsg, botSelfId))
+    }
+
+    @Test
+    fun `toChatMessageOrNull excludes third party bot messages`() {
+        val botSelfId = Snowflake(42L)
+        val thirdPartyBotId = Snowflake(9999L)
+        val thirdPartyMsg =
+            createMockMessage(
+                id = 505L,
+                username = "MusicBot",
+                content = "Now playing: track 1",
+                isBot = true,
+                authorId = thirdPartyBotId,
+            )
+
+        val chatMessage = filter.toChatMessageOrNull(thirdPartyMsg, botSelfId)
+        kotlin.test.assertNull(chatMessage)
+    }
+
+    @Test
+    fun `toChatMessageOrNull excludes unverified webhook messages`() {
+        val botSelfId = Snowflake(42L)
+        val unverifiedWebhookId = Snowflake(8888L)
+        val webhookMsg =
+            createMockMessage(
+                id = 506L,
+                username = "ExternalWebhook",
+                content = "New deployment finished",
+                isBot = true,
+                webhookId = unverifiedWebhookId,
+            )
+
+        val chatMessage = filter.toChatMessageOrNull(webhookMsg, botSelfId)
+        kotlin.test.assertNull(chatMessage)
     }
 }

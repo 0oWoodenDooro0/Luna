@@ -12,6 +12,8 @@ import dev.socialpeek.SocialPeek
 import dev.socialpeek.model.PeekPost
 import kotlinx.coroutines.flow.toList
 import luna.core.JsonLogger
+import luna.core.SummaryMessageRegistry
+import luna.core.SummaryRegistry
 import org.slf4j.LoggerFactory
 import java.util.Collections
 import java.util.LinkedHashMap
@@ -65,15 +67,9 @@ class SummaryService(
     val summarizer: GeminiSummarizer = GeminiSummarizer(),
     val collector: ConversationSliceCollector = ConversationSliceCollector(),
     val configuredEmoji: String? = null,
+    val summaryRegistry: SummaryRegistry = SummaryMessageRegistry,
     val replySender: suspend (message: Message, content: String) -> Unit = { message, content ->
-        message.reply {
-            this.messageReference = message.id
-            this.content = content
-            this.suppressEmbeds = true
-            allowedMentions {
-                repliedUser = false
-            }
-        }
+        defaultReplySender(message, content, summaryRegistry)
     },
 ) {
     fun buildReply(
@@ -93,6 +89,7 @@ class SummaryService(
     private val statusCache = BoundedStatusCache()
 
     fun register(kord: Kord) {
+        collector.noiseFilter.setKord(kord)
         kord.on<ReactionAddEvent> {
             handleReaction(this)
         }
@@ -271,5 +268,24 @@ class SummaryService(
         const val DISCORD_MAX_MESSAGE_LENGTH = 2000
         const val YOUTUBE_DURATION_EXCEEDED_MESSAGE = "此影片長度超過 2 小時上限，為避免運算逾時，請選擇較短的片段或精華進行摘要。"
         const val FALLBACK_EMPTY_SUMMARY_MESSAGE = "抱歉，AI 無法為此內容生成有效摘要，請嘗試提供更多上下文或選擇其他內容。"
+
+        suspend fun defaultReplySender(
+            message: Message,
+            content: String,
+            summaryRegistry: SummaryRegistry = SummaryMessageRegistry,
+            replyAction: suspend (Message, String) -> Message = { msg, text ->
+                msg.reply {
+                    this.messageReference = msg.id
+                    this.content = text
+                    this.suppressEmbeds = true
+                    allowedMentions {
+                        repliedUser = false
+                    }
+                }
+            },
+        ) {
+            val sent = replyAction(message, content)
+            summaryRegistry.register(sent.id)
+        }
     }
 }

@@ -5,6 +5,8 @@ import dev.kord.common.entity.Snowflake
 import dev.kord.core.entity.Message
 import dev.kord.core.entity.channel.Channel
 import luna.core.LunaWebhookRegistry
+import luna.core.SummaryMessageRegistry
+import luna.core.SummaryRegistry
 import luna.core.WebhookRegistry
 
 enum class RejectionReason {
@@ -42,6 +44,7 @@ data class ChatterFilterConfig(
 open class ChatterNoiseFilter(
     val cooldownCache: BoundedChannelCooldownCache = BoundedChannelCooldownCache(),
     val webhookRegistry: WebhookRegistry = LunaWebhookRegistry,
+    val summaryRegistry: SummaryRegistry = SummaryMessageRegistry,
     var enabled: Boolean = true,
     var allowedChannels: Set<Snowflake> = emptySet(),
     var cooldownDurationMs: Long = BoundedChannelCooldownCache.DEFAULT_COOLDOWN_MS,
@@ -52,9 +55,11 @@ open class ChatterNoiseFilter(
         cooldownCache: BoundedChannelCooldownCache =
             BoundedChannelCooldownCache(defaultCooldownDurationMs = config.cooldownDurationMs),
         webhookRegistry: WebhookRegistry = LunaWebhookRegistry,
+        summaryRegistry: SummaryRegistry = SummaryMessageRegistry,
     ) : this(
         cooldownCache = cooldownCache,
         webhookRegistry = webhookRegistry,
+        summaryRegistry = summaryRegistry,
         enabled = config.enabled,
         allowedChannels = config.allowedChannels,
         cooldownDurationMs = config.cooldownDurationMs,
@@ -205,6 +210,13 @@ open class ChatterNoiseFilter(
 
         val isLunaBot = kordSelfId != null && runCatching { message.author?.id }.getOrNull() == kordSelfId
         if (!isLunaWebhook && !isLunaBot && (message.author == null || message.author?.isBot == true)) return null
+
+        if (isLunaBot) {
+            val isSummary = summaryRegistry.contains(message.id) || SummaryRegistry.isSummaryContent(message.content)
+            if (isSummary) {
+                return null
+            }
+        }
 
         val hasAttachments = runCatching { message.attachments.isNotEmpty() }.getOrDefault(false)
         if (message.content.isBlank() && !hasAttachments) return null
