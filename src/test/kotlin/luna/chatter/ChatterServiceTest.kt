@@ -78,6 +78,8 @@ class ChatterServiceTest {
         webhookId: Snowflake? = null,
         type: MessageType = MessageType.Default,
         authorIsNull: Boolean = false,
+        mentionedUserIds: Set<Snowflake> = emptySet(),
+        selfId: Snowflake = Snowflake(9999L),
     ): Message {
         val author =
             if (authorIsNull) {
@@ -101,6 +103,7 @@ class ChatterServiceTest {
 
         val msg = mockk<Message>()
         val mockKord = mockk<Kord>(relaxed = true)
+        every { mockKord.selfId } returns selfId
         every { msg.kord } returns mockKord
         every { msg.id } returns Snowflake(id)
         every { msg.channelId } returns Snowflake(channelId)
@@ -110,10 +113,59 @@ class ChatterServiceTest {
         every { msg.type } returns type
         every { msg.webhookId } returns webhookId
         every { msg.attachments } returns emptySet()
+        every { msg.mentionedUserIds } returns mentionedUserIds
         every { msg.channel } returns channel
         coEvery { msg.getChannel() } returns channel
         return msg
     }
+
+    @Test
+    fun `direct mention to bot triggers immediate reply without calling laya and bypasses cooldown`() =
+        runTest {
+            val botSelfId = Snowflake(9999L)
+            val channelId = 500L
+            cooldownCache.record(channelId, simulatedTime)
+
+            val message =
+                createMockMessage(
+                    id = 101L,
+                    channelId = channelId,
+                    username = "Alice",
+                    content = "<@9999> what do you think about Kotlin coroutines?",
+                    mentionedUserIds = setOf(botSelfId),
+                    selfId = botSelfId,
+                )
+            val replyText = "Coroutines are awesome and lightweight!"
+
+            coEvery { chatterGenerator.generateReply(any<List<ChatMessage>>()) } returns replyText
+
+            val result = service.processMessage(message)
+
+            assertTrue(result, "Expected processMessage to reply to direct bot mention even during cooldown")
+            coVerify(exactly = 0) { layaClient.evaluateParticipation(any()) }
+            coVerify(exactly = 1) { channel.type() }
+            coVerify(exactly = 1) { chatterGenerator.generateReply(any<List<ChatMessage>>()) }
+            coVerify(exactly = 1) { channel.createMessage(replyText) }
+        }
+
+    @Test
+    fun `trivial ambient message without bot mention, question, or substantive content does not call laya`() =
+        runTest {
+            val channelId = 500L
+            val message =
+                createMockMessage(
+                    id = 102L,
+                    channelId = channelId,
+                    username = "Bob",
+                    content = "ok",
+                    mentionedUserIds = emptySet(),
+                )
+
+            val result = service.processMessage(message)
+
+            assertFalse(result, "Trivial ambient message should not trigger chatter reply")
+            coVerify(exactly = 0) { layaClient.evaluateParticipation(any()) }
+        }
 
     @Test
     fun `successful end-to-end flow with valid message, typing indicator and reply`() =
