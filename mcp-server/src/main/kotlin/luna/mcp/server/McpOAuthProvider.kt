@@ -398,7 +398,7 @@ class McpOAuthProvider(
         const val AUTH_CODE_LIFETIME_MS = 600_000L // 10 minutes
 
         private val GOOGLE_REDIRECT_URI_REGEX =
-            Regex("""^https://oauth-redirect\.googleusercontent\.com/(?:r|a)/.*$""")
+            Regex("""^https://(?:oauth-redirect(?:-sandbox)?\.googleusercontent\.com/(?:r|a)/.*|vertexaisearch\.cloud\.google\.com/oauth-redirect.*)$""")
         private val LOCALHOST_REDIRECT_URI_REGEX =
             Regex("""^https?://(?:localhost|127\.0\.0\.1)(?::\d+)?(?:/.*)?$""")
     }

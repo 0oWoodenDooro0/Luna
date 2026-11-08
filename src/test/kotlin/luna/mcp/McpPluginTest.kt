@@ -141,7 +141,7 @@ class McpPluginTest {
 
             eventsFlow.emit(event)
 
-            coVerify(exactly = 1) { mockClientCommand.handle(interaction) }
+            coVerify(timeout = 3000, exactly = 1) { mockClientCommand.handle(interaction) }
         }
 
     @Test

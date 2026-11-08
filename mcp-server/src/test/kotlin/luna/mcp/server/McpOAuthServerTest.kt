@@ -375,7 +375,11 @@ class McpOAuthServerTest {
 
             val grantTypes = json["grant_types_supported"]?.jsonArray?.map { it.jsonPrimitive.content }
             assertNotNull(grantTypes)
-            assertEquals(listOf("authorization_code", "refresh_token"), grantTypes)
+            assertEquals(listOf("authorization_code", "refresh_token", "client_credentials"), grantTypes)
+
+            val authMethods = json["token_endpoint_auth_methods_supported"]?.jsonArray?.map { it.jsonPrimitive.content }
+            assertNotNull(authMethods)
+            assertEquals(listOf("client_secret_basic", "client_secret_post"), authMethods)
 
             val codeChallengeMethods = json["code_challenge_methods_supported"]?.jsonArray?.map { it.jsonPrimitive.content }
             assertNotNull(codeChallengeMethods)
@@ -893,7 +897,7 @@ class McpOAuthServerTest {
                     setBody(
                         io.ktor.client.request.forms.FormDataContent(
                             io.ktor.http.parameters {
-                                append("grant_type", "client_credentials")
+                                append("grant_type", "password")
                                 append("client_id", "test-client-id")
                             },
                         ),
@@ -1189,5 +1193,231 @@ class McpOAuthServerTest {
             val failJson = Json.parseToJsonElement(refreshFailResponse.bodyAsText()).jsonObject
             assertEquals("invalid_client", failJson["error"]?.jsonPrimitive?.content)
             assertEquals("Client authentication failed", failJson["error_description"]?.jsonPrimitive?.content)
+        }
+
+    @Test
+    fun `POST oauth token with client_secret but omitted client_id in body succeeds via authCode clientId`() =
+        testApplication {
+            val broadcaster = DiscordWebhookBroadcaster(repository)
+            val clientId = "dyn-omitted-client-id"
+            val plainSecret = "valid-secret-123"
+            registerTestClient(clientId, plainSecret)
+
+            val provider = McpOAuthProvider(clientRepository = clientRepository)
+            application {
+                mcpServerModule(
+                    broadcaster = broadcaster,
+                    clientRepository = clientRepository,
+                    oAuthProvider = provider,
+                )
+            }
+
+            val redirectUri = "https://oauth-redirect.googleusercontent.com/r/test-project"
+            val code = provider.issueAuthorizationCode(clientId, redirectUri, null, null)
+
+            // Client sends client_secret but omits client_id in the body
+            val response =
+                client.post("/oauth/token") {
+                    setBody(
+                        io.ktor.client.request.forms.FormDataContent(
+                            io.ktor.http.parameters {
+                                append("grant_type", "authorization_code")
+                                append("code", code)
+                                append("redirect_uri", redirectUri)
+                                append("client_secret", plainSecret)
+                            },
+                        ),
+                    )
+                }
+
+            assertEquals(HttpStatusCode.OK, response.status)
+            val json = Json.parseToJsonElement(response.bodyAsText()).jsonObject
+            val accessToken = json["access_token"]?.jsonPrimitive?.content
+            assertNotNull(accessToken)
+            assertTrue(accessToken.startsWith("luna_at_"))
+            assertEquals(clientId, provider.getClientIdFromToken(accessToken))
+        }
+
+    @Test
+    fun `POST oauth token with grant_type client_credentials and valid credentials returns access token`() =
+        testApplication {
+            val broadcaster = DiscordWebhookBroadcaster(repository)
+            val clientId = "m2m-gemini-client"
+            val plainSecret = "m2m-secret-xyz"
+            registerTestClient(clientId, plainSecret)
+
+            val provider = McpOAuthProvider(clientRepository = clientRepository)
+            application {
+                mcpServerModule(
+                    broadcaster = broadcaster,
+                    clientRepository = clientRepository,
+                    oAuthProvider = provider,
+                )
+            }
+
+            val response =
+                client.post("/oauth/token") {
+                    setBody(
+                        io.ktor.client.request.forms.FormDataContent(
+                            io.ktor.http.parameters {
+                                append("grant_type", "client_credentials")
+                                append("client_id", clientId)
+                                append("client_secret", plainSecret)
+                            },
+                        ),
+                    )
+                }
+
+            assertEquals(HttpStatusCode.OK, response.status)
+            val json = Json.parseToJsonElement(response.bodyAsText()).jsonObject
+            val accessToken = json["access_token"]?.jsonPrimitive?.content
+            assertNotNull(accessToken)
+            assertTrue(accessToken.startsWith("luna_at_"))
+            assertEquals("Bearer", json["token_type"]?.jsonPrimitive?.content)
+            assertEquals(clientId, provider.getClientIdFromToken(accessToken))
+        }
+
+    @Test
+    fun `GET oauth authorize with client_id containing whitespace trims and redirects 302`() =
+        testApplication {
+            val broadcaster = DiscordWebhookBroadcaster(repository)
+            val clientId = "whitespace-client-id"
+            registerTestClient(clientId)
+
+            val provider = McpOAuthProvider(clientRepository = clientRepository)
+            application {
+                mcpServerModule(broadcaster = broadcaster, clientRepository = clientRepository, oAuthProvider = provider)
+            }
+
+            val client = createClient { followRedirects = false }
+            val redirectUri = "https://oauth-redirect.googleusercontent.com/r/my-project"
+            val response =
+                client.get("/oauth/authorize") {
+                    url {
+                        parameters.append("client_id", "  whitespace-client-id  ")
+                        parameters.append("redirect_uri", redirectUri)
+                        parameters.append("response_type", "code")
+                    }
+                }
+
+            assertEquals(HttpStatusCode.Found, response.status)
+        }
+
+    @Test
+    fun `POST oauth token with client credentials containing whitespace trims and succeeds`() =
+        testApplication {
+            val broadcaster = DiscordWebhookBroadcaster(repository)
+            val clientId = "whitespace-token-client"
+            val plainSecret = "whitespace-token-secret"
+            registerTestClient(clientId, plainSecret)
+
+            val provider = McpOAuthProvider(clientRepository = clientRepository)
+            application {
+                mcpServerModule(broadcaster = broadcaster, clientRepository = clientRepository, oAuthProvider = provider)
+            }
+
+            val redirectUri = "https://oauth-redirect.googleusercontent.com/r/my-project"
+            val code = provider.issueAuthorizationCode(clientId, redirectUri, null, null)
+
+            val response =
+                client.post("/oauth/token") {
+                    setBody(
+                        io.ktor.client.request.forms.FormDataContent(
+                            io.ktor.http.parameters {
+                                append("grant_type", "authorization_code")
+                                append("code", code)
+                                append("redirect_uri", redirectUri)
+                                append("client_id", "  whitespace-token-client  ")
+                                append("client_secret", "  whitespace-token-secret  ")
+                            },
+                        ),
+                    )
+                }
+
+            assertEquals(HttpStatusCode.OK, response.status)
+        }
+
+    @Test
+    fun `POST oauth token with percent-encoded credentials in Basic Auth header succeeds per RFC 6749`() =
+        testApplication {
+            val broadcaster = DiscordWebhookBroadcaster(repository)
+            val clientId = "rfc-encoded-client"
+            val plainSecret = "secret-with special=chars&more"
+            registerTestClient(clientId, plainSecret)
+
+            val provider = McpOAuthProvider(clientRepository = clientRepository)
+            application {
+                mcpServerModule(broadcaster = broadcaster, clientRepository = clientRepository, oAuthProvider = provider)
+            }
+
+            val redirectUri = "https://oauth-redirect.googleusercontent.com/r/my-project"
+            val code = provider.issueAuthorizationCode(clientId, redirectUri, null, null)
+
+            // Encode according to RFC 6749 Section 2.3.1 (application/x-www-form-urlencoded percent-encoded)
+            val encodedClientId = java.net.URLEncoder.encode(clientId, "UTF-8")
+            val encodedSecret = java.net.URLEncoder.encode(plainSecret, "UTF-8")
+            val basicCredentials =
+                java.util.Base64
+                    .getEncoder()
+                    .encodeToString("$encodedClientId:$encodedSecret".toByteArray())
+
+            val response =
+                client.post("/oauth/token") {
+                    headers.append(io.ktor.http.HttpHeaders.Authorization, "Basic $basicCredentials")
+                    setBody(
+                        io.ktor.client.request.forms.FormDataContent(
+                            io.ktor.http.parameters {
+                                append("grant_type", "authorization_code")
+                                append("code", code)
+                                append("redirect_uri", redirectUri)
+                            },
+                        ),
+                    )
+                }
+
+            assertEquals(HttpStatusCode.OK, response.status)
+            val json = Json.parseToJsonElement(response.bodyAsText()).jsonObject
+            val token = json["access_token"]?.jsonPrimitive?.content
+            assertNotNull(token)
+            assertEquals(clientId, provider.getClientIdFromToken(token))
+        }
+
+    @Test
+    fun `GET oauth authorize with Google sandbox and Vertex AI redirect URIs succeeds`() =
+        testApplication {
+            val broadcaster = DiscordWebhookBroadcaster(repository)
+            val clientId = "sandbox-vertex-client"
+            registerTestClient(clientId)
+
+            val provider = McpOAuthProvider(clientRepository = clientRepository)
+            application {
+                mcpServerModule(broadcaster = broadcaster, clientRepository = clientRepository, oAuthProvider = provider)
+            }
+
+            val client = createClient { followRedirects = false }
+            val sandboxUri = "https://oauth-redirect-sandbox.googleusercontent.com/r/sandbox-proj"
+            val vertexUri = "https://vertexaisearch.cloud.google.com/oauth-redirect"
+
+            val responseSandbox =
+                client.get("/oauth/authorize") {
+                    url {
+                        parameters.append("client_id", clientId)
+                        parameters.append("redirect_uri", sandboxUri)
+                        parameters.append("response_type", "code")
+                    }
+                }
+            assertEquals(HttpStatusCode.Found, responseSandbox.status)
+            assertTrue(responseSandbox.headers["Location"]!!.startsWith(sandboxUri))
+
+            val responseVertex =
+                client.get("/oauth/authorize") {
+                    url {
+                        parameters.append("client_id", clientId)
+                        parameters.append("redirect_uri", vertexUri)
+                        parameters.append("response_type", "code")
+                    }
+                }
+            assertEquals(HttpStatusCode.Found, responseVertex.status)
+            assertTrue(responseVertex.headers["Location"]!!.startsWith(vertexUri))
         }
 }
