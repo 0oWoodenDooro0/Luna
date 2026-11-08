@@ -564,4 +564,114 @@ class LayaClientTest {
         val contextConf = LayaConfig.fromPluginContext(mockContext)
         assertEquals(20_000L, contextConf.timeoutMillis)
     }
+
+    @Test
+    fun `parses real Laya Studio response where noul is numeric probability`() =
+        runTest {
+            val mockEngine =
+                MockEngine {
+                    respond(
+                        content =
+                            """
+                            {
+                              "model": "convaiinnovations/laya",
+                              "answers": {
+                                "should_participate": {
+                                  "type": "noul",
+                                  "noul": 0.9875,
+                                  "confidence": 0.9875,
+                                  "answer_choice": null
+                                }
+                              },
+                              "usage": { "input_tokens": 42 }
+                            }
+                            """.trimIndent(),
+                        status = HttpStatusCode.OK,
+                        headers = headersOf(HttpHeaders.ContentType, "application/json"),
+                    )
+                }
+
+            val client =
+                LayaClient(
+                    config = LayaConfig(apiKey = "valid-token", threshold = 0.7),
+                    httpClient = createTestClient(mockEngine),
+                )
+
+            val decision = client.decide("User: Anyone know how to fix this issue?")
+            assertTrue(decision.shouldParticipate)
+            assertEquals(true, decision.noul)
+            assertEquals(0.9875, decision.probability)
+        }
+
+    @Test
+    fun `fails participation when numeric noul probability falls below threshold`() =
+        runTest {
+            val mockEngine =
+                MockEngine {
+                    respond(
+                        content =
+                            """
+                            {
+                              "model": "convaiinnovations/laya",
+                              "answers": {
+                                "should_participate": {
+                                  "type": "noul",
+                                  "noul": 0.25,
+                                  "confidence": 0.95,
+                                  "answer_choice": null
+                                }
+                              }
+                            }
+                            """.trimIndent(),
+                        status = HttpStatusCode.OK,
+                        headers = headersOf(HttpHeaders.ContentType, "application/json"),
+                    )
+                }
+
+            val client =
+                LayaClient(
+                    config = LayaConfig(apiKey = "valid-token", threshold = 0.7),
+                    httpClient = createTestClient(mockEngine),
+                )
+
+            val decision = client.decide("User: random noise")
+            assertFalse(decision.shouldParticipate)
+            assertEquals(false, decision.noul)
+            assertEquals(0.25, decision.probability)
+        }
+
+    @Test
+    fun `parses stringified numeric noul probability correctly`() =
+        runTest {
+            val mockEngine =
+                MockEngine {
+                    respond(
+                        content =
+                            """
+                            {
+                              "answers": {
+                                "should_participate": {
+                                  "type": "noul",
+                                  "noul": "0.85",
+                                  "confidence": "0.85"
+                                }
+                              }
+                            }
+                            """.trimIndent(),
+                        status = HttpStatusCode.OK,
+                        headers = headersOf(HttpHeaders.ContentType, "application/json"),
+                    )
+                }
+
+            val client =
+                LayaClient(
+                    config = LayaConfig(apiKey = "valid-token", threshold = 0.7),
+                    httpClient = createTestClient(mockEngine),
+                )
+
+            val decision = client.decide("User: Hello Luna")
+            assertTrue(decision.shouldParticipate)
+            assertEquals(true, decision.noul)
+            assertEquals(0.85, decision.probability)
+        }
 }
