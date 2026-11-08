@@ -95,6 +95,8 @@ object GeminiTools {
         GeminiTool(
             googleSearch = GeminiGoogleSearch(),
         )
+
+    val GOOGLE_SEARCH = GOOGLE_SEARCH_TOOL
 }
 
 /**

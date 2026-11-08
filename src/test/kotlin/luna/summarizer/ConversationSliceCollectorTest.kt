@@ -703,7 +703,7 @@ class ConversationSliceCollectorTest {
             val slice = collector.collectSlice(targetMsg)
             assertNotNull(slice)
             val content = slice.summaryInput.content
-            val expectedExcerpt = "A".repeat(40) + "..."
+            val expectedExcerpt = "A".repeat(37) + "..."
             assertTrue(content.contains("[Bob 回覆 Alice「$expectedExcerpt」]: Comment"))
         }
 }

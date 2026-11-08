@@ -1614,10 +1614,10 @@ class SummaryServiceTest {
         }
 
     @Test
-    fun `replyBuilder configures suppressEmbeds true and repliedUser false`() {
+    fun `buildReply configures suppressEmbeds true and repliedUser false`() {
         val service = SummaryService()
         val message = createMockMessage(id = 8001L, username = "alice", content = "Message needing summary")
-        val builder = service.replyBuilder(message, "Formatted summary text")
+        val builder = service.buildReply(message, "Formatted summary text")
 
         assertEquals(message.id, builder.messageReference)
         assertEquals("Formatted summary text", builder.content)
@@ -1718,38 +1718,4 @@ class SummaryServiceTest {
             assertEquals(2000, reply.length)
             assertTrue(reply.endsWith("..."))
         }
-
-    @Test
-    fun `default replyBuilder configures suppressEmbeds true and repliedUser false`() {
-        val service = SummaryService()
-        val message = createMockMessage(id = 8004L, username = "alice", content = "Test content with embed suppression")
-        val builder = service.replyBuilder(message, "Test content with embed suppression")
-
-        assertEquals(message.id, builder.messageReference)
-        assertEquals("Test content with embed suppression", builder.content)
-        assertEquals(true, builder.suppressEmbeds)
-        assertEquals(false, builder.allowedMentions?.repliedUser)
-    }
-
-    @Test
-    fun `SummaryService replyBuilder enforces suppressEmbeds for citations and summaries`() {
-        val capturedBuilders = mutableListOf<dev.kord.rest.builder.message.create.UserMessageCreateBuilder>()
-        val service =
-            SummaryService(
-                replyBuilder = { msg, content ->
-                    val builder =
-                        dev.kord.rest.builder.message.create.UserMessageCreateBuilder().apply {
-                            this.messageReference = msg.id
-                            this.content = content
-                            this.suppressEmbeds = true
-                        }
-                    capturedBuilders.add(builder)
-                    builder
-                },
-                replySender = { _, _ -> },
-            )
-        val msg = createMockMessage(id = 8005L, username = "alice", content = "Test")
-        val builder = service.replyBuilder(msg, "Content")
-        assertTrue(builder.suppressEmbeds == true, "Embed suppression flag must be true")
-    }
 }

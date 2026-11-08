@@ -86,16 +86,26 @@ open class GeminiSummarizer(
                 try {
                     summarizeDirect(input, tools = initialTools)
                 } catch (e: Exception) {
-                    if (input.imageAttachments.isNotEmpty() || (initialTools != null && input.tools == null)) {
-                        logger.warn("Summarization failed with exception: {}. Retrying baseline fallback.", e.message)
+                    if (initialTools != null && input.tools == null) {
+                        logger.warn("Search grounding failed with exception: {}. Retrying baseline without search.", e.message)
+                        retryBaseline(input.copy(tools = null))
+                    } else if (input.imageAttachments.isNotEmpty()) {
+                        logger.warn("Multimodal summarization failed with exception: {}. Retrying text baseline without images.", e.message)
                         retryBaseline(input.copy(imageAttachments = emptyList(), tools = null))
                     } else {
                         throw e
                     }
                 }
-            return if (res is SummaryResult.Error && (input.imageAttachments.isNotEmpty() || (initialTools != null && input.tools == null))) {
-                logger.warn("Summarization failed: {}. Retrying baseline fallback.", res.message)
-                retryBaseline(input.copy(imageAttachments = emptyList(), tools = null))
+            return if (res is SummaryResult.Error) {
+                if (initialTools != null && input.tools == null) {
+                    logger.warn("Search grounding returned error: {}. Retrying baseline without search.", res.message)
+                    retryBaseline(input.copy(tools = null))
+                } else if (input.imageAttachments.isNotEmpty()) {
+                    logger.warn("Multimodal summarization returned error: {}. Retrying text baseline without images.", res.message)
+                    retryBaseline(input.copy(imageAttachments = emptyList(), tools = null))
+                } else {
+                    res
+                }
             } else {
                 res
             }
@@ -470,7 +480,7 @@ open class GeminiSummarizer(
                                     modelContent = candidateContent ?: GeminiContent(role = "model", parts = parts),
                                     toolName = functionCall.name,
                                     toolResponseContent = toolOutput,
-                                    tools = activeTools?.filter { it.actualGoogleSearch != null }?.takeIf { it.isNotEmpty() },
+                                    tools = activeTools?.takeIf { it.isNotEmpty() },
                                 )
                             }
                         } else {

@@ -114,7 +114,10 @@ open class ConversationSliceCollector(
             }
         val subsequentMessages = subsequentMessagesRaw.filterNot { isNoiseMessage(it) }
 
-        val allMessages = precedingMessages + message + subsequentMessages
+        val allMessages =
+            (precedingMessages + message + subsequentMessages)
+                .distinctBy { it.id }
+                .sortedBy { it.id.value }
         val primaryUrl = allMessages.asReversed().firstNotNullOfOrNull { msg -> URL_REGEX.find(msg.content)?.value }
 
         val targetImages = extractImageAttachments(message)
@@ -303,27 +306,37 @@ open class ConversationSliceCollector(
         return timeOrder ?: (msg.id != baseline.id && msg.id.value < baseline.id.value)
     }
 
-    private suspend fun shouldStopBacktracking(
+    private suspend fun shouldStopTraversal(
         msg: Message,
         referenceMessage: Message,
         accumulatedLength: Int,
+        forward: Boolean = false,
     ): Boolean {
         if (isBotSummaryMessage(msg)) {
-            logger.debug("Encountered bot summary message {}, stopping history backtracking", msg.id)
+            val direction = if (forward) "forward traversal" else "history backtracking"
+            logger.debug("Encountered bot summary message {}, stopping {}", msg.id, direction)
             return true
         }
 
-        val elapsed = runCatching { referenceMessage.timestamp - msg.timestamp }.getOrNull()
+        val elapsed =
+            if (forward) {
+                runCatching { msg.timestamp - referenceMessage.timestamp }.getOrNull()
+            } else {
+                runCatching { referenceMessage.timestamp - msg.timestamp }.getOrNull()
+            }
         if (elapsed != null && elapsed > inactivityGap) {
-            logger.debug("Inactivity gap {} exceeds {}, stopping history backtracking", elapsed, inactivityGap)
+            val direction = if (forward) "forward traversal" else "history backtracking"
+            logger.debug("Inactivity gap {} exceeds {}, stopping {}", elapsed, inactivityGap, direction)
             return true
         }
 
         if (accumulatedLength + msg.content.length > maxCharacterBudget) {
+            val direction = if (forward) "forward traversal" else "history backtracking"
             logger.debug(
-                "Accumulated character budget {} exceeded with message {}, stopping history backtracking",
+                "Accumulated character budget {} exceeded with message {}, stopping {}",
                 maxCharacterBudget,
                 msg.id,
+                direction,
             )
             return true
         }
@@ -354,7 +367,7 @@ open class ConversationSliceCollector(
         for (i in chronological.lastIndex downTo 0) {
             val msg = chronological[i]
 
-            if (shouldStopBacktracking(msg, referenceMessage, accumulatedLength)) {
+            if (shouldStopTraversal(msg, referenceMessage, accumulatedLength, forward = false)) {
                 stopIndex = i
                 break
             }
@@ -397,23 +410,7 @@ open class ConversationSliceCollector(
         var accumulatedLength = initialAccumulatedLength
 
         for (msg in chronological) {
-            if (isBotSummaryMessage(msg)) {
-                logger.debug("Encountered bot summary message {} during forward traversal, stopping", msg.id)
-                break
-            }
-
-            val elapsed = runCatching { msg.timestamp - referenceMessage.timestamp }.getOrNull()
-            if (elapsed != null && elapsed > inactivityGap) {
-                logger.debug("Inactivity gap {} exceeds {} during forward traversal, stopping", elapsed, inactivityGap)
-                break
-            }
-
-            if (accumulatedLength + msg.content.length > maxCharacterBudget) {
-                logger.debug(
-                    "Accumulated character budget {} exceeded during forward traversal with message {}, stopping",
-                    maxCharacterBudget,
-                    msg.id,
-                )
+            if (shouldStopTraversal(msg, referenceMessage, accumulatedLength, forward = true)) {
                 break
             }
 
@@ -475,7 +472,7 @@ open class ConversationSliceCollector(
 
             val msg = rawCandidates[i]
 
-            if (shouldStopBacktracking(msg, referenceMessage, accumulatedLength)) {
+            if (shouldStopTraversal(msg, referenceMessage, accumulatedLength, forward = false)) {
                 break
             }
 
@@ -529,7 +526,7 @@ open class ConversationSliceCollector(
                         val rawContent = refMsg.content.trim().replace("\n", " ")
                         val excerpt =
                             if (rawContent.length > 40) {
-                                "${rawContent.take(40)}..."
+                                "${rawContent.take(37)}..."
                             } else {
                                 rawContent
                             }

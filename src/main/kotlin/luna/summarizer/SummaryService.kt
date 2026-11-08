@@ -65,8 +65,8 @@ class SummaryService(
     val summarizer: GeminiSummarizer = GeminiSummarizer(),
     val collector: ConversationSliceCollector = ConversationSliceCollector(),
     val configuredEmoji: String? = null,
-    val replyBuilder: (message: Message, content: String) -> dev.kord.rest.builder.message.create.UserMessageCreateBuilder = { message, content ->
-        dev.kord.rest.builder.message.create.UserMessageCreateBuilder().apply {
+    val replySender: suspend (message: Message, content: String) -> Unit = { message, content ->
+        message.reply {
             this.messageReference = message.id
             this.content = content
             this.suppressEmbeds = true
@@ -75,16 +75,20 @@ class SummaryService(
             }
         }
     },
-    internal val replySender: suspend (message: Message, content: String) -> Unit = { message, content ->
-        val builder = replyBuilder(message, content)
-        message.reply {
-            this.messageReference = builder.messageReference
-            this.content = builder.content
-            this.suppressEmbeds = builder.suppressEmbeds
-            this.allowedMentions = builder.allowedMentions
-        }
-    },
 ) {
+    fun buildReply(
+        message: Message,
+        content: String,
+    ): dev.kord.rest.builder.message.create.UserMessageCreateBuilder =
+        dev.kord.rest.builder.message.create.UserMessageCreateBuilder().apply {
+            this.messageReference = message.id
+            this.content = content
+            this.suppressEmbeds = true
+            allowedMentions {
+                repliedUser = false
+            }
+        }
+
     private val logger = LoggerFactory.getLogger(SummaryService::class.java)
     private val statusCache = BoundedStatusCache()
 
