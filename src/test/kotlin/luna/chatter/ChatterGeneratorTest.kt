@@ -145,6 +145,10 @@ class ChatterGeneratorTest {
         assertTrue(userPrompt.contains("空格") || userPrompt.contains("分行"))
         assertTrue(userPrompt.contains("emoji") || userPrompt.contains("表情符號"))
         assertTrue(userPrompt.contains("重點") || userPrompt.contains("短句"))
+        assertTrue(userPrompt.contains("順著最新") || userPrompt.contains("舊句子"))
+
+        val systemPrompt = ChatterPromptBuilder.buildSystemInstruction()
+        assertTrue(systemPrompt.contains("最新") && (systemPrompt.contains("舊句子") || systemPrompt.contains("切勿回頭")))
     }
 
     @Test

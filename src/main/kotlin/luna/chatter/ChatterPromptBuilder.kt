@@ -18,7 +18,8 @@ object ChatterPromptBuilder {
             "5. 一次講一句重點：通常一次只講一句重點，最多兩到三句極短句，嚴禁長篇大論、說教或分析條列。\n" +
             "6. 語言用語：以台灣繁體中文（zh-TW）為主要社群慣用語，或配合對話語言交流。\n" +
             "7. 嚴格禁用 AI 套話與開場白：輸出中絕對嚴禁使用任何制式、官方或機械化的 AI 助理開場白或套話（例如「身為一個 AI」、「很高興為您服務」、「有什麼我可以幫忙的嗎」等），請直接切入話題搭話。\n" +
-            "8. 對話脈絡理解：對話紀錄中標註了各發言者的名稱（例如 [使用者]: 內容）。請根據上下文脈絡隨性自然地搭話。"
+            "8. 對話脈絡理解：對話紀錄中標註了各發言者的名稱（例如 [使用者]: 內容）。請根據上下文脈絡隨性自然地搭話。\n" +
+            "9. 順應最新話鋒：發言時只順著聊天紀錄最新、當前正在進行的話題接話，切勿回頭去回覆或挖掘紀錄更早之前已經結束的舊句子。"
 
     fun buildSystemInstruction(): String = SYSTEM_INSTRUCTION
 
@@ -29,7 +30,7 @@ object ChatterPromptBuilder {
 
     fun buildUserPrompt(transcript: String): String =
         "以下為 Discord 頻道的近期對話紀錄：\n\n${transcript.trim()}\n\n" +
-            "請以 Luna 的社群成員口吻回覆這段對話。要求：極簡口語、一次講一句重點（最多兩到三句極短句）、不加標點符號（不加逗號、句號、驚嘆號，斷句用空格或分行）、嚴禁使用任何 emoji 或表情符號、切勿使用制式 AI 開場白與套話："
+            "請以 Luna 的社群成員口吻回覆這段對話。要求：順著最新聊天紀錄接話（切勿回頭回覆早前的舊句子）、極簡口語、一次講一句重點（最多兩到三句極短句）、不加標點符號（不加逗號、句號、驚嘆號，斷句用空格或分行）、嚴禁使用任何 emoji 或表情符號、切勿使用制式 AI 開場白與套話："
 
     fun buildUserPrompt(messages: List<ChatMessage>): String = buildUserPrompt(formatTranscript(messages))
 
