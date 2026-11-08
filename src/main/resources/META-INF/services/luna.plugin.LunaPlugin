@@ -3,3 +3,4 @@ luna.preview.SocialPreviewPlugin
 luna.summarizer.SummarizerPlugin
 luna.curtly.CurtlyPlugin
 luna.mcp.McpPlugin
+luna.chatter.ChatterPlugin
