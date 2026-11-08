@@ -143,14 +143,13 @@ open class ChatterNoiseFilter(
             )
         }
 
-        val stripped = stripLunaMentions(message.content, resolvedSelfId)
         val finalContent =
-            when {
-                stripped.isNotBlank() -> stripped
-                directMention -> CALLOUT_GREETING
-                hasAttachments -> "[Attachment]"
-                else -> message.content
-            }
+            resolveCleanedContent(
+                rawContent = message.content,
+                botSelfId = resolvedSelfId,
+                hasAttachments = hasAttachments,
+                isDirectMention = directMention,
+            ) ?: message.content
 
         val speakerName = extractSpeakerName(message)
 
@@ -251,16 +250,31 @@ open class ChatterNoiseFilter(
         val hasAttachments = runCatching { message.attachments.isNotEmpty() }.getOrDefault(false)
         if (message.content.isBlank() && !hasAttachments) return null
 
-        val stripped = stripLunaMentions(message.content, resolvedSelfId)
         val content =
-            when {
-                stripped.isNotBlank() -> stripped
-                hasAttachments -> "[Attachment]"
-                message.content.isNotBlank() -> CALLOUT_GREETING
-                else -> return null
-            }
+            resolveCleanedContent(
+                rawContent = message.content,
+                botSelfId = resolvedSelfId,
+                hasAttachments = hasAttachments,
+            ) ?: return null
+
         val speaker = if (isLunaBot) "Luna" else extractSpeakerName(message)
         return ChatMessage(speaker, content)
+    }
+
+    fun resolveCleanedContent(
+        rawContent: String,
+        botSelfId: Snowflake? = null,
+        hasAttachments: Boolean = false,
+        isDirectMention: Boolean = false,
+    ): String? {
+        val stripped = stripLunaMentions(rawContent, botSelfId)
+        return when {
+            stripped.isNotBlank() -> stripped
+            isDirectMention -> CALLOUT_GREETING
+            hasAttachments -> "[Attachment]"
+            rawContent.isNotBlank() -> CALLOUT_GREETING
+            else -> null
+        }
     }
 
     fun filterHistory(

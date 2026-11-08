@@ -131,7 +131,7 @@ open class DialogueNoiseFilter(
         val isLunaBot = currentSelfId != null && authorId == currentSelfId
 
         if (isLunaBot) {
-            if (isBotSummaryMessage(message) || summaryRegistry.contains(message.id)) {
+            if (isBotSummaryMessage(message)) {
                 return true
             }
         } else if (!isLuna && (message.author == null || message.author?.isBot == true)) {

@@ -29,7 +29,7 @@ object ChatterPromptBuilder {
 
     fun buildUserPrompt(transcript: String): String =
         "以下為 Discord 頻道的近期對話紀錄：\n\n${transcript.trim()}\n\n" +
-            "請以 Luna 的社群成員口吻回覆這段對話。要求：極簡口語、一次講一句重點（最多兩到三句極短句）、不加標點符號（不加逗號句號，斷句用空格或分行）、嚴禁使用任何 emoji 或表情符號、切勿使用制式 AI 開場白與套話："
+            "請以 Luna 的社群成員口吻回覆這段對話。要求：極簡口語、一次講一句重點（最多兩到三句極短句）、不加標點符號（不加逗號、句號、驚嘆號，斷句用空格或分行）、嚴禁使用任何 emoji 或表情符號、切勿使用制式 AI 開場白與套話："
 
     fun buildUserPrompt(messages: List<ChatMessage>): String = buildUserPrompt(formatTranscript(messages))
 
