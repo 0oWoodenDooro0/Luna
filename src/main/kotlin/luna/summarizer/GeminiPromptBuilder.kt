@@ -197,13 +197,11 @@ object GeminiPromptBuilder {
     ): GeminiGenerateContentRequest {
         val parts = mutableListOf<GeminiPart>()
         if (!input.videoUri.isNullOrBlank()) {
-            val mode = resolveProcessingMode(input.videoDurationSeconds)
             parts.add(
                 GeminiPart(
                     fileData =
                         GeminiFileData(
                             fileUri = input.videoUri,
-                            processing = mode.value,
                         ),
                 ),
             )

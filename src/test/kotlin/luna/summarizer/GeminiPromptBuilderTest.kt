@@ -7,6 +7,7 @@ import kotlin.test.assertContains
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 class GeminiPromptBuilderTest {
@@ -144,7 +145,7 @@ class GeminiPromptBuilderTest {
     }
 
     @Test
-    fun `buildRequest includes video file data part with static processing mode for short videos`() {
+    fun `buildRequest includes video file data part adhering to REST schema without invalid processing field`() {
         val input =
             SummaryInput(
                 title = "Short YouTube Clip",
@@ -161,7 +162,7 @@ class GeminiPromptBuilderTest {
         val fileData = videoPart.fileData
         assertNotNull(fileData)
         assertEquals("https://www.youtube.com/watch?v=short123", fileData.fileUri)
-        assertEquals("static", fileData.processing)
+        assertNull(fileData.mimeType)
 
         val textPart = parts[1]
         val text = textPart.text
@@ -172,31 +173,17 @@ class GeminiPromptBuilderTest {
 
         val serialized = json.encodeToString(request)
         assertContains(serialized, "\"file_uri\":\"https://www.youtube.com/watch?v=short123\"")
-        assertContains(serialized, "\"processing\":\"static\"")
+        assertFalse(serialized.contains("\"processing\""), "file_data must not contain 'processing' field")
     }
 
     @Test
-    fun `buildRequest includes video file data part with agentic processing mode for long videos`() {
-        val input =
-            SummaryInput(
-                title = "Long Tech Conference Talk",
-                content = "1-hour deep dive into compiler architecture",
-                videoUri = "https://www.youtube.com/watch?v=longTalk456",
-                videoDurationSeconds = 3600L,
-            )
-        val request = GeminiPromptBuilder.buildRequest(input)
-
-        val parts = request.contents.first().parts
-        assertEquals(2, parts.size)
-        val videoPart = parts[0]
-        val fileData = videoPart.fileData
-        assertNotNull(fileData)
-        assertEquals("https://www.youtube.com/watch?v=longTalk456", fileData.fileUri)
-        assertEquals("agentic", fileData.processing)
-
-        val serialized = json.encodeToString(request)
-        assertContains(serialized, "\"file_uri\":\"https://www.youtube.com/watch?v=longTalk456\"")
-        assertContains(serialized, "\"processing\":\"agentic\"")
+    fun `resolveProcessingMode correctly classifies video duration boundaries`() {
+        assertEquals(VideoProcessingMode.STATIC, GeminiPromptBuilder.resolveProcessingMode(null))
+        assertEquals(VideoProcessingMode.STATIC, GeminiPromptBuilder.resolveProcessingMode(0L))
+        assertEquals(VideoProcessingMode.STATIC, GeminiPromptBuilder.resolveProcessingMode(120L))
+        assertEquals(VideoProcessingMode.STATIC, GeminiPromptBuilder.resolveProcessingMode(300L))
+        assertEquals(VideoProcessingMode.AGENTIC, GeminiPromptBuilder.resolveProcessingMode(301L))
+        assertEquals(VideoProcessingMode.AGENTIC, GeminiPromptBuilder.resolveProcessingMode(3600L))
     }
 
     @Test
@@ -576,7 +563,7 @@ class GeminiPromptBuilderTest {
         val videoPart = parts[0].fileData
         assertNotNull(videoPart)
         assertEquals("https://www.youtube.com/watch?v=fullStackDemo", videoPart.fileUri)
-        assertEquals("static", videoPart.processing)
+        assertNull(videoPart.mimeType)
 
         val imagePart1 = parts[1].fileData
         assertNotNull(imagePart1)

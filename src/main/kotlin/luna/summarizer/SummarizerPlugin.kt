@@ -66,15 +66,17 @@ class SummarizerPlugin(
                 ?: context.config<String>("gemini.api_key")
                 ?: ""
 
-        val model =
+        val rawModel =
             context.config<String>("GEMINI_MODEL")?.takeIf { it.isNotBlank() }
                 ?: context.config<String>("gemini.model")?.takeIf { it.isNotBlank() }
                 ?: GeminiConfig.DEFAULT_MODEL
+        val model = rawModel.trim().removePrefix("models/")
 
-        val baseUrl =
+        val rawBaseUrl =
             context.config<String>("GEMINI_BASE_URL")?.takeIf { it.isNotBlank() }
                 ?: context.config<String>("gemini.baseUrl")?.takeIf { it.isNotBlank() }
                 ?: GeminiConfig.DEFAULT_BASE_URL
+        val baseUrl = rawBaseUrl.trim().trimEnd('/').removeSuffix("/v1beta")
 
         val emoji =
             context.config<String>("SUMMARY_EMOJI")?.takeIf { it.isNotBlank() }

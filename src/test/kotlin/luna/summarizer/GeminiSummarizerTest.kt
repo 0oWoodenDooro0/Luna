@@ -1611,4 +1611,71 @@ class GeminiSummarizerTest {
         val enabledCfg = GeminiConfig.fromEnv(mapOf("GEMINI_SEARCH_GROUNDING_ENABLED" to "true"))
         assertTrue(enabledCfg.searchGroundingEnabled)
     }
+
+    @Test
+    fun `short video summarization routes to generateContent with clean file_data and sanitized model path`() =
+        runTest {
+            var recordedUrl: String? = null
+            var recordedBody: String? = null
+
+            val responseJson =
+                """
+                {
+                  "candidates": [
+                    {
+                      "content": {
+                        "role": "model",
+                        "parts": [
+                          {
+                            "text": "TL;DR:\n這是短影片摘要。\n\n核心重點:\n• 重點一\n• 重點二"
+                          }
+                        ]
+                      },
+                      "finishReason": "STOP"
+                    }
+                  ]
+                }
+                """.trimIndent()
+
+            val mockEngine =
+                MockEngine { request ->
+                    recordedUrl = request.url.toString()
+                    recordedBody = request.body.toByteArray().decodeToString()
+                    respond(
+                        content = responseJson,
+                        status = HttpStatusCode.OK,
+                        headers = headersOf(HttpHeaders.ContentType, "application/json"),
+                    )
+                }
+
+            val config =
+                GeminiConfig(
+                    apiKey = "secret-key",
+                    model = "models/gemini-3.5-flash-lite",
+                    baseUrl = "https://generativelanguage.googleapis.com/v1beta/",
+                )
+            val summarizer = GeminiSummarizer(config = config, httpClient = createTestClient(mockEngine))
+
+            val input =
+                SummaryInput(
+                    content = "Short video description",
+                    videoUri = "https://www.youtube.com/watch?v=short123",
+                    videoDurationSeconds = 179L,
+                )
+
+            val result = summarizer.summarize(input)
+            assertIs<SummaryResult.Success>(result)
+            assertTrue(result.text.contains("這是短影片摘要"))
+
+            // Verify endpoint does not have double 'models/' or double 'v1beta'
+            assertEquals(
+                "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent?key=secret-key",
+                recordedUrl,
+            )
+
+            // Verify file_data does NOT contain invalid 'processing' field
+            val body = checkNotNull(recordedBody)
+            assertTrue(body.contains("\"file_uri\":\"https://www.youtube.com/watch?v=short123\""))
+            assertFalse(body.contains("\"processing\""), "REST payload must not contain 'processing' in file_data")
+        }
 }

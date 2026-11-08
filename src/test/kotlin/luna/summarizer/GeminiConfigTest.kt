@@ -51,4 +51,27 @@ class GeminiConfigTest {
         assertEquals("", envConfig.apiKey)
         assertEquals("gemini-3.5-flash-lite", envConfig.model)
     }
+
+    @Test
+    fun `cleanModel and cleanBaseUrl sanitize models prefix and trailing v1beta path`() {
+        val config =
+            GeminiConfig(
+                apiKey = "key",
+                model = "models/gemini-3.5-flash-lite",
+                baseUrl = "https://generativelanguage.googleapis.com/v1beta/",
+            )
+        assertEquals("gemini-3.5-flash-lite", config.cleanModel)
+        assertEquals("https://generativelanguage.googleapis.com", config.cleanBaseUrl)
+
+        val fromEnvConfig =
+            GeminiConfig.fromEnv(
+                mapOf(
+                    "GEMINI_API_KEY" to "key",
+                    "GEMINI_MODEL" to "models/gemini-2.0-flash",
+                    "GEMINI_BASE_URL" to "https://custom.endpoint.com/v1beta",
+                ),
+            )
+        assertEquals("gemini-2.0-flash", fromEnvConfig.cleanModel)
+        assertEquals("https://custom.endpoint.com", fromEnvConfig.cleanBaseUrl)
+    }
 }

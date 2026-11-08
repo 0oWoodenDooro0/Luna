@@ -270,7 +270,6 @@ data class GeminiFileData(
     val fileUri: String,
     @SerialName("mime_type")
     val mimeType: String? = null,
-    val processing: String? = null,
 )
 
 @Serializable

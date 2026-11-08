@@ -206,7 +206,7 @@ open class GeminiSummarizer(
         activeTools: List<GeminiTool>?,
     ): SummaryResult {
         val endpoint =
-            "${config.baseUrl.trimEnd('/')}/v1beta/models/${config.model}:generateContent?key=${config.apiKey}"
+            "${config.cleanBaseUrl}/v1beta/models/${config.cleanModel}:generateContent?key=${config.apiKey}"
 
         return try {
             val response: HttpResponse =
@@ -284,10 +284,10 @@ open class GeminiSummarizer(
         val userPrompt = GeminiPromptBuilder.buildUserPrompt(input)
         val systemInstruction = GeminiPromptBuilder.buildSystemInstruction(input)
         val promptText = "$systemInstruction\n\n---\n\n$userPrompt"
-        val endpoint = "${config.baseUrl.trimEnd('/')}/v1beta/interactions?key=${config.apiKey}"
+        val endpoint = "${config.cleanBaseUrl}/v1beta/interactions?key=${config.apiKey}"
         val requestPayload =
             GeminiInteractionRequest(
-                model = config.model,
+                model = config.cleanModel,
                 input =
                     listOf(
                         GeminiInteractionInput(
@@ -344,7 +344,7 @@ open class GeminiSummarizer(
     }
 
     private suspend fun pollInteraction(id: String): SummaryResult {
-        val endpoint = "${config.baseUrl.trimEnd('/')}/v1beta/interactions/$id?key=${config.apiKey}"
+        val endpoint = "${config.cleanBaseUrl}/v1beta/interactions/$id?key=${config.apiKey}"
         var attempts = 0
 
         while (attempts < maxPollingAttempts) {
