@@ -65,16 +65,30 @@ class SummaryService(
     val summarizer: GeminiSummarizer = GeminiSummarizer(),
     val collector: ConversationSliceCollector = ConversationSliceCollector(),
     val configuredEmoji: String? = null,
-    private val replySender: suspend (message: Message, content: String) -> Unit = { message, content ->
+    val replySender: suspend (message: Message, content: String) -> Unit = { message, content ->
         message.reply {
             this.messageReference = message.id
             this.content = content
+            this.suppressEmbeds = true
             allowedMentions {
                 repliedUser = false
             }
         }
     },
 ) {
+    fun buildReply(
+        message: Message,
+        content: String,
+    ): dev.kord.rest.builder.message.create.UserMessageCreateBuilder =
+        dev.kord.rest.builder.message.create.UserMessageCreateBuilder().apply {
+            this.messageReference = message.id
+            this.content = content
+            this.suppressEmbeds = true
+            allowedMentions {
+                repliedUser = false
+            }
+        }
+
     private val logger = LoggerFactory.getLogger(SummaryService::class.java)
     private val statusCache = BoundedStatusCache()
 
@@ -189,8 +203,16 @@ class SummaryService(
                 is SummaryResult.Success -> {
                     statusCache[event.messageId] = SummaryStatus.DONE
                     val sanitized = EmojiSanitizer.stripEmojis(result.text).trim()
+                    val citationsText = GeminiPromptBuilder.formatGroundingCitations(result.citations)
+                    val combinedText =
+                        when {
+                            sanitized.isNotBlank() && citationsText.isNotBlank() -> "$sanitized\n\n$citationsText"
+                            sanitized.isNotBlank() -> sanitized
+                            citationsText.isNotBlank() -> citationsText
+                            else -> ""
+                        }
                     val textToSend =
-                        truncateForDiscord(sanitized).takeIf { it.isNotBlank() }
+                        truncateForDiscord(combinedText).takeIf { it.isNotBlank() }
                             ?: FALLBACK_EMPTY_SUMMARY_MESSAGE
                     replySender(message, textToSend)
                     JsonLogger.log(
@@ -203,6 +225,7 @@ class SummaryService(
                                 "hasUrl" to (slice.primaryUrl != null),
                                 "url" to (slice.primaryUrl ?: ""),
                                 "summaryLength" to textToSend.length,
+                                "citationCount" to result.citations.size,
                             ),
                     )
                 }

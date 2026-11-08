@@ -44,6 +44,19 @@ open class ConversationSliceCollector(
             .toList()
             .reversed()
     },
+    val forwardFetcher: suspend (message: Message, limit: Int) -> List<Message> = { message, limit ->
+        message.channel
+            .getMessagesAfter(message.id, limit = limit)
+            .toList()
+    },
+    val referenceFetcher: suspend (message: Message) -> Message? = { msg ->
+        runCatching {
+            msg.referencedMessage
+                ?: msg.messageReference?.data?.id?.value?.let { refId ->
+                    msg.channel.getMessageOrNull(refId)
+                }
+        }.getOrNull()
+    },
 ) {
     private val logger = LoggerFactory.getLogger(ConversationSliceCollector::class.java)
 
@@ -88,32 +101,44 @@ open class ConversationSliceCollector(
 
         val (precedingMessagesRaw, unconsumedHistory) = retrieveContextMessagesWithHistory(message)
         val precedingMessages = precedingMessagesRaw.filterNot { isNoiseMessage(it) }
-        val allMessages =
-            if (precedingMessages.isNotEmpty()) {
-                precedingMessages + message
+
+        val consumedCount = precedingMessagesRaw.size + 1
+        val remainingBudget = (maxHistoryMessages - consumedCount).coerceAtLeast(0)
+        val initialLength = message.content.length + precedingMessagesRaw.sumOf { it.content.length }
+
+        val subsequentMessagesRaw =
+            if (remainingBudget > 0) {
+                retrieveForwardMessages(message, remainingBudget, initialLength)
             } else {
-                listOf(message)
+                emptyList()
             }
+        val subsequentMessages = subsequentMessagesRaw.filterNot { isNoiseMessage(it) }
+
+        val allMessages =
+            (precedingMessages + message + subsequentMessages)
+                .distinctBy { it.id }
+                .sortedBy { it.id.value }
         val primaryUrl = allMessages.asReversed().firstNotNullOfOrNull { msg -> URL_REGEX.find(msg.content)?.value }
 
         val targetImages = extractImageAttachments(message)
         val retainedTargetImages = targetImages.take(maxImages)
         val remainingCapacity = kotlin.math.max(0, maxImages - retainedTargetImages.size)
 
-        val precedingMessagesWithImages = precedingMessages.map { msg -> msg to extractImageAttachments(msg) }
-        val retainedPrecedingByMessage = mutableMapOf<Snowflake, List<ChatImageAttachment>>()
+        val otherMessages = precedingMessages + subsequentMessages
+        val otherMessagesWithImages = otherMessages.map { msg -> msg to extractImageAttachments(msg) }
+        val retainedOtherByMessage = mutableMapOf<Snowflake, List<ChatImageAttachment>>()
         var capacityLeft = remainingCapacity
 
-        for ((msg, images) in precedingMessagesWithImages.asReversed()) {
+        for ((msg, images) in otherMessagesWithImages.asReversed()) {
             if (capacityLeft <= 0 || images.isEmpty()) {
-                retainedPrecedingByMessage[msg.id] = emptyList()
+                retainedOtherByMessage[msg.id] = emptyList()
                 continue
             }
             if (images.size <= capacityLeft) {
-                retainedPrecedingByMessage[msg.id] = images
+                retainedOtherByMessage[msg.id] = images
                 capacityLeft -= images.size
             } else {
-                retainedPrecedingByMessage[msg.id] = images.takeLast(capacityLeft)
+                retainedOtherByMessage[msg.id] = images.takeLast(capacityLeft)
                 capacityLeft = 0
             }
         }
@@ -124,22 +149,32 @@ open class ConversationSliceCollector(
                     if (msg.id == message.id) {
                         retainedTargetImages
                     } else {
-                        retainedPrecedingByMessage[msg.id].orEmpty()
+                        retainedOtherByMessage[msg.id].orEmpty()
                     }
                 msg to retained
             }
         val sliceImageAttachments = messagesWithImages.flatMap { it.second }
 
+        val replyReferencesByMessage = resolveExternalReplyReferences(allMessages)
+
         val formattedContent =
-            if (precedingMessages.isNotEmpty()) {
-                val allMessages = precedingMessages + message
+            if (allMessages.size > 1) {
                 val imagesMap = messagesWithImages.toMap().mapKeys { it.key.id }
-                val (formatted, _) = formatDialogueMessages(allMessages, imagesMap)
+                val (formatted, _) =
+                    formatDialogueMessages(
+                        messages = allMessages,
+                        imagesByMessage = imagesMap,
+                        replyReferencesByMessage = replyReferencesByMessage,
+                    )
                 formatted
             } else {
                 val embedText = formatEmbedPreviews(message)
-                if (sliceImageAttachments.isNotEmpty() || embedText.isNotEmpty()) {
-                    formatDialogueMessages(listOf(message), mapOf(message.id to sliceImageAttachments)).first
+                if (sliceImageAttachments.isNotEmpty() || embedText.isNotEmpty() || replyReferencesByMessage.isNotEmpty()) {
+                    formatDialogueMessages(
+                        messages = listOf(message),
+                        imagesByMessage = mapOf(message.id to sliceImageAttachments),
+                        replyReferencesByMessage = replyReferencesByMessage,
+                    ).first
                 } else {
                     message.content
                 }
@@ -164,7 +199,7 @@ open class ConversationSliceCollector(
 
                 val postContent = post.content.ifBlank { "" }.trim()
                 val combinedContent =
-                    if (precedingMessages.isEmpty() && sliceImageAttachments.isEmpty()) {
+                    if (allMessages.size == 1 && sliceImageAttachments.isEmpty()) {
                         val commentary = message.content.replace(primaryUrl, "").trim()
                         if (commentary.isNotBlank() && postContent.isNotBlank()) {
                             "使用者附註: $commentary\n\n內容:\n$postContent"
@@ -207,12 +242,22 @@ open class ConversationSliceCollector(
                 )
 
             if (earlierMessages.isNotEmpty()) {
-                val (earlierTranscript, _) = formatDialogueMessages(earlierMessages, startingImageIndex = 1)
+                val earlierReferences = resolveExternalReplyReferences(earlierMessages)
+                val (earlierTranscript, _) =
+                    formatDialogueMessages(
+                        messages = earlierMessages,
+                        startingImageIndex = 1,
+                        replyReferencesByMessage = earlierReferences,
+                    )
                 val baselineTranscript =
-                    if (precedingMessages.isNotEmpty()) {
+                    if (allMessages.size > 1) {
                         formattedContent
                     } else {
-                        formatDialogueMessages(allMessages, startingImageIndex = 1).first
+                        formatDialogueMessages(
+                            messages = allMessages,
+                            startingImageIndex = 1,
+                            replyReferencesByMessage = replyReferencesByMessage,
+                        ).first
                     }
                 GeminiPromptBuilder.formatExpandedDialogue(
                     earlierContent = earlierTranscript,
@@ -261,27 +306,37 @@ open class ConversationSliceCollector(
         return timeOrder ?: (msg.id != baseline.id && msg.id.value < baseline.id.value)
     }
 
-    private suspend fun shouldStopBacktracking(
+    private suspend fun shouldStopTraversal(
         msg: Message,
         referenceMessage: Message,
         accumulatedLength: Int,
+        forward: Boolean = false,
     ): Boolean {
         if (isBotSummaryMessage(msg)) {
-            logger.debug("Encountered bot summary message {}, stopping history backtracking", msg.id)
+            val direction = if (forward) "forward traversal" else "history backtracking"
+            logger.debug("Encountered bot summary message {}, stopping {}", msg.id, direction)
             return true
         }
 
-        val elapsed = runCatching { referenceMessage.timestamp - msg.timestamp }.getOrNull()
+        val elapsed =
+            if (forward) {
+                runCatching { msg.timestamp - referenceMessage.timestamp }.getOrNull()
+            } else {
+                runCatching { referenceMessage.timestamp - msg.timestamp }.getOrNull()
+            }
         if (elapsed != null && elapsed > inactivityGap) {
-            logger.debug("Inactivity gap {} exceeds {}, stopping history backtracking", elapsed, inactivityGap)
+            val direction = if (forward) "forward traversal" else "history backtracking"
+            logger.debug("Inactivity gap {} exceeds {}, stopping {}", elapsed, inactivityGap, direction)
             return true
         }
 
         if (accumulatedLength + msg.content.length > maxCharacterBudget) {
+            val direction = if (forward) "forward traversal" else "history backtracking"
             logger.debug(
-                "Accumulated character budget {} exceeded with message {}, stopping history backtracking",
+                "Accumulated character budget {} exceeded with message {}, stopping {}",
                 maxCharacterBudget,
                 msg.id,
+                direction,
             )
             return true
         }
@@ -312,7 +367,7 @@ open class ConversationSliceCollector(
         for (i in chronological.lastIndex downTo 0) {
             val msg = chronological[i]
 
-            if (shouldStopBacktracking(msg, referenceMessage, accumulatedLength)) {
+            if (shouldStopTraversal(msg, referenceMessage, accumulatedLength, forward = false)) {
                 stopIndex = i
                 break
             }
@@ -330,6 +385,41 @@ open class ConversationSliceCollector(
             }
 
         return acceptedPreceding.toList() to unconsumed
+    }
+
+    internal suspend fun retrieveForwardMessages(
+        targetMessage: Message,
+        remainingBudget: Int,
+        initialAccumulatedLength: Int,
+    ): List<Message> {
+        if (remainingBudget <= 0) return emptyList()
+
+        val rawForward =
+            runCatching {
+                forwardFetcher(targetMessage, remainingBudget)
+            }.getOrElse { e ->
+                logger.warn("Failed to retrieve forward messages for {}: {}", targetMessage.id, e.message)
+                emptyList()
+            }
+
+        if (rawForward.isEmpty()) return emptyList()
+
+        val chronological = normalizeChronologicalOrder(rawForward).take(remainingBudget)
+        val acceptedSubsequent = mutableListOf<Message>()
+        var referenceMessage = targetMessage
+        var accumulatedLength = initialAccumulatedLength
+
+        for (msg in chronological) {
+            if (shouldStopTraversal(msg, referenceMessage, accumulatedLength, forward = true)) {
+                break
+            }
+
+            acceptedSubsequent.add(msg)
+            accumulatedLength += msg.content.length
+            referenceMessage = msg
+        }
+
+        return acceptedSubsequent
     }
 
     internal suspend fun retrieveContextMessages(targetMessage: Message): List<Message> = retrieveContextMessagesWithHistory(targetMessage).first
@@ -382,7 +472,7 @@ open class ConversationSliceCollector(
 
             val msg = rawCandidates[i]
 
-            if (shouldStopBacktracking(msg, referenceMessage, accumulatedLength)) {
+            if (shouldStopTraversal(msg, referenceMessage, accumulatedLength, forward = false)) {
                 break
             }
 
@@ -394,15 +484,56 @@ open class ConversationSliceCollector(
         return acceptedEarlier.filterNot { isNoiseMessage(it) }
     }
 
+    internal suspend fun resolveExternalReplyReferences(
+        messages: List<Message>,
+        maxExternalReferences: Int = 3,
+    ): Map<Snowflake, Message> {
+        val windowMessageIds = messages.map { it.id }.toSet()
+        val result = mutableMapOf<Snowflake, Message>()
+        val resolvedExternalIds = mutableSetOf<Snowflake>()
+
+        for (msg in messages) {
+            val ref = runCatching { referenceFetcher(msg) }.getOrNull() ?: continue
+            if (ref.id in windowMessageIds) {
+                continue
+            }
+            if (ref.id in resolvedExternalIds) {
+                result[msg.id] = ref
+                continue
+            }
+            if (resolvedExternalIds.size < maxExternalReferences) {
+                resolvedExternalIds.add(ref.id)
+                result[msg.id] = ref
+            }
+        }
+        return result
+    }
+
     internal fun formatDialogueMessages(
         messages: List<Message>,
         imagesByMessage: Map<Snowflake, List<ChatImageAttachment>> = emptyMap(),
         startingImageIndex: Int = 1,
+        replyReferencesByMessage: Map<Snowflake, Message> = emptyMap(),
     ): Pair<String, Int> {
         var imageIndex = startingImageIndex
         val formatted =
             messages.joinToString("\n") { msg ->
-                val author = resolveAuthorName(msg)
+                val baseAuthor = resolveAuthorName(msg)
+                val refMsg = replyReferencesByMessage[msg.id]
+                val author =
+                    if (refMsg != null) {
+                        val refAuthor = resolveAuthorName(refMsg)
+                        val rawContent = refMsg.content.trim().replace("\n", " ")
+                        val excerpt =
+                            if (rawContent.length > 40) {
+                                "${rawContent.take(37)}..."
+                            } else {
+                                rawContent
+                            }
+                        "$baseAuthor 回覆 $refAuthor「$excerpt」"
+                    } else {
+                        baseAuthor
+                    }
                 val embedText = formatEmbedPreviews(msg)
                 val images = imagesByMessage[msg.id] ?: extractImageAttachments(msg)
                 if (images.isNotEmpty()) {

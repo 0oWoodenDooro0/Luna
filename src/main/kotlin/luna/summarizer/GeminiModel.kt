@@ -90,6 +90,13 @@ object GeminiTools {
         GeminiTool(
             functionDeclarations = listOf(FETCH_EARLIER_MESSAGES_DECLARATION),
         )
+
+    val GOOGLE_SEARCH_TOOL =
+        GeminiTool(
+            googleSearch = GeminiGoogleSearch(),
+        )
+
+    val GOOGLE_SEARCH = GOOGLE_SEARCH_TOOL
 }
 
 /**
@@ -100,9 +107,11 @@ sealed class SummaryResult {
      * Successful summary output.
      *
      * @property text The generated structured summary.
+     * @property citations Optional search grounding citations referenced during generation.
      */
     data class Success(
         val text: String,
+        val citations: List<GroundingCitation> = emptyList(),
     ) : SummaryResult()
 
     /**
@@ -166,13 +175,22 @@ data class GeminiGenerateContentRequest(
 )
 
 @Serializable
+class GeminiGoogleSearch
+
+@Serializable
 data class GeminiTool(
     val functionDeclarations: List<GeminiFunctionDeclaration>? = null,
     @SerialName("function_declarations")
     val functionDeclarationsSnake: List<GeminiFunctionDeclaration>? = null,
+    val googleSearch: GeminiGoogleSearch? = null,
+    @SerialName("google_search")
+    val googleSearchSnake: GeminiGoogleSearch? = null,
 ) {
     val actualFunctionDeclarations: List<GeminiFunctionDeclaration>
         get() = functionDeclarations ?: functionDeclarationsSnake ?: emptyList()
+
+    val actualGoogleSearch: GeminiGoogleSearch?
+        get() = googleSearch ?: googleSearchSnake
 }
 
 @Serializable
@@ -289,10 +307,49 @@ data class GeminiGenerateContentResponse(
 )
 
 @Serializable
+data class GroundingCitation(
+    val title: String,
+    val url: String,
+)
+
+@Serializable
+data class GeminiGroundingMetadata(
+    val webSearchQueries: List<String>? = null,
+    @SerialName("web_search_queries")
+    val webSearchQueriesSnake: List<String>? = null,
+    val groundingChunks: List<GeminiGroundingChunk>? = null,
+    @SerialName("grounding_chunks")
+    val groundingChunksSnake: List<GeminiGroundingChunk>? = null,
+) {
+    val actualWebSearchQueries: List<String>
+        get() = webSearchQueries ?: webSearchQueriesSnake ?: emptyList()
+
+    val actualGroundingChunks: List<GeminiGroundingChunk>
+        get() = groundingChunks ?: groundingChunksSnake ?: emptyList()
+}
+
+@Serializable
+data class GeminiGroundingChunk(
+    val web: GeminiGroundingWebSource? = null,
+)
+
+@Serializable
+data class GeminiGroundingWebSource(
+    val uri: String? = null,
+    val title: String? = null,
+)
+
+@Serializable
 data class GeminiCandidate(
     val content: GeminiContent? = null,
     val finishReason: String? = null,
-)
+    val groundingMetadata: GeminiGroundingMetadata? = null,
+    @SerialName("grounding_metadata")
+    val groundingMetadataSnake: GeminiGroundingMetadata? = null,
+) {
+    val actualGroundingMetadata: GeminiGroundingMetadata?
+        get() = groundingMetadata ?: groundingMetadataSnake
+}
 
 @Serializable
 data class GeminiPromptFeedback(

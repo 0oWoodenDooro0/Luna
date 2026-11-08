@@ -2,6 +2,7 @@ package luna.summarizer
 
 import dev.kord.common.entity.MessageType
 import dev.kord.common.entity.Snowflake
+import dev.kord.core.behavior.reply
 import dev.kord.core.entity.Attachment
 import dev.kord.core.entity.Message
 import dev.kord.core.entity.ReactionEmoji
@@ -22,6 +23,7 @@ import kotlinx.coroutines.test.runTest
 import org.junit.jupiter.api.BeforeEach
 import java.util.concurrent.atomic.AtomicInteger
 import kotlin.test.Test
+import kotlin.test.assertContains
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
@@ -1609,5 +1611,111 @@ class SummaryServiceTest {
 
             coVerify(exactly = 1) { summarizer.summarize(any<SummaryInput>(), any()) }
             kotlin.test.assertNull(service.getStatus(targetMsg.id))
+        }
+
+    @Test
+    fun `buildReply configures suppressEmbeds true and repliedUser false`() {
+        val service = SummaryService()
+        val message = createMockMessage(id = 8001L, username = "alice", content = "Message needing summary")
+        val builder = service.buildReply(message, "Formatted summary text")
+
+        assertEquals(message.id, builder.messageReference)
+        assertEquals("Formatted summary text", builder.content)
+        assertEquals(true, builder.suppressEmbeds)
+        assertEquals(false, builder.allowedMentions?.repliedUser)
+    }
+
+    @Test
+    fun `summary delivery appends search grounding citations to Discord reply with angle brackets`() =
+        runTest {
+            val summarizer = mockk<GeminiSummarizer>()
+            var replyCaptured: String? = null
+
+            val service =
+                SummaryService(
+                    summarizer = summarizer,
+                    replySender = { _, content -> replyCaptured = content },
+                )
+
+            val targetMsg = createMockMessage(id = 8002L, username = "bob", content = "What is Kotlin K2?")
+            val citations =
+                listOf(
+                    GroundingCitation(title = "Kotlin 2.0 Released", url = "https://kotlinlang.org/k2"),
+                    GroundingCitation(title = "JetBrains Blog", url = "https://blog.jetbrains.com/kotlin"),
+                )
+
+            coEvery {
+                summarizer.summarize(any<SummaryInput>(), any())
+            } returns
+                SummaryResult.Success(
+                    text = "TL;DR: Kotlin 2.0 introduces K2 compiler.\n\n核心重點:\n• Faster compilation",
+                    citations = citations,
+                )
+
+            val user = mockk<User>()
+            every { user.isBot } returns false
+
+            val event = mockk<ReactionAddEvent>()
+            every { event.emoji } returns ReactionEmoji.Unicode("📝")
+            every { event.userId } returns Snowflake(55L)
+            every { event.messageId } returns targetMsg.id
+            coEvery { event.getUserOrNull() } returns user
+            coEvery { event.getMessageOrNull() } returns targetMsg
+
+            service.handleReaction(event)
+
+            val reply = replyCaptured
+            assertNotNull(reply)
+            assertContains(reply, "TL;DR: Kotlin 2.0 introduces K2 compiler.")
+            assertContains(reply, "核心重點:")
+            assertContains(reply, "[Kotlin 2.0 Released](<https://kotlinlang.org/k2>)")
+            assertContains(reply, "[JetBrains Blog](<https://blog.jetbrains.com/kotlin>)")
+            assertEquals(SummaryStatus.DONE, service.getStatus(targetMsg.id))
+        }
+
+    @Test
+    fun `summary delivery with citations exceeding 2000 characters is cleanly truncated with ellipsis`() =
+        runTest {
+            val summarizer = mockk<GeminiSummarizer>()
+            var replyCaptured: String? = null
+
+            val service =
+                SummaryService(
+                    summarizer = summarizer,
+                    replySender = { _, content -> replyCaptured = content },
+                )
+
+            val targetMsg = createMockMessage(id = 8003L, username = "charlie", content = "Explain quantum computing")
+            val longSummary = "Q".repeat(1950)
+            val citations =
+                listOf(
+                    GroundingCitation(title = "Quantum Computing IBM", url = "https://ibm.com/quantum"),
+                    GroundingCitation(title = "Google Quantum AI", url = "https://quantumai.google"),
+                )
+
+            coEvery {
+                summarizer.summarize(any<SummaryInput>(), any())
+            } returns
+                SummaryResult.Success(
+                    text = longSummary,
+                    citations = citations,
+                )
+
+            val user = mockk<User>()
+            every { user.isBot } returns false
+
+            val event = mockk<ReactionAddEvent>()
+            every { event.emoji } returns ReactionEmoji.Unicode("📝")
+            every { event.userId } returns Snowflake(55L)
+            every { event.messageId } returns targetMsg.id
+            coEvery { event.getUserOrNull() } returns user
+            coEvery { event.getMessageOrNull() } returns targetMsg
+
+            service.handleReaction(event)
+
+            val reply = replyCaptured
+            assertNotNull(reply)
+            assertEquals(2000, reply.length)
+            assertTrue(reply.endsWith("..."))
         }
 }

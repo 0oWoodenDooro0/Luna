@@ -126,11 +126,19 @@ class SummarizerPlugin(
         this.maxLookbackMessages = lookbackLimit
         this.maxImages = imagesLimit
 
+        val searchGrounding =
+            context.config<Boolean>("GEMINI_SEARCH_GROUNDING_ENABLED")
+                ?: context.config<String>("GEMINI_SEARCH_GROUNDING_ENABLED")?.toBooleanStrictOrNull()
+                ?: context.config<Boolean>("gemini.searchGroundingEnabled")
+                ?: context.config<String>("gemini.searchGroundingEnabled")?.toBooleanStrictOrNull()
+                ?: GeminiConfig.DEFAULT_SEARCH_GROUNDING_ENABLED
+
         val geminiConfig =
             GeminiConfig(
                 apiKey = apiKey,
                 model = model,
                 baseUrl = baseUrl,
+                searchGroundingEnabled = searchGrounding,
             )
 
         val gemini =

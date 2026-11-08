@@ -78,28 +78,42 @@ open class GeminiSummarizer(
             return SummaryResult.Error.Generic("Content to summarize cannot be blank")
         }
 
+        val activeSearchTools = if (config.searchGroundingEnabled) listOf(GeminiTools.GOOGLE_SEARCH_TOOL) else emptyList()
+
         if (lookbackProvider == null) {
+            val initialTools = input.tools ?: activeSearchTools.takeIf { it.isNotEmpty() }
             val res =
                 try {
-                    summarizeDirect(input, tools = input.tools)
+                    summarizeDirect(input, tools = initialTools)
                 } catch (e: Exception) {
-                    if (input.imageAttachments.isNotEmpty()) {
-                        logger.warn("Multimodal summarization failed with exception: {}. Retrying text-only fallback.", e.message)
+                    if (initialTools != null && input.tools == null) {
+                        logger.warn("Search grounding failed with exception: {}. Retrying baseline without search.", e.message)
+                        retryBaseline(input.copy(tools = null))
+                    } else if (input.imageAttachments.isNotEmpty()) {
+                        logger.warn("Multimodal summarization failed with exception: {}. Retrying text baseline without images.", e.message)
                         retryBaseline(input.copy(imageAttachments = emptyList(), tools = null))
                     } else {
                         throw e
                     }
                 }
-            return if (res is SummaryResult.Error && input.imageAttachments.isNotEmpty()) {
-                logger.warn("Multimodal summarization failed: {}. Retrying text-only fallback.", res.message)
-                retryBaseline(input.copy(imageAttachments = emptyList(), tools = null))
+            return if (res is SummaryResult.Error) {
+                if (initialTools != null && input.tools == null) {
+                    logger.warn("Search grounding returned error: {}. Retrying baseline without search.", res.message)
+                    retryBaseline(input.copy(tools = null))
+                } else if (input.imageAttachments.isNotEmpty()) {
+                    logger.warn("Multimodal summarization returned error: {}. Retrying text baseline without images.", res.message)
+                    retryBaseline(input.copy(imageAttachments = emptyList(), tools = null))
+                } else {
+                    res
+                }
             } else {
                 res
             }
         }
 
         val baselineInput = input.copy(tools = null)
-        val toolEnabledInput = input.copy(tools = listOf(GeminiTools.FETCH_EARLIER_MESSAGES_TOOL))
+        val combinedTools = (activeSearchTools + GeminiTools.FETCH_EARLIER_MESSAGES_TOOL).distinct()
+        val toolEnabledInput = input.copy(tools = combinedTools)
 
         var result: SummaryResult =
             try {
@@ -466,7 +480,7 @@ open class GeminiSummarizer(
                                     modelContent = candidateContent ?: GeminiContent(role = "model", parts = parts),
                                     toolName = functionCall.name,
                                     toolResponseContent = toolOutput,
-                                    tools = null,
+                                    tools = activeTools?.takeIf { it.isNotEmpty() },
                                 )
                             }
                         } else {
@@ -494,7 +508,20 @@ open class GeminiSummarizer(
                 if (sanitized.isBlank()) {
                     return SummaryResult.Error.Generic("Gemini summary output is empty or sanitized to blank")
                 }
-                return SummaryResult.Success(text = sanitized)
+
+                val candidateGrounding = candidate?.actualGroundingMetadata
+                val citations =
+                    candidateGrounding
+                        ?.actualGroundingChunks
+                        ?.mapNotNull { chunk ->
+                            val web = chunk.web ?: return@mapNotNull null
+                            val uri = web.uri?.trim()?.takeIf { it.isNotBlank() } ?: return@mapNotNull null
+                            val title = web.title?.trim()?.takeIf { it.isNotBlank() } ?: uri
+                            GroundingCitation(title = title, url = uri)
+                        }?.distinctBy { it.url }
+                        ?.take(3) ?: emptyList()
+
+                return SummaryResult.Success(text = sanitized, citations = citations)
             }
         }
     }
@@ -512,6 +539,7 @@ open class GeminiSummarizer(
                 ignoreUnknownKeys = true
                 isLenient = true
                 encodeDefaults = false
+                explicitNulls = false
             }
 
         private fun createDefaultHttpClient(): HttpClient =

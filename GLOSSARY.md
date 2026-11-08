@@ -104,4 +104,20 @@ _Avoid_: External auth server, Auth0 integration
 The cross-process SQLite storage library residing in `libs/mcp-data` shared between Luna Host and Decoupled MCP Server, managing client credentials, tagged webhooks, and WAL concurrency without exposing database tables across the interface seam.
 _Avoid_: SQLite helper, MCP database layer, shared DB scripts
 
+**Bidirectional Dialogue Slicing**:
+The conversation history traversal strategy that walks both backward and forward from the target message, prioritizing backward context to establish discussion origin and extending forward until an inactivity gap, a bot summary, or the message capacity budget is encountered.
+_Avoid_: Forward-backward scraper, chat window expansion
+
+**Reply Reference Chaining**:
+The selective resolution and inline attribution of Discord replied-to messages that lie beyond the standard conversation slice window, providing cross-temporal conversational context without corrupting the chronological timeline.
+_Avoid_: Reply scraping, message jumping, thread follow
+
+**Search Grounding**:
+The model-controlled invocation of Google Search via the Gemini API to verify factual claims, look up real-time information, and define specialized terminology within the conversation summary pipeline.
+_Avoid_: Web scraping, Google search bot, search plugin
+
+**Grounding Source Attribution**:
+The structured presentation of search grounding citations at the conclusion of a summary with URL embed suppression to prevent Discord layout pollution.
+_Avoid_: Link spam, citation previews, embed footer
+
 
