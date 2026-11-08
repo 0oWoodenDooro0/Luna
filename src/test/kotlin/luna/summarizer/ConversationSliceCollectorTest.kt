@@ -49,6 +49,7 @@ class ConversationSliceCollectorTest {
         timestamp: Instant = Instant.fromEpochMilliseconds(id * 1000),
         attachments: Set<Attachment> = emptySet(),
         type: MessageType = MessageType.Default,
+        referencedMessage: Message? = null,
     ): Message {
         val author = mockk<User>()
         every { author.username } returns username
@@ -65,6 +66,8 @@ class ConversationSliceCollectorTest {
         every { message.embeds } returns emptyList()
         every { message.data.author.username } returns username
         every { message.data.webhookId.value } returns null
+        every { message.referencedMessage } returns referencedMessage
+        every { message.messageReference } returns null
         return message
     }
 
@@ -488,4 +491,219 @@ class ConversationSliceCollectorTest {
         assertEquals(100, ConversationSliceCollector.resolveMaxHistoryMessages(clampedEnv))
         assertEquals(1, ConversationSliceCollector.resolveMaxLookbackMessages(clampedEnv))
     }
+
+    @Test
+    fun `collectSlice performs bidirectional slicing prioritizing backward history and collecting forward remainder`() =
+        runTest {
+            val baseTime = Instant.parse("2026-11-06T12:00:00Z")
+            val prev1 = createMockMessage(1061L, "Alice", "Earlier 1", timestamp = baseTime)
+            val prev2 = createMockMessage(1062L, "Bob", "Earlier 2", timestamp = baseTime + 1.minutes)
+            val targetMsg = createMockMessage(1063L, "Charlie", "Target middle", timestamp = baseTime + 2.minutes)
+            val next1 = createMockMessage(1064L, "Dave", "Later 1", timestamp = baseTime + 3.minutes)
+            val next2 = createMockMessage(1065L, "Eve", "Later 2", timestamp = baseTime + 4.minutes)
+
+            val collector =
+                ConversationSliceCollector(
+                    maxHistoryMessages = 4,
+                    historyFetcher = { _, _ -> listOf(prev1, prev2) },
+                    forwardFetcher = { _, limit -> listOf(next1, next2).take(limit) },
+                )
+
+            val slice = collector.collectSlice(targetMsg)
+            assertNotNull(slice)
+            val content = slice.summaryInput.content
+            assertTrue(content.contains("[Alice]: Earlier 1"))
+            assertTrue(content.contains("[Bob]: Earlier 2"))
+            assertTrue(content.contains("[Charlie]: Target middle"))
+            assertTrue(content.contains("[Dave]: Later 1"))
+            assertFalse(content.contains("[Eve]: Later 2"))
+        }
+
+    @Test
+    fun `collectSlice halts forward traversal when forward inactivity gap exceeds limit`() =
+        runTest {
+            val baseTime = Instant.parse("2026-11-06T12:00:00Z")
+            val targetMsg = createMockMessage(1071L, "Alice", "Topic start", timestamp = baseTime)
+            val next1 = createMockMessage(1072L, "Bob", "Immediate reply", timestamp = baseTime + 2.minutes)
+            val next2 = createMockMessage(1073L, "Charlie", "Too late reply", timestamp = baseTime + 20.minutes)
+
+            val collector =
+                ConversationSliceCollector(
+                    inactivityGap = 15.minutes,
+                    historyFetcher = { _, _ -> emptyList() },
+                    forwardFetcher = { _, _ -> listOf(next1, next2) },
+                )
+
+            val slice = collector.collectSlice(targetMsg)
+            assertNotNull(slice)
+            val content = slice.summaryInput.content
+            assertTrue(content.contains("[Alice]: Topic start"))
+            assertTrue(content.contains("[Bob]: Immediate reply"))
+            assertFalse(content.contains("Too late reply"))
+        }
+
+    @Test
+    fun `collectSlice halts forward traversal upon encountering bot summary message`() =
+        runTest {
+            val baseTime = Instant.parse("2026-11-06T12:00:00Z")
+            val targetMsg = createMockMessage(1081L, "Alice", "Let us begin", timestamp = baseTime)
+            val next1 = createMockMessage(1082L, "Bob", "Great point", timestamp = baseTime + 1.minutes)
+            val botSummary =
+                createMockMessage(
+                    1083L,
+                    "LunaBot",
+                    "TL;DR:\nThis topic was already summarized.",
+                    timestamp = baseTime + 2.minutes,
+                    isBot = true,
+                )
+            val next3 = createMockMessage(1084L, "Charlie", "Unrelated future topic", timestamp = baseTime + 3.minutes)
+
+            val collector =
+                ConversationSliceCollector(
+                    historyFetcher = { _, _ -> emptyList() },
+                    forwardFetcher = { _, _ -> listOf(next1, botSummary, next3) },
+                )
+
+            val slice = collector.collectSlice(targetMsg)
+            assertNotNull(slice)
+            val content = slice.summaryInput.content
+            assertTrue(content.contains("[Alice]: Let us begin"))
+            assertTrue(content.contains("[Bob]: Great point"))
+            assertFalse(content.contains("TL;DR:"))
+            assertFalse(content.contains("Unrelated future topic"))
+        }
+
+    @Test
+    fun `collectSlice resolves cross-temporal reply reference outside window and formats inline attribution`() =
+        runTest {
+            val baseTime = Instant.parse("2026-11-06T12:00:00Z")
+            val externalMsg =
+                createMockMessage(
+                    2001L,
+                    "Alice",
+                    "We need to decide on architecture first",
+                    timestamp = baseTime - 60.minutes,
+                )
+            val replyMsg =
+                createMockMessage(
+                    2002L,
+                    "Bob",
+                    "I agree with the architecture choice",
+                    timestamp = baseTime,
+                    referencedMessage = externalMsg,
+                )
+            val targetMsg =
+                createMockMessage(
+                    2003L,
+                    "Charlie",
+                    "Let's proceed",
+                    timestamp = baseTime + 1.minutes,
+                )
+
+            val collector =
+                ConversationSliceCollector(
+                    historyFetcher = { _, _ -> listOf(replyMsg) },
+                    forwardFetcher = { _, _ -> emptyList() },
+                )
+
+            val slice = collector.collectSlice(targetMsg)
+            assertNotNull(slice)
+            val content = slice.summaryInput.content
+            assertTrue(content.contains("[Bob 回覆 Alice「We need to decide on architecture first」]: I agree with the architecture choice"))
+            assertTrue(content.contains("[Charlie]: Let's proceed"))
+        }
+
+    @Test
+    fun `collectSlice formats normally without inline quote when referenced message is already in slice window`() =
+        runTest {
+            val baseTime = Instant.parse("2026-11-06T12:00:00Z")
+            val inWindowMsg =
+                createMockMessage(
+                    2011L,
+                    "Alice",
+                    "Plan proposal",
+                    timestamp = baseTime,
+                )
+            val replyMsg =
+                createMockMessage(
+                    2012L,
+                    "Bob",
+                    "Looks good",
+                    timestamp = baseTime + 1.minutes,
+                    referencedMessage = inWindowMsg,
+                )
+            val targetMsg =
+                createMockMessage(
+                    2013L,
+                    "Charlie",
+                    "Finalizing",
+                    timestamp = baseTime + 2.minutes,
+                )
+
+            val collector =
+                ConversationSliceCollector(
+                    historyFetcher = { _, _ -> listOf(inWindowMsg, replyMsg) },
+                    forwardFetcher = { _, _ -> emptyList() },
+                )
+
+            val slice = collector.collectSlice(targetMsg)
+            assertNotNull(slice)
+            val content = slice.summaryInput.content
+            assertTrue(content.contains("[Alice]: Plan proposal"))
+            assertTrue(content.contains("[Bob]: Looks good"))
+            assertFalse(content.contains("回覆 Alice"))
+        }
+
+    @Test
+    fun `collectSlice bounds external reference lookups to maximum of 3 messages`() =
+        runTest {
+            val baseTime = Instant.parse("2026-11-06T12:00:00Z")
+            val ext1 = createMockMessage(2021L, "Ext1", "External 1", timestamp = baseTime - 60.minutes)
+            val ext2 = createMockMessage(2022L, "Ext2", "External 2", timestamp = baseTime - 50.minutes)
+            val ext3 = createMockMessage(2023L, "Ext3", "External 3", timestamp = baseTime - 40.minutes)
+            val ext4 = createMockMessage(2024L, "Ext4", "External 4", timestamp = baseTime - 30.minutes)
+
+            val r1 = createMockMessage(2025L, "U1", "Reply 1", timestamp = baseTime, referencedMessage = ext1)
+            val r2 = createMockMessage(2026L, "U2", "Reply 2", timestamp = baseTime + 1.minutes, referencedMessage = ext2)
+            val r3 = createMockMessage(2027L, "U3", "Reply 3", timestamp = baseTime + 2.minutes, referencedMessage = ext3)
+            val r4 = createMockMessage(2028L, "U4", "Reply 4", timestamp = baseTime + 3.minutes, referencedMessage = ext4)
+            val targetMsg = createMockMessage(2029L, "U5", "Target", timestamp = baseTime + 4.minutes)
+
+            val collector =
+                ConversationSliceCollector(
+                    historyFetcher = { _, _ -> listOf(r1, r2, r3, r4) },
+                    forwardFetcher = { _, _ -> emptyList() },
+                )
+
+            val slice = collector.collectSlice(targetMsg)
+            assertNotNull(slice)
+            val content = slice.summaryInput.content
+            assertTrue(content.contains("[U1 回覆 Ext1「External 1」]: Reply 1"))
+            assertTrue(content.contains("[U2 回覆 Ext2「External 2」]: Reply 2"))
+            assertTrue(content.contains("[U3 回覆 Ext3「External 3」]: Reply 3"))
+            assertTrue(content.contains("[U4]: Reply 4"))
+            assertFalse(content.contains("回覆 Ext4"))
+        }
+
+    @Test
+    fun `collectSlice clamps reply reference excerpt to 40 characters with ellipsis`() =
+        runTest {
+            val baseTime = Instant.parse("2026-11-06T12:00:00Z")
+            val longContent = "A".repeat(60)
+            val ext = createMockMessage(2031L, "Alice", longContent, timestamp = baseTime - 60.minutes)
+            val replyMsg = createMockMessage(2032L, "Bob", "Comment", timestamp = baseTime, referencedMessage = ext)
+            val targetMsg = createMockMessage(2033L, "Charlie", "Target", timestamp = baseTime + 1.minutes)
+
+            val collector =
+                ConversationSliceCollector(
+                    historyFetcher = { _, _ -> listOf(replyMsg) },
+                    forwardFetcher = { _, _ -> emptyList() },
+                )
+
+            val slice = collector.collectSlice(targetMsg)
+            assertNotNull(slice)
+            val content = slice.summaryInput.content
+            val expectedExcerpt = "A".repeat(40) + "..."
+            assertTrue(content.contains("[Bob 回覆 Alice「$expectedExcerpt」]: Comment"))
+        }
 }

@@ -666,4 +666,82 @@ class GeminiPromptBuilderTest {
         assertContains(prompt, "[當前核心討論]")
         assertContains(prompt, "00:00 Final conclusion")
     }
+
+    @Test
+    fun `system instructions include search grounding and terminology fact-checking section with strict source isolation`() {
+        val instructions =
+            listOf(
+                GeminiPromptBuilder.SYSTEM_INSTRUCTION,
+                GeminiPromptBuilder.VIDEO_SYSTEM_INSTRUCTION,
+                GeminiPromptBuilder.CHAT_IMAGE_SYSTEM_INSTRUCTION,
+                GeminiPromptBuilder.VIDEO_AND_IMAGE_SYSTEM_INSTRUCTION,
+            )
+
+        for (inst in instructions) {
+            assertContains(inst, "台灣繁體中文")
+            assertContains(inst, "zh-TW")
+            assertContains(inst, "TL;DR:")
+            assertContains(inst, "核心重點:")
+            assertContains(inst, "名詞與事實查核:")
+            assertContains(inst, "Google")
+            assertContains(inst, "搜尋")
+            assertFalse(EmojiSanitizer.containsEmoji(inst), "Instruction must not contain emojis")
+        }
+
+        // Standard chat instructions specify strict source isolation for participant discussions
+        assertContains(GeminiPromptBuilder.SYSTEM_INSTRUCTION, "嚴格來源隔離")
+        assertContains(GeminiPromptBuilder.SYSTEM_INSTRUCTION, "參與者觀點")
+        assertContains(GeminiPromptBuilder.CHAT_IMAGE_SYSTEM_INSTRUCTION, "嚴格來源隔離")
+    }
+
+    @Test
+    fun `formatGroundingCitations formats citations with angle-bracketed URLs capped at top 3 unique sources`() {
+        val citations =
+            listOf(
+                GroundingCitation(title = "Kotlin Documentation", url = "https://kotlinlang.org/docs"),
+                GroundingCitation(title = "Google Search", url = "https://www.google.com"),
+                GroundingCitation(title = "Kotlin Documentation Duplicate", url = "https://kotlinlang.org/docs"),
+                GroundingCitation(title = "Android Developers", url = "https://developer.android.com"),
+                GroundingCitation(title = "GitHub", url = "https://github.com"),
+            )
+
+        val formatted = GeminiPromptBuilder.formatGroundingCitations(citations)
+        val expected =
+            """
+            [Kotlin Documentation](<https://kotlinlang.org/docs>)
+            [Google Search](<https://www.google.com>)
+            [Android Developers](<https://developer.android.com>)
+            """.trimIndent()
+
+        assertEquals(expected, formatted)
+    }
+
+    @Test
+    fun `formatGroundingCitations falls back to URL when citation title is blank`() {
+        val citations =
+            listOf(
+                GroundingCitation(title = "", url = "https://example.com/untitled"),
+                GroundingCitation(title = "   ", url = "https://example.com/whitespace"),
+            )
+
+        val formatted = GeminiPromptBuilder.formatGroundingCitations(citations)
+        val expected =
+            """
+            [https://example.com/untitled](<https://example.com/untitled>)
+            [https://example.com/whitespace](<https://example.com/whitespace>)
+            """.trimIndent()
+
+        assertEquals(expected, formatted)
+    }
+
+    @Test
+    fun `formatGroundingCitations returns empty string when citations list is empty or invalid`() {
+        assertEquals("", GeminiPromptBuilder.formatGroundingCitations(emptyList()))
+        assertEquals(
+            "",
+            GeminiPromptBuilder.formatGroundingCitations(
+                listOf(GroundingCitation(title = "No URL", url = "")),
+            ),
+        )
+    }
 }

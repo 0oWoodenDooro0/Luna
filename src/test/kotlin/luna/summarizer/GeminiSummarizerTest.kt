@@ -16,6 +16,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertIs
+import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 
 class GeminiSummarizerTest {
@@ -648,7 +649,7 @@ class GeminiSummarizerTest {
 
             val summarizer =
                 GeminiSummarizer(
-                    config = GeminiConfig(apiKey = "test-key"),
+                    config = GeminiConfig(apiKey = "test-key", searchGroundingEnabled = false),
                     httpClient = createTestClient(mockEngine),
                 )
 
@@ -1414,4 +1415,200 @@ class GeminiSummarizerTest {
             assertEquals(2, requestCount)
             assertFalse(fallbackHadImages)
         }
+
+    @Test
+    fun `summarize includes standalone googleSearch tool when searchGroundingEnabled is true`() =
+        runTest {
+            var capturedBody: String? = null
+            val responseJson =
+                """
+                {
+                  "candidates": [
+                    {
+                      "content": {
+                        "parts": [{ "text": "TL;DR:\nSummary with search grounding." }]
+                      }
+                    }
+                  ]
+                }
+                """.trimIndent()
+
+            val mockEngine =
+                MockEngine { request ->
+                    capturedBody = request.body.toByteArray().decodeToString()
+                    respond(
+                        content = responseJson,
+                        status = HttpStatusCode.OK,
+                        headers = headersOf(HttpHeaders.ContentType, "application/json"),
+                    )
+                }
+
+            val summarizer =
+                GeminiSummarizer(
+                    config = GeminiConfig(apiKey = "test-key", searchGroundingEnabled = true),
+                    httpClient = createTestClient(mockEngine),
+                )
+
+            val result = summarizer.summarize("Topic with specialized terms")
+            assertIs<SummaryResult.Success>(result)
+            val body = checkNotNull(capturedBody)
+            assertTrue(body.contains("\"googleSearch\":{}"))
+            assertFalse(body.contains("\"functionDeclarations\""))
+        }
+
+    @Test
+    fun `summarize combines googleSearch and functionDeclarations as separate objects in tools array`() =
+        runTest {
+            var capturedBody: String? = null
+            val responseJson =
+                """
+                {
+                  "candidates": [
+                    {
+                      "content": {
+                        "parts": [{ "text": "TL;DR:\nSummary succeeded." }]
+                      }
+                    }
+                  ]
+                }
+                """.trimIndent()
+
+            val mockEngine =
+                MockEngine { request ->
+                    capturedBody = request.body.toByteArray().decodeToString()
+                    respond(
+                        content = responseJson,
+                        status = HttpStatusCode.OK,
+                        headers = headersOf(HttpHeaders.ContentType, "application/json"),
+                    )
+                }
+
+            val summarizer =
+                GeminiSummarizer(
+                    config = GeminiConfig(apiKey = "test-key", searchGroundingEnabled = true),
+                    httpClient = createTestClient(mockEngine),
+                )
+
+            val result =
+                summarizer.summarize(
+                    input = SummaryInput(content = "Multi-tool request"),
+                    lookbackProvider = { "earlier history" },
+                )
+
+            assertIs<SummaryResult.Success>(result)
+            val body = checkNotNull(capturedBody)
+            assertTrue(body.contains("\"googleSearch\":{}"))
+            assertTrue(body.contains("fetch_earlier_messages"))
+        }
+
+    @Test
+    fun `summarize extracts and deduplicates grounding citations from candidate metadata`() =
+        runTest {
+            val responseJson =
+                """
+                {
+                  "candidates": [
+                    {
+                      "content": {
+                        "parts": [{ "text": "TL;DR:\nSummary with citations." }]
+                      },
+                      "groundingMetadata": {
+                        "webSearchQueries": ["Gemini Search Grounding"],
+                        "groundingChunks": [
+                          { "web": { "uri": "https://example.com/source1", "title": "Source 1" } },
+                          { "web": { "uri": "https://example.com/source2", "title": "Source 2" } },
+                          { "web": { "uri": "https://example.com/source1", "title": "Duplicate Source" } },
+                          { "web": { "uri": "https://example.com/source3", "title": "Source 3" } },
+                          { "web": { "uri": "https://example.com/source4", "title": "Source 4" } }
+                        ]
+                      }
+                    }
+                  ]
+                }
+                """.trimIndent()
+
+            val mockEngine =
+                MockEngine {
+                    respond(
+                        content = responseJson,
+                        status = HttpStatusCode.OK,
+                        headers = headersOf(HttpHeaders.ContentType, "application/json"),
+                    )
+                }
+
+            val summarizer =
+                GeminiSummarizer(
+                    config = GeminiConfig(apiKey = "test-key", searchGroundingEnabled = true),
+                    httpClient = createTestClient(mockEngine),
+                )
+
+            val result = summarizer.summarize("Topic requiring citations")
+            assertIs<SummaryResult.Success>(result)
+            assertEquals(3, result.citations.size)
+            assertEquals("https://example.com/source1", result.citations[0].url)
+            assertEquals("Source 1", result.citations[0].title)
+            assertEquals("https://example.com/source2", result.citations[1].url)
+            assertEquals("https://example.com/source3", result.citations[2].url)
+        }
+
+    @Test
+    fun `summarize gracefully falls back to baseline when search grounding fails`() =
+        runTest {
+            var requestCount = 0
+            val fallbackResponse =
+                """
+                {
+                  "candidates": [
+                    {
+                      "content": {
+                        "parts": [{ "text": "TL;DR:\nBaseline fallback summary without search." }]
+                      }
+                    }
+                  ]
+                }
+                """.trimIndent()
+
+            val mockEngine =
+                MockEngine { request ->
+                    requestCount++
+                    if (requestCount == 1) {
+                        respond(
+                            content = """{"error": {"code": 400, "message": "Search grounding tool not supported on this model"}}""",
+                            status = HttpStatusCode.BadRequest,
+                            headers = headersOf(HttpHeaders.ContentType, "application/json"),
+                        )
+                    } else {
+                        val body = request.body.toByteArray().decodeToString()
+                        assertFalse(body.contains("googleSearch"))
+                        respond(
+                            content = fallbackResponse,
+                            status = HttpStatusCode.OK,
+                            headers = headersOf(HttpHeaders.ContentType, "application/json"),
+                        )
+                    }
+                }
+
+            val summarizer =
+                GeminiSummarizer(
+                    config = GeminiConfig(apiKey = "test-key", searchGroundingEnabled = true),
+                    httpClient = createTestClient(mockEngine),
+                )
+
+            val result = summarizer.summarize("Should fall back to baseline")
+            assertIs<SummaryResult.Success>(result)
+            assertTrue(result.text.contains("Baseline fallback summary without search"))
+            assertEquals(2, requestCount)
+        }
+
+    @Test
+    fun `GeminiConfig parses GEMINI_SEARCH_GROUNDING_ENABLED from environment`() {
+        val defaultCfg = GeminiConfig.fromEnv()
+        assertTrue(defaultCfg.searchGroundingEnabled)
+
+        val disabledCfg = GeminiConfig.fromEnv(mapOf("GEMINI_SEARCH_GROUNDING_ENABLED" to "false"))
+        assertFalse(disabledCfg.searchGroundingEnabled)
+
+        val enabledCfg = GeminiConfig.fromEnv(mapOf("GEMINI_SEARCH_GROUNDING_ENABLED" to "true"))
+        assertTrue(enabledCfg.searchGroundingEnabled)
+    }
 }
