@@ -63,6 +63,16 @@ class PluginContextTest {
     }
 
     @Test
+    fun `does not resolve global BASE_URL for external service namespaces`() {
+        val context = createContext(mapOf("BASE_URL" to "https://global.example.com/s/"))
+
+        assertEquals("default", context.config("gemini.baseUrl", "default"))
+        assertNull(context.config<String>("gemini.baseUrl"))
+        assertEquals("default", context.config("chatter.baseUrl", "default"))
+        assertNull(context.config<String>("chatter.baseUrl"))
+    }
+
+    @Test
     fun `resolves summarizer alias to summary uppercase key`() {
         val context = createContext(mapOf("SUMMARY_EMOJI" to "✨"))
 

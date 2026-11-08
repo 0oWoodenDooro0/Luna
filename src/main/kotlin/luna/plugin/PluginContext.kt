@@ -156,8 +156,17 @@ class DefaultPluginContext(
                 }
 
                 // 5. Simple property name uppercase (e.g. curtly.baseUrl -> BASE_URL, summarizer.emoji -> EMOJI)
+                // Guard: External service URLs (e.g. gemini.baseUrl, chatter.baseUrl) must never
+                // fall back to the bot's own public web server BASE_URL.
                 val simpleProp = parts.last()
-                candidates.add(toSnakeCase(simpleProp).uppercase())
+                val upperSimple = toSnakeCase(simpleProp).uppercase()
+                val isBaseUrlCollision =
+                    upperSimple == "BASE_URL" &&
+                        !prefix.equals("curtly", ignoreCase = true) &&
+                        !prefix.equals("luna", ignoreCase = true)
+                if (!isBaseUrlCollision) {
+                    candidates.add(upperSimple)
+                }
 
                 // If key starts with "plugins.", also check without "plugins." prefix
                 if (prefix.equals("plugins", ignoreCase = true) && parts.size > 2) {

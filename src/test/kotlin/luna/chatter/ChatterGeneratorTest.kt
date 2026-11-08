@@ -1,5 +1,6 @@
 package luna.chatter
 
+import dev.kord.core.Kord
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.mock.MockEngine
 import io.ktor.client.engine.mock.respond
@@ -10,8 +11,12 @@ import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.headersOf
 import io.ktor.serialization.kotlinx.json.json
+import io.ktor.server.routing.Routing
+import io.mockk.mockk
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.Json
+import luna.plugin.DefaultPluginContext
+import org.jetbrains.exposed.v1.jdbc.Database
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -74,6 +79,24 @@ class ChatterGeneratorTest {
         assertEquals("generic-gemini-key", config.apiKey)
         assertTrue(config.isConfigured)
         assertEquals("gemini-1.5-pro", config.cleanModel)
+        assertEquals("https://generativelanguage.googleapis.com", config.cleanBaseUrl)
+    }
+
+    @Test
+    fun `ChatterConfig fromPluginContext preserves default official baseUrl when only global BASE_URL is present`() {
+        val context =
+            DefaultPluginContext(
+                kord = mockk<Kord>(relaxed = true),
+                routing = mockk<Routing>(relaxed = true),
+                database = mockk<Database>(relaxed = true),
+                configMap =
+                    mapOf(
+                        "BASE_URL" to "http://localhost:8080/s/",
+                        "GEMINI_API_KEY" to "test-gemini-key",
+                    ),
+            )
+        val config = ChatterConfig.fromPluginContext(context)
+        assertEquals("https://generativelanguage.googleapis.com", config.baseUrl)
         assertEquals("https://generativelanguage.googleapis.com", config.cleanBaseUrl)
     }
 
