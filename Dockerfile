@@ -12,8 +12,18 @@ COPY libs/config/build.gradle.kts ./libs/config/
 COPY libs/mcp-data/build.gradle.kts ./libs/mcp-data/
 COPY mcp-server/build.gradle.kts ./mcp-server/
 
-# Make gradlew executable and fetch dependencies
-RUN chmod +x gradlew && ./gradlew dependencies --no-daemon || true
+# Make gradlew executable and download the Gradle distribution, retrying transient
+# CDN failures (timeouts / HTTP 504) so a single flaky download doesn't fail the build
+RUN chmod +x gradlew && \
+    for attempt in 1 2 3 4 5; do \
+        ./gradlew --version --no-daemon && break; \
+        [ "$attempt" -eq 5 ] && exit 1; \
+        echo "Gradle distribution download failed (attempt $attempt), retrying..."; \
+        sleep $((attempt * 5)); \
+    done
+
+# Fetch dependencies
+RUN ./gradlew dependencies --no-daemon || true
 
 # Copy source code
 COPY src ./src
