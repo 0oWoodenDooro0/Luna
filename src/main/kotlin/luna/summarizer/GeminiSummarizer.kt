@@ -6,7 +6,6 @@ import io.ktor.client.engine.cio.CIO
 import io.ktor.client.plugins.HttpRequestTimeoutException
 import io.ktor.client.plugins.HttpTimeout
 import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
-import io.ktor.client.request.get
 import io.ktor.client.request.post
 import io.ktor.client.request.setBody
 import io.ktor.client.statement.HttpResponse
@@ -17,8 +16,19 @@ import io.ktor.http.contentType
 import io.ktor.http.isSuccess
 import io.ktor.serialization.kotlinx.json.json
 import kotlinx.coroutines.TimeoutCancellationException
-import kotlinx.coroutines.delay
 import kotlinx.serialization.json.Json
+import luna.core.ai.EmojiSanitizer
+import luna.core.ai.GeminiContent
+import luna.core.ai.GeminiFunctionResponse
+import luna.core.ai.GeminiGenerateContentRequest
+import luna.core.ai.GeminiGenerateContentResponse
+import luna.core.ai.GeminiInteractionClient
+import luna.core.ai.GeminiInteractionResult
+import luna.core.ai.GeminiPart
+import luna.core.ai.GeminiTool
+import luna.core.ai.GeminiTools
+import luna.core.ai.GroundingCitation
+import luna.core.ai.VideoProcessingMode
 import org.slf4j.LoggerFactory
 import java.net.SocketTimeoutException
 
@@ -33,6 +43,12 @@ open class GeminiSummarizer(
     private val maxPollingAttempts: Int = 30,
 ) : AutoCloseable {
     private val logger = LoggerFactory.getLogger(GeminiSummarizer::class.java)
+    private val interactionClient =
+        GeminiInteractionClient(
+            httpClient = httpClient,
+            pollingDelayMs = pollingDelayMs,
+            maxPollingAttempts = maxPollingAttempts,
+        )
 
     suspend fun summarize(
         content: String,
@@ -284,104 +300,44 @@ open class GeminiSummarizer(
         val userPrompt = GeminiPromptBuilder.buildUserPrompt(input)
         val systemInstruction = GeminiPromptBuilder.buildSystemInstruction(input)
         val promptText = "$systemInstruction\n\n---\n\n$userPrompt"
-        val endpoint = "${config.cleanBaseUrl}/v1beta/interactions?key=${config.apiKey}"
-        val requestPayload =
-            GeminiInteractionRequest(
-                model = config.cleanModel,
-                input =
-                    listOf(
-                        GeminiInteractionInput(
-                            type = "video",
-                            uri = input.videoUri,
-                            mimeType = "video/mp4",
-                            processing = "agentic",
-                        ),
-                        GeminiInteractionInput(
-                            type = "text",
-                            text = promptText,
-                        ),
-                    ),
-                background = true,
-            )
 
-        return try {
-            val response: HttpResponse =
-                httpClient.post(endpoint) {
-                    contentType(ContentType.Application.Json)
-                    setBody(requestPayload)
-                }
-
-            if (response.status == HttpStatusCode.TooManyRequests) {
-                val retryAfter = response.headers["Retry-After"]?.toLongOrNull()
-                return SummaryResult.Error.RateLimitExceeded(
-                    message = "Gemini API rate limit exceeded (HTTP 429)",
-                    retryAfterSeconds = retryAfter,
+        return when (
+            val result =
+                interactionClient.runAgenticVideo(
+                    baseUrl = config.cleanBaseUrl,
+                    apiKey = config.apiKey,
+                    model = config.cleanModel,
+                    videoUri = input.videoUri.orEmpty(),
+                    promptText = promptText,
                 )
+        ) {
+            is GeminiInteractionResult.Success -> {
+                SummaryResult.Success(text = result.text)
             }
-            if (!response.status.isSuccess()) {
-                val errorBody = response.bodyAsText()
-                return SummaryResult.Error.ApiError(
-                    statusCode = response.status.value,
-                    message = "Gemini API error (${response.status.value}): $errorBody",
+
+            is GeminiInteractionResult.Error.RateLimitExceeded -> {
+                SummaryResult.Error.RateLimitExceeded(
+                    message = result.message,
+                    retryAfterSeconds = result.retryAfterSeconds,
                 )
             }
 
-            val interaction = response.body<GeminiInteractionResponse>()
-            val interactionId =
-                interaction.id
-                    ?: return SummaryResult.Error.Generic("No interaction ID returned from Gemini")
+            is GeminiInteractionResult.Error.Timeout -> {
+                SummaryResult.Error.Timeout(message = result.message, cause = result.cause)
+            }
 
-            pollInteraction(interactionId)
-        } catch (e: HttpRequestTimeoutException) {
-            SummaryResult.Error.Timeout("Gemini API request timed out: ${e.message}", cause = e)
-        } catch (e: SocketTimeoutException) {
-            SummaryResult.Error.Timeout("Gemini API socket timed out: ${e.message}", cause = e)
-        } catch (e: TimeoutCancellationException) {
-            SummaryResult.Error.Timeout("Gemini API coroutine timed out: ${e.message}", cause = e)
-        } catch (e: Exception) {
-            SummaryResult.Error.Generic("Unexpected error invoking Gemini API: ${e.message}", cause = e)
+            is GeminiInteractionResult.Error.ApiError -> {
+                SummaryResult.Error.ApiError(statusCode = result.statusCode, message = result.message)
+            }
+
+            is GeminiInteractionResult.Error.EmptyOutput -> {
+                SummaryResult.Error.Generic(result.message)
+            }
+
+            is GeminiInteractionResult.Error.Generic -> {
+                SummaryResult.Error.Generic(message = result.message, cause = result.cause)
+            }
         }
-    }
-
-    private suspend fun pollInteraction(id: String): SummaryResult {
-        val endpoint = "${config.cleanBaseUrl}/v1beta/interactions/$id?key=${config.apiKey}"
-        var attempts = 0
-
-        while (attempts < maxPollingAttempts) {
-            attempts++
-            val response = httpClient.get(endpoint)
-            if (response.status == HttpStatusCode.TooManyRequests) {
-                val retryAfter = response.headers["Retry-After"]?.toLongOrNull()
-                return SummaryResult.Error.RateLimitExceeded(
-                    message = "Gemini API rate limit exceeded (HTTP 429)",
-                    retryAfterSeconds = retryAfter,
-                )
-            }
-            if (!response.status.isSuccess()) {
-                return SummaryResult.Error.ApiError(
-                    statusCode = response.status.value,
-                    message = "Error polling interaction: ${response.status.value}",
-                )
-            }
-
-            val statusResponse = response.body<GeminiInteractionResponse>()
-            val rawOutput = statusResponse.extractOutputText()
-            if (statusResponse.status == "completed" || rawOutput.isNotBlank()) {
-                val sanitized = EmojiSanitizer.stripEmojis(rawOutput).trim()
-                if (sanitized.isBlank()) {
-                    return SummaryResult.Error.Generic("Gemini summary output is empty or sanitized to blank")
-                }
-                return SummaryResult.Success(text = sanitized)
-            }
-            if (statusResponse.status == "failed") {
-                val errorMsg = statusResponse.error?.message ?: "Agentic video processing failed"
-                return SummaryResult.Error.Generic(errorMsg)
-            }
-
-            delay(pollingDelayMs)
-        }
-
-        return SummaryResult.Error.Timeout("Agentic video interaction timed out after $maxPollingAttempts attempts")
     }
 
     private suspend fun handleResponse(
@@ -531,9 +487,6 @@ open class GeminiSummarizer(
     }
 
     companion object {
-        const val FETCH_EARLIER_MESSAGES = GeminiTools.FETCH_EARLIER_MESSAGES
-        val FETCH_EARLIER_MESSAGES_TOOL = GeminiTools.FETCH_EARLIER_MESSAGES_TOOL
-
         private val jsonParser =
             Json {
                 ignoreUnknownKeys = true

@@ -6,6 +6,8 @@ import dev.socialpeek.SocialPeek
 import dev.socialpeek.model.PeekPost
 import dev.socialpeek.model.Platform
 import kotlinx.coroutines.flow.toList
+import luna.core.ai.ChatImageAttachment
+import luna.core.ai.ChatImageAttachmentExtractor
 import org.slf4j.LoggerFactory
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.minutes
@@ -35,7 +37,7 @@ open class ConversationSliceCollector(
     val maxCharacterBudget: Int = resolveMaxCharacterBudget(),
     val maxImages: Int = resolveMaxImages(),
     val maxLookbackMessages: Int = resolveMaxLookbackMessages(),
-    val maxImageBytes: Int = DEFAULT_MAX_IMAGE_BYTES,
+    val maxImageBytes: Int = ChatImageAttachmentExtractor.DEFAULT_MAX_IMAGE_BYTES,
     val noiseFilter: DialogueNoiseFilter = DialogueNoiseFilter(),
     val peekResolver: suspend (String) -> PeekPost? = { SocialPeek.peekOrNull(it) },
     val historyFetcher: suspend (message: Message, limit: Int) -> List<Message> = { message, limit ->
@@ -68,31 +70,6 @@ open class ConversationSliceCollector(
 
     internal suspend fun isBotSummaryMessage(message: Message): Boolean = noiseFilter.isBotSummaryMessage(message)
 
-    internal fun extractImageAttachments(message: Message): List<ChatImageAttachment> {
-        val attachments = runCatching { message.attachments }.getOrElse { emptySet() }
-        if (attachments.isEmpty()) return emptyList()
-
-        return attachments.mapNotNull { attachment ->
-            val size = runCatching { attachment.size }.getOrNull()
-            if (size != null && size > maxImageBytes) {
-                return@mapNotNull null
-            }
-            val contentType = runCatching { attachment.contentType }.getOrNull()
-            val filename = runCatching { attachment.filename }.getOrNull()
-            val resolvedMimeType = resolveImageMimeType(contentType, filename)
-            if (resolvedMimeType != null) {
-                val url = runCatching { attachment.url }.getOrNull() ?: return@mapNotNull null
-                ChatImageAttachment(
-                    url = url,
-                    mimeType = resolvedMimeType,
-                    filename = filename,
-                )
-            } else {
-                null
-            }
-        }
-    }
-
     suspend fun collectSlice(message: Message): PreparedConversationSlice? {
         if (isNoiseMessage(message)) {
             logger.debug("Ignoring reaction on noise or bot message {}", message.id)
@@ -120,46 +97,19 @@ open class ConversationSliceCollector(
                 .sortedBy { it.id.value }
         val primaryUrl = allMessages.asReversed().firstNotNullOfOrNull { msg -> URL_REGEX.find(msg.content)?.value }
 
-        val targetImages = extractImageAttachments(message)
-        val retainedTargetImages = targetImages.take(maxImages)
-        val remainingCapacity = kotlin.math.max(0, maxImages - retainedTargetImages.size)
-
-        val otherMessages = precedingMessages + subsequentMessages
-        val otherMessagesWithImages = otherMessages.map { msg -> msg to extractImageAttachments(msg) }
-        val retainedOtherByMessage = mutableMapOf<Snowflake, List<ChatImageAttachment>>()
-        var capacityLeft = remainingCapacity
-
-        for ((msg, images) in otherMessagesWithImages.asReversed()) {
-            if (capacityLeft <= 0 || images.isEmpty()) {
-                retainedOtherByMessage[msg.id] = emptyList()
-                continue
-            }
-            if (images.size <= capacityLeft) {
-                retainedOtherByMessage[msg.id] = images
-                capacityLeft -= images.size
-            } else {
-                retainedOtherByMessage[msg.id] = images.takeLast(capacityLeft)
-                capacityLeft = 0
-            }
-        }
-
-        val messagesWithImages =
-            allMessages.map { msg ->
-                val retained =
-                    if (msg.id == message.id) {
-                        retainedTargetImages
-                    } else {
-                        retainedOtherByMessage[msg.id].orEmpty()
-                    }
-                msg to retained
-            }
-        val sliceImageAttachments = messagesWithImages.flatMap { it.second }
+        val imagesMap =
+            ChatImageAttachmentExtractor.selectChronologicalImages(
+                messages = allMessages,
+                maxImages = maxImages,
+                maxImageBytes = maxImageBytes,
+                prioritizedMessageId = message.id,
+            )
+        val sliceImageAttachments = imagesMap.values.flatten()
 
         val replyReferencesByMessage = resolveExternalReplyReferences(allMessages)
 
         val formattedContent =
             if (allMessages.size > 1) {
-                val imagesMap = messagesWithImages.toMap().mapKeys { it.key.id }
                 val (formatted, _) =
                     formatDialogueMessages(
                         messages = allMessages,
@@ -535,7 +485,7 @@ open class ConversationSliceCollector(
                         baseAuthor
                     }
                 val embedText = formatEmbedPreviews(msg)
-                val images = imagesByMessage[msg.id] ?: extractImageAttachments(msg)
+                val images = imagesByMessage[msg.id] ?: ChatImageAttachmentExtractor.extractFromMessage(msg, maxImageBytes)
                 if (images.isNotEmpty()) {
                     val markers =
                         images.map { img ->
@@ -610,35 +560,9 @@ open class ConversationSliceCollector(
         const val DEFAULT_MAX_HISTORY_MESSAGES = 50
         val DEFAULT_INACTIVITY_GAP = 15.minutes
         const val DEFAULT_MAX_CHARACTER_BUDGET = 20000
-        const val DEFAULT_MAX_IMAGE_BYTES = 10 * 1024 * 1024
         const val DEFAULT_MAX_IMAGES = 10
         const val DEFAULT_MAX_LOOKBACK_MESSAGES = 20
         const val NO_FURTHER_HISTORY_MESSAGE = "查無更早的歷史訊息。"
-
-        val SUPPORTED_IMAGE_MIME_TYPES =
-            setOf(
-                "image/jpeg",
-                "image/png",
-                "image/webp",
-                "image/gif",
-            )
-
-        fun resolveImageMimeType(
-            contentType: String?,
-            filename: String? = null,
-        ): String? {
-            val normalizedContentType =
-                contentType
-                    ?.substringBefore(';')
-                    ?.trim()
-                    ?.lowercase()
-
-            if (normalizedContentType != null && normalizedContentType in SUPPORTED_IMAGE_MIME_TYPES) {
-                return normalizedContentType
-            }
-
-            return null
-        }
 
         fun resolveMaxHistoryMessages(env: Map<String, String> = emptyMap()): Int =
             env["SUMMARY_MAX_HISTORY_MESSAGES"]

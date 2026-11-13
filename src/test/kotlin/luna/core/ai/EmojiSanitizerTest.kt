@@ -1,4 +1,4 @@
-package luna.summarizer
+package luna.core.ai
 
 import kotlin.test.Test
 import kotlin.test.assertEquals

@@ -2,6 +2,10 @@ package luna.summarizer
 
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+import luna.core.ai.ChatImageAttachment
+import luna.core.ai.EmojiSanitizer
+import luna.core.ai.GroundingCitation
+import luna.core.ai.VideoProcessingMode
 import kotlin.test.Test
 import kotlin.test.assertContains
 import kotlin.test.assertEquals

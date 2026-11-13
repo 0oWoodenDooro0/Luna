@@ -1,4 +1,4 @@
-package luna.summarizer
+package luna.core.ai
 
 /**
  * Utility to detect and strip emoji characters from text.

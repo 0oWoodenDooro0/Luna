@@ -12,6 +12,9 @@ import io.ktor.http.headersOf
 import io.ktor.serialization.kotlinx.json.json
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.Json
+import luna.core.ai.ChatImageAttachment
+import luna.core.ai.EmojiSanitizer
+import luna.core.ai.GeminiTools
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse

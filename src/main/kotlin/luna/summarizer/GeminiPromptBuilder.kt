@@ -1,5 +1,14 @@
 package luna.summarizer
 
+import luna.core.ai.GeminiContent
+import luna.core.ai.GeminiFileData
+import luna.core.ai.GeminiGenerateContentRequest
+import luna.core.ai.GeminiGenerationConfig
+import luna.core.ai.GeminiPart
+import luna.core.ai.GeminiTool
+import luna.core.ai.GroundingCitation
+import luna.core.ai.VideoProcessingMode
+
 /**
  * Builds system instructions, prompts, and REST request payloads for Google Gemini API.
  */
