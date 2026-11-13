@@ -199,7 +199,7 @@ open class ChatterNoiseFilter(
         return false
     }
 
-    fun isEligibleForLayaEvaluation(content: String): Boolean {
+    fun isEligibleForDecisionEvaluation(content: String): Boolean {
         val trimmed = content.trim()
         if (trimmed.isBlank()) return false
         if (trimmed.contains("luna", ignoreCase = true) || trimmed.contains("露娜")) {
@@ -208,7 +208,7 @@ open class ChatterNoiseFilter(
         if (trimmed.contains('?') || trimmed.contains('？')) {
             return true
         }
-        return trimmed.length >= MIN_LAYA_CONTENT_LENGTH
+        return trimmed.length >= MIN_DECISION_CONTENT_LENGTH
     }
 
     fun stripLunaMentions(
@@ -317,7 +317,7 @@ open class ChatterNoiseFilter(
     }
 
     companion object {
-        const val MIN_LAYA_CONTENT_LENGTH = 5
+        const val MIN_DECISION_CONTENT_LENGTH = 5
         val DEFAULT_BOT_PREFIXES = setOf("!", "~", "?")
         const val CALLOUT_GREETING = "你好"
         private val LUNA_MENTION_REGEX = Regex("""(?i)(?<!\w)@luna\b""")

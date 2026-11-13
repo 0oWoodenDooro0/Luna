@@ -466,26 +466,26 @@ class ChatterNoiseFilterTest {
     }
 
     @Test
-    fun `isEligibleForLayaEvaluation validates question marks, luna keyword, and substantive message length`() {
+    fun `isEligibleForDecisionEvaluation validates question marks, luna keyword, and substantive message length`() {
         // Trivial messages (< 5 chars, no ? or luna) -> false
-        assertFalse(filter.isEligibleForLayaEvaluation("ok"))
-        assertFalse(filter.isEligibleForLayaEvaluation("好"))
-        assertFalse(filter.isEligibleForLayaEvaluation("++"))
-        assertFalse(filter.isEligibleForLayaEvaluation("111"))
-        assertFalse(filter.isEligibleForLayaEvaluation("    "))
+        assertFalse(filter.isEligibleForDecisionEvaluation("ok"))
+        assertFalse(filter.isEligibleForDecisionEvaluation("好"))
+        assertFalse(filter.isEligibleForDecisionEvaluation("++"))
+        assertFalse(filter.isEligibleForDecisionEvaluation("111"))
+        assertFalse(filter.isEligibleForDecisionEvaluation("    "))
 
         // Questions (? or ？) -> true regardless of length
-        assertTrue(filter.isEligibleForLayaEvaluation("在嗎?"))
-        assertTrue(filter.isEligibleForLayaEvaluation("吃飽了嗎？"))
+        assertTrue(filter.isEligibleForDecisionEvaluation("在嗎?"))
+        assertTrue(filter.isEligibleForDecisionEvaluation("吃飽了嗎？"))
 
         // Luna keywords -> true regardless of length
-        assertTrue(filter.isEligibleForLayaEvaluation("luna"))
-        assertTrue(filter.isEligibleForLayaEvaluation("嗨Luna"))
-        assertTrue(filter.isEligibleForLayaEvaluation("露娜在嗎"))
+        assertTrue(filter.isEligibleForDecisionEvaluation("luna"))
+        assertTrue(filter.isEligibleForDecisionEvaluation("嗨Luna"))
+        assertTrue(filter.isEligibleForDecisionEvaluation("露娜在嗎"))
 
         // Substantive messages (>= 5 characters) -> true
-        assertTrue(filter.isEligibleForLayaEvaluation("今天天氣真好"))
-        assertTrue(filter.isEligibleForLayaEvaluation("週末大家有什麼安排呢"))
+        assertTrue(filter.isEligibleForDecisionEvaluation("今天天氣真好"))
+        assertTrue(filter.isEligibleForDecisionEvaluation("週末大家有什麼安排呢"))
     }
 
     @Test

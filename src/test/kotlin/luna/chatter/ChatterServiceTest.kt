@@ -36,7 +36,7 @@ class ChatterServiceTest {
     private var simulatedTime: Long = 100_000L
     private lateinit var cooldownCache: BoundedChannelCooldownCache
     private lateinit var filter: ChatterNoiseFilter
-    private lateinit var layaClient: LayaClient
+    private lateinit var decisionClient: GeminiDecisionClient
     private lateinit var chatterGenerator: ChatterGenerator
     private lateinit var channel: MessageChannel
     private lateinit var service: ChatterService
@@ -47,7 +47,7 @@ class ChatterServiceTest {
         simulatedTime = 100_000L
         cooldownCache = BoundedChannelCooldownCache(timeSource = { simulatedTime })
         filter = ChatterNoiseFilter(cooldownCache = cooldownCache)
-        layaClient = mockk(relaxed = true)
+        decisionClient = mockk(relaxed = true)
         chatterGenerator = mockk(relaxed = true)
         channel = mockk(relaxed = true)
 
@@ -57,7 +57,7 @@ class ChatterServiceTest {
         service =
             ChatterService(
                 filter = filter,
-                layaClient = layaClient,
+                decisionClient = decisionClient,
                 chatterGenerator = chatterGenerator,
                 cooldownCache = cooldownCache,
                 historyFetcher = { _, _ -> emptyList() },
@@ -120,7 +120,7 @@ class ChatterServiceTest {
     }
 
     @Test
-    fun `direct mention to bot triggers immediate reply without calling laya and bypasses cooldown`() =
+    fun `direct mention to bot triggers immediate reply without calling decision client and bypasses cooldown`() =
         runTest {
             val botSelfId = Snowflake(9999L)
             val channelId = 500L
@@ -142,7 +142,7 @@ class ChatterServiceTest {
             val result = service.processMessage(message)
 
             assertTrue(result, "Expected processMessage to reply to direct bot mention even during cooldown")
-            coVerify(exactly = 0) { layaClient.evaluateParticipation(any()) }
+            coVerify(exactly = 0) { decisionClient.decide(any(), any()) }
             coVerify(exactly = 1) { channel.type() }
             coVerify(exactly = 1) { chatterGenerator.generateReply(any<List<ChatMessage>>()) }
             coVerify(exactly = 1) { channel.createMessage(replyText) }
@@ -215,7 +215,7 @@ class ChatterServiceTest {
         }
 
     @Test
-    fun `trivial ambient message without bot mention, question, or substantive content does not call laya`() =
+    fun `trivial ambient message without bot mention, question, or substantive content does not call decision client`() =
         runTest {
             val channelId = 500L
             val message =
@@ -230,7 +230,7 @@ class ChatterServiceTest {
             val result = service.processMessage(message)
 
             assertFalse(result, "Trivial ambient message should not trigger chatter reply")
-            coVerify(exactly = 0) { layaClient.evaluateParticipation(any()) }
+            coVerify(exactly = 0) { decisionClient.decide(any(), any()) }
         }
 
     @Test
@@ -240,13 +240,13 @@ class ChatterServiceTest {
             val message = createMockMessage(id = 101L, channelId = channelId, username = "Alice", content = "Does anyone know when Luna updates?")
             val replyText = "Luna updates frequently! Check out the releases page."
 
-            coEvery { layaClient.evaluateParticipation(any()) } returns LayaDecision(shouldParticipate = true, probability = 0.95)
+            coEvery { decisionClient.decide(any(), any()) } returns ParticipationDecision(shouldParticipate = true, noul = 0.95)
             coEvery { chatterGenerator.generateReply(any<List<ChatMessage>>()) } returns replyText
 
             val result = service.processMessage(message)
 
             assertTrue(result, "Expected processMessage to return true when reply is successfully sent")
-            coVerify(exactly = 1) { layaClient.evaluateParticipation(match { it.contains("Alice") && it.contains("Luna updates") }) }
+            coVerify(exactly = 1) { decisionClient.decide(match { it.contains("Alice") && it.contains("Luna updates") }, any()) }
             coVerify(exactly = 1) { channel.type() }
             coVerify(exactly = 1) { chatterGenerator.generateReply(match<List<ChatMessage>> { it.any { msg -> msg.author == "Alice" } }) }
             coVerify(exactly = 1) { channel.createMessage(replyText) }
@@ -254,17 +254,17 @@ class ChatterServiceTest {
         }
 
     @Test
-    fun `laya says false results in no typing indicator, no gemini call, and no message sent`() =
+    fun `decision client returning false results in no typing indicator, no gemini call, and no message sent`() =
         runTest {
             val channelId = 501L
             val message = createMockMessage(id = 102L, channelId = channelId, username = "Bob", content = "Good morning")
 
-            coEvery { layaClient.evaluateParticipation(any()) } returns LayaDecision(shouldParticipate = false, probability = 0.2)
+            coEvery { decisionClient.decide(any(), any()) } returns ParticipationDecision(shouldParticipate = false, noul = 0.2)
 
             val result = service.processMessage(message)
 
-            assertFalse(result, "Expected processMessage to return false when Laya rejects participation")
-            coVerify(exactly = 1) { layaClient.evaluateParticipation(any()) }
+            assertFalse(result, "Expected processMessage to return false when decision client rejects participation")
+            coVerify(exactly = 1) { decisionClient.decide(any(), any()) }
             coVerify(exactly = 0) { channel.type() }
             coVerify(exactly = 0) { chatterGenerator.generateReply(any<List<ChatMessage>>()) }
             coVerify(exactly = 0) { channel.createMessage(any<String>()) }
@@ -272,28 +272,28 @@ class ChatterServiceTest {
         }
 
     @Test
-    fun `filter rejects bot messages without invoking laya or gemini`() =
+    fun `filter rejects bot messages without invoking decision client or gemini`() =
         runTest {
             val message = createMockMessage(id = 103L, isBot = true, content = "Bot announcement")
 
             val result = service.processMessage(message)
 
             assertFalse(result)
-            coVerify(exactly = 0) { layaClient.evaluateParticipation(any()) }
+            coVerify(exactly = 0) { decisionClient.decide(any(), any()) }
             coVerify(exactly = 0) { channel.type() }
             coVerify(exactly = 0) { chatterGenerator.generateReply(any<List<ChatMessage>>()) }
             coVerify(exactly = 0) { channel.createMessage(any<String>()) }
         }
 
     @Test
-    fun `filter rejects slash and prefix command messages without invoking laya or gemini`() =
+    fun `filter rejects slash and prefix command messages without invoking decision client or gemini`() =
         runTest {
             val slashCommand = createMockMessage(id = 104L, content = "/help")
             val prefixCommand = createMockMessage(id = 105L, content = "!roll 100")
 
             assertFalse(service.processMessage(slashCommand))
             assertFalse(service.processMessage(prefixCommand))
-            coVerify(exactly = 0) { layaClient.evaluateParticipation(any()) }
+            coVerify(exactly = 0) { decisionClient.decide(any(), any()) }
             coVerify(exactly = 0) { channel.type() }
             coVerify(exactly = 0) { chatterGenerator.generateReply(any<List<ChatMessage>>()) }
             coVerify(exactly = 0) { channel.createMessage(any<String>()) }
@@ -310,7 +310,7 @@ class ChatterServiceTest {
             val result = service.processMessage(message)
 
             assertFalse(result)
-            coVerify(exactly = 0) { layaClient.evaluateParticipation(any()) }
+            coVerify(exactly = 0) { decisionClient.decide(any(), any()) }
             coVerify(exactly = 0) { channel.type() }
             coVerify(exactly = 0) { chatterGenerator.generateReply(any<List<ChatMessage>>()) }
             coVerify(exactly = 0) { channel.createMessage(any<String>()) }
@@ -325,7 +325,7 @@ class ChatterServiceTest {
             val result = service.processMessage(message)
 
             assertFalse(result)
-            coVerify(exactly = 0) { layaClient.evaluateParticipation(any()) }
+            coVerify(exactly = 0) { decisionClient.decide(any(), any()) }
             coVerify(exactly = 0) { channel.type() }
             coVerify(exactly = 0) { chatterGenerator.generateReply(any<List<ChatMessage>>()) }
             coVerify(exactly = 0) { channel.createMessage(any<String>()) }
@@ -348,7 +348,7 @@ class ChatterServiceTest {
                     webhookId = webhookId,
                 )
 
-            coEvery { layaClient.evaluateParticipation(any()) } returns LayaDecision(shouldParticipate = true, probability = 0.9)
+            coEvery { decisionClient.decide(any(), any()) } returns ParticipationDecision(shouldParticipate = true, noul = 0.9)
             coEvery { chatterGenerator.generateReply(any<List<ChatMessage>>()) } returns "That looks like an interesting thread!"
 
             val result = service.processMessage(message)
@@ -366,7 +366,7 @@ class ChatterServiceTest {
             val channelId = 505L
             val message = createMockMessage(id = 109L, channelId = channelId, content = "Tell me something cool")
 
-            coEvery { layaClient.evaluateParticipation(any()) } returns LayaDecision(shouldParticipate = true)
+            coEvery { decisionClient.decide(any(), any()) } returns ParticipationDecision(shouldParticipate = true)
             coEvery { chatterGenerator.generateReply(any<List<ChatMessage>>()) } returns null
 
             val resultNull = service.processMessage(message)
@@ -399,7 +399,7 @@ class ChatterServiceTest {
     }
 
     @Test
-    fun `chatter plugin initializes configuration and instantiates components`() =
+    fun `chatter plugin initializes configuration and enables automatically when GEMINI_API_KEY is configured`() =
         runTest {
             val mockKord = mockk<Kord>(relaxed = true)
             val eventsFlow = MutableSharedFlow<Event>()
@@ -408,12 +408,12 @@ class ChatterServiceTest {
 
             val configMap =
                 mapOf(
-                    "LAYA_API_KEY" to "laya-secret-key-123",
-                    "LAYA_THRESHOLD" to 0.85,
-                    "CHATTER_ENABLED" to true,
+                    "GEMINI_API_KEY" to "gemini-secret-key-456",
+                    "CHATTER_DECISION_MODEL" to "gemini-decision-custom",
+                    "CHATTER_DECISION_THRESHOLD" to 0.85,
+                    "CHATTER_DECISION_TIMEOUT_SECONDS" to 15L,
                     "CHATTER_ALLOWED_CHANNELS" to "111,222",
                     "CHATTER_COOLDOWN_SECONDS" to 45L,
-                    "GEMINI_API_KEY" to "gemini-secret-key-456",
                     "CHATTER_GEMINI_MODEL" to "gemini-3.5-flash-test",
                 )
 
@@ -430,13 +430,43 @@ class ChatterServiceTest {
 
             assertTrue(plugin.isChatterEnabled)
             assertNotNull(plugin.service)
-            assertEquals("laya-secret-key-123", plugin.layaClient?.config?.apiKey)
-            assertEquals(0.85, plugin.layaClient?.config?.threshold)
+            assertEquals("gemini-secret-key-456", plugin.decisionClient?.config?.apiKey)
+            assertEquals("gemini-decision-custom", plugin.decisionClient?.config?.model)
+            assertEquals(0.85, plugin.decisionClient?.config?.threshold)
+            assertEquals(15_000L, plugin.decisionClient?.config?.timeoutMillis)
             assertEquals("gemini-secret-key-456", plugin.chatterGenerator?.config?.apiKey)
             assertEquals("gemini-3.5-flash-test", plugin.chatterGenerator?.config?.model)
             assertEquals(setOf(Snowflake(111L), Snowflake(222L)), plugin.filter?.allowedChannels)
             assertEquals(45_000L, plugin.filter?.cooldownDurationMs)
 
+            plugin.shutdown()
+        }
+
+    @Test
+    fun `chatter plugin remains disabled when CHATTER_ENABLED is false even with GEMINI_API_KEY configured`() =
+        runTest {
+            val mockKord = mockk<Kord>(relaxed = true)
+            val eventsFlow = MutableSharedFlow<Event>()
+            every { mockKord.coroutineContext } returns EmptyCoroutineContext
+            every { mockKord.events } returns eventsFlow
+
+            val context =
+                DefaultPluginContext(
+                    kord = mockKord,
+                    routing = mockk(relaxed = true),
+                    database = mockk(relaxed = true),
+                    configMap =
+                        mapOf(
+                            "GEMINI_API_KEY" to "gemini-secret-key-456",
+                            "CHATTER_ENABLED" to false,
+                        ),
+                )
+
+            val plugin = ChatterPlugin()
+            plugin.initialize(context)
+
+            assertFalse(plugin.isChatterEnabled)
+            assertFalse(plugin.filter?.enabled ?: true)
             plugin.shutdown()
         }
 
@@ -457,29 +487,30 @@ class ChatterServiceTest {
             val testService =
                 ChatterService(
                     filter = filter,
-                    layaClient = layaClient,
+                    decisionClient = decisionClient,
                     chatterGenerator = chatterGenerator,
                     cooldownCache = cooldownCache,
-                    layaMessageCount = 3,
+                    decisionMessageCount = 3,
                     historyMessageCount = 15,
                     historyFetcher = customHistoryFetcher,
                 )
 
-            coEvery { layaClient.evaluateParticipation(any()) } returns LayaDecision(shouldParticipate = true)
+            coEvery { decisionClient.decide(any(), any()) } returns ParticipationDecision(shouldParticipate = true)
             coEvery { chatterGenerator.generateReply(any<List<ChatMessage>>()) } returns "Yes, Luna replies to chats!"
 
             val result = testService.processMessage(currentMsg)
 
             assertTrue(result)
-            // Laya state should receive valid messages only (excluding bot and command)
+            // Decision state should receive valid messages only (excluding bot and command)
             coVerify(exactly = 1) {
-                layaClient.evaluateParticipation(
+                decisionClient.decide(
                     match { state ->
                         state.contains("Alice") &&
                             state.contains("Charlie") &&
                             !state.contains("SpamBot") &&
                             !state.contains("!help")
                     },
+                    any(),
                 )
             }
             // Gemini history should receive chronological list of ChatMessage turns
@@ -506,7 +537,7 @@ class ChatterServiceTest {
             val channelId = 507L
             val message = createMockMessage(id = 110L, channelId = channelId, username = "Daisy", content = "Hello there from event")
 
-            coEvery { layaClient.evaluateParticipation(any()) } returns LayaDecision(shouldParticipate = true)
+            coEvery { decisionClient.decide(any(), any()) } returns ParticipationDecision(shouldParticipate = true)
             coEvery { chatterGenerator.generateReply(any<List<ChatMessage>>()) } returns "General Kenobi!"
 
             val job = service.register(mockKord, scope = this)
@@ -525,7 +556,7 @@ class ChatterServiceTest {
         }
 
     @Test
-    fun `chatter plugin skips registration and runs in disabled mode when LAYA_API_KEY is blank`() =
+    fun `chatter plugin skips registration and runs in disabled mode when GEMINI_API_KEY is blank`() =
         runTest {
             val mockKord = mockk<Kord>(relaxed = true)
             val context =
@@ -533,14 +564,14 @@ class ChatterServiceTest {
                     kord = mockKord,
                     routing = mockk(relaxed = true),
                     database = mockk(relaxed = true),
-                    configMap = emptyMap(),
+                    configMap = mapOf("CHATTER_ENABLED" to true),
                 )
 
             val plugin = ChatterPlugin()
             plugin.initialize(context)
 
             assertFalse(plugin.isChatterEnabled)
-            assertEquals("", plugin.layaClient?.config?.apiKey)
+            assertEquals("", plugin.decisionClient?.config?.apiKey)
             plugin.shutdown()
         }
 }

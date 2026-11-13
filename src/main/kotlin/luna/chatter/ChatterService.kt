@@ -14,17 +14,17 @@ import org.slf4j.LoggerFactory
 /**
  * Service orchestrating the Chatter auto-reply pipeline:
  * 1. Pre-filtering incoming messages (noise, bot, command, cooldown, allowed channels).
- * 2. Assembling recent dialogue turns (2~3 messages) for Laya System 1 decision evaluation.
- * 3. Triggering channel typing feedback when Laya decides to participate.
+ * 2. Assembling recent dialogue turns (2~3 messages) for Gemini Decision 1 participation evaluation.
+ * 3. Triggering channel typing feedback when the decision model confirms participation.
  * 4. Assembling recent conversation history (10~20 messages) for Gemini dialogue generation.
  * 5. Sending generated reply to the Discord channel and refreshing cooldown.
  */
 open class ChatterService(
     val filter: ChatterNoiseFilter = ChatterNoiseFilter(),
-    val layaClient: LayaClient,
+    val decisionClient: GeminiDecisionClient,
     val chatterGenerator: ChatterGenerator,
     val cooldownCache: BoundedChannelCooldownCache = filter.cooldownCache,
-    val layaMessageCount: Int = DEFAULT_LAYA_MESSAGE_COUNT,
+    val decisionMessageCount: Int = DEFAULT_DECISION_MESSAGE_COUNT,
     val historyMessageCount: Int = DEFAULT_HISTORY_MESSAGE_COUNT,
     val historyFetcher: suspend (message: Message, limit: Int) -> List<Message> = { message, limit ->
         message.channel
@@ -87,37 +87,40 @@ open class ChatterService(
                 return false
             }
 
-            // 3. System 1 evaluation: bypass for direct bot mentions; pre-filter ambient messages
+            // 3. Participation evaluation: bypass for direct bot mentions; pre-filter ambient messages
             if (!isDirectMention) {
-                if (!filter.isEligibleForLayaEvaluation(message.content)) {
-                    logger.debug("Ambient message {} does not meet Laya evaluation criteria; skipping Laya call", message.id)
+                if (!filter.isEligibleForDecisionEvaluation(message.content)) {
+                    logger.debug(
+                        "Ambient message {} does not meet decision evaluation criteria; skipping decision call",
+                        message.id,
+                    )
                     return false
                 }
 
-                val layaSlice = chatHistory.takeLast(layaMessageCount.coerceAtLeast(1))
-                val layaState = ChatterPromptBuilder.formatTranscript(layaSlice)
-                if (layaState.isBlank()) {
-                    logger.debug("Assembled Laya dialogue state is blank; skipping evaluation")
+                val decisionSlice = chatHistory.takeLast(decisionMessageCount.coerceAtLeast(1))
+                val decisionState = ChatterPromptBuilder.formatTranscript(decisionSlice)
+                if (decisionState.isBlank()) {
+                    logger.debug("Assembled decision dialogue state is blank; skipping evaluation")
                     return false
                 }
 
                 val decision =
                     try {
-                        layaClient.evaluateParticipation(layaState)
+                        decisionClient.decide(decisionState)
                     } catch (e: Exception) {
-                        logger.warn("Laya evaluation threw error for state: {}", e.message)
-                        LayaDecision(shouldParticipate = false)
+                        logger.warn("Gemini decision evaluation threw error for state: {}", e.message)
+                        ParticipationDecision(shouldParticipate = false)
                     }
 
                 if (!decision.shouldParticipate) {
-                    logger.debug("Laya evaluated shouldParticipate=false for message {}", message.id)
+                    logger.debug("Decision client evaluated shouldParticipate=false for message {}", message.id)
                     return false
                 }
             } else {
-                logger.info("Direct bot mention detected on message {}; bypassing Laya evaluation", message.id)
+                logger.info("Direct bot mention detected on message {}; bypassing decision evaluation", message.id)
             }
 
-            // 4. Laya confirms participation: trigger channel.type()
+            // 4. Decision confirms participation: trigger channel.type()
             val channel =
                 try {
                     message.channel
@@ -173,7 +176,7 @@ open class ChatterService(
     }
 
     companion object {
-        const val DEFAULT_LAYA_MESSAGE_COUNT = 3
+        const val DEFAULT_DECISION_MESSAGE_COUNT = 3
         const val DEFAULT_HISTORY_MESSAGE_COUNT = 15
     }
 }
