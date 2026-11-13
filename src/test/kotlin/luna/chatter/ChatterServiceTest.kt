@@ -7,11 +7,17 @@ import dev.kord.core.behavior.channel.MessageChannelBehavior
 import dev.kord.core.behavior.channel.createMessage
 import dev.kord.core.cache.data.MessageData
 import dev.kord.core.cache.data.UserData
+import dev.kord.core.entity.Attachment
+import dev.kord.core.entity.Embed
 import dev.kord.core.entity.Message
 import dev.kord.core.entity.User
 import dev.kord.core.entity.channel.MessageChannel
 import dev.kord.core.event.Event
 import dev.kord.core.event.message.MessageCreateEvent
+import dev.socialpeek.model.Author
+import dev.socialpeek.model.Comment
+import dev.socialpeek.model.PeekPost
+import dev.socialpeek.model.Platform
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.every
@@ -30,6 +36,7 @@ import kotlin.coroutines.EmptyCoroutineContext
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
+import kotlin.test.assertSame
 import kotlin.test.assertTrue
 
 class ChatterServiceTest {
@@ -39,6 +46,7 @@ class ChatterServiceTest {
     private lateinit var decisionClient: GeminiDecisionClient
     private lateinit var chatterGenerator: ChatterGenerator
     private lateinit var channel: MessageChannel
+    private lateinit var contextCollector: ChatterContextCollector
     private lateinit var service: ChatterService
 
     @BeforeEach
@@ -50,6 +58,11 @@ class ChatterServiceTest {
         decisionClient = mockk(relaxed = true)
         chatterGenerator = mockk(relaxed = true)
         channel = mockk(relaxed = true)
+        contextCollector =
+            ChatterContextCollector(
+                noiseFilter = filter,
+                peekResolver = { null },
+            )
 
         coEvery { channel.type() } returns Unit
         coEvery { channel.createMessage(any<String>()) } returns mockk(relaxed = true)
@@ -61,12 +74,37 @@ class ChatterServiceTest {
                 chatterGenerator = chatterGenerator,
                 cooldownCache = cooldownCache,
                 historyFetcher = { _, _ -> emptyList() },
+                contextCollector = contextCollector,
             )
     }
 
     @AfterEach
     fun tearDown() {
         LunaWebhookRegistry.clear()
+    }
+
+    private fun createMockAttachment(
+        url: String,
+        contentType: String?,
+        filename: String = "image.png",
+        size: Int = 512 * 1024,
+    ): Attachment {
+        val attachment = mockk<Attachment>()
+        every { attachment.url } returns url
+        every { attachment.contentType } returns contentType
+        every { attachment.filename } returns filename
+        every { attachment.size } returns size
+        return attachment
+    }
+
+    private fun createMockEmbed(
+        title: String? = null,
+        description: String? = null,
+    ): Embed {
+        val embed = mockk<Embed>()
+        every { embed.title } returns title
+        every { embed.description } returns description
+        return embed
     }
 
     private fun createMockMessage(
@@ -80,6 +118,9 @@ class ChatterServiceTest {
         authorIsNull: Boolean = false,
         mentionedUserIds: Set<Snowflake> = emptySet(),
         selfId: Snowflake = Snowflake(9999L),
+        attachments: Set<Attachment> = emptySet(),
+        embeds: List<Embed> = emptyList(),
+        referencedMessage: Message? = null,
     ): Message {
         val author =
             if (authorIsNull) {
@@ -112,8 +153,11 @@ class ChatterServiceTest {
         every { msg.content } returns content
         every { msg.type } returns type
         every { msg.webhookId } returns webhookId
-        every { msg.attachments } returns emptySet()
+        every { msg.attachments } returns attachments
+        every { msg.embeds } returns embeds
         every { msg.mentionedUserIds } returns mentionedUserIds
+        every { msg.referencedMessage } returns referencedMessage
+        every { msg.messageReference } returns null
         every { msg.channel } returns channel
         coEvery { msg.getChannel() } returns channel
         return msg
@@ -137,14 +181,14 @@ class ChatterServiceTest {
                 )
             val replyText = "Coroutines are awesome and lightweight!"
 
-            coEvery { chatterGenerator.generateReply(any<List<ChatMessage>>()) } returns replyText
+            coEvery { chatterGenerator.generateReply(any<String>()) } returns replyText
 
             val result = service.processMessage(message)
 
             assertTrue(result, "Expected processMessage to reply to direct bot mention even during cooldown")
             coVerify(exactly = 0) { decisionClient.decide(any(), any()) }
             coVerify(exactly = 1) { channel.type() }
-            coVerify(exactly = 1) { chatterGenerator.generateReply(any<List<ChatMessage>>()) }
+            coVerify(exactly = 1) { chatterGenerator.generateReply(any<String>()) }
             coVerify(exactly = 1) { channel.createMessage(replyText) }
         }
 
@@ -165,7 +209,7 @@ class ChatterServiceTest {
                 )
             val replyText = "你好！很高興見到你！"
 
-            coEvery { chatterGenerator.generateReply(any<List<ChatMessage>>()) } returns replyText
+            coEvery { chatterGenerator.generateReply(any<String>()) } returns replyText
 
             val result = service.processMessage(message)
 
@@ -173,8 +217,8 @@ class ChatterServiceTest {
             coVerify(exactly = 1) { channel.type() }
             coVerify(exactly = 1) {
                 chatterGenerator.generateReply(
-                    match<List<ChatMessage>> { list ->
-                        list.any { it.author == "Alice" && it.content == ChatterNoiseFilter.CALLOUT_GREETING }
+                    match<String> { transcript ->
+                        transcript.contains("[Alice]: ${ChatterNoiseFilter.CALLOUT_GREETING}")
                     },
                 )
             }
@@ -198,7 +242,7 @@ class ChatterServiceTest {
                 )
             val replyText = "今天天氣晴朗，很適合出門走走！"
 
-            coEvery { chatterGenerator.generateReply(any<List<ChatMessage>>()) } returns replyText
+            coEvery { chatterGenerator.generateReply(any<String>()) } returns replyText
 
             val result = service.processMessage(message)
 
@@ -206,8 +250,8 @@ class ChatterServiceTest {
             coVerify(exactly = 1) { channel.type() }
             coVerify(exactly = 1) {
                 chatterGenerator.generateReply(
-                    match<List<ChatMessage>> { list ->
-                        list.any { it.author == "Alice" && it.content == "今天天氣如何" }
+                    match<String> { transcript ->
+                        transcript.contains("[Alice]: 今天天氣如何") && !transcript.contains("@Luna")
                     },
                 )
             }
@@ -241,14 +285,14 @@ class ChatterServiceTest {
             val replyText = "Luna updates frequently! Check out the releases page."
 
             coEvery { decisionClient.decide(any(), any()) } returns ParticipationDecision(shouldParticipate = true, noul = 0.95)
-            coEvery { chatterGenerator.generateReply(any<List<ChatMessage>>()) } returns replyText
+            coEvery { chatterGenerator.generateReply(any<String>()) } returns replyText
 
             val result = service.processMessage(message)
 
             assertTrue(result, "Expected processMessage to return true when reply is successfully sent")
             coVerify(exactly = 1) { decisionClient.decide(match { it.contains("Alice") && it.contains("Luna updates") }, any()) }
             coVerify(exactly = 1) { channel.type() }
-            coVerify(exactly = 1) { chatterGenerator.generateReply(match<List<ChatMessage>> { it.any { msg -> msg.author == "Alice" } }) }
+            coVerify(exactly = 1) { chatterGenerator.generateReply(match<String> { it.contains("[Alice]: Does anyone know when Luna updates?") }) }
             coVerify(exactly = 1) { channel.createMessage(replyText) }
             assertTrue(cooldownCache.isOnCooldown(channelId), "Channel cooldown must be recorded after sending reply")
         }
@@ -266,7 +310,7 @@ class ChatterServiceTest {
             assertFalse(result, "Expected processMessage to return false when decision client rejects participation")
             coVerify(exactly = 1) { decisionClient.decide(any(), any()) }
             coVerify(exactly = 0) { channel.type() }
-            coVerify(exactly = 0) { chatterGenerator.generateReply(any<List<ChatMessage>>()) }
+            coVerify(exactly = 0) { chatterGenerator.generateReply(any<String>()) }
             coVerify(exactly = 0) { channel.createMessage(any<String>()) }
             assertFalse(cooldownCache.isOnCooldown(channelId), "Cooldown should not be recorded when not participating")
         }
@@ -281,7 +325,7 @@ class ChatterServiceTest {
             assertFalse(result)
             coVerify(exactly = 0) { decisionClient.decide(any(), any()) }
             coVerify(exactly = 0) { channel.type() }
-            coVerify(exactly = 0) { chatterGenerator.generateReply(any<List<ChatMessage>>()) }
+            coVerify(exactly = 0) { chatterGenerator.generateReply(any<String>()) }
             coVerify(exactly = 0) { channel.createMessage(any<String>()) }
         }
 
@@ -295,7 +339,7 @@ class ChatterServiceTest {
             assertFalse(service.processMessage(prefixCommand))
             coVerify(exactly = 0) { decisionClient.decide(any(), any()) }
             coVerify(exactly = 0) { channel.type() }
-            coVerify(exactly = 0) { chatterGenerator.generateReply(any<List<ChatMessage>>()) }
+            coVerify(exactly = 0) { chatterGenerator.generateReply(any<String>()) }
             coVerify(exactly = 0) { channel.createMessage(any<String>()) }
         }
 
@@ -312,7 +356,7 @@ class ChatterServiceTest {
             assertFalse(result)
             coVerify(exactly = 0) { decisionClient.decide(any(), any()) }
             coVerify(exactly = 0) { channel.type() }
-            coVerify(exactly = 0) { chatterGenerator.generateReply(any<List<ChatMessage>>()) }
+            coVerify(exactly = 0) { chatterGenerator.generateReply(any<String>()) }
             coVerify(exactly = 0) { channel.createMessage(any<String>()) }
         }
 
@@ -327,7 +371,7 @@ class ChatterServiceTest {
             assertFalse(result)
             coVerify(exactly = 0) { decisionClient.decide(any(), any()) }
             coVerify(exactly = 0) { channel.type() }
-            coVerify(exactly = 0) { chatterGenerator.generateReply(any<List<ChatMessage>>()) }
+            coVerify(exactly = 0) { chatterGenerator.generateReply(any<String>()) }
             coVerify(exactly = 0) { channel.createMessage(any<String>()) }
         }
 
@@ -349,13 +393,13 @@ class ChatterServiceTest {
                 )
 
             coEvery { decisionClient.decide(any(), any()) } returns ParticipationDecision(shouldParticipate = true, noul = 0.9)
-            coEvery { chatterGenerator.generateReply(any<List<ChatMessage>>()) } returns "That looks like an interesting thread!"
+            coEvery { chatterGenerator.generateReply(any<String>()) } returns "That looks like an interesting thread!"
 
             val result = service.processMessage(message)
 
             assertTrue(result, "SocialPreview webhook in registry must pass filter and be processed")
             coVerify(exactly = 1) { channel.type() }
-            coVerify(exactly = 1) { chatterGenerator.generateReply(any<List<ChatMessage>>()) }
+            coVerify(exactly = 1) { chatterGenerator.generateReply(any<String>()) }
             coVerify(exactly = 1) { channel.createMessage("That looks like an interesting thread!") }
             assertTrue(cooldownCache.isOnCooldown(channelId))
         }
@@ -367,7 +411,7 @@ class ChatterServiceTest {
             val message = createMockMessage(id = 109L, channelId = channelId, content = "Tell me something cool")
 
             coEvery { decisionClient.decide(any(), any()) } returns ParticipationDecision(shouldParticipate = true)
-            coEvery { chatterGenerator.generateReply(any<List<ChatMessage>>()) } returns null
+            coEvery { chatterGenerator.generateReply(any<String>()) } returns null
 
             val resultNull = service.processMessage(message)
             assertFalse(resultNull, "Expected failure when Gemini returns null")
@@ -375,7 +419,7 @@ class ChatterServiceTest {
             assertFalse(cooldownCache.isOnCooldown(channelId))
 
             // Test Gemini throwing exception
-            coEvery { chatterGenerator.generateReply(any<List<ChatMessage>>()) } throws RuntimeException("Network timeout")
+            coEvery { chatterGenerator.generateReply(any<String>()) } throws RuntimeException("Network timeout")
             val resultException = service.processMessage(message)
             assertFalse(resultException, "Expected graceful failure when Gemini throws exception")
             coVerify(exactly = 0) { channel.createMessage(any<String>()) }
@@ -496,7 +540,7 @@ class ChatterServiceTest {
                 )
 
             coEvery { decisionClient.decide(any(), any()) } returns ParticipationDecision(shouldParticipate = true)
-            coEvery { chatterGenerator.generateReply(any<List<ChatMessage>>()) } returns "Yes, Luna replies to chats!"
+            coEvery { chatterGenerator.generateReply(any<String>()) } returns "Yes, Luna replies to chats!"
 
             val result = testService.processMessage(currentMsg)
 
@@ -513,14 +557,15 @@ class ChatterServiceTest {
                     any(),
                 )
             }
-            // Gemini history should receive chronological list of ChatMessage turns
+            // Gemini reply stage should receive chronological dialogue transcript without noise
             coVerify(exactly = 1) {
                 chatterGenerator.generateReply(
-                    match<List<ChatMessage>> { history ->
-                        history.size == 3 &&
-                            history[0].author == "Alice" && history[0].content == "What is Luna?" &&
-                            history[1].author == "Charlie" && history[1].content == "Luna is a community bot." &&
-                            history[2].author == "Alice" && history[2].content == "Does it reply to chats?"
+                    match<String> { transcript ->
+                        transcript.contains("[Alice]: What is Luna?") &&
+                            transcript.contains("[Charlie]: Luna is a community bot.") &&
+                            transcript.contains("[Alice]: Does it reply to chats?") &&
+                            !transcript.contains("SpamBot") &&
+                            !transcript.contains("!help")
                     },
                 )
             }
@@ -538,7 +583,7 @@ class ChatterServiceTest {
             val message = createMockMessage(id = 110L, channelId = channelId, username = "Daisy", content = "Hello there from event")
 
             coEvery { decisionClient.decide(any(), any()) } returns ParticipationDecision(shouldParticipate = true)
-            coEvery { chatterGenerator.generateReply(any<List<ChatMessage>>()) } returns "General Kenobi!"
+            coEvery { chatterGenerator.generateReply(any<String>()) } returns "General Kenobi!"
 
             val job = service.register(mockKord, scope = this)
 
@@ -573,5 +618,305 @@ class ChatterServiceTest {
             assertFalse(plugin.isChatterEnabled)
             assertEquals("", plugin.decisionClient?.config?.apiKey)
             plugin.shutdown()
+        }
+
+    @Test
+    fun `image-only ambient message passes decision evaluation with ChatImageAttachments and triggers reply`() =
+        runTest {
+            val channelId = 601L
+            val validPng = createMockAttachment("https://cdn.example.com/meme.png", "image/png", "meme.png")
+            val message =
+                createMockMessage(
+                    id = 601L,
+                    channelId = channelId,
+                    username = "Alice",
+                    content = "",
+                    attachments = setOf(validPng),
+                )
+
+            coEvery { decisionClient.decide(any(), any()) } returns ParticipationDecision(shouldParticipate = true, noul = 0.88)
+            coEvery { chatterGenerator.generateReply(any<String>()) } returns "haha that meme is gold"
+
+            val result = service.processMessage(message)
+
+            assertTrue(result)
+            coVerify(exactly = 1) {
+                decisionClient.decide(
+                    match { it.contains("[Alice]: [附帶圖片 1: meme.png]") },
+                    match { it.size == 1 && it[0].url == "https://cdn.example.com/meme.png" && it[0].mimeType == "image/png" },
+                )
+            }
+            coVerify(exactly = 1) {
+                chatterGenerator.generateReply(
+                    match<String> { it.contains("[Alice]: [附帶圖片 1: meme.png]") },
+                )
+            }
+            coVerify(exactly = 1) { channel.createMessage("haha that meme is gold") }
+            assertTrue(cooldownCache.isOnCooldown(channelId))
+        }
+
+    @Test
+    fun `oversized image-only ambient message does not invoke decision client or chatter generator`() =
+        runTest {
+            val tenMbPlusOne = 10 * 1024 * 1024 + 1
+            val hugeImg = createMockAttachment("https://cdn.example.com/huge.jpg", "image/jpeg", "huge.jpg", size = tenMbPlusOne)
+            val message =
+                createMockMessage(
+                    id = 602L,
+                    channelId = 602L,
+                    username = "Bob",
+                    content = "",
+                    attachments = setOf(hugeImg),
+                )
+
+            val result = service.processMessage(message)
+
+            assertFalse(result)
+            coVerify(exactly = 0) { decisionClient.decide(any(), any()) }
+            coVerify(exactly = 0) { chatterGenerator.generateReply(any<String>()) }
+            coVerify(exactly = 0) { channel.createMessage(any<String>()) }
+        }
+
+    @Test
+    fun `URL-only ambient message skips SocialPeek in decision stage and propagates resolved post content to ChatterGenerator`() =
+        runTest {
+            val channelId = 603L
+            val callStages = mutableListOf<String>()
+            val peekPost =
+                PeekPost(
+                    platform = Platform.GENERIC,
+                    id = "article-1",
+                    originalUrl = "https://example.com/kotlin-post",
+                    cleanUrl = "https://example.com/kotlin-post",
+                    author = Author(username = "Author"),
+                    title = "Kotlin 2.2 Released",
+                    content = "Context parameters and new compiler improvements",
+                    comments = listOf(Comment(author = "reader", content = "Looks clean!")),
+                )
+            val customCollector =
+                ChatterContextCollector(
+                    noiseFilter = filter,
+                    peekResolver = { url ->
+                        callStages.add("peek:$url")
+                        peekPost
+                    },
+                )
+            val urlService =
+                ChatterService(
+                    filter = filter,
+                    decisionClient = decisionClient,
+                    chatterGenerator = chatterGenerator,
+                    cooldownCache = cooldownCache,
+                    historyFetcher = { _, _ -> emptyList() },
+                    contextCollector = customCollector,
+                )
+
+            val urlMessage =
+                createMockMessage(
+                    id = 603L,
+                    channelId = channelId,
+                    username = "Alice",
+                    content = "https://example.com/kotlin-post",
+                )
+
+            coEvery { decisionClient.decide(any(), any()) } answers {
+                callStages.add("decide")
+                ParticipationDecision(shouldParticipate = true, noul = 0.91)
+            }
+            coEvery { chatterGenerator.generateReply(any<String>()) } answers {
+                callStages.add("generate")
+                "Kotlin 2.2 context parameters look neat"
+            }
+
+            val result = urlService.processMessage(urlMessage)
+
+            assertTrue(result)
+            assertEquals(listOf("decide", "peek:https://example.com/kotlin-post", "generate"), callStages)
+            coVerify(exactly = 1) {
+                chatterGenerator.generateReply(
+                    match<String> { transcript ->
+                        transcript.contains("https://example.com/kotlin-post") &&
+                            transcript.contains("Kotlin 2.2 Released") &&
+                            transcript.contains("Context parameters and new compiler improvements") &&
+                            transcript.contains("Looks clean!")
+                    },
+                )
+            }
+            coVerify(exactly = 1) { channel.createMessage("Kotlin 2.2 context parameters look neat") }
+        }
+
+    @Test
+    fun `lightweight vs heavy split caps decision at 3 messages and 3 images while reply receives 15 messages and maxImages`() =
+        runTest {
+            val channelId = 604L
+            val extRef = createMockMessage(id = 700L, channelId = channelId, username = "ExtUser", content = "Earlier architecture note")
+            val historyMsgs =
+                (1..14).map { idx ->
+                    val att = createMockAttachment("https://cdn.example.com/$idx.png", "image/png", "$idx.png")
+                    createMockMessage(
+                        id = 700L + idx,
+                        channelId = channelId,
+                        username = "U$idx",
+                        content = "Turn $idx",
+                        attachments = setOf(att),
+                        referencedMessage = if (idx == 1) extRef else null,
+                    )
+                }
+            val currentAtt = createMockAttachment("https://cdn.example.com/15.png", "image/png", "15.png")
+            val currentMsg =
+                createMockMessage(
+                    id = 715L,
+                    channelId = channelId,
+                    username = "U15",
+                    content = "Turn 15 check this out",
+                    attachments = setOf(currentAtt),
+                )
+
+            val splitCollector =
+                ChatterContextCollector(
+                    noiseFilter = filter,
+                    decisionMessageCount = 3,
+                    historyMessageCount = 15,
+                    maxDecisionImages = 3,
+                    maxImages = 10,
+                    peekResolver = { null },
+                )
+            val splitService =
+                ChatterService(
+                    filter = filter,
+                    decisionClient = decisionClient,
+                    chatterGenerator = chatterGenerator,
+                    cooldownCache = cooldownCache,
+                    historyFetcher = { _, _ -> historyMsgs },
+                    contextCollector = splitCollector,
+                )
+
+            coEvery { decisionClient.decide(any(), any()) } returns ParticipationDecision(shouldParticipate = true, noul = 0.8)
+            coEvery { chatterGenerator.generateReply(any<String>()) } returns "nice progression"
+
+            val result = splitService.processMessage(currentMsg)
+
+            assertTrue(result)
+            coVerify(exactly = 1) {
+                decisionClient.decide(
+                    match { state ->
+                        !state.contains("Turn 12") &&
+                            state.contains("Turn 13") &&
+                            state.contains("Turn 14") &&
+                            state.contains("Turn 15")
+                    },
+                    match { images ->
+                        images.map { it.url } ==
+                            listOf(
+                                "https://cdn.example.com/13.png",
+                                "https://cdn.example.com/14.png",
+                                "https://cdn.example.com/15.png",
+                            )
+                    },
+                )
+            }
+            coVerify(exactly = 1) {
+                chatterGenerator.generateReply(
+                    match<String> { transcript ->
+                        transcript.contains("[U1 回覆 ExtUser「Earlier architecture note」]: Turn 1") &&
+                            transcript.contains("Turn 15 check this out") &&
+                            transcript.contains("[附帶圖片 1: 6.png]") &&
+                            transcript.contains("[附帶圖片 10: 15.png]") &&
+                            !transcript.contains("[附帶圖片 11:")
+                    },
+                )
+            }
+        }
+
+    @Test
+    fun `SocialPeek failure in reply stage degrades cleanly to Discord embed transcript without failing reply`() =
+        runTest {
+            val channelId = 605L
+            val embed = createMockEmbed(title = "Fallback Embed Title", description = "Fallback description")
+            val message =
+                createMockMessage(
+                    id = 801L,
+                    channelId = channelId,
+                    username = "Alice",
+                    content = "Check https://example.com/failing-page",
+                    embeds = listOf(embed),
+                )
+
+            val failingCollector =
+                ChatterContextCollector(
+                    noiseFilter = filter,
+                    peekResolver = { throw RuntimeException("SocialPeek timeout") },
+                )
+            val failingPeekService =
+                ChatterService(
+                    filter = filter,
+                    decisionClient = decisionClient,
+                    chatterGenerator = chatterGenerator,
+                    cooldownCache = cooldownCache,
+                    historyFetcher = { _, _ -> emptyList() },
+                    contextCollector = failingCollector,
+                )
+
+            coEvery { decisionClient.decide(any(), any()) } returns ParticipationDecision(shouldParticipate = true)
+            coEvery { chatterGenerator.generateReply(any<String>()) } returns "looks interesting anyway"
+
+            val result = failingPeekService.processMessage(message)
+
+            assertTrue(result)
+            coVerify(exactly = 1) {
+                chatterGenerator.generateReply(
+                    match<String> { transcript ->
+                        transcript.contains("https://example.com/failing-page") &&
+                            transcript.contains("[連結預覽: Fallback Embed Title - Fallback description]")
+                    },
+                )
+            }
+            coVerify(exactly = 1) { channel.createMessage("looks interesting anyway") }
+        }
+
+    @Test
+    fun `chatter plugin resolves YOUTUBE_API_KEY and SUMMARY_MAX_IMAGES and wires ChatterContextCollector`() =
+        runTest {
+            val mockKord = mockk<Kord>(relaxed = true)
+            val eventsFlow = MutableSharedFlow<Event>()
+            every { mockKord.coroutineContext } returns EmptyCoroutineContext
+            every { mockKord.events } returns eventsFlow
+
+            val customContext =
+                DefaultPluginContext(
+                    kord = mockKord,
+                    routing = mockk(relaxed = true),
+                    database = mockk(relaxed = true),
+                    configMap =
+                        mapOf(
+                            "GEMINI_API_KEY" to "gemini-secret",
+                            "YOUTUBE_API_KEY" to "yt-secret-key",
+                            "SUMMARY_MAX_IMAGES" to 6,
+                        ),
+                )
+
+            val customPlugin = ChatterPlugin()
+            customPlugin.initialize(customContext)
+
+            assertEquals(6, customPlugin.maxImages)
+            assertEquals(6, customPlugin.contextCollector?.maxImages)
+            assertSame(customPlugin.contextCollector, customPlugin.service?.contextCollector)
+            customPlugin.shutdown()
+
+            val defaultContext =
+                DefaultPluginContext(
+                    kord = mockKord,
+                    routing = mockk(relaxed = true),
+                    database = mockk(relaxed = true),
+                    configMap = mapOf("GEMINI_API_KEY" to "gemini-secret"),
+                )
+
+            val defaultPlugin = ChatterPlugin()
+            defaultPlugin.initialize(defaultContext)
+
+            assertEquals(10, defaultPlugin.maxImages)
+            assertEquals(10, defaultPlugin.contextCollector?.maxImages)
+            assertSame(defaultPlugin.contextCollector, defaultPlugin.service?.contextCollector)
+            defaultPlugin.shutdown()
         }
 }

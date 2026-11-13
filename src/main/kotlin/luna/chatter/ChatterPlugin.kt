@@ -7,6 +7,7 @@ import dev.kord.core.on
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import luna.core.ai.SocialPeekFactory
 import luna.plugin.LunaPlugin
 import luna.plugin.PluginContext
 import luna.plugin.config
@@ -49,6 +50,12 @@ class ChatterPlugin(
         internal set
 
     var cooldownCache: BoundedChannelCooldownCache? = null
+        internal set
+
+    var contextCollector: ChatterContextCollector? = null
+        internal set
+
+    var maxImages: Int = ChatterContextCollector.DEFAULT_MAX_IMAGES
         internal set
 
     var isChatterEnabled: Boolean = false
@@ -97,6 +104,19 @@ class ChatterPlugin(
                 ?: 30L
         val cooldownDurationMs = cooldownSeconds * 1000L
 
+        val youtubeApiKey =
+            context.config<String>("YOUTUBE_API_KEY")?.takeIf { it.isNotBlank() }
+                ?: context.config<String>("youtube.apiKey")?.takeIf { it.isNotBlank() }
+                ?: context.config<String>("youtube.api_key")?.takeIf { it.isNotBlank() }
+
+        val imagesLimit =
+            context.config<Int>("SUMMARY_MAX_IMAGES")?.takeIf { it > 0 }
+                ?: context.config<String>("SUMMARY_MAX_IMAGES")?.toIntOrNull()?.takeIf { it > 0 }
+                ?: context.config<Int>("summary.maxImages")?.takeIf { it > 0 }
+                ?: context.config<String>("summary.maxImages")?.toIntOrNull()?.takeIf { it > 0 }
+                ?: ChatterContextCollector.DEFAULT_MAX_IMAGES
+        this.maxImages = imagesLimit
+
         val client = decisionClientFactory?.invoke(decisionConfig) ?: GeminiDecisionClient(config = decisionConfig)
         this.decisionClient = client
 
@@ -116,12 +136,22 @@ class ChatterPlugin(
             )
         this.filter = noiseFilter
 
+        val peekResolver = SocialPeekFactory.buildPeekResolver(youtubeApiKey)
+        val collector =
+            ChatterContextCollector(
+                noiseFilter = noiseFilter,
+                maxImages = imagesLimit,
+                peekResolver = peekResolver,
+            )
+        this.contextCollector = collector
+
         val chatterService =
             ChatterService(
                 filter = noiseFilter,
                 decisionClient = client,
                 chatterGenerator = generator,
                 cooldownCache = cooldown,
+                contextCollector = collector,
             )
         val finalService = serviceFactory?.invoke(chatterService) ?: chatterService
         this.service = finalService

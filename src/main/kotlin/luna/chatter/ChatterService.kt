@@ -33,6 +33,12 @@ open class ChatterService(
             .reversed()
     },
     val messageSender: (suspend (channel: MessageChannelBehavior, content: String) -> Message)? = null,
+    val contextCollector: ChatterContextCollector =
+        ChatterContextCollector(
+            noiseFilter = filter,
+            decisionMessageCount = decisionMessageCount,
+            historyMessageCount = historyMessageCount,
+        ),
 ) {
     private val logger = LoggerFactory.getLogger(ChatterService::class.java)
 
@@ -71,6 +77,15 @@ open class ChatterService(
                 return false
             }
 
+            // Pre-filter ambient messages before fetching channel history
+            if (!isDirectMention && !filter.isEligibleForDecisionEvaluation(message)) {
+                logger.debug(
+                    "Ambient message {} does not meet decision evaluation criteria; skipping decision call",
+                    message.id,
+                )
+                return false
+            }
+
             // 2. Gathers recent messages from channel slice to construct state / history
             val previousMessages =
                 try {
@@ -81,32 +96,18 @@ open class ChatterService(
                 }
 
             val allRaw = previousMessages + message
-            val chatHistory = filter.filterHistory(allRaw, selfId)
-            if (chatHistory.isEmpty()) {
-                logger.debug("No valid chat messages found in history for message {}", message.id)
-                return false
-            }
 
-            // 3. Participation evaluation: bypass for direct bot mentions; pre-filter ambient messages
+            // 3. Participation evaluation: bypass for direct bot mentions
             if (!isDirectMention) {
-                if (!filter.isEligibleForDecisionEvaluation(message.content)) {
-                    logger.debug(
-                        "Ambient message {} does not meet decision evaluation criteria; skipping decision call",
-                        message.id,
-                    )
-                    return false
-                }
-
-                val decisionSlice = chatHistory.takeLast(decisionMessageCount.coerceAtLeast(1))
-                val decisionState = ChatterPromptBuilder.formatTranscript(decisionSlice)
-                if (decisionState.isBlank()) {
+                val decisionContext = contextCollector.collectDecisionContext(allRaw, kordSelfId = selfId)
+                if (decisionContext.transcript.isBlank() && decisionContext.images.isEmpty()) {
                     logger.debug("Assembled decision dialogue state is blank; skipping evaluation")
                     return false
                 }
 
                 val decision =
                     try {
-                        decisionClient.decide(decisionState)
+                        decisionClient.decide(decisionContext.transcript, decisionContext.images)
                     } catch (e: Exception) {
                         logger.warn("Gemini decision evaluation threw error for state: {}", e.message)
                         ParticipationDecision(shouldParticipate = false)
@@ -135,13 +136,17 @@ open class ChatterService(
                 logger.warn("channel.type() call failed on channel {}: {}", message.channelId, e.message)
             }
 
-            // Collects recent 10~20 channel messages (chronological order)
-            val geminiHistory = chatHistory.takeLast(historyMessageCount.coerceAtLeast(1))
+            // Assemble heavy reply context (15 messages, reply chains, images, SocialPeek)
+            val replyContext = contextCollector.collectReplyContext(allRaw, kordSelfId = selfId)
+            if (replyContext.transcript.isBlank()) {
+                logger.debug("No valid chat messages found in reply context for message {}", message.id)
+                return false
+            }
 
-            // Calls chatterGenerator.generateReply(history)
+            // Calls chatterGenerator.generateReply(enrichedTranscript)
             val replyText =
                 try {
-                    chatterGenerator.generateReply(geminiHistory)
+                    chatterGenerator.generateReply(replyContext.transcript)
                 } catch (e: Exception) {
                     logger.error("ChatterGenerator failed to generate reply: {}", e.message, e)
                     null
