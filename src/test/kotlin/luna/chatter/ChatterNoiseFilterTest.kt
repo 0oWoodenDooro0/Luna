@@ -314,8 +314,10 @@ class ChatterNoiseFilterTest {
         }
 
     @Test
-    fun `allows chatter triggers after cooldown duration expires`() =
+    fun `allows chatter triggers after 5 second default cooldown duration expires`() =
         runTest {
+            assertEquals(5_000L, BoundedChannelCooldownCache.DEFAULT_COOLDOWN_MS)
+
             val channelId = Snowflake(402L)
             val message = createMockMessage(channelId = 402L, content = "Trigger after cooldown")
 
@@ -323,12 +325,12 @@ class ChatterNoiseFilterTest {
             cooldownCache.record(channelId)
             assertTrue(cooldownCache.isOnCooldown(channelId))
 
-            // Advance time to 29.999 seconds later: still on cooldown
-            simulatedTime += 29_999L
+            // Advance time to 4.999 seconds later: still on cooldown
+            simulatedTime += 4_999L
             assertFalse(filter.shouldProcess(message))
 
-            // Advance time past 30.000 seconds (e.g. 30.001s total)
-            simulatedTime += 2L
+            // Advance time to 5.000 seconds total: cooldown expired
+            simulatedTime += 1L
             assertFalse(cooldownCache.isOnCooldown(channelId))
 
             val allowedResult = filter.evaluate(message)

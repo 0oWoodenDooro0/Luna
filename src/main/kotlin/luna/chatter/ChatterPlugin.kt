@@ -52,6 +52,9 @@ class ChatterPlugin(
     var cooldownCache: BoundedChannelCooldownCache? = null
         internal set
 
+    var inFlightTracker: BoundedChannelInFlightTracker? = null
+        internal set
+
     var contextCollector: ChatterContextCollector? = null
         internal set
 
@@ -101,7 +104,7 @@ class ChatterPlugin(
                 ?: context.config<Long>("chatter.cooldownSeconds")
                 ?: context.config<Int>("chatter.cooldownSeconds")?.toLong()
                 ?: context.config<String>("chatter.cooldownSeconds")?.toLongOrNull()
-                ?: 30L
+                ?: 5L
         val cooldownDurationMs = cooldownSeconds * 1000L
 
         val youtubeApiKey =
@@ -133,6 +136,9 @@ class ChatterPlugin(
         val cooldown = BoundedChannelCooldownCache(defaultCooldownDurationMs = cooldownDurationMs)
         this.cooldownCache = cooldown
 
+        val tracker = BoundedChannelInFlightTracker()
+        this.inFlightTracker = tracker
+
         val noiseFilter =
             ChatterNoiseFilter(
                 cooldownCache = cooldown,
@@ -159,6 +165,7 @@ class ChatterPlugin(
                 cooldownCache = cooldown,
                 contextCollector = collector,
                 traceRecorder = traceRecorder,
+                inFlightTracker = tracker,
             )
         val finalService = serviceFactory?.invoke(chatterService) ?: chatterService
         this.service = finalService

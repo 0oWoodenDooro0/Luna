@@ -19,15 +19,26 @@ import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.every
 import io.mockk.mockk
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.test.runTest
 import luna.core.LunaWebhookRegistry
+import luna.core.ai.AiTraceDiscordContext
+import luna.core.ai.AiTracePipeline
+import luna.core.ai.AiTraceRecord
+import luna.core.ai.AiTraceRecorder
+import luna.core.ai.AiTraceSession
+import luna.core.ai.AiTraceTrigger
+import luna.core.ai.NoOpAiTraceRecorder
 import luna.plugin.DefaultPluginContext
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
+import java.util.concurrent.atomic.AtomicInteger
 import kotlin.coroutines.EmptyCoroutineContext
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 import kotlin.test.assertSame
@@ -597,6 +608,268 @@ class ChatterServiceTest {
             assertEquals(10, defaultPlugin.contextCollector?.maxImages)
             assertSame(defaultPlugin.contextCollector, defaultPlugin.service?.contextCollector)
             assertTrue(defaultPlugin.chatterGenerator?.config?.searchGroundingEnabled ?: false)
+            assertEquals(5_000L, defaultPlugin.filter?.cooldownDurationMs)
+            assertEquals(5_000L, defaultPlugin.cooldownCache?.defaultCooldownDurationMs)
+            assertNotNull(defaultPlugin.inFlightTracker)
+            assertSame(defaultPlugin.inFlightTracker, defaultPlugin.service?.inFlightTracker)
             defaultPlugin.shutdown()
+        }
+
+    @Test
+    fun `concurrent ambient messages skip immediately before fetching history, starting trace session, or invoking AI`() =
+        runTest {
+            val channelId = 700L
+            val otherChannelId = 701L
+            val historyCalls = AtomicInteger(0)
+            val traceSessionStarts = AtomicInteger(0)
+            val tracker = BoundedChannelInFlightTracker()
+            val enteredDecision = CompletableDeferred<Unit>()
+            val releaseDecision = CompletableDeferred<Unit>()
+
+            val countingTraceRecorder =
+                object : AiTraceRecorder {
+                    override fun isEnabled(): Boolean = false
+
+                    override fun startSession(
+                        pipeline: AiTracePipeline,
+                        trigger: AiTraceTrigger,
+                        discord: AiTraceDiscordContext,
+                    ): AiTraceSession {
+                        traceSessionStarts.incrementAndGet()
+                        return NoOpAiTraceRecorder.startSession(pipeline, trigger, discord)
+                    }
+
+                    override fun record(trace: AiTraceRecord) = Unit
+
+                    override suspend fun flushAndClose(timeoutMs: Long) = Unit
+                }
+
+            val guardedService =
+                ChatterService(
+                    filter = filter,
+                    decisionClient = decisionClient,
+                    chatterGenerator = chatterGenerator,
+                    cooldownCache = cooldownCache,
+                    historyFetcher = { msg, _ ->
+                        historyCalls.incrementAndGet()
+                        if (msg.channelId == Snowflake(channelId)) {
+                            emptyList()
+                        } else {
+                            emptyList()
+                        }
+                    },
+                    contextCollector = contextCollector,
+                    traceRecorder = countingTraceRecorder,
+                    inFlightTracker = tracker,
+                )
+
+            coEvery { decisionClient.decide(any(), any()) } coAnswers {
+                val transcript = firstArg<String>()
+                if (transcript.contains("first ambient")) {
+                    enteredDecision.complete(Unit)
+                    releaseDecision.await()
+                }
+                ParticipationDecision(shouldParticipate = true, noul = 0.9)
+            }
+            coEvery { chatterGenerator.generateReply(any<ChatterInput>()) } returns "Reply"
+
+            val msg1 = createMockMessage(id = 7001L, channelId = channelId, username = "Alice", content = "first ambient")
+            val msg2Concurrent = createMockMessage(id = 7002L, channelId = channelId, username = "Bob", content = "second ambient")
+            val msgOtherChannel = createMockMessage(id = 7003L, channelId = otherChannelId, username = "Cara", content = "other channel")
+
+            val firstRun = async { guardedService.processMessage(msg1) }
+            enteredDecision.await()
+
+            assertTrue(tracker.isInFlight(channelId))
+            assertEquals(1, tracker.activeCount(channelId))
+            assertEquals(1, historyCalls.get())
+            assertEquals(1, traceSessionStarts.get())
+
+            // Concurrent ambient message on the same channel skips immediately before history, trace session, or AI
+            assertFalse(guardedService.processMessage(msg2Concurrent))
+            assertEquals(1, historyCalls.get())
+            assertEquals(1, traceSessionStarts.get())
+            coVerify(exactly = 1) { decisionClient.decide(any(), any()) }
+
+            // Different channel is unaffected by channel 700L in-flight state
+            assertTrue(guardedService.processMessage(msgOtherChannel))
+            assertEquals(2, historyCalls.get())
+            assertEquals(2, traceSessionStarts.get())
+
+            releaseDecision.complete(Unit)
+            assertTrue(firstRun.await())
+
+            assertFalse(tracker.isInFlight(channelId))
+            assertEquals(0, tracker.activeCount(channelId))
+            assertEquals(0, tracker.size)
+        }
+
+    @Test
+    fun `direct bot mention bypasses in-flight guard, keeps reference count across concurrent runs, and releases on exception`() =
+        runTest {
+            val botSelfId = Snowflake(9999L)
+            val channelId = 702L
+            val tracker = BoundedChannelInFlightTracker()
+            val ambientEnteredDecision = CompletableDeferred<Unit>()
+            val releaseAmbientDecision = CompletableDeferred<Unit>()
+            val mentionEnteredGenerate = CompletableDeferred<Unit>()
+            val releaseMentionGenerate = CompletableDeferred<Unit>()
+            val historyCalls = AtomicInteger(0)
+
+            val guardedService =
+                ChatterService(
+                    filter = filter,
+                    decisionClient = decisionClient,
+                    chatterGenerator = chatterGenerator,
+                    cooldownCache = cooldownCache,
+                    historyFetcher = { _, _ ->
+                        historyCalls.incrementAndGet()
+                        emptyList()
+                    },
+                    contextCollector = contextCollector,
+                    inFlightTracker = tracker,
+                )
+
+            coEvery { decisionClient.decide(any(), any()) } coAnswers {
+                val transcript = firstArg<String>()
+                if (transcript.contains("ambient in-flight")) {
+                    ambientEnteredDecision.complete(Unit)
+                    releaseAmbientDecision.await()
+                }
+                ParticipationDecision(shouldParticipate = false, noul = 0.2)
+            }
+            coEvery { chatterGenerator.generateReply(any<ChatterInput>()) } coAnswers {
+                mentionEnteredGenerate.complete(Unit)
+                releaseMentionGenerate.await()
+                throw RuntimeException("simulated generator failure")
+            }
+
+            val ambient1 = createMockMessage(id = 7101L, channelId = channelId, username = "Alice", content = "ambient in-flight")
+            val mentionMsg =
+                createMockMessage(
+                    id = 7102L,
+                    channelId = channelId,
+                    username = "Bob",
+                    content = "<@9999> urgent question",
+                    mentionedUserIds = setOf(botSelfId),
+                    selfId = botSelfId,
+                )
+            val ambient2WhileMentionRuns =
+                createMockMessage(id = 7103L, channelId = channelId, username = "Cara", content = "ambient burst")
+            val ambient3AfterCleanup =
+                createMockMessage(id = 7104L, channelId = channelId, username = "Dave", content = "after cleanup")
+
+            val ambientRun = async { guardedService.processMessage(ambient1) }
+            ambientEnteredDecision.await()
+            assertEquals(1, tracker.activeCount(channelId))
+
+            // Direct @bot mention proceeds concurrently and increments active count to 2
+            val mentionRun = async { guardedService.processMessage(mentionMsg) }
+            mentionEnteredGenerate.await()
+            assertEquals(2, tracker.activeCount(channelId))
+
+            // Completing ambient run only decrements count from 2 -> 1; mention is still active
+            releaseAmbientDecision.complete(Unit)
+            assertFalse(ambientRun.await())
+            assertTrue(tracker.isInFlight(channelId))
+            assertEquals(1, tracker.activeCount(channelId))
+
+            // Ambient message while direct mention is still running must still skip immediately
+            val historyCountBeforeBurst = historyCalls.get()
+            assertFalse(guardedService.processMessage(ambient2WhileMentionRuns))
+            assertEquals(historyCountBeforeBurst, historyCalls.get())
+
+            // Direct mention fails with RuntimeException; try/finally must release count back to 0
+            releaseMentionGenerate.complete(Unit)
+            assertFalse(mentionRun.await())
+            assertFalse(tracker.isInFlight(channelId))
+            assertEquals(0, tracker.activeCount(channelId))
+
+            // Subsequent ambient message proceeds normally after exception cleanup
+            assertFalse(guardedService.processMessage(ambient3AfterCleanup))
+            assertEquals(historyCountBeforeBurst + 1, historyCalls.get())
+            assertFalse(tracker.isInFlight(channelId))
+            assertEquals(0, tracker.activeCount(channelId))
+
+            // Unhandled exception from startSession still releases in-flight count via finally
+            val throwingTraceRecorder =
+                object : AiTraceRecorder {
+                    override fun isEnabled(): Boolean = false
+
+                    override fun startSession(
+                        pipeline: AiTracePipeline,
+                        trigger: AiTraceTrigger,
+                        discord: AiTraceDiscordContext,
+                    ): AiTraceSession = throw IllegalStateException("trace recorder boom")
+
+                    override fun record(trace: AiTraceRecord) = Unit
+
+                    override suspend fun flushAndClose(timeoutMs: Long) = Unit
+                }
+            val throwingService =
+                ChatterService(
+                    filter = filter,
+                    decisionClient = decisionClient,
+                    chatterGenerator = chatterGenerator,
+                    cooldownCache = cooldownCache,
+                    historyFetcher = { _, _ -> emptyList() },
+                    contextCollector = contextCollector,
+                    traceRecorder = throwingTraceRecorder,
+                    inFlightTracker = tracker,
+                )
+            val failingMention =
+                createMockMessage(
+                    id = 7105L,
+                    channelId = 703L,
+                    username = "Eve",
+                    content = "<@9999> fail trace",
+                    mentionedUserIds = setOf(botSelfId),
+                    selfId = botSelfId,
+                )
+            assertFailsWith<IllegalStateException> {
+                throwingService.processMessage(failingMention)
+            }
+            assertFalse(tracker.isInFlight(703L))
+            assertEquals(0, tracker.activeCount(703L))
+        }
+
+    @Test
+    fun `default 5 second cooldown blocks ambient before 5s, allows direct mention during cooldown, and allows ambient at 5s`() =
+        runTest {
+            val botSelfId = Snowflake(9999L)
+            val channelId = 704L
+
+            coEvery { decisionClient.decide(any(), any()) } returns ParticipationDecision(shouldParticipate = true, noul = 0.9)
+            coEvery { chatterGenerator.generateReply(any<ChatterInput>()) } returns "Hello!"
+
+            // Initial ambient reply starts the 5s cooldown at simulatedTime
+            val firstAmbient = createMockMessage(id = 7201L, channelId = channelId, username = "Alice", content = "anyone here?")
+            assertTrue(service.processMessage(firstAmbient))
+            coVerify(exactly = 1) { decisionClient.decide(any(), any()) }
+
+            // 4.999s later: ambient message is blocked by default 5s cooldown
+            simulatedTime += 4_999L
+            val blockedAmbient = createMockMessage(id = 7202L, channelId = channelId, username = "Bob", content = "still blocked")
+            assertFalse(service.processMessage(blockedAmbient))
+            coVerify(exactly = 1) { decisionClient.decide(any(), any()) }
+
+            // Direct @bot mention during the 5s cooldown still bypasses cooldown and replies
+            val mentionDuringCooldown =
+                createMockMessage(
+                    id = 7203L,
+                    channelId = channelId,
+                    username = "Cara",
+                    content = "<@9999> ping",
+                    mentionedUserIds = setOf(botSelfId),
+                    selfId = botSelfId,
+                )
+            assertTrue(service.processMessage(mentionDuringCooldown))
+            coVerify(exactly = 2) { chatterGenerator.generateReply(any<ChatterInput>()) }
+
+            // Advance 5.000s after the mention reply: ambient message is allowed again
+            simulatedTime += 5_000L
+            val allowedAmbient = createMockMessage(id = 7204L, channelId = channelId, username = "Dave", content = "cooldown expired")
+            assertTrue(service.processMessage(allowedAmbient))
+            coVerify(exactly = 2) { decisionClient.decide(any(), any()) }
         }
 }
