@@ -126,7 +126,6 @@ class ChatterPlugin(
             decisionClientFactory?.invoke(decisionConfig)
                 ?: GeminiDecisionClient(
                     config = decisionConfig,
-                    defaultInstructions = decisionConfig.instructions,
                     traceRecorder = traceRecorder,
                 )
         this.decisionClient = client

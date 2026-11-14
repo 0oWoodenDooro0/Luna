@@ -48,7 +48,7 @@ import java.net.SocketTimeoutException
 open class GeminiDecisionClient(
     val config: ChatterDecisionConfig = ChatterDecisionConfig.fromEnv(),
     private val httpClient: HttpClient = createDefaultHttpClient(config.timeoutMillis),
-    val defaultInstructions: String = config.instructions.trim().ifBlank { DEFAULT_INSTRUCTIONS },
+    val defaultInstructions: String = config.instructions,
     val traceRecorder: AiTraceRecorder = NoOpAiTraceRecorder,
 ) : AutoCloseable {
     private val logger = LoggerFactory.getLogger(GeminiDecisionClient::class.java)
