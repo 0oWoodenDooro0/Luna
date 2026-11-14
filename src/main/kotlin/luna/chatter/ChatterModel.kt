@@ -1,6 +1,6 @@
 package luna.chatter
 
-import kotlinx.serialization.Serializable
+import luna.core.ai.ChatImageAttachment
 
 /**
  * Single turn message in a conversational dialogue.
@@ -13,44 +13,25 @@ data class ChatMessage(
     val content: String,
 )
 
-@Serializable
-data class ChatterGenerateContentRequest(
-    val contents: List<ChatterContent>,
-    val systemInstruction: ChatterContent? = null,
-    val generationConfig: ChatterGenerationConfig? = null,
-)
-
-@Serializable
-data class ChatterContent(
-    val parts: List<ChatterPart>,
-    val role: String? = null,
-)
-
-@Serializable
-data class ChatterPart(
-    val text: String? = null,
-)
-
-@Serializable
-data class ChatterGenerationConfig(
-    val temperature: Double? = null,
-    val maxOutputTokens: Int? = null,
-    val topP: Double? = null,
-)
-
-@Serializable
-data class ChatterGenerateContentResponse(
-    val candidates: List<ChatterCandidate>? = null,
-    val promptFeedback: ChatterPromptFeedback? = null,
-)
-
-@Serializable
-data class ChatterCandidate(
-    val content: ChatterContent? = null,
-    val finishReason: String? = null,
-)
-
-@Serializable
-data class ChatterPromptFeedback(
-    val blockReason: String? = null,
+/**
+ * Unified multimodal input payload for [ChatterGenerator].
+ *
+ * @property transcript Formatted dialogue transcript (including optional enriched link/comments text).
+ * @property imageAttachments Discord CDN chat image attachments for multimodal understanding.
+ * @property videoUri Optional YouTube video URI when primary URL resolves to YouTube.
+ * @property videoDurationSeconds Optional YouTube video duration in seconds for Tiered Video Latency Policy.
+ * @property isDirectMention True if the triggering message directly @mentioned Luna.
+ * @property title Optional resolved page/video title.
+ * @property url Optional resolved clean URL.
+ * @property comments Optional extracted social/YouTube audience comments.
+ */
+data class ChatterInput(
+    val transcript: String,
+    val imageAttachments: List<ChatImageAttachment> = emptyList(),
+    val videoUri: String? = null,
+    val videoDurationSeconds: Long? = null,
+    val isDirectMention: Boolean = false,
+    val title: String? = null,
+    val url: String? = null,
+    val comments: List<String> = emptyList(),
 )

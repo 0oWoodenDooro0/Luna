@@ -181,14 +181,18 @@ class ChatterServiceTest {
                 )
             val replyText = "Coroutines are awesome and lightweight!"
 
-            coEvery { chatterGenerator.generateReply(any<String>()) } returns replyText
+            coEvery { chatterGenerator.generateReply(any<ChatterInput>()) } returns replyText
 
             val result = service.processMessage(message)
 
             assertTrue(result, "Expected processMessage to reply to direct bot mention even during cooldown")
             coVerify(exactly = 0) { decisionClient.decide(any(), any()) }
             coVerify(exactly = 1) { channel.type() }
-            coVerify(exactly = 1) { chatterGenerator.generateReply(any<String>()) }
+            coVerify(exactly = 1) {
+                chatterGenerator.generateReply(
+                    match<ChatterInput> { it.isDirectMention && it.transcript.contains("what do you think about Kotlin coroutines?") },
+                )
+            }
             coVerify(exactly = 1) { channel.createMessage(replyText) }
         }
 
@@ -209,7 +213,7 @@ class ChatterServiceTest {
                 )
             val replyText = "你好！很高興見到你！"
 
-            coEvery { chatterGenerator.generateReply(any<String>()) } returns replyText
+            coEvery { chatterGenerator.generateReply(any<ChatterInput>()) } returns replyText
 
             val result = service.processMessage(message)
 
@@ -217,8 +221,9 @@ class ChatterServiceTest {
             coVerify(exactly = 1) { channel.type() }
             coVerify(exactly = 1) {
                 chatterGenerator.generateReply(
-                    match<String> { transcript ->
-                        transcript.contains("[Alice]: ${ChatterNoiseFilter.CALLOUT_GREETING}")
+                    match<ChatterInput> { input ->
+                        input.isDirectMention &&
+                            input.transcript.contains("[Alice]: ${ChatterNoiseFilter.CALLOUT_GREETING}")
                     },
                 )
             }
@@ -242,7 +247,7 @@ class ChatterServiceTest {
                 )
             val replyText = "今天天氣晴朗，很適合出門走走！"
 
-            coEvery { chatterGenerator.generateReply(any<String>()) } returns replyText
+            coEvery { chatterGenerator.generateReply(any<ChatterInput>()) } returns replyText
 
             val result = service.processMessage(message)
 
@@ -250,8 +255,10 @@ class ChatterServiceTest {
             coVerify(exactly = 1) { channel.type() }
             coVerify(exactly = 1) {
                 chatterGenerator.generateReply(
-                    match<String> { transcript ->
-                        transcript.contains("[Alice]: 今天天氣如何") && !transcript.contains("@Luna")
+                    match<ChatterInput> { input ->
+                        input.isDirectMention &&
+                            input.transcript.contains("[Alice]: 今天天氣如何") &&
+                            !input.transcript.contains("@Luna")
                     },
                 )
             }
@@ -285,14 +292,18 @@ class ChatterServiceTest {
             val replyText = "Luna updates frequently! Check out the releases page."
 
             coEvery { decisionClient.decide(any(), any()) } returns ParticipationDecision(shouldParticipate = true, noul = 0.95)
-            coEvery { chatterGenerator.generateReply(any<String>()) } returns replyText
+            coEvery { chatterGenerator.generateReply(any<ChatterInput>()) } returns replyText
 
             val result = service.processMessage(message)
 
             assertTrue(result, "Expected processMessage to return true when reply is successfully sent")
             coVerify(exactly = 1) { decisionClient.decide(match { it.contains("Alice") && it.contains("Luna updates") }, any()) }
             coVerify(exactly = 1) { channel.type() }
-            coVerify(exactly = 1) { chatterGenerator.generateReply(match<String> { it.contains("[Alice]: Does anyone know when Luna updates?") }) }
+            coVerify(exactly = 1) {
+                chatterGenerator.generateReply(
+                    match<ChatterInput> { !it.isDirectMention && it.transcript.contains("[Alice]: Does anyone know when Luna updates?") },
+                )
+            }
             coVerify(exactly = 1) { channel.createMessage(replyText) }
             assertTrue(cooldownCache.isOnCooldown(channelId), "Channel cooldown must be recorded after sending reply")
         }
@@ -310,7 +321,7 @@ class ChatterServiceTest {
             assertFalse(result, "Expected processMessage to return false when decision client rejects participation")
             coVerify(exactly = 1) { decisionClient.decide(any(), any()) }
             coVerify(exactly = 0) { channel.type() }
-            coVerify(exactly = 0) { chatterGenerator.generateReply(any<String>()) }
+            coVerify(exactly = 0) { chatterGenerator.generateReply(any<ChatterInput>()) }
             coVerify(exactly = 0) { channel.createMessage(any<String>()) }
             assertFalse(cooldownCache.isOnCooldown(channelId), "Cooldown should not be recorded when not participating")
         }
@@ -325,7 +336,7 @@ class ChatterServiceTest {
             assertFalse(result)
             coVerify(exactly = 0) { decisionClient.decide(any(), any()) }
             coVerify(exactly = 0) { channel.type() }
-            coVerify(exactly = 0) { chatterGenerator.generateReply(any<String>()) }
+            coVerify(exactly = 0) { chatterGenerator.generateReply(any<ChatterInput>()) }
             coVerify(exactly = 0) { channel.createMessage(any<String>()) }
         }
 
@@ -339,7 +350,7 @@ class ChatterServiceTest {
             assertFalse(service.processMessage(prefixCommand))
             coVerify(exactly = 0) { decisionClient.decide(any(), any()) }
             coVerify(exactly = 0) { channel.type() }
-            coVerify(exactly = 0) { chatterGenerator.generateReply(any<String>()) }
+            coVerify(exactly = 0) { chatterGenerator.generateReply(any<ChatterInput>()) }
             coVerify(exactly = 0) { channel.createMessage(any<String>()) }
         }
 
@@ -356,7 +367,7 @@ class ChatterServiceTest {
             assertFalse(result)
             coVerify(exactly = 0) { decisionClient.decide(any(), any()) }
             coVerify(exactly = 0) { channel.type() }
-            coVerify(exactly = 0) { chatterGenerator.generateReply(any<String>()) }
+            coVerify(exactly = 0) { chatterGenerator.generateReply(any<ChatterInput>()) }
             coVerify(exactly = 0) { channel.createMessage(any<String>()) }
         }
 
@@ -371,7 +382,7 @@ class ChatterServiceTest {
             assertFalse(result)
             coVerify(exactly = 0) { decisionClient.decide(any(), any()) }
             coVerify(exactly = 0) { channel.type() }
-            coVerify(exactly = 0) { chatterGenerator.generateReply(any<String>()) }
+            coVerify(exactly = 0) { chatterGenerator.generateReply(any<ChatterInput>()) }
             coVerify(exactly = 0) { channel.createMessage(any<String>()) }
         }
 
@@ -393,13 +404,13 @@ class ChatterServiceTest {
                 )
 
             coEvery { decisionClient.decide(any(), any()) } returns ParticipationDecision(shouldParticipate = true, noul = 0.9)
-            coEvery { chatterGenerator.generateReply(any<String>()) } returns "That looks like an interesting thread!"
+            coEvery { chatterGenerator.generateReply(any<ChatterInput>()) } returns "That looks like an interesting thread!"
 
             val result = service.processMessage(message)
 
             assertTrue(result, "SocialPreview webhook in registry must pass filter and be processed")
             coVerify(exactly = 1) { channel.type() }
-            coVerify(exactly = 1) { chatterGenerator.generateReply(any<String>()) }
+            coVerify(exactly = 1) { chatterGenerator.generateReply(any<ChatterInput>()) }
             coVerify(exactly = 1) { channel.createMessage("That looks like an interesting thread!") }
             assertTrue(cooldownCache.isOnCooldown(channelId))
         }
@@ -411,7 +422,7 @@ class ChatterServiceTest {
             val message = createMockMessage(id = 109L, channelId = channelId, content = "Tell me something cool")
 
             coEvery { decisionClient.decide(any(), any()) } returns ParticipationDecision(shouldParticipate = true)
-            coEvery { chatterGenerator.generateReply(any<String>()) } returns null
+            coEvery { chatterGenerator.generateReply(any<ChatterInput>()) } returns null
 
             val resultNull = service.processMessage(message)
             assertFalse(resultNull, "Expected failure when Gemini returns null")
@@ -419,7 +430,7 @@ class ChatterServiceTest {
             assertFalse(cooldownCache.isOnCooldown(channelId))
 
             // Test Gemini throwing exception
-            coEvery { chatterGenerator.generateReply(any<String>()) } throws RuntimeException("Network timeout")
+            coEvery { chatterGenerator.generateReply(any<ChatterInput>()) } throws RuntimeException("Network timeout")
             val resultException = service.processMessage(message)
             assertFalse(resultException, "Expected graceful failure when Gemini throws exception")
             coVerify(exactly = 0) { channel.createMessage(any<String>()) }
@@ -540,7 +551,7 @@ class ChatterServiceTest {
                 )
 
             coEvery { decisionClient.decide(any(), any()) } returns ParticipationDecision(shouldParticipate = true)
-            coEvery { chatterGenerator.generateReply(any<String>()) } returns "Yes, Luna replies to chats!"
+            coEvery { chatterGenerator.generateReply(any<ChatterInput>()) } returns "Yes, Luna replies to chats!"
 
             val result = testService.processMessage(currentMsg)
 
@@ -560,12 +571,12 @@ class ChatterServiceTest {
             // Gemini reply stage should receive chronological dialogue transcript without noise
             coVerify(exactly = 1) {
                 chatterGenerator.generateReply(
-                    match<String> { transcript ->
-                        transcript.contains("[Alice]: What is Luna?") &&
-                            transcript.contains("[Charlie]: Luna is a community bot.") &&
-                            transcript.contains("[Alice]: Does it reply to chats?") &&
-                            !transcript.contains("SpamBot") &&
-                            !transcript.contains("!help")
+                    match<ChatterInput> { input ->
+                        input.transcript.contains("[Alice]: What is Luna?") &&
+                            input.transcript.contains("[Charlie]: Luna is a community bot.") &&
+                            input.transcript.contains("[Alice]: Does it reply to chats?") &&
+                            !input.transcript.contains("SpamBot") &&
+                            !input.transcript.contains("!help")
                     },
                 )
             }
@@ -583,7 +594,7 @@ class ChatterServiceTest {
             val message = createMockMessage(id = 110L, channelId = channelId, username = "Daisy", content = "Hello there from event")
 
             coEvery { decisionClient.decide(any(), any()) } returns ParticipationDecision(shouldParticipate = true)
-            coEvery { chatterGenerator.generateReply(any<String>()) } returns "General Kenobi!"
+            coEvery { chatterGenerator.generateReply(any<ChatterInput>()) } returns "General Kenobi!"
 
             val job = service.register(mockKord, scope = this)
 
@@ -635,7 +646,7 @@ class ChatterServiceTest {
                 )
 
             coEvery { decisionClient.decide(any(), any()) } returns ParticipationDecision(shouldParticipate = true, noul = 0.88)
-            coEvery { chatterGenerator.generateReply(any<String>()) } returns "haha that meme is gold"
+            coEvery { chatterGenerator.generateReply(any<ChatterInput>()) } returns "haha that meme is gold"
 
             val result = service.processMessage(message)
 
@@ -648,7 +659,13 @@ class ChatterServiceTest {
             }
             coVerify(exactly = 1) {
                 chatterGenerator.generateReply(
-                    match<String> { it.contains("[Alice]: [附帶圖片 1: meme.png]") },
+                    match<ChatterInput> { input ->
+                        !input.isDirectMention &&
+                            input.transcript.contains("[Alice]: [附帶圖片 1: meme.png]") &&
+                            input.imageAttachments.size == 1 &&
+                            input.imageAttachments[0].url == "https://cdn.example.com/meme.png" &&
+                            input.imageAttachments[0].mimeType == "image/png"
+                    },
                 )
             }
             coVerify(exactly = 1) { channel.createMessage("haha that meme is gold") }
@@ -673,7 +690,7 @@ class ChatterServiceTest {
 
             assertFalse(result)
             coVerify(exactly = 0) { decisionClient.decide(any(), any()) }
-            coVerify(exactly = 0) { chatterGenerator.generateReply(any<String>()) }
+            coVerify(exactly = 0) { chatterGenerator.generateReply(any<ChatterInput>()) }
             coVerify(exactly = 0) { channel.createMessage(any<String>()) }
         }
 
@@ -723,7 +740,7 @@ class ChatterServiceTest {
                 callStages.add("decide")
                 ParticipationDecision(shouldParticipate = true, noul = 0.91)
             }
-            coEvery { chatterGenerator.generateReply(any<String>()) } answers {
+            coEvery { chatterGenerator.generateReply(any<ChatterInput>()) } answers {
                 callStages.add("generate")
                 "Kotlin 2.2 context parameters look neat"
             }
@@ -734,11 +751,15 @@ class ChatterServiceTest {
             assertEquals(listOf("decide", "peek:https://example.com/kotlin-post", "generate"), callStages)
             coVerify(exactly = 1) {
                 chatterGenerator.generateReply(
-                    match<String> { transcript ->
-                        transcript.contains("https://example.com/kotlin-post") &&
-                            transcript.contains("Kotlin 2.2 Released") &&
-                            transcript.contains("Context parameters and new compiler improvements") &&
-                            transcript.contains("Looks clean!")
+                    match<ChatterInput> { input ->
+                        !input.isDirectMention &&
+                            input.title == "Kotlin 2.2 Released" &&
+                            input.url == "https://example.com/kotlin-post" &&
+                            input.comments == listOf("Looks clean!") &&
+                            input.transcript.contains("https://example.com/kotlin-post") &&
+                            input.transcript.contains("Kotlin 2.2 Released") &&
+                            input.transcript.contains("Context parameters and new compiler improvements") &&
+                            input.transcript.contains("Looks clean!")
                     },
                 )
             }
@@ -792,7 +813,7 @@ class ChatterServiceTest {
                 )
 
             coEvery { decisionClient.decide(any(), any()) } returns ParticipationDecision(shouldParticipate = true, noul = 0.8)
-            coEvery { chatterGenerator.generateReply(any<String>()) } returns "nice progression"
+            coEvery { chatterGenerator.generateReply(any<ChatterInput>()) } returns "nice progression"
 
             val result = splitService.processMessage(currentMsg)
 
@@ -817,12 +838,15 @@ class ChatterServiceTest {
             }
             coVerify(exactly = 1) {
                 chatterGenerator.generateReply(
-                    match<String> { transcript ->
-                        transcript.contains("[U1 回覆 ExtUser「Earlier architecture note」]: Turn 1") &&
-                            transcript.contains("Turn 15 check this out") &&
-                            transcript.contains("[附帶圖片 1: 6.png]") &&
-                            transcript.contains("[附帶圖片 10: 15.png]") &&
-                            !transcript.contains("[附帶圖片 11:")
+                    match<ChatterInput> { input ->
+                        input.transcript.contains("[U1 回覆 ExtUser「Earlier architecture note」]: Turn 1") &&
+                            input.transcript.contains("Turn 15 check this out") &&
+                            input.transcript.contains("[附帶圖片 1: 6.png]") &&
+                            input.transcript.contains("[附帶圖片 10: 15.png]") &&
+                            !input.transcript.contains("[附帶圖片 11:") &&
+                            input.imageAttachments.size == 10 &&
+                            input.imageAttachments.first().url == "https://cdn.example.com/6.png" &&
+                            input.imageAttachments.last().url == "https://cdn.example.com/15.png"
                     },
                 )
             }
@@ -858,20 +882,99 @@ class ChatterServiceTest {
                 )
 
             coEvery { decisionClient.decide(any(), any()) } returns ParticipationDecision(shouldParticipate = true)
-            coEvery { chatterGenerator.generateReply(any<String>()) } returns "looks interesting anyway"
+            coEvery { chatterGenerator.generateReply(any<ChatterInput>()) } returns "looks interesting anyway"
 
             val result = failingPeekService.processMessage(message)
 
             assertTrue(result)
             coVerify(exactly = 1) {
                 chatterGenerator.generateReply(
-                    match<String> { transcript ->
-                        transcript.contains("https://example.com/failing-page") &&
-                            transcript.contains("[連結預覽: Fallback Embed Title - Fallback description]")
+                    match<ChatterInput> { input ->
+                        input.transcript.contains("https://example.com/failing-page") &&
+                            input.transcript.contains("[連結預覽: Fallback Embed Title - Fallback description]")
                     },
                 )
             }
             coVerify(exactly = 1) { channel.createMessage("looks interesting anyway") }
+        }
+
+    @Test
+    fun `YouTube PeekPost propagates videoUri, videoDurationSeconds, metadata, and isDirectMention into ChatterInput`() =
+        runTest {
+            val botSelfId = Snowflake(9999L)
+            val ytPost =
+                PeekPost(
+                    platform = Platform.YOUTUBE,
+                    id = "dQw4w9WgXcQ",
+                    originalUrl = "https://youtu.be/dQw4w9WgXcQ",
+                    cleanUrl = "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+                    author = Author(username = "TestChannel"),
+                    title = "Deep Dive on Kotlin",
+                    content = "Video description",
+                    rawData = mapOf("durationSeconds" to "900"),
+                    comments = listOf(Comment(author = "viewer1", content = "Great talk!")),
+                )
+            val ytCollector =
+                ChatterContextCollector(
+                    noiseFilter = filter,
+                    peekResolver = { ytPost },
+                )
+            val ytService =
+                ChatterService(
+                    filter = filter,
+                    decisionClient = decisionClient,
+                    chatterGenerator = chatterGenerator,
+                    cooldownCache = cooldownCache,
+                    historyFetcher = { _, _ -> emptyList() },
+                    contextCollector = ytCollector,
+                )
+
+            coEvery { decisionClient.decide(any(), any()) } returns ParticipationDecision(shouldParticipate = true, noul = 0.9)
+            coEvery { chatterGenerator.generateReply(any<ChatterInput>()) } returns "這部影片講得挺清楚的"
+
+            val ambientMsg =
+                createMockMessage(
+                    id = 850L,
+                    channelId = 606L,
+                    username = "Alice",
+                    content = "看看這部 https://youtu.be/dQw4w9WgXcQ",
+                )
+            assertTrue(ytService.processMessage(ambientMsg))
+            coVerify(exactly = 1) {
+                chatterGenerator.generateReply(
+                    match<ChatterInput> { input ->
+                        !input.isDirectMention &&
+                            input.videoUri == "https://www.youtube.com/watch?v=dQw4w9WgXcQ" &&
+                            input.videoDurationSeconds == 900L &&
+                            input.title == "Deep Dive on Kotlin" &&
+                            input.url == "https://www.youtube.com/watch?v=dQw4w9WgXcQ" &&
+                            input.comments == listOf("Great talk!")
+                    },
+                )
+            }
+
+            val mentionMsg =
+                createMockMessage(
+                    id = 851L,
+                    channelId = 607L,
+                    username = "Bob",
+                    content = "<@9999> 幫我看這部 https://youtu.be/dQw4w9WgXcQ",
+                    mentionedUserIds = setOf(botSelfId),
+                    selfId = botSelfId,
+                )
+            assertTrue(ytService.processMessage(mentionMsg))
+            coVerify(exactly = 1) {
+                chatterGenerator.generateReply(
+                    match<ChatterInput> { input ->
+                        input.isDirectMention &&
+                            input.videoUri == "https://www.youtube.com/watch?v=dQw4w9WgXcQ" &&
+                            input.videoDurationSeconds == 900L &&
+                            input.title == "Deep Dive on Kotlin" &&
+                            input.url == "https://www.youtube.com/watch?v=dQw4w9WgXcQ" &&
+                            input.comments == listOf("Great talk!")
+                    },
+                )
+            }
         }
 
     @Test
@@ -892,6 +995,7 @@ class ChatterServiceTest {
                             "GEMINI_API_KEY" to "gemini-secret",
                             "YOUTUBE_API_KEY" to "yt-secret-key",
                             "SUMMARY_MAX_IMAGES" to 6,
+                            "GEMINI_SEARCH_GROUNDING_ENABLED" to false,
                         ),
                 )
 
@@ -901,6 +1005,7 @@ class ChatterServiceTest {
             assertEquals(6, customPlugin.maxImages)
             assertEquals(6, customPlugin.contextCollector?.maxImages)
             assertSame(customPlugin.contextCollector, customPlugin.service?.contextCollector)
+            assertFalse(customPlugin.chatterGenerator?.config?.searchGroundingEnabled ?: true)
             customPlugin.shutdown()
 
             val defaultContext =
@@ -917,6 +1022,7 @@ class ChatterServiceTest {
             assertEquals(10, defaultPlugin.maxImages)
             assertEquals(10, defaultPlugin.contextCollector?.maxImages)
             assertSame(defaultPlugin.contextCollector, defaultPlugin.service?.contextCollector)
+            assertTrue(defaultPlugin.chatterGenerator?.config?.searchGroundingEnabled ?: false)
             defaultPlugin.shutdown()
         }
 }

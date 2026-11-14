@@ -138,15 +138,30 @@ open class ChatterService(
 
             // Assemble heavy reply context (15 messages, reply chains, images, SocialPeek)
             val replyContext = contextCollector.collectReplyContext(allRaw, kordSelfId = selfId)
-            if (replyContext.transcript.isBlank()) {
-                logger.debug("No valid chat messages found in reply context for message {}", message.id)
+            if (replyContext.transcript.isBlank() &&
+                replyContext.imageAttachments.isEmpty() &&
+                replyContext.videoUri.isNullOrBlank()
+            ) {
+                logger.debug("No valid chat messages or media found in reply context for message {}", message.id)
                 return false
             }
 
-            // Calls chatterGenerator.generateReply(enrichedTranscript)
+            val chatterInput =
+                ChatterInput(
+                    transcript = replyContext.transcript,
+                    imageAttachments = replyContext.imageAttachments,
+                    videoUri = replyContext.videoUri,
+                    videoDurationSeconds = replyContext.videoDurationSeconds,
+                    isDirectMention = isDirectMention,
+                    title = replyContext.title,
+                    url = replyContext.url,
+                    comments = replyContext.comments,
+                )
+
+            // Calls chatterGenerator.generateReply(chatterInput)
             val replyText =
                 try {
-                    chatterGenerator.generateReply(replyContext.transcript)
+                    chatterGenerator.generateReply(chatterInput)
                 } catch (e: Exception) {
                     logger.error("ChatterGenerator failed to generate reply: {}", e.message, e)
                     null
