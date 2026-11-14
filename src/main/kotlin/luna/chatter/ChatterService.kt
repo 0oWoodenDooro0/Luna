@@ -161,7 +161,17 @@ open class ChatterService(
 
         // 3. Participation evaluation: bypass for direct bot mentions
         if (!isDirectMention) {
-            val decisionContext = contextCollector.collectDecisionContext(allRaw, kordSelfId = selfId)
+            val decisionContext =
+                try {
+                    contextCollector.collectDecisionContext(allRaw, kordSelfId = selfId)
+                } catch (e: Exception) {
+                    logger.warn("Error collecting decision context for message {}: {}", message.id, e.message)
+                    session.fail(
+                        AiTraceFailureCategory.CONTEXT_ERROR,
+                        "Error collecting decision context for message ${message.id}: ${e.message}",
+                    )
+                    return false
+                }
             if (decisionContext.transcript.isBlank() && decisionContext.images.isEmpty()) {
                 logger.debug("Assembled decision dialogue state is blank; skipping evaluation")
                 session.fail(
@@ -219,7 +229,17 @@ open class ChatterService(
         }
 
         // Assemble heavy reply context (15 messages, reply chains, images, SocialPeek)
-        val replyContext = contextCollector.collectReplyContext(allRaw, kordSelfId = selfId)
+        val replyContext =
+            try {
+                contextCollector.collectReplyContext(allRaw, kordSelfId = selfId)
+            } catch (e: Exception) {
+                logger.warn("Error collecting reply context for message {}: {}", message.id, e.message)
+                session.fail(
+                    AiTraceFailureCategory.CONTEXT_ERROR,
+                    "Error collecting reply context for message ${message.id}: ${e.message}",
+                )
+                return false
+            }
         if (replyContext.transcript.isBlank() &&
             replyContext.imageAttachments.isEmpty() &&
             replyContext.videoUri.isNullOrBlank()

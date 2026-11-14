@@ -596,4 +596,55 @@ class AiTraceRecorderTest {
             jsonLogger.detachAppender(listAppender)
         }
     }
+
+    @Test
+    fun `AiTraceSession dispatches registered extraSecrets via AiTraceRecorder record overload`() {
+        var recordedTrace: AiTraceRecord? = null
+        var recordedSecrets: Set<String>? = null
+        val customRecorder =
+            object : AiTraceRecorder {
+                override fun isEnabled(): Boolean = true
+
+                override fun startSession(
+                    pipeline: AiTracePipeline,
+                    trigger: AiTraceTrigger,
+                    discord: AiTraceDiscordContext,
+                ): AiTraceSession =
+                    AiTraceSession(
+                        recorder = this,
+                        pipeline = pipeline,
+                        trigger = trigger,
+                        discord = discord,
+                        isEnabled = true,
+                        emitCorrelationLog = false,
+                    )
+
+                override fun record(trace: AiTraceRecord) {
+                    recordedTrace = trace
+                }
+
+                override fun record(
+                    trace: AiTraceRecord,
+                    extraSecrets: Set<String>,
+                ) {
+                    recordedTrace = trace
+                    recordedSecrets = extraSecrets
+                }
+
+                override suspend fun flushAndClose(timeoutMs: Long) = Unit
+            }
+
+        val session =
+            customRecorder.startSession(
+                pipeline = AiTracePipeline.CHATTER,
+                trigger = AiTraceTrigger.MENTION,
+                discord = AiTraceDiscordContext(channelId = "c1", messageId = "m1", isDirectMention = true),
+            )
+        session.registerSecret("dynamic-secret-123")
+        session.complete("done")
+        session.finish()
+
+        assertNotNull(recordedTrace)
+        assertEquals(setOf("dynamic-secret-123"), recordedSecrets)
+    }
 }

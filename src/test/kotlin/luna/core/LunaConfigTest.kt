@@ -509,6 +509,20 @@ class LunaConfigTest {
         assertEquals(14, invalidBounds.maxDays)
         assertEquals(200, invalidBounds.maxTotalMb)
 
+        val snakeAliases =
+            luna.core.ai.AiTraceConfig.fromMap(
+                mapOf(
+                    "ai.trace.enabled" to false,
+                    "ai.trace.dir" to "/tmp/ai-map-snake",
+                    "ai.trace.max_days" to 10,
+                    "ai.trace.max_total_mb" to 80,
+                ),
+            )
+        assertEquals(false, snakeAliases.enabled)
+        assertEquals("/tmp/ai-map-snake", snakeAliases.dir)
+        assertEquals(10, snakeAliases.maxDays)
+        assertEquals(80, snakeAliases.maxTotalMb)
+
         // Verify drift audit recognizes AI_TRACE_* and ai.trace.* and does not mask them
         val audit =
             ConfigLoader.auditDrift(

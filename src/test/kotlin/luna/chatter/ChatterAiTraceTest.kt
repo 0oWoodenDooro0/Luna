@@ -971,6 +971,35 @@ class ChatterAiTraceTest {
     }
 
     @Test
+    fun `ChatterGenerator classifies RECITATION finishReason with empty text as SAFETY_BLOCK`(
+        @TempDir tempDir: Path,
+    ) = runTest {
+        val recorder = JsonlAiTraceRecorder(traceDir = tempDir, clock = fixedClock)
+        val engine =
+            MockEngine {
+                respond(
+                    content = """{"candidates":[{"content":{"parts":[]},"finishReason":"RECITATION"}]}""",
+                    status = HttpStatusCode.OK,
+                    headers = headersOf(HttpHeaders.ContentType, "application/json"),
+                )
+            }
+        val generator =
+            ChatterGenerator(
+                config = ChatterConfig(apiKey = "k", searchGroundingEnabled = false),
+                httpClient = createHttpClient(engine),
+                traceRecorder = recorder,
+            )
+
+        assertNull(generator.generateReply("hello"))
+        recorder.flushAndClose()
+
+        val trace = readTraceLines(tempDir).single()
+        assertEquals(AiTraceOutcome.FAILED, trace.outcome)
+        assertEquals(AiTraceFailureCategory.SAFETY_BLOCK, trace.failureCategory)
+        assertEquals("RECITATION", trace.attempts.single().finishReason)
+    }
+
+    @Test
     fun `ChatterService post-filter preflight aborts record attempts empty or prior DECISION attempts with FAILED outcome`(
         @TempDir tempDir: Path,
     ) = runTest {
@@ -1097,6 +1126,70 @@ class ChatterAiTraceTest {
         assertEquals(AiTraceFailureCategory.UNEXPECTED_ERROR, traces[3].failureCategory)
         assertEquals(1, traces[3].attemptCount)
         assertEquals(AiAttemptStage.CHATTER_GENERATE, traces[3].attempts.single().stage)
+    }
+
+    @Test
+    fun `ChatterService classifies collectDecisionContext and collectReplyContext exceptions as CONTEXT_ERROR`(
+        @TempDir tempDir: Path,
+    ) = runTest {
+        val recorder = JsonlAiTraceRecorder(traceDir = tempDir, clock = fixedClock)
+        val selfId = Snowflake(9999L)
+
+        // 1. collectDecisionContext throws
+        run {
+            val failingDecisionCollector =
+                object : ChatterContextCollector() {
+                    override fun collectDecisionContext(
+                        messages: List<Message>,
+                        kordSelfId: Snowflake?,
+                    ): ChatterDecisionContext = throw IllegalStateException("Decision context boom")
+                }
+            val service =
+                ChatterService(
+                    filter = ChatterNoiseFilter(),
+                    decisionClient = GeminiDecisionClient(config = ChatterDecisionConfig(apiKey = "k"), traceRecorder = recorder),
+                    chatterGenerator = ChatterGenerator(config = ChatterConfig(apiKey = "k"), traceRecorder = recorder),
+                    historyFetcher = { _, _ -> emptyList() },
+                    contextCollector = failingDecisionCollector,
+                    traceRecorder = recorder,
+                )
+            val msg = createMockMessage(id = 851L, content = "Does anyone know Kotlin?")
+            assertFalse(service.processMessage(msg))
+        }
+
+        // 2. collectReplyContext throws
+        run {
+            val failingReplyCollector =
+                object : ChatterContextCollector() {
+                    override suspend fun collectReplyContext(
+                        messages: List<Message>,
+                        kordSelfId: Snowflake?,
+                    ): PreparedChatterContext = throw IllegalStateException("Reply context boom")
+                }
+            val service =
+                ChatterService(
+                    filter = ChatterNoiseFilter(),
+                    decisionClient = GeminiDecisionClient(config = ChatterDecisionConfig(apiKey = "k"), traceRecorder = recorder),
+                    chatterGenerator = ChatterGenerator(config = ChatterConfig(apiKey = "k"), traceRecorder = recorder),
+                    historyFetcher = { _, _ -> emptyList() },
+                    contextCollector = failingReplyCollector,
+                    traceRecorder = recorder,
+                )
+            val msg = createMockMessage(id = 852L, content = "<@9999> hi", mentionedUserIds = setOf(selfId), selfId = selfId)
+            assertFalse(service.processMessage(msg))
+        }
+
+        recorder.flushAndClose()
+        val traces = readTraceLines(tempDir)
+        assertEquals(2, traces.size)
+
+        assertEquals(AiTraceOutcome.FAILED, traces[0].outcome)
+        assertEquals(AiTraceFailureCategory.CONTEXT_ERROR, traces[0].failureCategory)
+        assertTrue(traces[0].errorSummary?.contains("Decision context boom") == true)
+
+        assertEquals(AiTraceOutcome.FAILED, traces[1].outcome)
+        assertEquals(AiTraceFailureCategory.CONTEXT_ERROR, traces[1].failureCategory)
+        assertTrue(traces[1].errorSummary?.contains("Reply context boom") == true)
     }
 
     @Test

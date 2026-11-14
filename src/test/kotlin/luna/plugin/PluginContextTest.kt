@@ -282,4 +282,47 @@ class PluginContextTest {
         assertEquals(21, fromDotted.maxDays)
         assertEquals(100, fromDotted.maxTotalMb)
     }
+
+    @Test
+    fun `AiTraceConfig fromPluginContext resolves snake_case dotted aliases max_days and max_total_mb and bounds`() {
+        val exactLookupValues =
+            mapOf(
+                "ai.trace.enabled" to "false",
+                "ai.trace.dir" to "/tmp/ai-snake",
+                "ai.trace.max_days" to "9",
+                "ai.trace.max_total_mb" to "75",
+            )
+        val exactContext =
+            object : PluginContext {
+                override val kord: Kord = mockk(relaxed = true)
+                override val routing: Routing = mockk(relaxed = true)
+                override val database: Database = mockk(relaxed = true)
+
+                override fun <T> config(
+                    key: String,
+                    clazz: Class<T>,
+                ): T? = exactLookupValues[key]?.let { if (clazz.isInstance(it)) clazz.cast(it) else null }
+            }
+
+        val resolved =
+            luna.core.ai.AiTraceConfig
+                .fromPluginContext(exactContext)
+        assertEquals(false, resolved.enabled)
+        assertEquals("/tmp/ai-snake", resolved.dir)
+        assertEquals(9, resolved.maxDays)
+        assertEquals(75, resolved.maxTotalMb)
+
+        val invalidBoundsContext =
+            createContext(
+                mapOf(
+                    "ai.trace.max_days" to 0,
+                    "ai.trace.max_total_mb" to -5,
+                ),
+            )
+        val bounded =
+            luna.core.ai.AiTraceConfig
+                .fromPluginContext(invalidBoundsContext)
+        assertEquals(14, bounded.maxDays)
+        assertEquals(200, bounded.maxTotalMb)
+    }
 }
