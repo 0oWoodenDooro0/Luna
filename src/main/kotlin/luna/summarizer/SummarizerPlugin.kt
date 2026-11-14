@@ -136,7 +136,10 @@ class SummarizerPlugin(
 
         val gemini =
             summarizerFactory?.invoke(geminiConfig)
-                ?: GeminiSummarizer(config = geminiConfig)
+                ?: GeminiSummarizer(
+                    config = geminiConfig,
+                    traceRecorder = context.aiTraceRecorder,
+                )
         this.summarizer = gemini
 
         val peekResolver = SocialPeekFactory.buildPeekResolver(youtubeApiKey)
@@ -161,6 +164,7 @@ class SummarizerPlugin(
                 summarizer = gemini,
                 collector = collector,
                 configuredEmoji = emoji,
+                traceRecorder = context.aiTraceRecorder,
             )
         this.summaryService = service
 
