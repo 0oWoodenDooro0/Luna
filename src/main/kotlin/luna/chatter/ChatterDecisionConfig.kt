@@ -11,6 +11,8 @@ import luna.plugin.config
  * @property baseUrl Base URL for Google Generative Language API (defaults to `https://generativelanguage.googleapis.com`).
  * @property threshold Minimum calibrated `noul` probability required for participation (clamped to `0.0..1.0`, default `0.7`).
  * @property timeoutMillis HTTP request/socket/connect timeout in milliseconds (default `10_000L`).
+ * @property instructions Decision evaluation prompt instructions sent to `gemini-decision-1` (defaults to [GeminiDecisionClient.DEFAULT_INSTRUCTIONS]).
+ * @property decisionMessageCount Maximum number of dialogue turns passed to `gemini-decision-1` (bounded to `1..100`, default `15`).
  */
 data class ChatterDecisionConfig(
     val apiKey: String = "",
@@ -18,6 +20,8 @@ data class ChatterDecisionConfig(
     val baseUrl: String = DEFAULT_BASE_URL,
     val threshold: Double = DEFAULT_THRESHOLD,
     val timeoutMillis: Long = DEFAULT_TIMEOUT_MILLIS,
+    val instructions: String = GeminiDecisionClient.DEFAULT_INSTRUCTIONS,
+    val decisionMessageCount: Int = DEFAULT_DECISION_MESSAGE_COUNT,
 ) {
     val isConfigured: Boolean
         get() = apiKey.isNotBlank()
@@ -37,6 +41,9 @@ data class ChatterDecisionConfig(
         const val DEFAULT_THRESHOLD = 0.7
         const val DEFAULT_TIMEOUT_SECONDS = 10L
         const val DEFAULT_TIMEOUT_MILLIS = DEFAULT_TIMEOUT_SECONDS * 1000L
+        const val DEFAULT_DECISION_MESSAGE_COUNT = 15
+        const val MIN_DECISION_MESSAGE_COUNT = 1
+        const val MAX_DECISION_MESSAGE_COUNT = 100
 
         private fun normalizeThreshold(raw: Double?): Double =
             if (raw == null || raw.isNaN() || raw.isInfinite()) {
@@ -46,6 +53,22 @@ data class ChatterDecisionConfig(
             }
 
         private fun normalizeTimeoutMillis(timeoutSeconds: Long?): Long = timeoutSeconds?.takeIf { it > 0L }?.let { it * 1000L } ?: DEFAULT_TIMEOUT_MILLIS
+
+        private fun normalizeInstructions(raw: String?): String = raw?.trim()?.ifBlank { null } ?: GeminiDecisionClient.DEFAULT_INSTRUCTIONS
+
+        private fun normalizeDecisionMessageCount(raw: Long?): Int =
+            if (raw == null || raw <= 0L) {
+                DEFAULT_DECISION_MESSAGE_COUNT
+            } else {
+                raw.coerceIn(MIN_DECISION_MESSAGE_COUNT.toLong(), MAX_DECISION_MESSAGE_COUNT.toLong()).toInt()
+            }
+
+        private fun readLongConfig(value: Any?): Long? =
+            when (value) {
+                is Number -> value.toLong()
+                is String -> value.trim().toLongOrNull()
+                else -> null
+            }
 
         fun fromEnv(env: Map<String, String> = System.getenv()): ChatterDecisionConfig {
             val key = env["GEMINI_API_KEY"]?.trim().orEmpty()
@@ -63,6 +86,9 @@ data class ChatterDecisionConfig(
 
             val threshold = normalizeThreshold(env["CHATTER_DECISION_THRESHOLD"]?.trim()?.toDoubleOrNull())
             val timeoutSeconds = env["CHATTER_DECISION_TIMEOUT_SECONDS"]?.trim()?.toLongOrNull()
+            val instructions = normalizeInstructions(env["CHATTER_DECISION_INSTRUCTIONS"])
+            val decisionMessageCount =
+                normalizeDecisionMessageCount(env["CHATTER_DECISION_MESSAGE_COUNT"]?.trim()?.toLongOrNull())
 
             return ChatterDecisionConfig(
                 apiKey = key,
@@ -70,6 +96,8 @@ data class ChatterDecisionConfig(
                 baseUrl = baseUrl,
                 threshold = threshold,
                 timeoutMillis = normalizeTimeoutMillis(timeoutSeconds),
+                instructions = instructions,
+                decisionMessageCount = decisionMessageCount,
             )
         }
 
@@ -113,12 +141,24 @@ data class ChatterDecisionConfig(
                     ?: (config["chatter.decisionTimeoutSeconds"] as? Number)?.toLong()
                     ?: (config["chatter.decisionTimeoutSeconds"] as? String)?.trim()?.toLongOrNull()
 
+            val rawInstructions =
+                (config["CHATTER_DECISION_INSTRUCTIONS"] as? String)?.trim()?.ifBlank { null }
+                    ?: (config["chatter.decision.instructions"] as? String)?.trim()?.ifBlank { null }
+                    ?: (config["chatter.decisionInstructions"] as? String)?.trim()?.ifBlank { null }
+
+            val rawDecisionMessageCount =
+                readLongConfig(config["CHATTER_DECISION_MESSAGE_COUNT"])
+                    ?: readLongConfig(config["chatter.decision.messageCount"])
+                    ?: readLongConfig(config["chatter.decisionMessageCount"])
+
             return ChatterDecisionConfig(
                 apiKey = key,
                 model = model,
                 baseUrl = baseUrl,
                 threshold = normalizeThreshold(rawThreshold),
                 timeoutMillis = normalizeTimeoutMillis(timeoutSeconds),
+                instructions = normalizeInstructions(rawInstructions),
+                decisionMessageCount = normalizeDecisionMessageCount(rawDecisionMessageCount),
             )
         }
 
@@ -165,12 +205,30 @@ data class ChatterDecisionConfig(
                     ?: context.config<Int>("chatter.decisionTimeoutSeconds")?.toLong()
                     ?: context.config<String>("chatter.decisionTimeoutSeconds")?.trim()?.toLongOrNull()
 
+            val rawInstructions =
+                context.config<String>("CHATTER_DECISION_INSTRUCTIONS")?.trim()?.ifBlank { null }
+                    ?: context.config<String>("chatter.decision.instructions")?.trim()?.ifBlank { null }
+                    ?: context.config<String>("chatter.decisionInstructions")?.trim()?.ifBlank { null }
+
+            val rawDecisionMessageCount =
+                context.config<Long>("CHATTER_DECISION_MESSAGE_COUNT")
+                    ?: context.config<Int>("CHATTER_DECISION_MESSAGE_COUNT")?.toLong()
+                    ?: context.config<String>("CHATTER_DECISION_MESSAGE_COUNT")?.trim()?.toLongOrNull()
+                    ?: context.config<Long>("chatter.decision.messageCount")
+                    ?: context.config<Int>("chatter.decision.messageCount")?.toLong()
+                    ?: context.config<String>("chatter.decision.messageCount")?.trim()?.toLongOrNull()
+                    ?: context.config<Long>("chatter.decisionMessageCount")
+                    ?: context.config<Int>("chatter.decisionMessageCount")?.toLong()
+                    ?: context.config<String>("chatter.decisionMessageCount")?.trim()?.toLongOrNull()
+
             return ChatterDecisionConfig(
                 apiKey = key,
                 model = model,
                 baseUrl = baseUrl,
                 threshold = normalizeThreshold(rawThreshold),
                 timeoutMillis = normalizeTimeoutMillis(timeoutSeconds),
+                instructions = normalizeInstructions(rawInstructions),
+                decisionMessageCount = normalizeDecisionMessageCount(rawDecisionMessageCount),
             )
         }
     }

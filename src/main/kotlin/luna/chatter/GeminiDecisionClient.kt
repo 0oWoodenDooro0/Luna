@@ -48,7 +48,7 @@ import java.net.SocketTimeoutException
 open class GeminiDecisionClient(
     val config: ChatterDecisionConfig = ChatterDecisionConfig.fromEnv(),
     private val httpClient: HttpClient = createDefaultHttpClient(config.timeoutMillis),
-    val defaultInstructions: String = DEFAULT_INSTRUCTIONS,
+    val defaultInstructions: String = config.instructions.trim().ifBlank { DEFAULT_INSTRUCTIONS },
     val traceRecorder: AiTraceRecorder = NoOpAiTraceRecorder,
 ) : AutoCloseable {
     private val logger = LoggerFactory.getLogger(GeminiDecisionClient::class.java)
@@ -207,7 +207,7 @@ open class GeminiDecisionClient(
                         QUESTION_SHOULD_PARTICIPATE to
                             GeminiDecisionQuestion(
                                 type = GeminiDecisionQuestion.TYPE_NOUL,
-                                instructions = defaultInstructions,
+                                instructions = defaultInstructions.trim().ifBlank { DEFAULT_INSTRUCTIONS },
                             ),
                     ),
             )
@@ -371,10 +371,17 @@ open class GeminiDecisionClient(
         const val QUESTION_SHOULD_PARTICIPATE = "should_participate"
 
         const val DEFAULT_INSTRUCTIONS =
-            "Should the AI assistant join and participate in this conversation? " +
-                "Answer true if the message asks a question, seeks discussion, mentions the bot, " +
-                "or raises a conversational topic suitable for chat; answer false if it is a " +
-                "personal command, pure greeting exchange, system notice, or closed dialogue."
+            "You are evaluating whether Luna, a casual and balanced Discord community member, " +
+                "should reply specifically to [Latest Message] given [Recent Context] and [Bot Identity].\n" +
+                "Answer true when:\n" +
+                "- [Latest Message] is a short contextual reaction or follow-up to an active thread or ongoing topic.\n" +
+                "- [Latest Message] asks a question, raises an open topic, or shares a meme, image, or link inviting discussion.\n" +
+                "- [Latest Message] naturally references Luna or replies to one of Luna's recent messages where continuing feels natural.\n" +
+                "Answer false when:\n" +
+                "- [Latest Message] is part of a narrow 1-on-1 dialogue between other members where jumping in would intrude.\n" +
+                "- [Latest Message] is a low-signal conversation ender (such as ok, lol, thumbs-up, or brief acknowledgments) with no active Luna thread.\n" +
+                "- [Latest Message] is a bot command or system notice.\n" +
+                "- Replying would feel like a forced, redundant, or awkward interjection."
 
         val jsonParser =
             Json {
