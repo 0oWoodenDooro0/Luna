@@ -75,6 +75,8 @@ data class AiAttemptRequest(
     val hasVideo: Boolean = false,
     val videoDurationSeconds: Long? = null,
     val transcriptLength: Int = 0,
+    val webUrlCount: Int = 0,
+    val enabledTools: List<String> = emptyList(),
 )
 
 @Serializable
@@ -93,6 +95,10 @@ data class AiAttemptRecord(
     val pollingAttempts: Int? = null,
     val parsedOutcome: AiAttemptOutcome,
     val errorMessage: String? = null,
+    val urlContextResults: List<UrlContextResultEntry> = emptyList(),
+    val googleSearchQueries: List<String> = emptyList(),
+    val rawCitations: List<GroundingCitation> = emptyList(),
+    val filteredCitations: List<GroundingCitation> = emptyList(),
 )
 
 @Serializable
