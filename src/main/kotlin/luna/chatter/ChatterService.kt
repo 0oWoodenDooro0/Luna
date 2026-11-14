@@ -146,17 +146,7 @@ open class ChatterService(
                 return false
             }
 
-            val chatterInput =
-                ChatterInput(
-                    transcript = replyContext.transcript,
-                    imageAttachments = replyContext.imageAttachments,
-                    videoUri = replyContext.videoUri,
-                    videoDurationSeconds = replyContext.videoDurationSeconds,
-                    isDirectMention = isDirectMention,
-                    title = replyContext.title,
-                    url = replyContext.url,
-                    comments = replyContext.comments,
-                )
+            val chatterInput = replyContext.toChatterInput(isDirectMention = isDirectMention)
 
             // Calls chatterGenerator.generateReply(chatterInput)
             val replyText =

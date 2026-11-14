@@ -30,7 +30,19 @@ data class PreparedChatterContext(
     val comments: List<String> = emptyList(),
     val videoUri: String? = null,
     val videoDurationSeconds: Long? = null,
-)
+) {
+    fun toChatterInput(isDirectMention: Boolean = false): ChatterInput =
+        ChatterInput(
+            transcript = transcript,
+            imageAttachments = imageAttachments,
+            videoUri = videoUri,
+            videoDurationSeconds = videoDurationSeconds,
+            isDirectMention = isDirectMention,
+            title = title,
+            url = url,
+            comments = comments,
+        )
+}
 
 /**
  * Collaborator seam responsible for the Lightweight-Heavy Multimodal Split in the Chatter Pipeline:
@@ -212,7 +224,15 @@ open class ChatterContextCollector(
         val resolvedExternalIds = mutableSetOf<Snowflake>()
 
         for (msg in messages) {
-            val ref = runCatching { referenceFetcher(msg) }.getOrNull() ?: continue
+            val ref =
+                runCatching { referenceFetcher(msg) }
+                    .onFailure { e ->
+                        logger.warn(
+                            "Failed to resolve external reply reference for message {}: {}",
+                            msg.id,
+                            e.message ?: e::class.simpleName,
+                        )
+                    }.getOrNull() ?: continue
             if (ref.id in windowMessageIds) {
                 continue
             }
