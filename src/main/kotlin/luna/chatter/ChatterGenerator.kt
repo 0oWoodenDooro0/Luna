@@ -1,7 +1,6 @@
 package luna.chatter
 
 import io.ktor.client.HttpClient
-import io.ktor.client.call.body
 import io.ktor.client.engine.cio.CIO
 import io.ktor.client.plugins.HttpRequestTimeoutException
 import io.ktor.client.plugins.HttpTimeout
@@ -11,16 +10,30 @@ import io.ktor.client.request.setBody
 import io.ktor.client.statement.HttpResponse
 import io.ktor.client.statement.bodyAsText
 import io.ktor.http.ContentType
+import io.ktor.http.HttpStatusCode
 import io.ktor.http.contentType
 import io.ktor.http.isSuccess
 import io.ktor.serialization.kotlinx.json.json
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.serialization.json.Json
+import luna.core.ai.AiAttemptOutcome
+import luna.core.ai.AiAttemptRequest
+import luna.core.ai.AiAttemptStage
+import luna.core.ai.AiTraceDiscordContext
+import luna.core.ai.AiTraceFailureCategory
+import luna.core.ai.AiTracePipeline
+import luna.core.ai.AiTraceRecorder
+import luna.core.ai.AiTraceSession
+import luna.core.ai.AiTraceTrigger
+import luna.core.ai.GeminiGenerateContentRequest
 import luna.core.ai.GeminiGenerateContentResponse
 import luna.core.ai.GeminiInteractionClient
 import luna.core.ai.GeminiInteractionResult
 import luna.core.ai.GeminiTool
 import luna.core.ai.GeminiTools
+import luna.core.ai.GeminiUsageMetadata
+import luna.core.ai.NoOpAiTraceRecorder
+import luna.core.ai.currentAiTraceSession
 import org.slf4j.LoggerFactory
 import java.net.SocketTimeoutException
 
@@ -34,6 +47,7 @@ open class ChatterGenerator(
     private val httpClient: HttpClient = createDefaultHttpClient(),
     private val pollingDelayMs: Long = GeminiInteractionClient.DEFAULT_POLLING_DELAY_MS,
     private val maxPollingAttempts: Int = GeminiInteractionClient.DEFAULT_MAX_POLLING_ATTEMPTS,
+    val traceRecorder: AiTraceRecorder = NoOpAiTraceRecorder,
 ) : AutoCloseable {
     private val logger = LoggerFactory.getLogger(ChatterGenerator::class.java)
     private val interactionClient =
@@ -50,6 +64,7 @@ open class ChatterGenerator(
 
         data class Failure(
             val reason: String,
+            val failureCategory: AiTraceFailureCategory,
             val cause: Throwable? = null,
         ) : GenerateAttempt()
     }
@@ -61,54 +76,96 @@ open class ChatterGenerator(
      * @return Concise organic reply strictly bounded to 2,000 characters, or null on failure.
      */
     open suspend fun generateReply(input: ChatterInput): String? {
-        if (!config.isConfigured) {
-            logger.warn("ChatterGenerator cannot proceed: Gemini API key is not configured")
-            return null
-        }
-        if (input.transcript.isBlank() && input.imageAttachments.isEmpty() && input.videoUri.isNullOrBlank()) {
-            logger.debug("ChatterGenerator received blank dialogue input, returning null")
-            return null
-        }
-
-        val rawVideoUri = input.videoUri?.trim()?.takeIf { it.isNotEmpty() }
-        val duration = input.videoDurationSeconds
-
-        if (rawVideoUri != null) {
-            when {
-                duration != null && duration > MAX_VIDEO_DURATION_SECONDS -> {
-                    logger.warn(
-                        "YouTube video duration {}s exceeds 2-hour cap ({}s) for {}; omitting videoUri and proceeding with transcript metadata/comments",
-                        duration,
-                        MAX_VIDEO_DURATION_SECONDS,
-                        rawVideoUri,
-                    )
-                    return generateWithFallback(input.copy(videoUri = null))
-                }
-
-                duration != null && duration > MAX_STATIC_VIDEO_DURATION_SECONDS -> {
-                    if (input.isDirectMention) {
-                        val agenticReply = generateAgenticVideoReply(input.copy(videoUri = rawVideoUri))
-                        if (agenticReply != null) {
-                            return agenticReply
-                        }
-                        return generateWithFallback(input.copy(videoUri = null))
-                    } else {
-                        logger.info(
-                            "Ambient Chatter on long YouTube video ({}s > {}s) omits videoUri to preserve low latency; relying on transcript metadata/comments",
-                            duration,
-                            MAX_STATIC_VIDEO_DURATION_SECONDS,
-                        )
-                        return generateWithFallback(input.copy(videoUri = null))
-                    }
-                }
-
-                else -> {
-                    return generateWithFallback(input.copy(videoUri = rawVideoUri))
-                }
+        val activeSession = currentAiTraceSession()
+        val standaloneSession =
+            if (activeSession == null && traceRecorder.isEnabled()) {
+                traceRecorder.startSession(
+                    pipeline = AiTracePipeline.CHATTER,
+                    trigger = if (input.isDirectMention) AiTraceTrigger.MENTION else AiTraceTrigger.AMBIENT,
+                    discord =
+                        AiTraceDiscordContext(
+                            channelId = "standalone",
+                            messageId = "standalone",
+                            isDirectMention = input.isDirectMention,
+                        ),
+                )
+            } else {
+                null
             }
-        }
+        val session = activeSession ?: standaloneSession
+        val isStandalone = standaloneSession != null
+        session?.registerSecret(config.apiKey)
 
-        return generateWithFallback(input.copy(videoUri = null))
+        return try {
+            if (!config.isConfigured) {
+                logger.warn("ChatterGenerator cannot proceed: Gemini API key is not configured")
+                session?.fail(
+                    AiTraceFailureCategory.NOT_CONFIGURED,
+                    "GEMINI_API_KEY is not configured",
+                )
+                return null
+            }
+            if (input.transcript.isBlank() && input.imageAttachments.isEmpty() && input.videoUri.isNullOrBlank()) {
+                logger.debug("ChatterGenerator received blank dialogue input, returning null")
+                session?.fail(
+                    AiTraceFailureCategory.CONTEXT_ERROR,
+                    "ChatterGenerator received blank dialogue input",
+                )
+                return null
+            }
+
+            val rawVideoUri = input.videoUri?.trim()?.takeIf { it.isNotEmpty() }
+            val duration = input.videoDurationSeconds
+
+            val replyText =
+                if (rawVideoUri != null) {
+                    when {
+                        duration != null && duration > MAX_VIDEO_DURATION_SECONDS -> {
+                            logger.warn(
+                                "YouTube video duration {}s exceeds 2-hour cap ({}s) for {}; omitting videoUri and proceeding with transcript metadata/comments",
+                                duration,
+                                MAX_VIDEO_DURATION_SECONDS,
+                                rawVideoUri,
+                            )
+                            generateWithFallback(input.copy(videoUri = null), session)
+                        }
+
+                        duration != null && duration > MAX_STATIC_VIDEO_DURATION_SECONDS -> {
+                            if (input.isDirectMention) {
+                                val agenticReply = generateAgenticVideoReply(input.copy(videoUri = rawVideoUri))
+                                if (agenticReply != null) {
+                                    agenticReply
+                                } else {
+                                    session?.markDegraded(
+                                        "Agentic video interaction failed; degrading to generateContent without videoUri",
+                                    )
+                                    generateWithFallback(input.copy(videoUri = null), session)
+                                }
+                            } else {
+                                logger.info(
+                                    "Ambient Chatter on long YouTube video ({}s > {}s) omits videoUri to preserve low latency; relying on transcript metadata/comments",
+                                    duration,
+                                    MAX_STATIC_VIDEO_DURATION_SECONDS,
+                                )
+                                generateWithFallback(input.copy(videoUri = null), session)
+                            }
+                        }
+
+                        else -> {
+                            generateWithFallback(input.copy(videoUri = rawVideoUri), session)
+                        }
+                    }
+                } else {
+                    generateWithFallback(input.copy(videoUri = null), session)
+                }
+
+            if (isStandalone && replyText != null) {
+                standaloneSession.complete(finalOutput = replyText)
+            }
+            replyText
+        } finally {
+            standaloneSession?.finish()
+        }
     }
 
     /**
@@ -177,9 +234,12 @@ open class ChatterGenerator(
         }
     }
 
-    private suspend fun generateWithFallback(input: ChatterInput): String? {
+    private suspend fun generateWithFallback(
+        input: ChatterInput,
+        session: AiTraceSession?,
+    ): String? {
         val searchTools = if (config.searchGroundingEnabled) listOf(GeminiTools.GOOGLE_SEARCH_TOOL) else null
-        val initialOutcome = executeGenerateContent(input, tools = searchTools)
+        val initialOutcome = executeGenerateContent(input, tools = searchTools, session = session, variant = null)
         if (initialOutcome is GenerateAttempt.Success) {
             return initialOutcome.text
         }
@@ -191,7 +251,8 @@ open class ChatterGenerator(
                 latestFailure.reason,
                 latestFailure.cause,
             )
-            when (val noSearchOutcome = executeGenerateContent(input, tools = null)) {
+            session?.markDegraded(latestFailure.reason)
+            when (val noSearchOutcome = executeGenerateContent(input, tools = null, session = session, variant = VARIANT_NO_SEARCH)) {
                 is GenerateAttempt.Success -> return noSearchOutcome.text
                 is GenerateAttempt.Failure -> latestFailure = noSearchOutcome
             }
@@ -205,6 +266,7 @@ open class ChatterGenerator(
                     latestFailure.reason,
                     latestFailure.cause,
                 )
+                session?.fail(latestFailure.failureCategory, latestFailure.reason)
                 return null
             }
             logger.warn(
@@ -212,22 +274,47 @@ open class ChatterGenerator(
                 latestFailure.reason,
                 latestFailure.cause,
             )
+            session?.markDegraded(latestFailure.reason)
             val textOnlyInput = input.copy(imageAttachments = emptyList(), videoUri = null)
-            return when (val textOnlyOutcome = executeGenerateContent(textOnlyInput, tools = null)) {
-                is GenerateAttempt.Success -> textOnlyOutcome.text
-                is GenerateAttempt.Failure -> null
+            return when (val textOnlyOutcome = executeGenerateContent(textOnlyInput, tools = null, session = session, variant = VARIANT_NO_MEDIA)) {
+                is GenerateAttempt.Success -> {
+                    textOnlyOutcome.text
+                }
+
+                is GenerateAttempt.Failure -> {
+                    session?.fail(textOnlyOutcome.failureCategory, textOnlyOutcome.reason)
+                    null
+                }
             }
         }
 
+        session?.fail(latestFailure.failureCategory, latestFailure.reason)
         return null
     }
 
     private suspend fun executeGenerateContent(
         input: ChatterInput,
         tools: List<GeminiTool>?,
+        session: AiTraceSession?,
+        variant: String?,
     ): GenerateAttempt {
         val requestPayload = ChatterPromptBuilder.buildRequest(input, tools = tools)
-        val endpoint = "${config.cleanBaseUrl}/v1beta/models/${config.cleanModel}:generateContent?key=${config.apiKey}"
+        val sanitizedEndpoint = "${config.cleanBaseUrl}/v1beta/models/${config.cleanModel}:generateContent"
+        val endpoint = "$sanitizedEndpoint?key=${config.apiKey}"
+        val attemptRequest =
+            if (session?.isEnabled == true) {
+                AiAttemptRequest(
+                    payload = jsonParser.encodeToJsonElement(GeminiGenerateContentRequest.serializer(), requestPayload),
+                    hasImages = input.imageAttachments.isNotEmpty(),
+                    imageCount = input.imageAttachments.size,
+                    hasVideo = !input.videoUri.isNullOrBlank(),
+                    videoDurationSeconds = input.videoDurationSeconds,
+                    transcriptLength = input.transcript.length,
+                )
+            } else {
+                null
+            }
+        val startNano = System.nanoTime()
 
         val response: HttpResponse =
             try {
@@ -236,53 +323,138 @@ open class ChatterGenerator(
                     setBody(requestPayload)
                 }
             } catch (e: HttpRequestTimeoutException) {
+                val reason = "request timeout: ${e.message}"
                 logger.warn("ChatterGenerator request timed out: {}", e.message)
-                return GenerateAttempt.Failure("request timeout: ${e.message}", e)
+                recordFailureAttempt(session, variant, sanitizedEndpoint, attemptRequest, startNano, reason = reason)
+                return GenerateAttempt.Failure(reason, AiTraceFailureCategory.TIMEOUT, e)
             } catch (e: SocketTimeoutException) {
+                val reason = "socket timeout: ${e.message}"
                 logger.warn("ChatterGenerator socket timed out: {}", e.message)
-                return GenerateAttempt.Failure("socket timeout: ${e.message}", e)
+                recordFailureAttempt(session, variant, sanitizedEndpoint, attemptRequest, startNano, reason = reason)
+                return GenerateAttempt.Failure(reason, AiTraceFailureCategory.TIMEOUT, e)
             } catch (e: TimeoutCancellationException) {
+                val reason = "coroutine timeout: ${e.message}"
                 logger.warn("ChatterGenerator coroutine timed out: {}", e.message)
-                return GenerateAttempt.Failure("coroutine timeout: ${e.message}", e)
+                recordFailureAttempt(session, variant, sanitizedEndpoint, attemptRequest, startNano, reason = reason)
+                return GenerateAttempt.Failure(reason, AiTraceFailureCategory.TIMEOUT, e)
             } catch (e: Exception) {
+                val reason = "unexpected network error: ${e.message}"
                 logger.error("ChatterGenerator unexpected network error: {}", e.message, e)
-                return GenerateAttempt.Failure("unexpected network error: ${e.message}", e)
+                recordFailureAttempt(session, variant, sanitizedEndpoint, attemptRequest, startNano, reason = reason)
+                return GenerateAttempt.Failure(reason, AiTraceFailureCategory.UNEXPECTED_ERROR, e)
             }
 
+        val httpStatus = response.status.value
+        val rawBody = runCatching { response.bodyAsText() }.getOrNull()
+
         if (!response.status.isSuccess()) {
-            val errorBody = runCatching { response.bodyAsText() }.getOrDefault("")
+            val errorBody = rawBody.orEmpty()
+            val reason = "HTTP $httpStatus: $errorBody"
+            val failureCategory =
+                if (response.status == HttpStatusCode.TooManyRequests) {
+                    AiTraceFailureCategory.RATE_LIMIT
+                } else {
+                    AiTraceFailureCategory.HTTP_ERROR
+                }
             logger.warn(
                 "Gemini API returned error status HTTP {}: {}",
-                response.status.value,
+                httpStatus,
                 errorBody,
             )
-            return GenerateAttempt.Failure("HTTP ${response.status.value}: $errorBody")
+            recordFailureAttempt(
+                session = session,
+                variant = variant,
+                sanitizedEndpoint = sanitizedEndpoint,
+                attemptRequest = attemptRequest,
+                startNano = startNano,
+                httpStatus = httpStatus,
+                responseRaw = rawBody,
+                reason = reason,
+            )
+            return GenerateAttempt.Failure(reason, failureCategory)
         }
 
         val responseBody: GeminiGenerateContentResponse =
             try {
-                response.body()
+                val bodyText = rawBody?.takeIf { it.isNotBlank() } ?: throw IllegalStateException("empty response body")
+                jsonParser.decodeFromString<GeminiGenerateContentResponse>(bodyText)
             } catch (e: Exception) {
+                val reason = "response parse failure: ${e.message}"
                 logger.warn("Failed to parse Gemini API response: {}", e.message, e)
-                return GenerateAttempt.Failure("response parse failure: ${e.message}", e)
+                recordFailureAttempt(
+                    session = session,
+                    variant = variant,
+                    sanitizedEndpoint = sanitizedEndpoint,
+                    attemptRequest = attemptRequest,
+                    startNano = startNano,
+                    httpStatus = httpStatus,
+                    responseRaw = rawBody,
+                    reason = reason,
+                )
+                return GenerateAttempt.Failure(reason, AiTraceFailureCategory.PARSE_ERROR, e)
             }
+
+        val finishReason = responseBody.candidates?.firstOrNull()?.finishReason
+        val blockReason = responseBody.promptFeedback?.blockReason
+        val usageMetadata = responseBody.usageMetadata
 
         if (responseBody.error != null) {
             val errMsg = responseBody.error.message ?: responseBody.error.status ?: "unknown API error"
+            val reason = "API error: $errMsg"
             logger.warn("Gemini API returned embedded error: {}", errMsg)
-            return GenerateAttempt.Failure("API error: $errMsg")
+            recordFailureAttempt(
+                session = session,
+                variant = variant,
+                sanitizedEndpoint = sanitizedEndpoint,
+                attemptRequest = attemptRequest,
+                startNano = startNano,
+                httpStatus = httpStatus,
+                responseRaw = rawBody,
+                finishReason = finishReason,
+                blockReason = blockReason,
+                usageMetadata = usageMetadata,
+                reason = reason,
+            )
+            return GenerateAttempt.Failure(reason, AiTraceFailureCategory.HTTP_ERROR)
         }
 
-        val blockReason = responseBody.promptFeedback?.blockReason
         if (!blockReason.isNullOrBlank()) {
+            val reason = "blocked by filter: $blockReason"
             logger.warn("Gemini generation blocked by safety or policy filter: {}", blockReason)
-            return GenerateAttempt.Failure("blocked by filter: $blockReason")
+            recordFailureAttempt(
+                session = session,
+                variant = variant,
+                sanitizedEndpoint = sanitizedEndpoint,
+                attemptRequest = attemptRequest,
+                startNano = startNano,
+                httpStatus = httpStatus,
+                responseRaw = rawBody,
+                finishReason = finishReason,
+                blockReason = blockReason,
+                usageMetadata = usageMetadata,
+                reason = reason,
+            )
+            return GenerateAttempt.Failure(reason, AiTraceFailureCategory.SAFETY_BLOCK)
         }
 
         val candidates = responseBody.candidates
         if (candidates.isNullOrEmpty()) {
+            val reason = "empty candidates"
             logger.warn("Gemini API returned no response candidates")
-            return GenerateAttempt.Failure("empty candidates")
+            recordFailureAttempt(
+                session = session,
+                variant = variant,
+                sanitizedEndpoint = sanitizedEndpoint,
+                attemptRequest = attemptRequest,
+                startNano = startNano,
+                httpStatus = httpStatus,
+                responseRaw = rawBody,
+                finishReason = finishReason,
+                blockReason = blockReason,
+                usageMetadata = usageMetadata,
+                reason = reason,
+            )
+            return GenerateAttempt.Failure(reason, AiTraceFailureCategory.EMPTY_OUTPUT)
         }
 
         val rawText =
@@ -295,8 +467,28 @@ open class ChatterGenerator(
                 ?.trim()
 
         if (rawText.isNullOrBlank()) {
+            val reason = "blank candidate content"
+            val failureCategory =
+                if (isSafetyFinishReason(finishReason)) {
+                    AiTraceFailureCategory.SAFETY_BLOCK
+                } else {
+                    AiTraceFailureCategory.EMPTY_OUTPUT
+                }
             logger.warn("Gemini candidate content was blank or empty")
-            return GenerateAttempt.Failure("blank candidate content")
+            recordFailureAttempt(
+                session = session,
+                variant = variant,
+                sanitizedEndpoint = sanitizedEndpoint,
+                attemptRequest = attemptRequest,
+                startNano = startNano,
+                httpStatus = httpStatus,
+                responseRaw = rawBody,
+                finishReason = finishReason,
+                blockReason = blockReason,
+                usageMetadata = usageMetadata,
+                reason = reason,
+            )
+            return GenerateAttempt.Failure(reason, failureCategory)
         }
 
         val sanitized =
@@ -305,12 +497,75 @@ open class ChatterGenerator(
                 maxLength = config.maxOutputCharacters,
             )
         if (sanitized.isBlank()) {
+            val reason = "sanitized to blank"
             logger.warn("Chatter response was sanitized to blank")
-            return GenerateAttempt.Failure("sanitized to blank")
+            recordFailureAttempt(
+                session = session,
+                variant = variant,
+                sanitizedEndpoint = sanitizedEndpoint,
+                attemptRequest = attemptRequest,
+                startNano = startNano,
+                httpStatus = httpStatus,
+                responseRaw = rawBody,
+                finishReason = finishReason,
+                blockReason = blockReason,
+                usageMetadata = usageMetadata,
+                reason = reason,
+            )
+            return GenerateAttempt.Failure(reason, AiTraceFailureCategory.EMPTY_OUTPUT)
         }
 
+        session?.recordAttempt(
+            stage = AiAttemptStage.CHATTER_GENERATE,
+            variant = variant,
+            model = config.cleanModel,
+            endpoint = sanitizedEndpoint,
+            latencyMs = elapsedMillis(startNano),
+            httpStatus = httpStatus,
+            request = attemptRequest,
+            responseRaw = rawBody,
+            finishReason = finishReason,
+            blockReason = blockReason,
+            usageMetadata = usageMetadata,
+            parsedOutcome = AiAttemptOutcome.SUCCESS,
+            errorMessage = null,
+        )
         return GenerateAttempt.Success(sanitized)
     }
+
+    private fun recordFailureAttempt(
+        session: AiTraceSession?,
+        variant: String?,
+        sanitizedEndpoint: String,
+        attemptRequest: AiAttemptRequest?,
+        startNano: Long,
+        httpStatus: Int? = null,
+        responseRaw: String? = null,
+        finishReason: String? = null,
+        blockReason: String? = null,
+        usageMetadata: GeminiUsageMetadata? = null,
+        reason: String,
+    ) {
+        session?.recordAttempt(
+            stage = AiAttemptStage.CHATTER_GENERATE,
+            variant = variant,
+            model = config.cleanModel,
+            endpoint = sanitizedEndpoint,
+            latencyMs = elapsedMillis(startNano),
+            httpStatus = httpStatus,
+            request = attemptRequest,
+            responseRaw = responseRaw,
+            finishReason = finishReason,
+            blockReason = blockReason,
+            usageMetadata = usageMetadata,
+            parsedOutcome = AiAttemptOutcome.ERROR,
+            errorMessage = reason,
+        )
+    }
+
+    private fun elapsedMillis(startNano: Long): Long = ((System.nanoTime() - startNano) / 1_000_000L).coerceAtLeast(0L)
+
+    private fun isSafetyFinishReason(finishReason: String?): Boolean = finishReason?.uppercase() in SAFETY_FINISH_REASONS
 
     override fun close() {
         httpClient.close()
@@ -319,6 +574,9 @@ open class ChatterGenerator(
     companion object {
         const val MAX_STATIC_VIDEO_DURATION_SECONDS = 300L
         const val MAX_VIDEO_DURATION_SECONDS = 7200L
+        private const val VARIANT_NO_SEARCH = "no-search"
+        private const val VARIANT_NO_MEDIA = "no-media"
+        private val SAFETY_FINISH_REASONS = setOf("SAFETY", "PROHIBITED_CONTENT", "BLOCKLIST", "SPII")
 
         private val jsonParser =
             Json {
