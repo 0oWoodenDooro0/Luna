@@ -392,6 +392,58 @@ class CodingStandardsTest {
         )
     }
 
+    @Test
+    fun `test suites must stay within 600 lines or not exceed legacy baseline`() {
+        val defaultMaxLines = 600
+        val legacyBaselines =
+            mapOf(
+                "src/test/kotlin/luna/core/EnvSyncCliTest.kt" to 638,
+                "src/test/kotlin/luna/chatter/ChatterNoiseFilterTest.kt" to 642,
+                "src/test/kotlin/luna/core/ai/AiTraceRecorderTest.kt" to 650,
+                "mcp-server/src/test/kotlin/luna/mcp/server/McpServerTest.kt" to 692,
+                "src/test/kotlin/luna/summarizer/SummaryServiceTest.kt" to 719,
+                "src/test/kotlin/luna/mcp/McpWebhookCommandTest.kt" to 752,
+                "src/test/kotlin/luna/summarizer/GeminiSummarizerTest.kt" to 757,
+                "src/test/kotlin/luna/core/ai/GeminiInteractionAiTraceTest.kt" to 825,
+                "src/test/kotlin/luna/summarizer/GeminiSummarizerLookbackTest.kt" to 828,
+                "src/test/kotlin/luna/chatter/ChatterContextCollectorTest.kt" to 838,
+                "src/test/kotlin/luna/chatter/GeminiDecisionClientTest.kt" to 838,
+                "src/test/kotlin/luna/core/ai/GeminiInteractionClientTest.kt" to 974,
+                "src/test/kotlin/luna/chatter/ChatterGeneratorTest.kt" to 1109,
+                "mcp-server/src/test/kotlin/luna/mcp/server/McpOAuthServerTest.kt" to 1129,
+                "src/test/kotlin/luna/chatter/ChatterServiceTest.kt" to 1146,
+                "src/test/kotlin/luna/summarizer/ConversationSliceCollectorTest.kt" to 1256,
+                "src/test/kotlin/luna/summarizer/SummaryAiTraceTest.kt" to 1404,
+                "src/test/kotlin/luna/chatter/ChatterAiTraceTest.kt" to 1686,
+            )
+
+        val testRoots = findKotlinSourceRoots("test")
+        assertTrue(testRoots.isNotEmpty(), "At least one src/test/kotlin directory must exist")
+
+        val violations = mutableListOf<String>()
+        testRoots.forEach { root ->
+            root
+                .walkTopDown()
+                .filter { it.isFile && it.name.endsWith("Test.kt") }
+                .forEach { file ->
+                    val relPath = file.relativeTo(projectRoot).path.replace('\\', '/')
+                    val lineCount = file.useLines { it.count() }
+                    val limit = legacyBaselines[relPath] ?: defaultMaxLines
+                    if (lineCount > limit) {
+                        violations.add(
+                            "$relPath: $lineCount lines exceeds limit $limit. " +
+                                "Split new concerns into a focused *Test.kt file per CODING_STANDARDS.md §5.",
+                        )
+                    }
+                }
+        }
+
+        assertTrue(
+            violations.isEmpty(),
+            "Found oversized test suite violations:\n" + violations.joinToString("\n"),
+        )
+    }
+
     private fun findKotlinSourceRoots(parentDirName: String): List<File> =
         projectRoot
             .walkTopDown()
