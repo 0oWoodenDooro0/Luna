@@ -7,6 +7,7 @@ import dev.kord.core.on
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import luna.core.ai.SocialPeekFactory
 import luna.plugin.LunaPlugin
 import luna.plugin.PluginContext
 import luna.plugin.config
@@ -24,11 +25,11 @@ internal fun safeScope(kord: Kord): CoroutineScope {
 /**
  * Luna Plugin encapsulating autonomous conversational participation in Discord channels (Chatter).
  *
- * Uses Laya Studio System 1 for low-latency decision filtering (`POST /v1/systemone`) and
- * Google Gemini for persona-grounded conversational dialogue generation.
+ * Uses Google Gemini Decision 1 for low-latency participation evaluation (`POST /v1beta/decisions`)
+ * and Google Gemini for persona-grounded conversational dialogue generation.
  */
 class ChatterPlugin(
-    private val layaClientFactory: ((LayaConfig) -> LayaClient)? = null,
+    private val decisionClientFactory: ((ChatterDecisionConfig) -> GeminiDecisionClient)? = null,
     private val generatorFactory: ((ChatterConfig) -> ChatterGenerator)? = null,
     private val serviceFactory: ((ChatterService) -> ChatterService)? = null,
 ) : LunaPlugin {
@@ -36,7 +37,7 @@ class ChatterPlugin(
 
     override val name: String = "chatter"
 
-    var layaClient: LayaClient? = null
+    var decisionClient: GeminiDecisionClient? = null
         internal set
 
     var chatterGenerator: ChatterGenerator? = null
@@ -51,14 +52,20 @@ class ChatterPlugin(
     var cooldownCache: BoundedChannelCooldownCache? = null
         internal set
 
+    var contextCollector: ChatterContextCollector? = null
+        internal set
+
+    var maxImages: Int = ChatterContextCollector.DEFAULT_MAX_IMAGES
+        internal set
+
     var isChatterEnabled: Boolean = false
         internal set
 
     private var registrationJob: Job? = null
 
     override suspend fun initialize(context: PluginContext) {
-        val layaConfig = LayaConfig.fromPluginContext(context)
-        val layaApiKey = layaConfig.apiKey
+        val decisionConfig = ChatterDecisionConfig.fromPluginContext(context)
+        val geminiApiKey = decisionConfig.apiKey
 
         val chatterEnabledConfig =
             context.config<Boolean>("CHATTER_ENABLED")
@@ -66,7 +73,7 @@ class ChatterPlugin(
                 ?: context.config<Boolean>("chatter.enabled")
                 ?: context.config<String>("chatter.enabled")?.toBooleanStrictOrNull()
 
-        val chatterEnabled = chatterEnabledConfig ?: layaApiKey.isNotBlank()
+        val chatterEnabled = (chatterEnabledConfig ?: true) && geminiApiKey.isNotBlank()
         this.isChatterEnabled = chatterEnabled
 
         val allowedChannelsRaw =
@@ -97,8 +104,21 @@ class ChatterPlugin(
                 ?: 30L
         val cooldownDurationMs = cooldownSeconds * 1000L
 
-        val laya = layaClientFactory?.invoke(layaConfig) ?: LayaClient(config = layaConfig)
-        this.layaClient = laya
+        val youtubeApiKey =
+            context.config<String>("YOUTUBE_API_KEY")?.takeIf { it.isNotBlank() }
+                ?: context.config<String>("youtube.apiKey")?.takeIf { it.isNotBlank() }
+                ?: context.config<String>("youtube.api_key")?.takeIf { it.isNotBlank() }
+
+        val imagesLimit =
+            context.config<Int>("SUMMARY_MAX_IMAGES")?.takeIf { it > 0 }
+                ?: context.config<String>("SUMMARY_MAX_IMAGES")?.toIntOrNull()?.takeIf { it > 0 }
+                ?: context.config<Int>("summary.maxImages")?.takeIf { it > 0 }
+                ?: context.config<String>("summary.maxImages")?.toIntOrNull()?.takeIf { it > 0 }
+                ?: ChatterContextCollector.DEFAULT_MAX_IMAGES
+        this.maxImages = imagesLimit
+
+        val client = decisionClientFactory?.invoke(decisionConfig) ?: GeminiDecisionClient(config = decisionConfig)
+        this.decisionClient = client
 
         val chatterConfig = ChatterConfig.fromPluginContext(context)
         val generator = generatorFactory?.invoke(chatterConfig) ?: ChatterGenerator(config = chatterConfig)
@@ -116,18 +136,28 @@ class ChatterPlugin(
             )
         this.filter = noiseFilter
 
+        val peekResolver = SocialPeekFactory.buildPeekResolver(youtubeApiKey)
+        val collector =
+            ChatterContextCollector(
+                noiseFilter = noiseFilter,
+                maxImages = imagesLimit,
+                peekResolver = peekResolver,
+            )
+        this.contextCollector = collector
+
         val chatterService =
             ChatterService(
                 filter = noiseFilter,
-                layaClient = laya,
+                decisionClient = client,
                 chatterGenerator = generator,
                 cooldownCache = cooldown,
+                contextCollector = collector,
             )
         val finalService = serviceFactory?.invoke(chatterService) ?: chatterService
         this.service = finalService
 
-        if (layaApiKey.isBlank()) {
-            logger.info("LAYA_API_KEY is not configured; ChatterPlugin running in disabled mode")
+        if (geminiApiKey.isBlank()) {
+            logger.info("GEMINI_API_KEY is not configured; ChatterPlugin running in disabled mode")
             return
         }
 
@@ -147,7 +177,7 @@ class ChatterPlugin(
 
     override suspend fun shutdown() {
         registrationJob?.cancel()
-        layaClient?.close()
+        decisionClient?.close()
         chatterGenerator?.close()
     }
 

@@ -8,16 +8,13 @@ import dev.kord.core.entity.ReactionEmoji
 import dev.kord.core.event.message.ReactionAddEvent
 import dev.kord.core.on
 import dev.kord.rest.builder.message.allowedMentions
-import dev.socialpeek.SocialPeek
-import dev.socialpeek.model.PeekPost
-import kotlinx.coroutines.flow.toList
 import luna.core.JsonLogger
 import luna.core.SummaryMessageRegistry
 import luna.core.SummaryRegistry
+import luna.core.ai.EmojiSanitizer
 import org.slf4j.LoggerFactory
 import java.util.Collections
 import java.util.LinkedHashMap
-import kotlin.time.Duration
 
 enum class SummaryStatus {
     IN_PROGRESS,

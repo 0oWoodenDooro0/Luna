@@ -75,35 +75,35 @@ class ConversationSliceCollectorTest {
     }
 
     @Test
-    fun `extractImageAttachments correctly resolves valid image attachments and drops oversized ones`() {
-        val collector = ConversationSliceCollector(maxImageBytes = 5 * 1024 * 1024)
+    fun `collectSlice resolves valid image attachments and drops oversized or spoofed ones`() =
+        runTest {
+            val collector =
+                ConversationSliceCollector(
+                    maxImageBytes = 5 * 1024 * 1024,
+                    historyFetcher = { _, _ -> emptyList() },
+                )
 
-        val validImg = createMockAttachment("https://cdn.discordapp.com/valid.png", "image/png", "valid.png", size = 2 * 1024 * 1024)
-        val oversizedImg = createMockAttachment("https://cdn.discordapp.com/large.jpg", "image/jpeg", "large.jpg", size = 8 * 1024 * 1024)
-        val nonImg = createMockAttachment("https://cdn.discordapp.com/doc.pdf", "application/pdf", "doc.pdf", size = 1024)
+            val validImg = createMockAttachment("https://cdn.discordapp.com/valid.png", "image/png", "valid.png", size = 2 * 1024 * 1024)
+            val oversizedImg = createMockAttachment("https://cdn.discordapp.com/large.jpg", "image/jpeg", "large.jpg", size = 8 * 1024 * 1024)
+            val spoofedImg = createMockAttachment("https://cdn.discordapp.com/fake.png", "application/octet-stream", "fake.png", size = 1024)
+            val nonImg = createMockAttachment("https://cdn.discordapp.com/doc.pdf", "application/pdf", "doc.pdf", size = 1024)
 
-        val message = createMockMessage(1L, "Alice", "Check files", attachments = setOf(validImg, oversizedImg, nonImg))
-        val extracted = collector.extractImageAttachments(message)
+            val message =
+                createMockMessage(
+                    id = 1L,
+                    username = "Alice",
+                    content = "Check files",
+                    attachments = setOf(validImg, oversizedImg, spoofedImg, nonImg),
+                )
+            val slice = collector.collectSlice(message)
 
-        assertEquals(1, extracted.size)
-        assertEquals("https://cdn.discordapp.com/valid.png", extracted.first().url)
-        assertEquals("image/png", extracted.first().mimeType)
-        assertEquals("valid.png", extracted.first().filename)
-    }
-
-    @Test
-    fun `resolveImageMimeType validates supported formats and rejects unsupported or spoofed types`() {
-        assertEquals("image/png", ConversationSliceCollector.resolveImageMimeType("image/png", "test.png"))
-        assertEquals("image/jpeg", ConversationSliceCollector.resolveImageMimeType("IMAGE/JPEG", "test.jpg"))
-        assertEquals("image/webp", ConversationSliceCollector.resolveImageMimeType("image/webp; charset=utf-8", "test.webp"))
-        assertEquals("image/gif", ConversationSliceCollector.resolveImageMimeType("image/gif", "test.gif"))
-
-        assertNull(ConversationSliceCollector.resolveImageMimeType("application/octet-stream", "fake.png"))
-        assertNull(ConversationSliceCollector.resolveImageMimeType(null, "photo.jpg"))
-        assertNull(ConversationSliceCollector.resolveImageMimeType("application/pdf", "document.png"))
-        assertNull(ConversationSliceCollector.resolveImageMimeType("text/plain", "log.txt"))
-        assertNull(ConversationSliceCollector.resolveImageMimeType("video/mp4", "clip.mp4"))
-    }
+            assertNotNull(slice)
+            assertEquals(1, slice.summaryInput.imageAttachments.size)
+            val retainedImage = slice.summaryInput.imageAttachments.first()
+            assertEquals("https://cdn.discordapp.com/valid.png", retainedImage.url)
+            assertEquals("image/png", retainedImage.mimeType)
+            assertEquals("valid.png", retainedImage.filename)
+        }
 
     @Test
     fun `collectSlice on plain message performs dual-boundary backtracking and attaches lookback provider`() =

@@ -1,15 +1,6 @@
 package luna.summarizer
 
-import dev.socialpeek.SocialPeek
-import dev.socialpeek.model.PeekPost
-import dev.socialpeek.resolver.bilibili.BilibiliResolver
-import dev.socialpeek.resolver.facebook.FacebookResolver
-import dev.socialpeek.resolver.generic.GenericWebResolver
-import dev.socialpeek.resolver.instagram.InstagramResolver
-import dev.socialpeek.resolver.reddit.RedditResolver
-import dev.socialpeek.resolver.threads.ThreadsResolver
-import dev.socialpeek.resolver.x.XResolver
-import dev.socialpeek.resolver.youtube.YouTubeResolver
+import luna.core.ai.SocialPeekFactory
 import luna.plugin.LunaPlugin
 import luna.plugin.PluginContext
 import luna.plugin.config
@@ -148,26 +139,7 @@ class SummarizerPlugin(
                 ?: GeminiSummarizer(config = geminiConfig)
         this.summarizer = gemini
 
-        val peekResolver: suspend (String) -> PeekPost? =
-            if (!youtubeApiKey.isNullOrBlank()) {
-                val peekClient =
-                    SocialPeek
-                        .builder()
-                        .includeDefaultResolvers(false)
-                        .addResolver(FacebookResolver())
-                        .addResolver(BilibiliResolver())
-                        .addResolver(XResolver())
-                        .addResolver(InstagramResolver())
-                        .addResolver(ThreadsResolver())
-                        .addResolver(YouTubeResolver(apiKey = youtubeApiKey))
-                        .addResolver(RedditResolver())
-                        .addResolver(GenericWebResolver())
-                        .build()
-                val resolver: suspend (String) -> PeekPost? = { url -> peekClient.peekOrNull(url) }
-                resolver
-            } else {
-                { url -> SocialPeek.peekOrNull(url) }
-            }
+        val peekResolver = SocialPeekFactory.buildPeekResolver(youtubeApiKey)
 
         val collector =
             ConversationSliceCollector(

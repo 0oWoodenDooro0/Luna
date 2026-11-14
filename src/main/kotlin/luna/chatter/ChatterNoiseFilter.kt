@@ -8,6 +8,7 @@ import luna.core.LunaWebhookRegistry
 import luna.core.SummaryMessageRegistry
 import luna.core.SummaryRegistry
 import luna.core.WebhookRegistry
+import luna.core.ai.ChatImageAttachmentExtractor
 
 enum class RejectionReason {
     CHATTER_DISABLED,
@@ -199,7 +200,17 @@ open class ChatterNoiseFilter(
         return false
     }
 
-    fun isEligibleForLayaEvaluation(content: String): Boolean {
+    fun isEligibleForDecisionEvaluation(message: Message): Boolean {
+        if (ChatImageAttachmentExtractor.extractFromMessage(message).isNotEmpty()) {
+            return true
+        }
+        if (URL_REGEX.containsMatchIn(message.content)) {
+            return true
+        }
+        return isEligibleForDecisionEvaluation(message.content)
+    }
+
+    fun isEligibleForDecisionEvaluation(content: String): Boolean {
         val trimmed = content.trim()
         if (trimmed.isBlank()) return false
         if (trimmed.contains("luna", ignoreCase = true) || trimmed.contains("露娜")) {
@@ -208,7 +219,10 @@ open class ChatterNoiseFilter(
         if (trimmed.contains('?') || trimmed.contains('？')) {
             return true
         }
-        return trimmed.length >= MIN_LAYA_CONTENT_LENGTH
+        if (URL_REGEX.containsMatchIn(trimmed)) {
+            return true
+        }
+        return trimmed.length >= MIN_DECISION_CONTENT_LENGTH
     }
 
     fun stripLunaMentions(
@@ -225,30 +239,53 @@ open class ChatterNoiseFilter(
         return result.lines().joinToString("\n") { it.trim() }.trim()
     }
 
-    fun toChatMessageOrNull(
+    fun isContextMessage(
         message: Message,
         kordSelfId: Snowflake? = null,
-    ): ChatMessage? {
+    ): Boolean {
         val type = runCatching { message.type }.getOrNull() ?: MessageType.Default
-        if (isCommand(message.content, type)) return null
-        if (isSystemNotice(type)) return null
+        if (isCommand(message.content, type)) return false
+        if (isSystemNotice(type)) return false
         val webhookId = runCatching { message.webhookId }.getOrNull()
         val isLunaWebhook = webhookId != null && webhookRegistry.contains(webhookId)
-        if (webhookId != null && !isLunaWebhook) return null
+        if (webhookId != null && !isLunaWebhook) return false
 
         val resolvedSelfId = kordSelfId ?: runCatching { message.kord.selfId }.getOrNull()
-        val isLunaBot = resolvedSelfId != null && runCatching { message.author?.id }.getOrNull() == resolvedSelfId
-        if (!isLunaWebhook && !isLunaBot && (message.author == null || message.author?.isBot == true)) return null
+        val authorId =
+            runCatching { message.author?.id }.getOrNull()
+                ?: runCatching { message.data.author.id }.getOrNull()
+        val isLunaBot = resolvedSelfId != null && authorId == resolvedSelfId
+        if (!isLunaWebhook && !isLunaBot && (message.author == null || message.author?.isBot == true)) return false
 
         if (isLunaBot) {
             val isSummary = summaryRegistry.contains(message.id) || SummaryRegistry.isSummaryContent(message.content)
             if (isSummary) {
-                return null
+                return false
             }
         }
 
         val hasAttachments = runCatching { message.attachments.isNotEmpty() }.getOrDefault(false)
-        if (message.content.isBlank() && !hasAttachments) return null
+        val hasEmbeds = runCatching { message.embeds.isNotEmpty() }.getOrDefault(false)
+        return message.content.isNotBlank() || hasAttachments || hasEmbeds || isDirectBotMention(message, resolvedSelfId)
+    }
+
+    fun filterContextMessages(
+        messages: List<Message>,
+        kordSelfId: Snowflake? = null,
+    ): List<Message> = messages.filter { isContextMessage(it, kordSelfId) }
+
+    fun toChatMessageOrNull(
+        message: Message,
+        kordSelfId: Snowflake? = null,
+    ): ChatMessage? {
+        if (!isContextMessage(message, kordSelfId)) return null
+
+        val resolvedSelfId = kordSelfId ?: runCatching { message.kord.selfId }.getOrNull()
+        val authorId =
+            runCatching { message.author?.id }.getOrNull()
+                ?: runCatching { message.data.author.id }.getOrNull()
+        val isLunaBot = resolvedSelfId != null && authorId == resolvedSelfId
+        val hasAttachments = runCatching { message.attachments.isNotEmpty() }.getOrDefault(false)
 
         val content =
             resolveCleanedContent(
@@ -317,9 +354,10 @@ open class ChatterNoiseFilter(
     }
 
     companion object {
-        const val MIN_LAYA_CONTENT_LENGTH = 5
+        const val MIN_DECISION_CONTENT_LENGTH = 5
         val DEFAULT_BOT_PREFIXES = setOf("!", "~", "?")
         const val CALLOUT_GREETING = "你好"
+        val URL_REGEX = Regex("""https?://[^\s<>"']+""")
         private val LUNA_MENTION_REGEX = Regex("""(?i)(?<!\w)@luna\b""")
         private val MULTIPLE_SPACES_REGEX = Regex("""[ \t]+""")
     }

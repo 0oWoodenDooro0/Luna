@@ -1,11 +1,21 @@
 package luna.chatter
 
+import luna.core.ai.EmojiSanitizer
+import luna.core.ai.GeminiContent
+import luna.core.ai.GeminiFileData
+import luna.core.ai.GeminiGenerateContentRequest
+import luna.core.ai.GeminiGenerationConfig
+import luna.core.ai.GeminiPart
+import luna.core.ai.GeminiTool
+
 /**
  * Builds system persona instructions, user prompts, and request payloads for ChatterGenerator,
  * while providing output sanitization and Discord 2,000-character payload bound enforcement.
  */
 object ChatterPromptBuilder {
     const val DISCORD_MAX_LENGTH: Int = 2000
+    const val MAX_OUTPUT_TOKENS: Int = 512
+    const val TEMPERATURE: Double = 0.8
     const val TRUNCATION_ELLIPSIS: String = "..."
 
     const val SYSTEM_INSTRUCTION: String =
@@ -19,7 +29,9 @@ object ChatterPromptBuilder {
             "6. 語言用語：以台灣繁體中文（zh-TW）為主要社群慣用語，或配合對話語言交流。\n" +
             "7. 嚴格禁用 AI 套話與開場白：輸出中絕對嚴禁使用任何制式、官方或機械化的 AI 助理開場白或套話（例如「身為一個 AI」、「很高興為您服務」、「有什麼我可以幫忙的嗎」等），請直接切入話題搭話。\n" +
             "8. 對話脈絡理解：對話紀錄中標註了各發言者的名稱（例如 [使用者]: 內容）。請根據上下文脈絡隨性自然地搭話。\n" +
-            "9. 順應最新話鋒：發言時只順著聊天紀錄最新、當前正在進行的話題接話，切勿回頭去回覆或挖掘紀錄更早之前已經結束的舊句子。"
+            "9. 順應最新話鋒：發言時只順著聊天紀錄最新、當前正在進行的話題接話，切勿回頭去回覆或挖掘紀錄更早之前已經結束的舊句子。\n" +
+            "10. 多模態與連結內容理解：若對話中附帶圖片（標記為 [附帶圖片 N]）、YouTube 影片、或社群/網頁連結內容（[連結內容: ...]），請自然融入視覺畫面、影片重點或連結資訊來搭話或回應，但仍維持口語簡短的聊天節奏，不可變成制式摘要。\n" +
+            "11. 搜尋查證與禁止摘要格式：必要時可透過 Google 搜尋確認不熟悉的名詞或事實，將查到的重點自然融入口語回覆中。絕對禁止輸出「TL;DR:」、「核心重點:」、「參與者觀點:」、「社群觀點:」、「名詞與事實查核:」等制式摘要標題，也不可附上參考來源網址清單或引用連結列表。"
 
     fun buildSystemInstruction(): String = SYSTEM_INSTRUCTION
 
@@ -28,39 +40,131 @@ object ChatterPromptBuilder {
             "[${msg.author}]: ${msg.content.trim()}"
         }
 
-    fun buildUserPrompt(transcript: String): String =
-        "以下為 Discord 頻道的近期對話紀錄：\n\n${transcript.trim()}\n\n" +
-            "請以 Luna 的社群成員口吻回覆這段對話。要求：順著最新聊天紀錄接話（切勿回頭回覆早前的舊句子）、極簡口語、一次講一句重點（最多兩到三句極短句）、不加標點符號（不加逗號、句號、驚嘆號，斷句用空格或分行）、嚴禁使用任何 emoji 或表情符號、切勿使用制式 AI 開場白與套話："
+    fun buildUserPrompt(transcript: String): String = buildUserPrompt(ChatterInput(transcript = transcript))
 
     fun buildUserPrompt(messages: List<ChatMessage>): String = buildUserPrompt(formatTranscript(messages))
 
-    fun buildRequest(transcript: String): ChatterGenerateContentRequest =
-        ChatterGenerateContentRequest(
+    fun buildUserPrompt(input: ChatterInput): String {
+        val sb = StringBuilder()
+        val trimmedTranscript = input.transcript.trim()
+        sb.append("以下為 Discord 頻道的近期對話紀錄：\n\n")
+        if (trimmedTranscript.isNotEmpty()) {
+            sb.append(trimmedTranscript)
+        }
+
+        val supplemental = StringBuilder()
+        val cleanTitle = input.title?.trim()?.takeIf { it.isNotEmpty() }
+        if (cleanTitle != null && !trimmedTranscript.contains(cleanTitle)) {
+            supplemental.append("\n標題：").append(cleanTitle)
+        }
+        val cleanUrl = input.url?.trim()?.takeIf { it.isNotEmpty() }
+        if (cleanUrl != null && !trimmedTranscript.contains(cleanUrl)) {
+            supplemental.append("\n來源網址：").append(cleanUrl)
+        }
+        val missingComments =
+            input.comments
+                .map { it.trim() }
+                .filter { it.isNotEmpty() && !trimmedTranscript.contains(it) }
+        if (missingComments.isNotEmpty()) {
+            supplemental.append("\n社群留言：")
+            missingComments.forEachIndexed { idx, comment ->
+                supplemental.append("\n${idx + 1}. ").append(comment)
+            }
+        }
+        if (supplemental.isNotEmpty()) {
+            if (trimmedTranscript.isNotEmpty()) {
+                sb.append("\n")
+            }
+            sb.append(supplemental.toString().trimStart())
+        }
+
+        val mediaHints = mutableListOf<String>()
+        if (!input.videoUri.isNullOrBlank()) {
+            mediaHints.add("附帶 YouTube 影片請結合畫面與語音自然搭話")
+        }
+        if (input.imageAttachments.isNotEmpty()) {
+            mediaHints.add("對話中附帶圖片（[附帶圖片 N]）請自然結合視覺內容回應")
+        }
+        val mediaDirective =
+            if (mediaHints.isNotEmpty()) {
+                "（${mediaHints.joinToString("，")}）"
+            } else {
+                ""
+            }
+
+        sb.append(
+            "\n\n請以 Luna 的社群成員口吻回覆這段對話$mediaDirective。" +
+                "要求：順著最新聊天紀錄接話（切勿回頭回覆早前的舊句子）、極簡口語、一次講一句重點（最多兩到三句極短句）、" +
+                "不加標點符號（不加逗號、句號、驚嘆號，斷句用空格或分行）、嚴禁使用任何 emoji 或表情符號、" +
+                "切勿使用制式 AI 開場白與套話、不可輸出任何摘要標題或引用網址清單：",
+        )
+        return sb.toString().trim()
+    }
+
+    fun buildRequest(
+        transcript: String,
+        tools: List<GeminiTool>? = null,
+    ): GeminiGenerateContentRequest = buildRequest(ChatterInput(transcript = transcript), tools = tools)
+
+    fun buildRequest(
+        input: ChatterInput,
+        tools: List<GeminiTool>? = null,
+    ): GeminiGenerateContentRequest {
+        val parts = mutableListOf<GeminiPart>()
+        if (!input.videoUri.isNullOrBlank()) {
+            parts.add(
+                GeminiPart(
+                    fileData =
+                        GeminiFileData(
+                            fileUri = input.videoUri,
+                        ),
+                ),
+            )
+        }
+        for (attachment in input.imageAttachments) {
+            parts.add(
+                GeminiPart(
+                    fileData =
+                        GeminiFileData(
+                            fileUri = attachment.url,
+                            mimeType = attachment.mimeType,
+                        ),
+                ),
+            )
+        }
+        parts.add(GeminiPart(text = buildUserPrompt(input)))
+
+        return GeminiGenerateContentRequest(
             contents =
                 listOf(
-                    ChatterContent(
+                    GeminiContent(
                         role = "user",
-                        parts = listOf(ChatterPart(text = buildUserPrompt(transcript))),
+                        parts = parts,
                     ),
                 ),
             systemInstruction =
-                ChatterContent(
-                    parts = listOf(ChatterPart(text = buildSystemInstruction())),
+                GeminiContent(
+                    parts = listOf(GeminiPart(text = buildSystemInstruction())),
                 ),
             generationConfig =
-                ChatterGenerationConfig(
-                    temperature = 0.8,
-                    maxOutputTokens = 200,
+                GeminiGenerationConfig(
+                    temperature = TEMPERATURE,
+                    maxOutputTokens = MAX_OUTPUT_TOKENS,
                 ),
+            tools = tools?.takeIf { it.isNotEmpty() },
         )
+    }
 
-    fun sanitizeResponse(rawText: String): String {
+    fun sanitizeResponse(
+        rawText: String,
+        maxLength: Int = DISCORD_MAX_LENGTH,
+    ): String {
         var text = rawText.trim()
 
         // Strip wrapping code block if model wrapped reply in markdown fences
         if (text.startsWith("```") && text.endsWith("```") && text.length >= 6) {
             val lines = text.lines()
-            if (lines.size >= 2 && lines.first().startsWith("```") && lines.last() == "```") {
+            if (lines.size >= 2 && lines.first().startsWith("```") && lines.last().trim() == "```") {
                 text = lines.subList(1, lines.size - 1).joinToString("\n").trim()
             }
         }
@@ -75,7 +179,9 @@ object ChatterPromptBuilder {
             text = text.replace(pattern, "").trim()
         }
 
-        return truncateToDiscordLimit(text)
+        text = EmojiSanitizer.stripEmojis(text).trim()
+
+        return truncateToDiscordLimit(text, maxLength = maxLength)
     }
 
     /**

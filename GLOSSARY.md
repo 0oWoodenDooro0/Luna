@@ -120,4 +120,14 @@ _Avoid_: Web scraping, Google search bot, search plugin
 The structured presentation of search grounding citations at the conclusion of a summary with URL embed suppression to prevent Discord layout pollution.
 _Avoid_: Link spam, citation previews, embed footer
 
+**Chatter Pipeline**:
+The autonomous Discord conversation participation workflow that evaluates channel dialogue and generates concise, persona-grounded community replies.
+_Avoid_: Auto-responder, Laya bot, chat spammer
 
+**Participation Decision**:
+The low-latency binary probability assessment that determines whether Luna should join an ambient Discord conversation before invoking reply generation.
+_Avoid_: Laya System 1, participation scorer, AI gatekeeper
+
+**Tiered Video Latency Policy**:
+The Chatter video comprehension rule that uses static video understanding for short videos (<= 5 minutes) everywhere, while reserving slower Agentic Video Understanding (> 5 minutes) for direct mentions and falling back to creator metadata and audience feedback in ambient chats.
+_Avoid_: Video timeout guard, ambient video skip

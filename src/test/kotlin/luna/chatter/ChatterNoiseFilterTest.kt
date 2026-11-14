@@ -74,6 +74,7 @@ class ChatterNoiseFilterTest {
         every { msg.type } returns type
         every { msg.webhookId } returns webhookId
         every { msg.attachments } returns emptySet()
+        every { msg.embeds } returns emptyList()
         every { msg.mentionedUserIds } returns mentionedUserIds
         every { msg.referencedMessage } returns referencedMessage
         return msg
@@ -466,26 +467,121 @@ class ChatterNoiseFilterTest {
     }
 
     @Test
-    fun `isEligibleForLayaEvaluation validates question marks, luna keyword, and substantive message length`() {
+    fun `isEligibleForDecisionEvaluation validates question marks, luna keyword, and substantive message length`() {
         // Trivial messages (< 5 chars, no ? or luna) -> false
-        assertFalse(filter.isEligibleForLayaEvaluation("ok"))
-        assertFalse(filter.isEligibleForLayaEvaluation("好"))
-        assertFalse(filter.isEligibleForLayaEvaluation("++"))
-        assertFalse(filter.isEligibleForLayaEvaluation("111"))
-        assertFalse(filter.isEligibleForLayaEvaluation("    "))
+        assertFalse(filter.isEligibleForDecisionEvaluation("ok"))
+        assertFalse(filter.isEligibleForDecisionEvaluation("好"))
+        assertFalse(filter.isEligibleForDecisionEvaluation("++"))
+        assertFalse(filter.isEligibleForDecisionEvaluation("111"))
+        assertFalse(filter.isEligibleForDecisionEvaluation("    "))
 
         // Questions (? or ？) -> true regardless of length
-        assertTrue(filter.isEligibleForLayaEvaluation("在嗎?"))
-        assertTrue(filter.isEligibleForLayaEvaluation("吃飽了嗎？"))
+        assertTrue(filter.isEligibleForDecisionEvaluation("在嗎?"))
+        assertTrue(filter.isEligibleForDecisionEvaluation("吃飽了嗎？"))
 
         // Luna keywords -> true regardless of length
-        assertTrue(filter.isEligibleForLayaEvaluation("luna"))
-        assertTrue(filter.isEligibleForLayaEvaluation("嗨Luna"))
-        assertTrue(filter.isEligibleForLayaEvaluation("露娜在嗎"))
+        assertTrue(filter.isEligibleForDecisionEvaluation("luna"))
+        assertTrue(filter.isEligibleForDecisionEvaluation("嗨Luna"))
+        assertTrue(filter.isEligibleForDecisionEvaluation("露娜在嗎"))
 
         // Substantive messages (>= 5 characters) -> true
-        assertTrue(filter.isEligibleForLayaEvaluation("今天天氣真好"))
-        assertTrue(filter.isEligibleForLayaEvaluation("週末大家有什麼安排呢"))
+        assertTrue(filter.isEligibleForDecisionEvaluation("今天天氣真好"))
+        assertTrue(filter.isEligibleForDecisionEvaluation("週末大家有什麼安排呢"))
+
+        // HTTP/HTTPS URLs -> true
+        assertTrue(filter.isEligibleForDecisionEvaluation("https://example.com/post"))
+        assertTrue(filter.isEligibleForDecisionEvaluation("http://x.co"))
+    }
+
+    @Test
+    fun `isEligibleForDecisionEvaluation accepts image-only and URL-only messages`() {
+        val validPng = mockk<dev.kord.core.entity.Attachment>()
+        every { validPng.url } returns "https://cdn.discordapp.com/attachments/1/2/meme.png"
+        every { validPng.contentType } returns "image/png"
+        every { validPng.filename } returns "meme.png"
+        every { validPng.size } returns 512 * 1024
+
+        val imageOnlyMsg = createMockMessage(id = 701L, content = "")
+        every { imageOnlyMsg.attachments } returns setOf(validPng)
+        assertTrue(filter.isEligibleForDecisionEvaluation(imageOnlyMsg))
+
+        val urlOnlyMsg = createMockMessage(id = 702L, content = "https://www.youtube.com/watch?v=dQw4w9WgXcQ")
+        assertTrue(filter.isEligibleForDecisionEvaluation(urlOnlyMsg))
+
+        val httpUrlMsg = createMockMessage(id = 703L, content = "http://example.com/news")
+        assertTrue(filter.isEligibleForDecisionEvaluation(httpUrlMsg))
+    }
+
+    @Test
+    fun `isEligibleForDecisionEvaluation rejects blank messages with only oversized or unsupported MIME attachments`() {
+        val tenMbPlusOne = 10 * 1024 * 1024 + 1
+        val oversizedImg = mockk<dev.kord.core.entity.Attachment>()
+        every { oversizedImg.url } returns "https://cdn.discordapp.com/attachments/1/2/huge.jpg"
+        every { oversizedImg.contentType } returns "image/jpeg"
+        every { oversizedImg.filename } returns "huge.jpg"
+        every { oversizedImg.size } returns tenMbPlusOne
+
+        val oversizedOnlyMsg = createMockMessage(id = 704L, content = "   ")
+        every { oversizedOnlyMsg.attachments } returns setOf(oversizedImg)
+        assertFalse(filter.isEligibleForDecisionEvaluation(oversizedOnlyMsg))
+
+        val spoofedAttachment = mockk<dev.kord.core.entity.Attachment>()
+        every { spoofedAttachment.url } returns "https://cdn.discordapp.com/attachments/1/2/fake.png"
+        every { spoofedAttachment.contentType } returns "application/octet-stream"
+        every { spoofedAttachment.filename } returns "fake.png"
+        every { spoofedAttachment.size } returns 2048
+
+        val spoofedOnlyMsg = createMockMessage(id = 705L, content = "")
+        every { spoofedOnlyMsg.attachments } returns setOf(spoofedAttachment)
+        assertFalse(filter.isEligibleForDecisionEvaluation(spoofedOnlyMsg))
+
+        val pdfAttachment = mockk<dev.kord.core.entity.Attachment>()
+        every { pdfAttachment.url } returns "https://cdn.discordapp.com/attachments/1/2/doc.pdf"
+        every { pdfAttachment.contentType } returns "application/pdf"
+        every { pdfAttachment.filename } returns "doc.pdf"
+        every { pdfAttachment.size } returns 1024
+
+        val pdfOnlyMsg = createMockMessage(id = 706L, content = "")
+        every { pdfOnlyMsg.attachments } returns setOf(pdfAttachment)
+        assertFalse(filter.isEligibleForDecisionEvaluation(pdfOnlyMsg))
+    }
+
+    @Test
+    fun `filterContextMessages preserves valid dialogue, attachments, embeds, and Luna chatter while dropping noise`() {
+        val botSelfId = Snowflake(42L)
+        val validMsg = createMockMessage(id = 801L, username = "Alice", content = "Check this out")
+        val botMsg = createMockMessage(id = 802L, username = "SpamBot", content = "Spam", isBot = true)
+        val cmdMsg = createMockMessage(id = 803L, username = "Bob", content = "!help")
+        val lunaChatter =
+            createMockMessage(
+                id = 804L,
+                username = "Luna",
+                content = "looks neat",
+                isBot = true,
+                authorId = botSelfId,
+            )
+        val lunaSummary =
+            createMockMessage(
+                id = 805L,
+                username = "Luna",
+                content = "TL;DR: Summary",
+                isBot = true,
+                authorId = botSelfId,
+            )
+
+        val embed = mockk<dev.kord.core.entity.Embed>()
+        every { embed.title } returns "Article"
+        every { embed.description } returns "Details"
+        val embedOnlyMsg = createMockMessage(id = 806L, username = "Charlie", content = "")
+        every { embedOnlyMsg.embeds } returns listOf(embed)
+
+        val filtered =
+            filter.filterContextMessages(
+                listOf(validMsg, botMsg, cmdMsg, lunaChatter, lunaSummary, embedOnlyMsg),
+                kordSelfId = botSelfId,
+            )
+
+        assertEquals(listOf(801L, 804L, 806L), filtered.map { it.id.value.toLong() })
     }
 
     @Test

@@ -10,12 +10,14 @@ import luna.plugin.config
  * @property model Model identifier to use (defaults to `gemini-3.5-flash-lite`).
  * @property baseUrl Base URL for Google Generative Language API.
  * @property maxOutputCharacters Maximum length of generated Discord response (defaults to 2000).
+ * @property searchGroundingEnabled Whether autonomous Google Search Grounding is enabled (defaults to true).
  */
 data class ChatterConfig(
     val apiKey: String = "",
     val model: String = DEFAULT_MODEL,
     val baseUrl: String = DEFAULT_BASE_URL,
     val maxOutputCharacters: Int = DEFAULT_MAX_OUTPUT_CHARACTERS,
+    val searchGroundingEnabled: Boolean = DEFAULT_SEARCH_GROUNDING_ENABLED,
 ) {
     val isConfigured: Boolean
         get() = apiKey.isNotBlank()
@@ -30,6 +32,7 @@ data class ChatterConfig(
         const val DEFAULT_MODEL = "gemini-3.5-flash-lite"
         const val DEFAULT_BASE_URL = "https://generativelanguage.googleapis.com"
         const val DEFAULT_MAX_OUTPUT_CHARACTERS = 2000
+        const val DEFAULT_SEARCH_GROUNDING_ENABLED = true
 
         fun fromEnv(env: Map<String, String> = System.getenv()): ChatterConfig {
             val key = env["GEMINI_API_KEY"]?.trim().orEmpty()
@@ -42,10 +45,17 @@ data class ChatterConfig(
             val rawBaseUrl = env["GEMINI_BASE_URL"]?.trim()
             val baseUrl = if (!rawBaseUrl.isNullOrBlank()) rawBaseUrl.trimEnd('/').removeSuffix("/v1beta") else DEFAULT_BASE_URL
 
+            val searchGroundingEnabled =
+                env["GEMINI_SEARCH_GROUNDING_ENABLED"]
+                    ?.trim()
+                    ?.toBooleanStrictOrNull()
+                    ?: DEFAULT_SEARCH_GROUNDING_ENABLED
+
             return ChatterConfig(
                 apiKey = key,
                 model = model,
                 baseUrl = baseUrl,
+                searchGroundingEnabled = searchGroundingEnabled,
             )
         }
 
@@ -70,10 +80,18 @@ data class ChatterConfig(
                     ?: (config["chatter.baseUrl"] as? String)?.trim()?.ifBlank { null }
             val baseUrl = if (!rawBaseUrl.isNullOrBlank()) rawBaseUrl.trimEnd('/').removeSuffix("/v1beta") else DEFAULT_BASE_URL
 
+            val searchGroundingEnabled =
+                (config["GEMINI_SEARCH_GROUNDING_ENABLED"] as? Boolean)
+                    ?: (config["GEMINI_SEARCH_GROUNDING_ENABLED"] as? String)?.trim()?.toBooleanStrictOrNull()
+                    ?: (config["gemini.searchGroundingEnabled"] as? Boolean)
+                    ?: (config["gemini.searchGroundingEnabled"] as? String)?.trim()?.toBooleanStrictOrNull()
+                    ?: DEFAULT_SEARCH_GROUNDING_ENABLED
+
             return ChatterConfig(
                 apiKey = key,
                 model = model,
                 baseUrl = baseUrl,
+                searchGroundingEnabled = searchGroundingEnabled,
             )
         }
 
@@ -98,10 +116,18 @@ data class ChatterConfig(
                     ?: context.config<String>("chatter.baseUrl")?.trim()?.ifBlank { null }
             val baseUrl = if (!rawBaseUrl.isNullOrBlank()) rawBaseUrl.trimEnd('/').removeSuffix("/v1beta") else DEFAULT_BASE_URL
 
+            val searchGroundingEnabled =
+                context.config<Boolean>("GEMINI_SEARCH_GROUNDING_ENABLED")
+                    ?: context.config<String>("GEMINI_SEARCH_GROUNDING_ENABLED")?.trim()?.toBooleanStrictOrNull()
+                    ?: context.config<Boolean>("gemini.searchGroundingEnabled")
+                    ?: context.config<String>("gemini.searchGroundingEnabled")?.trim()?.toBooleanStrictOrNull()
+                    ?: DEFAULT_SEARCH_GROUNDING_ENABLED
+
             return ChatterConfig(
                 apiKey = key,
                 model = model,
                 baseUrl = baseUrl,
+                searchGroundingEnabled = searchGroundingEnabled,
             )
         }
     }
