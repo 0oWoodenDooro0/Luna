@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+set -eo pipefail
+
+echo "==> Running pre-push guardrail: full ./gradlew check..."
+./gradlew check --daemon --console=plain -q

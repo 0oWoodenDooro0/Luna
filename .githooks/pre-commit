@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
 set -eo pipefail
 
-echo "==> Running pre-commit guardrail: lintKotlin and test..."
-./gradlew lintKotlin test --daemon
+echo "==> Running pre-commit guardrail: lintKotlin and CodingStandardsTest..."
+./gradlew lintKotlin test --tests "luna.core.CodingStandardsTest" --daemon --console=plain -q
