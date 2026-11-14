@@ -23,7 +23,7 @@ import org.slf4j.LoggerFactory
 /**
  * Service orchestrating the Chatter auto-reply pipeline:
  * 1. Pre-filtering incoming messages (noise, bot, command, cooldown, allowed channels).
- * 2. Assembling recent dialogue turns (2~3 messages) for Gemini Decision 1 participation evaluation.
+ * 2. Assembling recent dialogue turns (up to 15 messages) with structural framing and reply chaining for Gemini Decision 1 participation evaluation.
  * 3. Triggering channel typing feedback when the decision model confirms participation.
  * 4. Assembling recent conversation history (10~20 messages) for Gemini dialogue generation.
  * 5. Sending generated reply to the Discord channel and refreshing cooldown.
@@ -142,7 +142,7 @@ open class ChatterService(
         // 2. Gathers recent messages from channel slice to construct state / history
         val previousMessages =
             try {
-                historyFetcher(message, historyMessageCount)
+                historyFetcher(message, maxOf(decisionMessageCount, historyMessageCount))
             } catch (e: Exception) {
                 logger.warn("Failed to fetch channel history for message {}: {}", message.id, e.message)
                 emptyList()
@@ -294,7 +294,7 @@ open class ChatterService(
     }
 
     companion object {
-        const val DEFAULT_DECISION_MESSAGE_COUNT = 3
+        const val DEFAULT_DECISION_MESSAGE_COUNT = 15
         const val DEFAULT_HISTORY_MESSAGE_COUNT = 15
     }
 }
