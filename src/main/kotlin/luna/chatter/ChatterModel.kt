@@ -24,6 +24,7 @@ data class ChatMessage(
  * @property title Optional resolved page/video title.
  * @property url Optional resolved clean URL.
  * @property comments Optional extracted social/YouTube audience comments.
+ * @property webUrls Deduplicated general public web URLs in the dialogue window (up to 20) for `url_context`.
  */
 data class ChatterInput(
     val transcript: String,
@@ -34,4 +35,5 @@ data class ChatterInput(
     val title: String? = null,
     val url: String? = null,
     val comments: List<String> = emptyList(),
+    val webUrls: List<String> = emptyList(),
 )

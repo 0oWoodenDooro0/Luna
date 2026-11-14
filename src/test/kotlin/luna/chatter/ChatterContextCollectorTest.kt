@@ -603,7 +603,7 @@ class ChatterContextCollectorTest {
         }
 
     @Test
-    fun `collectReplyContext logs warning and degrades to Discord embed transcript when SocialPeek fails or returns null`() =
+    fun `collectReplyContext logs warning and degrades to Discord embed transcript when SocialPeek fails or returns null for social URL`() =
         runTest {
             val logger = LoggerFactory.getLogger(ChatterContextCollector::class.java) as Logger
             val listAppender = ListAppender<ILoggingEvent>()
@@ -611,12 +611,13 @@ class ChatterContextCollectorTest {
             logger.addAppender(listAppender)
 
             try {
+                val socialUrl = "https://www.threads.net/@alice/post/broken"
                 val embed = createMockEmbed(title = "Fallback Embed Title", description = "Fallback embed snippet")
                 val msg =
                     createMockMessage(
                         id = 5001L,
                         username = "Alice",
-                        content = "Read https://example.com/broken",
+                        content = "Read $socialUrl",
                         embeds = listOf(embed),
                     )
 
@@ -628,15 +629,16 @@ class ChatterContextCollectorTest {
                     )
                 val degradedOnThrow = throwingCollector.collectReplyContext(listOf(msg))
 
-                assertEquals("https://example.com/broken", degradedOnThrow.primaryUrl)
+                assertEquals(socialUrl, degradedOnThrow.primaryUrl)
                 assertNull(degradedOnThrow.title)
                 assertNull(degradedOnThrow.postContent)
                 assertTrue(degradedOnThrow.comments.isEmpty())
-                assertTrue(degradedOnThrow.transcript.contains("[Alice]: Read https://example.com/broken"))
+                assertTrue(degradedOnThrow.webUrls.isEmpty())
+                assertTrue(degradedOnThrow.transcript.contains("[Alice]: Read $socialUrl"))
                 assertTrue(degradedOnThrow.transcript.contains("[連結預覽: Fallback Embed Title - Fallback embed snippet]"))
                 assertTrue(
                     listAppender.list.any {
-                        it.level == Level.WARN && it.formattedMessage.contains("https://example.com/broken")
+                        it.level == Level.WARN && it.formattedMessage.contains(socialUrl)
                     },
                 )
 
@@ -650,17 +652,187 @@ class ChatterContextCollectorTest {
                     )
                 val degradedOnNull = nullCollector.collectReplyContext(listOf(msg))
 
-                assertEquals("https://example.com/broken", degradedOnNull.primaryUrl)
+                assertEquals(socialUrl, degradedOnNull.primaryUrl)
                 assertNull(degradedOnNull.postContent)
+                assertTrue(degradedOnNull.webUrls.isEmpty())
                 assertTrue(degradedOnNull.transcript.contains("[連結預覽: Fallback Embed Title - Fallback embed snippet]"))
                 assertTrue(
                     listAppender.list.any {
-                        it.level == Level.WARN && it.formattedMessage.contains("https://example.com/broken")
+                        it.level == Level.WARN && it.formattedMessage.contains(socialUrl)
                     },
                 )
             } finally {
                 logger.detachAppender(listAppender)
                 listAppender.stop()
             }
+        }
+
+    @Test
+    fun `collectReplyContext skips peekResolver for general web URLs, preserves embeds, caps at 20, and excludes Discord CDN`() =
+        runTest {
+            var peekCalled = false
+            val embed = createMockEmbed(title = "Kotlin Docs", description = "Coroutines guide")
+            val cdnAttachment =
+                createMockAttachment("https://cdn.discordapp.com/attachments/1/2/shot.png", "image/png", "shot.png")
+
+            val msgs =
+                buildList {
+                    add(
+                        createMockMessage(
+                            id = 6001L,
+                            username = "Alice",
+                            content = "Check https://kotlinlang.org/docs/coroutines.html and https://kotlinlang.org/docs/coroutines.html/",
+                            embeds = listOf(embed),
+                            attachments = setOf(cdnAttachment),
+                        ),
+                    )
+                    // Add 21 more unique web URLs across messages in the 15-message window
+                    for (idx in 1..11) {
+                        add(
+                            createMockMessage(
+                                id = 6010L + idx,
+                                username = "User$idx",
+                                content = "Link A https://example.com/page-${idx * 2 - 1} and B https://example.com/page-${idx * 2}",
+                            ),
+                        )
+                    }
+                    add(
+                        createMockMessage(
+                            id = 6099L,
+                            username = "Dave",
+                            content = "Image link https://cdn.discordapp.com/attachments/1/2/shot.png",
+                        ),
+                    )
+                }
+
+            val collector =
+                ChatterContextCollector(
+                    noiseFilter = filter,
+                    peekResolver = {
+                        peekCalled = true
+                        error("peekResolver must not be invoked for general public web URLs")
+                    },
+                )
+
+            val prepared = collector.collectReplyContext(msgs)
+            val input = prepared.toChatterInput(isDirectMention = true)
+
+            assertFalse(peekCalled, "General public web URLs must never invoke peekResolver")
+            assertNull(prepared.primaryUrl)
+            assertEquals(20, prepared.webUrls.size)
+            assertEquals("https://kotlinlang.org/docs/coroutines.html", prepared.webUrls.first())
+            assertFalse(prepared.webUrls.any { it.contains("cdn.discordapp.com") })
+            assertTrue(prepared.transcript.contains("[連結預覽: Kotlin Docs - Coroutines guide]"))
+            assertTrue(prepared.transcript.contains("https://kotlinlang.org/docs/coroutines.html"))
+
+            assertEquals(prepared.webUrls, input.webUrls)
+            assertTrue(input.isDirectMention)
+        }
+
+    @Test
+    fun `collectReplyContext resolves social URL via peekResolver while preserving webUrls in same window`() =
+        runTest {
+            val resolvedUrls = mutableListOf<String>()
+            val socialUrl = "https://x.com/kotlin/status/12345"
+            val webUrl = "https://blog.jetbrains.com/kotlin/2026/release/"
+            val peekPost =
+                PeekPost(
+                    platform = Platform.X,
+                    id = "12345",
+                    originalUrl = socialUrl,
+                    cleanUrl = socialUrl,
+                    author = Author(username = "kotlin"),
+                    title = "Kotlin Post",
+                    content = "New release highlights",
+                )
+
+            val msg1 = createMockMessage(id = 6101L, username = "Alice", content = "Release blog: $webUrl")
+            val msg2 = createMockMessage(id = 6102L, username = "Bob", content = "Tweet: $socialUrl")
+
+            val collector =
+                ChatterContextCollector(
+                    noiseFilter = filter,
+                    peekResolver = { url ->
+                        resolvedUrls.add(url)
+                        peekPost
+                    },
+                )
+
+            val prepared = collector.collectReplyContext(listOf(msg1, msg2))
+            val input = prepared.toChatterInput()
+
+            assertEquals(listOf(socialUrl), resolvedUrls)
+            assertEquals(listOf(webUrl), prepared.webUrls)
+            assertEquals(listOf(webUrl), input.webUrls)
+            assertEquals("Kotlin Post", prepared.title)
+            assertTrue(prepared.transcript.contains(webUrl))
+            assertTrue(prepared.transcript.contains("New release highlights"))
+        }
+
+    @Test
+    fun `collectReplyContext falls back to regex-detected videoUri with warning log when YouTube resolution fails or returns null`() =
+        runTest {
+            val logger = LoggerFactory.getLogger(ChatterContextCollector::class.java) as Logger
+            val listAppender = ListAppender<ILoggingEvent>()
+            listAppender.start()
+            logger.addAppender(listAppender)
+
+            try {
+                val ytUrl = "https://youtu.be/dQw4w9WgXcQ"
+                val webUrl = "https://kotlinlang.org/docs/home.html"
+                val msg1 = createMockMessage(id = 6201L, username = "Alice", content = "Docs: $webUrl")
+                val msg2 = createMockMessage(id = 6202L, username = "Bob", content = "Video: $ytUrl")
+
+                // Case 1: YouTube resolution returns null (e.g. unconfigured YouTube Data API)
+                val nullCollector = ChatterContextCollector(noiseFilter = filter, peekResolver = { null })
+                val nullPrepared = nullCollector.collectReplyContext(listOf(msg1, msg2))
+
+                assertEquals(ytUrl, nullPrepared.primaryUrl)
+                assertEquals(ytUrl, nullPrepared.url)
+                assertEquals(ytUrl, nullPrepared.videoUri)
+                assertNull(nullPrepared.videoDurationSeconds)
+                assertEquals(listOf(webUrl), nullPrepared.webUrls)
+                assertTrue(
+                    listAppender.list.any {
+                        it.level == Level.WARN && it.formattedMessage.contains(ytUrl)
+                    },
+                )
+
+                listAppender.list.clear()
+
+                // Case 2: YouTube resolution throws exception
+                val throwingCollector =
+                    ChatterContextCollector(
+                        noiseFilter = filter,
+                        peekResolver = { throw IllegalStateException("YouTube Data API 403") },
+                    )
+                val throwPrepared = throwingCollector.collectReplyContext(listOf(msg1, msg2))
+
+                assertEquals(ytUrl, throwPrepared.videoUri)
+                assertNull(throwPrepared.videoDurationSeconds)
+                assertEquals(listOf(webUrl), throwPrepared.webUrls)
+                assertTrue(
+                    listAppender.list.any {
+                        it.level == Level.WARN && it.formattedMessage.contains(ytUrl)
+                    },
+                )
+            } finally {
+                logger.detachAppender(listAppender)
+                listAppender.stop()
+            }
+        }
+
+    @Test
+    fun `default ChatterContextCollector uses SocialPeekFactory without GenericWebResolver for general web URLs`() =
+        runTest {
+            val webUrl = "https://127.0.0.1:1/no-generic-scrape"
+            val msg = createMockMessage(id = 6301L, username = "Alice", content = "Check $webUrl")
+
+            val defaultCollector = ChatterContextCollector(noiseFilter = filter)
+            val prepared = defaultCollector.collectReplyContext(listOf(msg))
+
+            assertNull(prepared.primaryUrl)
+            assertNull(prepared.postContent)
+            assertEquals(listOf(webUrl), prepared.webUrls)
         }
 }
