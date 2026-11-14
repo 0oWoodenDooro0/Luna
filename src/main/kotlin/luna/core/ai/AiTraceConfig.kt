@@ -29,10 +29,10 @@ data class AiTraceConfig(
                     ?: parseBoolean(config["ai.trace.enabled"])
                     ?: DEFAULT_ENABLED
 
-            val rawDir =
-                (config["AI_TRACE_DIR"] as? String)?.trim()?.ifBlank { null }
-                    ?: (config["ai.trace.dir"] as? String)?.trim()?.ifBlank { null }
-            val dir = rawDir ?: DEFAULT_DIR
+            val dir =
+                parseNonBlankString(config["AI_TRACE_DIR"])
+                    ?: parseNonBlankString(config["ai.trace.dir"])
+                    ?: DEFAULT_DIR
 
             val maxDays =
                 (
@@ -58,44 +58,25 @@ data class AiTraceConfig(
             )
         }
 
-        fun fromPluginContext(context: PluginContext): AiTraceConfig {
-            val enabled =
-                context.config<Boolean>("AI_TRACE_ENABLED")
-                    ?: context.config<String>("AI_TRACE_ENABLED")?.trim()?.toBooleanStrictOrNull()
-                    ?: context.config<Boolean>("ai.trace.enabled")
-                    ?: context.config<String>("ai.trace.enabled")?.trim()?.toBooleanStrictOrNull()
-                    ?: DEFAULT_ENABLED
-
-            val rawDir =
-                context.config<String>("AI_TRACE_DIR")?.trim()?.ifBlank { null }
-                    ?: context.config<String>("ai.trace.dir")?.trim()?.ifBlank { null }
-            val dir = rawDir ?: DEFAULT_DIR
-
-            val maxDays =
-                (
-                    context.config<Int>("AI_TRACE_MAX_DAYS")
-                        ?: context.config<String>("AI_TRACE_MAX_DAYS")?.trim()?.toIntOrNull()
-                        ?: context.config<Int>("ai.trace.maxDays")
-                        ?: context.config<String>("ai.trace.maxDays")?.trim()?.toIntOrNull()
-                )?.takeIf { it > 0 }
-                    ?: DEFAULT_MAX_DAYS
-
-            val maxTotalMb =
-                (
-                    context.config<Int>("AI_TRACE_MAX_TOTAL_MB")
-                        ?: context.config<String>("AI_TRACE_MAX_TOTAL_MB")?.trim()?.toIntOrNull()
-                        ?: context.config<Int>("ai.trace.maxTotalMb")
-                        ?: context.config<String>("ai.trace.maxTotalMb")?.trim()?.toIntOrNull()
-                )?.takeIf { it > 0 }
-                    ?: DEFAULT_MAX_TOTAL_MB
-
-            return AiTraceConfig(
-                enabled = enabled,
-                dir = dir,
-                maxDays = maxDays,
-                maxTotalMb = maxTotalMb,
+        fun fromPluginContext(context: PluginContext): AiTraceConfig =
+            fromMap(
+                mapOf(
+                    "AI_TRACE_ENABLED" to (context.config<Boolean>("AI_TRACE_ENABLED") ?: context.config<String>("AI_TRACE_ENABLED")),
+                    "ai.trace.enabled" to (context.config<Boolean>("ai.trace.enabled") ?: context.config<String>("ai.trace.enabled")),
+                    "AI_TRACE_DIR" to context.config<String>("AI_TRACE_DIR"),
+                    "ai.trace.dir" to context.config<String>("ai.trace.dir"),
+                    "AI_TRACE_MAX_DAYS" to (context.config<Int>("AI_TRACE_MAX_DAYS") ?: context.config<String>("AI_TRACE_MAX_DAYS")),
+                    "ai.trace.maxDays" to (context.config<Int>("ai.trace.maxDays") ?: context.config<String>("ai.trace.maxDays")),
+                    "ai.trace.max_days" to (context.config<Int>("ai.trace.max_days") ?: context.config<String>("ai.trace.max_days")),
+                    "AI_TRACE_MAX_TOTAL_MB" to
+                        (context.config<Int>("AI_TRACE_MAX_TOTAL_MB") ?: context.config<String>("AI_TRACE_MAX_TOTAL_MB")),
+                    "ai.trace.maxTotalMb" to (context.config<Int>("ai.trace.maxTotalMb") ?: context.config<String>("ai.trace.maxTotalMb")),
+                    "ai.trace.max_total_mb" to
+                        (context.config<Int>("ai.trace.max_total_mb") ?: context.config<String>("ai.trace.max_total_mb")),
+                ),
             )
-        }
+
+        private fun parseNonBlankString(raw: Any?): String? = (raw as? String)?.trim()?.ifBlank { null }
 
         private fun parseBoolean(raw: Any?): Boolean? =
             when (raw) {

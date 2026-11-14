@@ -30,7 +30,8 @@ import luna.core.ai.AiTraceSession
 import luna.core.ai.AiTraceTrigger
 import luna.core.ai.ChatImageAttachment
 import luna.core.ai.NoOpAiTraceRecorder
-import luna.core.ai.currentAiTraceSession
+import luna.core.ai.elapsedMillisFromNanos
+import luna.core.ai.withActiveOrStandaloneSession
 import org.slf4j.LoggerFactory
 import java.net.SocketTimeoutException
 
@@ -78,104 +79,100 @@ open class GeminiDecisionClient(
     open suspend fun decide(
         state: String,
         images: List<ChatImageAttachment> = emptyList(),
+    ): ParticipationDecision =
+        traceRecorder.withActiveOrStandaloneSession(
+            pipeline = AiTracePipeline.CHATTER,
+            trigger = AiTraceTrigger.AMBIENT,
+            discord =
+                AiTraceDiscordContext(
+                    channelId = "standalone",
+                    messageId = "standalone",
+                    isDirectMention = false,
+                ),
+            secret = config.apiKey,
+        ) { session, isStandalone ->
+            executeDecide(state, images, session, isStandalone)
+        }
+
+    private suspend fun executeDecide(
+        state: String,
+        images: List<ChatImageAttachment>,
+        session: AiTraceSession?,
+        isStandalone: Boolean,
     ): ParticipationDecision {
-        val activeSession = currentAiTraceSession()
-        val standaloneSession =
-            if (activeSession == null && traceRecorder.isEnabled()) {
-                traceRecorder.startSession(
-                    pipeline = AiTracePipeline.CHATTER,
-                    trigger = AiTraceTrigger.AMBIENT,
-                    discord =
-                        AiTraceDiscordContext(
-                            channelId = "standalone",
-                            messageId = "standalone",
-                            isDirectMention = false,
-                        ),
-                )
-            } else {
-                null
-            }
-        val session = activeSession ?: standaloneSession
-        val isStandalone = standaloneSession != null
-        session?.registerSecret(config.apiKey)
+        if (!config.isConfigured) {
+            logger.warn("GEMINI_API_KEY is not configured; skipping conversation decision evaluation (fail-closed)")
+            session?.fail(
+                AiTraceFailureCategory.NOT_CONFIGURED,
+                "GEMINI_API_KEY is not configured",
+            )
+            return ParticipationDecision(shouldParticipate = false)
+        }
+        if (state.isBlank() && images.isEmpty()) {
+            logger.debug("Dialogue state and image attachments are blank; skipping decision evaluation (fail-closed)")
+            session?.fail(
+                AiTraceFailureCategory.CONTEXT_ERROR,
+                "Dialogue state and image attachments are blank",
+            )
+            return ParticipationDecision(shouldParticipate = false)
+        }
 
-        return try {
-            if (!config.isConfigured) {
-                logger.warn("GEMINI_API_KEY is not configured; skipping conversation decision evaluation (fail-closed)")
-                session?.fail(
-                    AiTraceFailureCategory.NOT_CONFIGURED,
-                    "GEMINI_API_KEY is not configured",
-                )
-                return ParticipationDecision(shouldParticipate = false)
-            }
-            if (state.isBlank() && images.isEmpty()) {
-                logger.debug("Dialogue state and image attachments are blank; skipping decision evaluation (fail-closed)")
-                session?.fail(
-                    AiTraceFailureCategory.CONTEXT_ERROR,
-                    "Dialogue state and image attachments are blank",
-                )
-                return ParticipationDecision(shouldParticipate = false)
-            }
-
-            val initialVariant = if (images.isNotEmpty()) "multimodal" else null
-            when (val initialOutcome = executeDecisionRequest(state, images, session, variant = initialVariant)) {
-                is RequestOutcome.Success -> {
-                    val decision = initialOutcome.decision
-                    if (!decision.shouldParticipate) {
-                        session?.skip(
-                            reason =
-                                "Participation decision skipped (noul=${decision.noul}, " +
-                                    "confidence=${decision.confidence}, threshold=${config.threshold})",
-                        )
-                    } else if (isStandalone) {
-                        session?.complete(
-                            finalOutput =
-                                "shouldParticipate=true, noul=${decision.noul}, confidence=${decision.confidence}",
-                        )
-                    }
-                    decision
+        val initialVariant = if (images.isNotEmpty()) "multimodal" else null
+        return when (val initialOutcome = executeDecisionRequest(state, images, session, variant = initialVariant)) {
+            is RequestOutcome.Success -> {
+                val decision = initialOutcome.decision
+                if (!decision.shouldParticipate) {
+                    session?.skip(
+                        reason =
+                            "Participation decision skipped (noul=${decision.noul}, " +
+                                "confidence=${decision.confidence}, threshold=${config.threshold})",
+                    )
+                } else if (isStandalone) {
+                    session?.complete(
+                        finalOutput =
+                            "shouldParticipate=true, noul=${decision.noul}, confidence=${decision.confidence}",
+                    )
                 }
+                decision
+            }
 
-                is RequestOutcome.Failure -> {
-                    if (images.isNotEmpty() && state.isNotBlank()) {
-                        logger.warn(
-                            "Multimodal Gemini decision request failed ({}); retrying once with text-only input",
-                            initialOutcome.reason,
-                            initialOutcome.cause,
-                        )
-                        session?.markDegraded(initialOutcome.reason)
-                        when (val retryOutcome = executeDecisionRequest(state, emptyList(), session, variant = "text-only")) {
-                            is RequestOutcome.Success -> {
-                                val decision = retryOutcome.decision
-                                if (!decision.shouldParticipate) {
-                                    session?.skip(
-                                        reason =
-                                            "Participation decision skipped after text-only retry " +
-                                                "(noul=${decision.noul}, confidence=${decision.confidence}, " +
-                                                "threshold=${config.threshold})",
-                                    )
-                                } else if (isStandalone) {
-                                    session?.complete(
-                                        finalOutput =
-                                            "shouldParticipate=true, noul=${decision.noul}, confidence=${decision.confidence}",
-                                    )
-                                }
-                                decision
+            is RequestOutcome.Failure -> {
+                if (images.isNotEmpty() && state.isNotBlank()) {
+                    logger.warn(
+                        "Multimodal Gemini decision request failed ({}); retrying once with text-only input",
+                        initialOutcome.reason,
+                        initialOutcome.cause,
+                    )
+                    session?.markDegraded(initialOutcome.reason)
+                    when (val retryOutcome = executeDecisionRequest(state, emptyList(), session, variant = "text-only")) {
+                        is RequestOutcome.Success -> {
+                            val decision = retryOutcome.decision
+                            if (!decision.shouldParticipate) {
+                                session?.skip(
+                                    reason =
+                                        "Participation decision skipped after text-only retry " +
+                                            "(noul=${decision.noul}, confidence=${decision.confidence}, " +
+                                            "threshold=${config.threshold})",
+                                )
+                            } else if (isStandalone) {
+                                session?.complete(
+                                    finalOutput =
+                                        "shouldParticipate=true, noul=${decision.noul}, confidence=${decision.confidence}",
+                                )
                             }
-
-                            is RequestOutcome.Failure -> {
-                                session?.fail(retryOutcome.failureCategory, retryOutcome.reason)
-                                ParticipationDecision(shouldParticipate = false)
-                            }
+                            decision
                         }
-                    } else {
-                        session?.fail(initialOutcome.failureCategory, initialOutcome.reason)
-                        ParticipationDecision(shouldParticipate = false)
+
+                        is RequestOutcome.Failure -> {
+                            session?.fail(retryOutcome.failureCategory, retryOutcome.reason)
+                            ParticipationDecision(shouldParticipate = false)
+                        }
                     }
+                } else {
+                    session?.fail(initialOutcome.failureCategory, initialOutcome.reason)
+                    ParticipationDecision(shouldParticipate = false)
                 }
             }
-        } finally {
-            standaloneSession?.finish()
         }
     }
 
@@ -217,7 +214,10 @@ open class GeminiDecisionClient(
         val attemptRequest =
             if (session?.isEnabled == true) {
                 AiAttemptRequest(
-                    payload = jsonParser.encodeToJsonElement(GeminiDecisionRequest.serializer(), requestPayload),
+                    payload =
+                        runCatching {
+                            jsonParser.encodeToJsonElement(GeminiDecisionRequest.serializer(), requestPayload)
+                        }.getOrNull(),
                     hasImages = images.isNotEmpty(),
                     imageCount = images.size,
                     hasVideo = false,
@@ -228,83 +228,94 @@ open class GeminiDecisionClient(
                 null
             }
         val startNano = System.nanoTime()
+        var httpStatus: Int? = null
+        var responseRaw: String? = null
 
-        return try {
-            val response: HttpResponse =
-                httpClient.post(config.decisionEndpoint) {
-                    header(API_KEY_HEADER, config.apiKey)
-                    contentType(ContentType.Application.Json)
-                    timeout {
-                        requestTimeoutMillis = config.timeoutMillis
-                        socketTimeoutMillis = config.timeoutMillis
-                        connectTimeoutMillis = config.timeoutMillis
+        val outcome: RequestOutcome =
+            try {
+                val response: HttpResponse =
+                    httpClient.post(config.decisionEndpoint) {
+                        header(API_KEY_HEADER, config.apiKey)
+                        contentType(ContentType.Application.Json)
+                        timeout {
+                            requestTimeoutMillis = config.timeoutMillis
+                            socketTimeoutMillis = config.timeoutMillis
+                            connectTimeoutMillis = config.timeoutMillis
+                        }
+                        setBody(requestPayload)
                     }
-                    setBody(requestPayload)
+                httpStatus = response.status.value
+                responseRaw = runCatching { response.bodyAsText() }.getOrNull()
+                evaluateResponse(response, responseRaw)
+            } catch (e: HttpRequestTimeoutException) {
+                val reason = "request timeout after ${config.timeoutMillis}ms: ${e.message}"
+                logger.warn("Gemini Decisions API request timed out after {}ms: {}", config.timeoutMillis, e.message)
+                RequestOutcome.Failure(reason, AiTraceFailureCategory.TIMEOUT, e)
+            } catch (e: SocketTimeoutException) {
+                val reason = "socket timeout after ${config.timeoutMillis}ms: ${e.message}"
+                logger.warn("Gemini Decisions API socket timed out after {}ms: {}", config.timeoutMillis, e.message)
+                RequestOutcome.Failure(reason, AiTraceFailureCategory.TIMEOUT, e)
+            } catch (e: TimeoutCancellationException) {
+                val reason = "coroutine timeout: ${e.message}"
+                logger.warn("Gemini Decisions API coroutine timed out: {}", e.message)
+                RequestOutcome.Failure(reason, AiTraceFailureCategory.TIMEOUT, e)
+            } catch (e: Exception) {
+                val reason = "unexpected error: ${e.message}"
+                logger.warn("Unexpected failure invoking Gemini Decisions API: {}", e.message, e)
+                RequestOutcome.Failure(reason, AiTraceFailureCategory.UNEXPECTED_ERROR, e)
+            }
+
+        val parsedOutcome =
+            when (outcome) {
+                is RequestOutcome.Success -> {
+                    if (outcome.decision.shouldParticipate) AiAttemptOutcome.SUCCESS else AiAttemptOutcome.SKIPPED
                 }
 
-            handleResponse(
-                response = response,
-                session = session,
-                variant = variant,
-                attemptRequest = attemptRequest,
-                startNano = startNano,
-            )
-        } catch (e: HttpRequestTimeoutException) {
-            val reason = "request timeout after ${config.timeoutMillis}ms: ${e.message}"
-            logger.warn("Gemini Decisions API request timed out after {}ms: {}", config.timeoutMillis, e.message)
-            recordFailureAttempt(session, variant, attemptRequest, startNano, httpStatus = null, responseRaw = null, reason = reason)
-            RequestOutcome.Failure(reason, AiTraceFailureCategory.TIMEOUT, e)
-        } catch (e: SocketTimeoutException) {
-            val reason = "socket timeout after ${config.timeoutMillis}ms: ${e.message}"
-            logger.warn("Gemini Decisions API socket timed out after {}ms: {}", config.timeoutMillis, e.message)
-            recordFailureAttempt(session, variant, attemptRequest, startNano, httpStatus = null, responseRaw = null, reason = reason)
-            RequestOutcome.Failure(reason, AiTraceFailureCategory.TIMEOUT, e)
-        } catch (e: TimeoutCancellationException) {
-            val reason = "coroutine timeout: ${e.message}"
-            logger.warn("Gemini Decisions API coroutine timed out: {}", e.message)
-            recordFailureAttempt(session, variant, attemptRequest, startNano, httpStatus = null, responseRaw = null, reason = reason)
-            RequestOutcome.Failure(reason, AiTraceFailureCategory.TIMEOUT, e)
-        } catch (e: Exception) {
-            val reason = "unexpected error: ${e.message}"
-            logger.warn("Unexpected failure invoking Gemini Decisions API: {}", e.message, e)
-            recordFailureAttempt(session, variant, attemptRequest, startNano, httpStatus = null, responseRaw = null, reason = reason)
-            RequestOutcome.Failure(reason, AiTraceFailureCategory.UNEXPECTED_ERROR, e)
-        }
+                is RequestOutcome.Failure -> {
+                    AiAttemptOutcome.ERROR
+                }
+            }
+        session?.recordAttempt(
+            stage = AiAttemptStage.DECISION,
+            variant = variant,
+            model = config.cleanModel,
+            endpoint = config.decisionEndpoint,
+            latencyMs = elapsedMillisFromNanos(startNano),
+            httpStatus = httpStatus,
+            request = attemptRequest,
+            responseRaw = responseRaw,
+            parsedOutcome = parsedOutcome,
+            errorMessage = (outcome as? RequestOutcome.Failure)?.reason,
+        )
+        return outcome
     }
 
-    private suspend fun handleResponse(
+    private fun evaluateResponse(
         response: HttpResponse,
-        session: AiTraceSession?,
-        variant: String?,
-        attemptRequest: AiAttemptRequest?,
-        startNano: Long,
+        rawBody: String?,
     ): RequestOutcome {
         val httpStatus = response.status.value
-        val rawBody = runCatching { response.bodyAsText() }.getOrNull()
 
-        when {
+        return when {
             response.status == HttpStatusCode.TooManyRequests -> {
                 val retryAfter = response.headers[HttpHeaders.RetryAfter]
                 val reason = "HTTP 429 rate limit exceeded"
                 logger.warn("Gemini Decisions API rate limit exceeded (HTTP 429). Retry-After: {}", retryAfter)
-                recordFailureAttempt(session, variant, attemptRequest, startNano, httpStatus, rawBody, reason)
-                return RequestOutcome.Failure(reason, AiTraceFailureCategory.RATE_LIMIT)
+                RequestOutcome.Failure(reason, AiTraceFailureCategory.RATE_LIMIT)
             }
 
             response.status.value >= 500 -> {
                 val errorBody = rawBody.orEmpty()
                 val reason = "HTTP $httpStatus upstream server error"
                 logger.warn("Gemini Decisions API upstream server error (HTTP {}): {}", httpStatus, errorBody)
-                recordFailureAttempt(session, variant, attemptRequest, startNano, httpStatus, rawBody, reason)
-                return RequestOutcome.Failure(reason, AiTraceFailureCategory.HTTP_ERROR)
+                RequestOutcome.Failure(reason, AiTraceFailureCategory.HTTP_ERROR)
             }
 
             !response.status.isSuccess() -> {
                 val errorBody = rawBody.orEmpty()
                 val reason = "HTTP $httpStatus: $errorBody"
                 logger.warn("Gemini Decisions API returned HTTP {}: {}", httpStatus, errorBody)
-                recordFailureAttempt(session, variant, attemptRequest, startNano, httpStatus, rawBody, reason)
-                return RequestOutcome.Failure(reason, AiTraceFailureCategory.HTTP_ERROR)
+                RequestOutcome.Failure(reason, AiTraceFailureCategory.HTTP_ERROR)
             }
 
             else -> {
@@ -315,7 +326,6 @@ open class GeminiDecisionClient(
                     } catch (ex: Exception) {
                         val reason = "malformed JSON payload: ${ex.message}"
                         logger.warn("Failed to parse Gemini Decisions API response payload: {}", ex.message)
-                        recordFailureAttempt(session, variant, attemptRequest, startNano, httpStatus, rawBody, reason)
                         return RequestOutcome.Failure(reason, AiTraceFailureCategory.PARSE_ERROR, ex)
                     }
 
@@ -323,7 +333,6 @@ open class GeminiDecisionClient(
                     val errorMsg = parsedResponse.error.message ?: parsedResponse.error.status ?: "unknown error"
                     val reason = "API error response: $errorMsg"
                     logger.warn("Gemini Decisions API reported error: {}", errorMsg)
-                    recordFailureAttempt(session, variant, attemptRequest, startNano, httpStatus, rawBody, reason)
                     return RequestOutcome.Failure(reason, AiTraceFailureCategory.HTTP_ERROR)
                 }
 
@@ -331,7 +340,6 @@ open class GeminiDecisionClient(
                 if (answer == null) {
                     val reason = "missing '$QUESTION_SHOULD_PARTICIPATE' answer"
                     logger.warn("Gemini Decisions response missing question answer for '{}'", QUESTION_SHOULD_PARTICIPATE)
-                    recordFailureAttempt(session, variant, attemptRequest, startNano, httpStatus, rawBody, reason)
                     return RequestOutcome.Failure(reason, AiTraceFailureCategory.PARSE_ERROR)
                 }
 
@@ -339,27 +347,12 @@ open class GeminiDecisionClient(
                 if (noul == null || noul.isNaN() || noul.isInfinite()) {
                     val reason = "missing valid numeric 'noul' score"
                     logger.warn("Gemini Decisions answer '{}' missing valid numeric 'noul' score", QUESTION_SHOULD_PARTICIPATE)
-                    recordFailureAttempt(session, variant, attemptRequest, startNano, httpStatus, rawBody, reason)
                     return RequestOutcome.Failure(reason, AiTraceFailureCategory.PARSE_ERROR)
                 }
 
-                val shouldParticipate = noul >= config.threshold
-                val latencyMs = elapsedMillis(startNano)
-                session?.recordAttempt(
-                    stage = AiAttemptStage.DECISION,
-                    variant = variant,
-                    model = config.cleanModel,
-                    endpoint = config.decisionEndpoint,
-                    latencyMs = latencyMs,
-                    httpStatus = httpStatus,
-                    request = attemptRequest,
-                    responseRaw = rawBody,
-                    parsedOutcome = if (shouldParticipate) AiAttemptOutcome.SUCCESS else AiAttemptOutcome.SKIPPED,
-                    errorMessage = null,
-                )
-                return RequestOutcome.Success(
+                RequestOutcome.Success(
                     ParticipationDecision(
-                        shouldParticipate = shouldParticipate,
+                        shouldParticipate = noul >= config.threshold,
                         noul = noul,
                         confidence = answer.confidence,
                         rawAnswer = answer,
@@ -368,31 +361,6 @@ open class GeminiDecisionClient(
             }
         }
     }
-
-    private fun recordFailureAttempt(
-        session: AiTraceSession?,
-        variant: String?,
-        attemptRequest: AiAttemptRequest?,
-        startNano: Long,
-        httpStatus: Int?,
-        responseRaw: String?,
-        reason: String,
-    ) {
-        session?.recordAttempt(
-            stage = AiAttemptStage.DECISION,
-            variant = variant,
-            model = config.cleanModel,
-            endpoint = config.decisionEndpoint,
-            latencyMs = elapsedMillis(startNano),
-            httpStatus = httpStatus,
-            request = attemptRequest,
-            responseRaw = responseRaw,
-            parsedOutcome = AiAttemptOutcome.ERROR,
-            errorMessage = reason,
-        )
-    }
-
-    private fun elapsedMillis(startNano: Long): Long = ((System.nanoTime() - startNano) / 1_000_000L).coerceAtLeast(0L)
 
     override fun close() {
         httpClient.close()

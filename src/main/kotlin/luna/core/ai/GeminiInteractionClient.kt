@@ -81,75 +81,51 @@ class GeminiInteractionClient(
         videoUri: String,
         promptText: String,
         videoDurationSeconds: Long? = null,
-    ): GeminiInteractionResult {
-        val existingSession = currentAiTraceSession()
-        val standaloneSession =
-            if (existingSession == null && traceRecorder.isEnabled()) {
-                traceRecorder.startSession(
-                    pipeline = AiTracePipeline.SUMMARY,
-                    trigger = AiTraceTrigger.REACTION,
-                    discord =
-                        AiTraceDiscordContext(
-                            channelId = "standalone",
-                            messageId = "standalone",
-                        ),
-                )
-            } else {
-                null
-            }
-
-        return if (standaloneSession != null) {
-            try {
-                withAiTraceSession(standaloneSession) {
-                    standaloneSession.registerSecret(apiKey)
-                    val result =
-                        executeAgenticVideo(
-                            baseUrl = baseUrl,
-                            apiKey = apiKey,
-                            model = model,
-                            videoUri = videoUri,
-                            promptText = promptText,
-                            videoDurationSeconds = videoDurationSeconds,
-                            session = standaloneSession,
-                        )
-                    when (result) {
-                        is GeminiInteractionResult.Success -> {
-                            standaloneSession.complete(finalOutput = result.text)
-                        }
-
-                        is GeminiInteractionResult.Error -> {
-                            val localRedactor = AiTraceRedactor(listOfNotNull(apiKey.takeIf { it.isNotBlank() }))
-                            standaloneSession.fail(
-                                failureCategory = classifyFailure(result, apiKey = apiKey, videoUri = videoUri),
-                                errorSummary = localRedactor.redactString(result.message),
-                            )
-                        }
-                    }
-                    result
-                }
-            } catch (e: Exception) {
+    ): GeminiInteractionResult =
+        traceRecorder.withActiveOrStandaloneSession(
+            pipeline = AiTracePipeline.SUMMARY,
+            trigger = AiTraceTrigger.REACTION,
+            discord =
+                AiTraceDiscordContext(
+                    channelId = "standalone",
+                    messageId = "standalone",
+                ),
+            secret = apiKey,
+            onStandaloneException = { session, e ->
                 val localRedactor = AiTraceRedactor(listOfNotNull(apiKey.takeIf { it.isNotBlank() }))
-                standaloneSession.fail(
+                session.fail(
                     failureCategory = AiTraceFailureCategory.UNEXPECTED_ERROR,
                     errorSummary = localRedactor.redactString(e.message) ?: e::class.simpleName ?: "Unexpected error",
                 )
-                throw e
-            } finally {
-                standaloneSession.finish()
+            },
+        ) { session, isStandalone ->
+            val result =
+                executeAgenticVideo(
+                    baseUrl = baseUrl,
+                    apiKey = apiKey,
+                    model = model,
+                    videoUri = videoUri,
+                    promptText = promptText,
+                    videoDurationSeconds = videoDurationSeconds,
+                    session = session,
+                )
+            if (isStandalone && session != null) {
+                when (result) {
+                    is GeminiInteractionResult.Success -> {
+                        session.complete(finalOutput = result.text)
+                    }
+
+                    is GeminiInteractionResult.Error -> {
+                        val localRedactor = AiTraceRedactor(listOfNotNull(apiKey.takeIf { it.isNotBlank() }))
+                        session.fail(
+                            failureCategory = classifyFailure(result, apiKey = apiKey, videoUri = videoUri),
+                            errorSummary = localRedactor.redactString(result.message),
+                        )
+                    }
+                }
             }
-        } else {
-            existingSession?.registerSecret(apiKey)
-            executeAgenticVideo(
-                baseUrl = baseUrl,
-                apiKey = apiKey,
-                model = model,
-                videoUri = videoUri,
-                promptText = promptText,
-                videoDurationSeconds = videoDurationSeconds,
-                session = existingSession,
-            )
+            result
         }
-    }
 
     private suspend fun executeAgenticVideo(
         baseUrl: String,
@@ -273,7 +249,7 @@ class GeminiInteractionClient(
             }
 
         if (session != null && session.isEnabled) {
-            val latencyMs = ((System.nanoTime() - startNano) / 1_000_000L).coerceAtLeast(0L)
+            val latencyMs = elapsedMillisFromNanos(startNano)
             val parsedOutcome =
                 when (result) {
                     is GeminiInteractionResult.Success -> AiAttemptOutcome.SUCCESS

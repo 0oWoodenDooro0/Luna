@@ -43,7 +43,8 @@ import luna.core.ai.GroundingCitation
 import luna.core.ai.NoOpAiTraceRecorder
 import luna.core.ai.VideoProcessingMode
 import luna.core.ai.currentAiTraceSession
-import luna.core.ai.withAiTraceSession
+import luna.core.ai.elapsedMillisFromNanos
+import luna.core.ai.withActiveOrStandaloneSession
 import org.slf4j.LoggerFactory
 import java.net.SocketTimeoutException
 
@@ -143,63 +144,47 @@ open class GeminiSummarizer(
     open suspend fun summarize(
         input: SummaryInput,
         lookbackProvider: (suspend (reason: String) -> String?)? = null,
-    ): SummaryResult {
-        val existingSession = currentAiTraceSession()
-        val standaloneSession =
-            if (existingSession == null && traceRecorder.isEnabled()) {
-                traceRecorder.startSession(
-                    pipeline = AiTracePipeline.SUMMARY,
-                    trigger = AiTraceTrigger.REACTION,
-                    discord =
-                        AiTraceDiscordContext(
-                            channelId = "direct",
-                            messageId = "direct",
-                        ),
-                )
-            } else {
-                null
-            }
-
-        return if (standaloneSession != null) {
-            try {
-                withAiTraceSession(standaloneSession) {
-                    standaloneSession.registerSecret(config.apiKey)
-                    val result = executeSummarize(input, lookbackProvider, standaloneSession)
-                    when (result) {
-                        is SummaryResult.Success -> {
-                            standaloneSession.complete(
-                                finalOutput = result.text,
-                                citations = result.citations,
-                            )
-                        }
-
-                        is SummaryResult.Error -> {
-                            standaloneSession.fail(
-                                failureCategory = classifySummaryError(result),
-                                errorSummary = result.message,
-                            )
-                        }
-
-                        is SummaryResult.ToolCall -> {
-                            standaloneSession.complete(finalOutput = null)
-                        }
-                    }
-                    result
-                }
-            } catch (e: Exception) {
-                standaloneSession.fail(
+    ): SummaryResult =
+        traceRecorder.withActiveOrStandaloneSession(
+            pipeline = AiTracePipeline.SUMMARY,
+            trigger = AiTraceTrigger.REACTION,
+            discord =
+                AiTraceDiscordContext(
+                    channelId = "direct",
+                    messageId = "direct",
+                ),
+            secret = config.apiKey,
+            onStandaloneException = { session, e ->
+                session.fail(
                     failureCategory = classifySummaryException(e),
                     errorSummary = e.message ?: e::class.simpleName ?: "Unexpected error",
                 )
-                throw e
-            } finally {
-                standaloneSession.finish()
+            },
+        ) { session, isStandalone ->
+            val result = executeSummarize(input, lookbackProvider, session)
+            if (isStandalone && session != null) {
+                when (result) {
+                    is SummaryResult.Success -> {
+                        session.complete(
+                            finalOutput = result.text,
+                            citations = result.citations,
+                        )
+                    }
+
+                    is SummaryResult.Error -> {
+                        session.fail(
+                            failureCategory = classifySummaryError(result),
+                            errorSummary = result.message,
+                        )
+                    }
+
+                    is SummaryResult.ToolCall -> {
+                        session.complete(finalOutput = null)
+                    }
+                }
             }
-        } else {
-            existingSession?.registerSecret(config.apiKey)
-            executeSummarize(input, lookbackProvider, existingSession)
+            result
         }
-    }
 
     private suspend fun executeSummarize(
         input: SummaryInput,
@@ -437,7 +422,7 @@ open class GeminiSummarizer(
                 SummaryResult.Error.Generic("Unexpected error invoking Gemini API: ${e.message}", cause = e)
             }
 
-        val latencyMs = ((System.nanoTime() - startNano) / 1_000_000L).coerceAtLeast(0L)
+        val latencyMs = elapsedMillisFromNanos(startNano)
         if (session != null && session.isEnabled) {
             val parsedOutcome =
                 when (result) {

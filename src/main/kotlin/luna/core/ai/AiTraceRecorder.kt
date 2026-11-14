@@ -45,6 +45,13 @@ interface AiTraceRecorder : AutoCloseable {
 
     fun record(trace: AiTraceRecord)
 
+    fun record(
+        trace: AiTraceRecord,
+        extraSecrets: Set<String>,
+    ) {
+        record(trace)
+    }
+
     suspend fun flushAndClose(timeoutMs: Long = DEFAULT_FLUSH_TIMEOUT_MS)
 
     override fun close() {
@@ -267,7 +274,7 @@ class AiTraceSession internal constructor(
                 } else {
                     failureCategory
                 }
-            val totalLatencyMs = ((System.nanoTime() - startNanoTime) / 1_000_000L).coerceAtLeast(0L)
+            val totalLatencyMs = elapsedMillisFromNanos(startNanoTime)
 
             snapshot =
                 AiTraceRecord(
@@ -290,11 +297,7 @@ class AiTraceSession internal constructor(
             secretsSnapshot = extraSecrets.toSet()
         }
 
-        if (recorder is JsonlAiTraceRecorder) {
-            recorder.recordWithSecrets(snapshot, secretsSnapshot)
-        } else {
-            recorder.record(snapshot)
-        }
+        recorder.record(snapshot, secretsSnapshot)
 
         if (emitCorrelationLog) {
             runCatching {
@@ -314,12 +317,18 @@ class AiTraceSession internal constructor(
                         ),
                     status = snapshot.outcome.name,
                 )
+            }.onFailure { err ->
+                logger.warn("Failed to emit AI_TRACE correlation log for {}: {}", snapshot.traceId, err.message)
             }
         }
     }
 
     override fun close() {
         finish()
+    }
+
+    companion object {
+        private val logger = LoggerFactory.getLogger(AiTraceSession::class.java)
     }
 }
 
@@ -335,6 +344,45 @@ suspend fun <T> withAiTraceSession(
     session: AiTraceSession,
     block: suspend () -> T,
 ): T = withContext(AiTraceContextElement(session)) { block() }
+
+fun elapsedMillisFromNanos(startNanoTime: Long): Long = ((System.nanoTime() - startNanoTime) / 1_000_000L).coerceAtLeast(0L)
+
+suspend fun <T> AiTraceRecorder.withActiveOrStandaloneSession(
+    pipeline: AiTracePipeline,
+    trigger: AiTraceTrigger,
+    discord: AiTraceDiscordContext,
+    secret: String? = null,
+    onStandaloneException: ((AiTraceSession, Exception) -> Unit)? = null,
+    block: suspend (session: AiTraceSession?, isStandalone: Boolean) -> T,
+): T {
+    val existingSession = currentAiTraceSession()
+    if (existingSession != null) {
+        existingSession.registerSecret(secret)
+        return block(existingSession, false)
+    }
+    if (!isEnabled()) {
+        return block(null, false)
+    }
+    val standaloneSession = startSession(pipeline = pipeline, trigger = trigger, discord = discord)
+    standaloneSession.registerSecret(secret)
+    return try {
+        withAiTraceSession(standaloneSession) {
+            block(standaloneSession, true)
+        }
+    } catch (e: Exception) {
+        if (onStandaloneException != null) {
+            onStandaloneException(standaloneSession, e)
+        } else {
+            standaloneSession.fail(
+                failureCategory = AiTraceFailureCategory.UNEXPECTED_ERROR,
+                errorSummary = e.message ?: e::class.simpleName ?: "Unexpected error",
+            )
+        }
+        throw e
+    } finally {
+        standaloneSession.finish()
+    }
+}
 
 /**
  * Bounded, fail-open JSONL [AiTraceRecorder] writing daily `ai-YYYY-MM-DD.jsonl` files
@@ -402,10 +450,10 @@ class JsonlAiTraceRecorder internal constructor(
         )
 
     override fun record(trace: AiTraceRecord) {
-        recordWithSecrets(trace, emptySet())
+        record(trace, emptySet())
     }
 
-    internal fun recordWithSecrets(
+    override fun record(
         trace: AiTraceRecord,
         extraSecrets: Set<String>,
     ) {
