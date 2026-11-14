@@ -64,6 +64,7 @@ open class GeminiSummarizer(
             httpClient = httpClient,
             pollingDelayMs = pollingDelayMs,
             maxPollingAttempts = maxPollingAttempts,
+            traceRecorder = traceRecorder,
         )
 
     private data class AttemptRequestMetadata(
@@ -214,6 +215,13 @@ open class GeminiSummarizer(
             val error = SummaryResult.Error.Generic("Content to summarize cannot be blank")
             session?.fail(AiTraceFailureCategory.CONTEXT_ERROR, error.message)
             return error
+        }
+
+        val isAgenticVideo =
+            !input.videoUri.isNullOrBlank() &&
+                GeminiPromptBuilder.resolveProcessingMode(input.videoDurationSeconds) == VideoProcessingMode.AGENTIC
+        if (isAgenticVideo) {
+            return summarizeAgentic(input)
         }
 
         val activeSearchTools = if (config.searchGroundingEnabled) listOf(GeminiTools.GOOGLE_SEARCH_TOOL) else emptyList()
@@ -548,6 +556,7 @@ open class GeminiSummarizer(
                     model = config.cleanModel,
                     videoUri = input.videoUri.orEmpty(),
                     promptText = promptText,
+                    videoDurationSeconds = input.videoDurationSeconds,
                 )
         ) {
             is GeminiInteractionResult.Success -> {

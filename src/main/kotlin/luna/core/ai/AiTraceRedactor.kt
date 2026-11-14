@@ -137,6 +137,8 @@ class AiTraceRedactor(
         private val BEARER_AUTH_REGEX =
             Regex("""(authorization\s*[:=]\s*["']?Bearer\s+)([^"'\s,;}\]]+)""", RegexOption.IGNORE_CASE)
 
+        fun sanitizeEndpoint(endpoint: String): String = QUERY_KEY_REGEX.replace(endpoint) { "${it.groupValues[1]}$MASK" }
+
         fun fromConfig(config: Map<String, Any?>): AiTraceRedactor {
             val secrets = mutableListOf<String>()
             collectSecretsFromMap(config, secrets)
