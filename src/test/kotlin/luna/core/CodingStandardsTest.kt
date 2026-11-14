@@ -319,13 +319,41 @@ class CodingStandardsTest {
 
     @Test
     fun `first-party plugins must not import sibling plugin packages`() {
-        val pluginPackages = setOf("chatter", "summarizer", "curtly", "mcp", "preview", "undercover")
-        val sharedMcpSubpackages = setOf("data", "server")
-        val importRegex = Regex("""^import\s+luna\.([a-zA-Z0-9_]+)(?:\.([a-zA-Z0-9_]+))?""")
+        val metaInfService = File(projectRoot, "src/main/resources/META-INF/services/luna.plugin.LunaPlugin")
+        assertTrue(metaInfService.exists(), "META-INF/services/luna.plugin.LunaPlugin must exist")
+
+        val pluginPackages =
+            metaInfService
+                .readLines()
+                .map { it.trim() }
+                .filter { it.isNotEmpty() && !it.startsWith("#") }
+                .mapNotNull { fqcn ->
+                    val parts = fqcn.split(".")
+                    if (parts.size >= 3 && parts[0] == "luna") parts[1] else null
+                }.toSet()
+        assertTrue(pluginPackages.isNotEmpty(), "At least one first-party plugin must be registered")
+
+        // Packages owned by :libs:* subprojects (e.g. :libs:mcp-data -> luna.mcp.data) are shared libraries, not plugin internals.
+        val sharedLibraryPrefixes =
+            File(projectRoot, "libs")
+                .takeIf { it.exists() }
+                ?.walkTopDown()
+                ?.filter { it.isFile && it.extension == "kt" }
+                ?.mapNotNull { file ->
+                    file
+                        .useLines { lines ->
+                            lines.firstOrNull { it.trim().startsWith("package ") }
+                        }?.trim()
+                        ?.removePrefix("package ")
+                        ?.trim()
+                }?.toSet()
+                ?: emptySet()
+
+        val importRegex = Regex("""^import\s+luna\.([a-zA-Z0-9_]+)""")
         val violations = mutableListOf<String>()
 
-        val roots = findKotlinSourceRoots("main") + findKotlinSourceRoots("test")
-        roots.forEach { root ->
+        val appRoots = listOf(File(projectRoot, "src/main/kotlin"), File(projectRoot, "src/test/kotlin")).filter { it.exists() }
+        appRoots.forEach { root ->
             pluginPackages.forEach { ownerPlugin ->
                 val pluginDir = File(root, "luna/$ownerPlugin")
                 if (!pluginDir.exists()) return@forEach
@@ -333,17 +361,18 @@ class CodingStandardsTest {
                 pluginDir.walkTopDown().filter { it.extension == "kt" }.forEach { file ->
                     file.useLines { lines ->
                         lines.forEachIndexed { index, line ->
-                            val match = importRegex.find(line.trim()) ?: return@forEachIndexed
+                            val trimmed = line.trim()
+                            val match = importRegex.find(trimmed) ?: return@forEachIndexed
                             val importedPkg = match.groupValues[1]
-                            val importedSubPkg = match.groupValues[2]
-                            val isSiblingPlugin =
-                                importedPkg in pluginPackages &&
-                                    importedPkg != ownerPlugin &&
-                                    !(importedPkg == "mcp" && importedSubPkg in sharedMcpSubpackages)
-                            if (isSiblingPlugin) {
+                            val importedPath = trimmed.removePrefix("import ").trim()
+                            val isSharedLibImport =
+                                sharedLibraryPrefixes.any { prefix ->
+                                    importedPath == prefix || importedPath.startsWith("$prefix.")
+                                }
+                            if (importedPkg in pluginPackages && importedPkg != ownerPlugin && !isSharedLibImport) {
                                 violations.add(
                                     "${file.relativeTo(projectRoot)}:${index + 1}: " +
-                                        "Plugin '$ownerPlugin' must not import sibling plugin '$importedPkg' (${line.trim()}). " +
+                                        "Plugin '$ownerPlugin' must not import sibling plugin '$importedPkg' ($trimmed). " +
                                         "Extract shared logic into 'luna.core' instead.",
                                 )
                             }
