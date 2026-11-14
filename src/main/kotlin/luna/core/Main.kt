@@ -12,6 +12,9 @@ import io.ktor.server.routing.routing
 import io.ktor.server.sessions.Sessions
 import io.ktor.server.sessions.cookie
 import kotlinx.coroutines.runBlocking
+import luna.core.ai.AiTraceConfig
+import luna.core.ai.AiTraceRecorder
+import luna.core.ai.JsonlAiTraceRecorder
 import luna.plugin.DefaultPluginContext
 import luna.plugin.PluginContext
 import luna.plugin.PluginLoader
@@ -32,6 +35,8 @@ class LunaHost(
 ) {
     val config: Map<String, Any?>
     val coreConfig: LunaCoreConfig
+    val aiTraceConfig: AiTraceConfig
+    val aiTraceRecorder: AiTraceRecorder
     val database: Database = customDatabase ?: initDatabase()
 
     var server: EmbeddedServer<NettyApplicationEngine, NettyApplicationEngine.Configuration>? = null
@@ -59,6 +64,9 @@ class LunaHost(
         unified.putIfAbsent("BASE_URL", coreConfig.baseUrl)
         unified.putIfAbsent("DISCORD_REDIRECT_URI", coreConfig.redirectUri)
         config = unified
+
+        aiTraceConfig = AiTraceConfig.fromMap(config)
+        aiTraceRecorder = JsonlAiTraceRecorder.fromConfig(aiTraceConfig, config)
 
         // Startup audit log emitting active configuration with secrets masked
         ConfigLoader.auditLog(config)
@@ -94,13 +102,14 @@ class LunaHost(
             }
         this.kord = kordClient
 
-        // 3. Build DefaultPluginContext providing kord, routing, database, and configuration
+        // 3. Build DefaultPluginContext providing kord, routing, database, configuration, and AI trace recorder
         val context =
             DefaultPluginContext(
                 kord = kordClient,
                 routing = routing,
                 database = database,
                 configMap = config,
+                aiTraceRecorder = aiTraceRecorder,
             )
         this.pluginContext = context
 
@@ -122,19 +131,28 @@ class LunaHost(
         return context
     }
 
+    suspend fun shutdown() {
+        try {
+            pluginLoader.shutdownPlugins()
+        } catch (e: Exception) {
+            System.err.println("Error during plugin shutdown: ${e.message}")
+        }
+        try {
+            aiTraceRecorder.flushAndClose()
+        } catch (e: Exception) {
+            System.err.println("Error during AI trace flush: ${e.message}")
+        }
+        try {
+            server?.stop(1000, 2000, TimeUnit.MILLISECONDS)
+        } catch (_: Exception) {
+        }
+    }
+
     private fun registerShutdownHook() {
         Runtime.getRuntime().addShutdownHook(
             Thread {
                 runBlocking {
-                    try {
-                        pluginLoader.shutdownPlugins()
-                    } catch (e: Exception) {
-                        System.err.println("Error during plugin shutdown: ${e.message}")
-                    }
-                    try {
-                        server?.stop(1000, 2000, TimeUnit.MILLISECONDS)
-                    } catch (_: Exception) {
-                    }
+                    shutdown()
                 }
             },
         )

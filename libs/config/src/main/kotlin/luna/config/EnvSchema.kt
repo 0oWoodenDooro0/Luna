@@ -185,6 +185,10 @@ object EnvSchemaAuditor {
             EnvVarSchema("SUMMARY_MAX_CHARACTER_BUDGET", isRequired = false, defaultValue = "20000", section = 3),
             EnvVarSchema("SUMMARY_MAX_LOOKBACK_MESSAGES", isRequired = false, defaultValue = "20", section = 3),
             EnvVarSchema("SUMMARY_MAX_IMAGES", isRequired = false, defaultValue = "10", section = 3),
+            EnvVarSchema("AI_TRACE_ENABLED", isRequired = false, defaultValue = "true", section = 3),
+            EnvVarSchema("AI_TRACE_DIR", isRequired = false, defaultValue = "data/logs/ai", section = 3),
+            EnvVarSchema("AI_TRACE_MAX_DAYS", isRequired = false, defaultValue = "14", section = 3),
+            EnvVarSchema("AI_TRACE_MAX_TOTAL_MB", isRequired = false, defaultValue = "200", section = 3),
             EnvVarSchema("PLUGINS_DISABLED", isRequired = false, section = 4),
             EnvVarSchema("PLUGINS_CURTLY_ENABLED", isRequired = false, defaultValue = "true", section = 4),
             EnvVarSchema("PLUGINS_MCP_ENABLED", isRequired = false, defaultValue = "true", section = 4),
@@ -235,6 +239,7 @@ object EnvSchemaAuditor {
         if (key.startsWith("youtube.") || key.startsWith("YOUTUBE_")) return true
         if (key.startsWith("undercover.") || key.startsWith("UNDERCOVER_")) return true
         if (key.startsWith("mcp.") || key.startsWith("MCP_")) return true
+        if (key.startsWith("ai.trace.") || key.startsWith("AI_TRACE_")) return true
 
         val candidates = candidateAliases[key]
         if (candidates != null && candidates.any { it in schemaKeys }) {
@@ -272,6 +277,10 @@ object EnvSchemaAuditor {
                 "MCP_PORT" -> listOf("PORT", "port", "mcp.port")
                 "MCP_DB_PATH" -> listOf("dbPath", "mcp.dbPath")
                 "MCP_PUBLIC_BASE_URL" -> listOf("publicBaseUrl", "mcp.publicBaseUrl")
+                "AI_TRACE_ENABLED" -> listOf("ai.trace.enabled")
+                "AI_TRACE_DIR" -> listOf("ai.trace.dir")
+                "AI_TRACE_MAX_DAYS" -> listOf("ai.trace.maxDays", "ai.trace.max_days")
+                "AI_TRACE_MAX_TOTAL_MB" -> listOf("ai.trace.maxTotalMb", "ai.trace.max_total_mb")
                 else -> emptyList()
             }
 
