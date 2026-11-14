@@ -74,6 +74,16 @@ object GeminiTools {
     val GOOGLE_SEARCH = GOOGLE_SEARCH_TOOL
 }
 
+/**
+ * Canonical Gemini finish reasons used across pipelines to classify safety blocks.
+ */
+object GeminiFinishReasons {
+    val SAFETY_BLOCK_REASONS: Set<String> =
+        setOf("SAFETY", "RECITATION", "PROHIBITED_CONTENT", "BLOCKLIST", "SPII")
+
+    fun isSafetyBlock(finishReason: String?): Boolean = finishReason?.uppercase() in SAFETY_BLOCK_REASONS
+}
+
 @Serializable
 data class GeminiGenerateContentRequest(
     val contents: List<GeminiContent>,

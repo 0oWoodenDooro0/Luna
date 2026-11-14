@@ -25,6 +25,7 @@ import luna.core.ai.AiTracePipeline
 import luna.core.ai.AiTraceRecorder
 import luna.core.ai.AiTraceSession
 import luna.core.ai.AiTraceTrigger
+import luna.core.ai.GeminiFinishReasons
 import luna.core.ai.GeminiGenerateContentRequest
 import luna.core.ai.GeminiGenerateContentResponse
 import luna.core.ai.GeminiInteractionClient
@@ -461,7 +462,7 @@ open class ChatterGenerator(
         if (rawText.isNullOrBlank()) {
             val reason = "blank candidate content"
             val failureCategory =
-                if (isSafetyFinishReason(finishReason)) {
+                if (GeminiFinishReasons.isSafetyBlock(finishReason)) {
                     AiTraceFailureCategory.SAFETY_BLOCK
                 } else {
                     AiTraceFailureCategory.EMPTY_OUTPUT
@@ -484,8 +485,6 @@ open class ChatterGenerator(
         return evaluated(GenerateAttempt.Success(sanitized))
     }
 
-    private fun isSafetyFinishReason(finishReason: String?): Boolean = finishReason?.uppercase() in SAFETY_FINISH_REASONS
-
     override fun close() {
         httpClient.close()
     }
@@ -495,7 +494,6 @@ open class ChatterGenerator(
         const val MAX_VIDEO_DURATION_SECONDS = 7200L
         private const val VARIANT_NO_SEARCH = "no-search"
         private const val VARIANT_NO_MEDIA = "no-media"
-        private val SAFETY_FINISH_REASONS = setOf("SAFETY", "RECITATION", "PROHIBITED_CONTENT", "BLOCKLIST", "SPII")
 
         private val jsonParser =
             Json {

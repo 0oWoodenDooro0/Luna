@@ -30,6 +30,7 @@ import luna.core.ai.AiTraceSession
 import luna.core.ai.AiTraceTrigger
 import luna.core.ai.EmojiSanitizer
 import luna.core.ai.GeminiContent
+import luna.core.ai.GeminiFinishReasons
 import luna.core.ai.GeminiFunctionResponse
 import luna.core.ai.GeminiGenerateContentRequest
 import luna.core.ai.GeminiGenerateContentResponse
@@ -761,7 +762,7 @@ open class GeminiSummarizer(
                         .trim()
                 if (rawText.isBlank()) {
                     val errorResult =
-                        if (finishReason in SAFETY_FINISH_REASONS) {
+                        if (GeminiFinishReasons.isSafetyBlock(finishReason)) {
                             SummaryResult.Error.Generic("Gemini response blocked due to finishReason: $finishReason")
                         } else {
                             SummaryResult.Error.Generic("Empty text in Gemini summary response")
@@ -814,9 +815,6 @@ open class GeminiSummarizer(
     }
 
     companion object {
-        private val SAFETY_FINISH_REASONS =
-            setOf("SAFETY", "RECITATION", "PROHIBITED_CONTENT", "BLOCKLIST", "SPII")
-
         private val jsonParser =
             Json {
                 ignoreUnknownKeys = true
