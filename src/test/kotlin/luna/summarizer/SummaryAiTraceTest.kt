@@ -1,5 +1,6 @@
 package luna.summarizer
 
+import ch.qos.logback.classic.Level
 import ch.qos.logback.classic.Logger
 import ch.qos.logback.classic.spi.ILoggingEvent
 import ch.qos.logback.core.read.ListAppender
@@ -14,9 +15,9 @@ import io.ktor.serialization.kotlinx.json.json
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonObject
-import kotlinx.serialization.json.jsonPrimitive
 import luna.core.ai.AiAttemptOutcome
 import luna.core.ai.AiAttemptStage
+import luna.core.ai.AiTraceFailureCategory
 import luna.core.ai.AiTraceJson
 import luna.core.ai.AiTraceOutcome
 import luna.core.ai.AiTracePipeline
@@ -405,7 +406,7 @@ class SummaryAiTraceTest {
     }
 
     @Test
-    fun `multimodal fallback strips Chat Image Attachment blocks and records DEGRADED_SUCCESS`(
+    fun `multimodal failure with images and tools fails fast with 1 attempt and records AI Trace FAILED`(
         @TempDir tempDir: Path,
     ) = runTest {
         val (recorder, traceFile) = createRecorder(tempDir)
@@ -414,21 +415,11 @@ class SummaryAiTraceTest {
         val mockEngine =
             MockEngine {
                 callIndex++
-                if (callIndex == 1) {
-                    respond(
-                        content = """{"error": {"code": 400, "message": "Unable to fetch image"}}""",
-                        status = HttpStatusCode.BadRequest,
-                        headers = headersOf(HttpHeaders.ContentType, "application/json"),
-                    )
-                } else {
-                    respond(
-                        content =
-                            """{"id": "int-text-only", "status": "completed", "finish_reason": "STOP", """ +
-                                """"steps": [{"type": "model_output", "content": [{"type": "text", "text": "TL;DR:\nText-only summary."}]}]}""",
-                        status = HttpStatusCode.OK,
-                        headers = headersOf(HttpHeaders.ContentType, "application/json"),
-                    )
-                }
+                respond(
+                    content = """{"error": {"code": 400, "message": "Unable to fetch image"}}""",
+                    status = HttpStatusCode.BadRequest,
+                    headers = headersOf(HttpHeaders.ContentType, "application/json"),
+                )
             }
 
         val summarizer =
@@ -450,34 +441,29 @@ class SummaryAiTraceTest {
         val result = summarizer.summarize(input)
         recorder.flushAndClose()
 
-        assertTrue(result is SummaryResult.Success)
+        assertTrue(result is SummaryResult.Error.ApiError)
+        assertEquals(1, callIndex, "Must fail fast with 1 upstream attempt and no no-images retry")
         val traces = readTraces(traceFile)
         assertEquals(1, traces.size)
         val trace = traces.first()
 
-        assertEquals(AiTraceOutcome.DEGRADED_SUCCESS, trace.outcome)
-        assertTrue(trace.degraded)
-        assertEquals(2, trace.attemptCount)
-        assertEquals(
-            listOf("SUMMARY_GENERATE:grounded", "SUMMARY_GENERATE:no-images"),
-            trace.fallbackPath,
-        )
+        assertEquals(AiTraceOutcome.FAILED, trace.outcome)
+        assertFalse(trace.degraded)
+        assertEquals(AiTraceFailureCategory.HTTP_ERROR, trace.failureCategory)
+        assertNotNull(trace.errorSummary)
+        assertEquals(1, trace.attemptCount)
+        assertEquals(listOf("SUMMARY_GENERATE:grounded"), trace.fallbackPath)
 
-        assertEquals(true, trace.attempts[0].request?.hasImages)
-        assertEquals(2, trace.attempts[0].request?.imageCount)
-        assertEquals(false, trace.attempts[1].request?.hasImages)
-        assertEquals(0, trace.attempts[1].request?.imageCount)
-        assertFalse(
-            trace.attempts[1]
-                .request
-                ?.payload
-                ?.toString()
-                ?.contains("cdn.discordapp.com") == true,
-        )
+        val attempt = trace.attempts.single()
+        assertEquals(AiAttemptOutcome.ERROR, attempt.parsedOutcome)
+        assertEquals(400, attempt.httpStatus)
+        assertNotNull(attempt.errorMessage)
+        assertEquals(true, attempt.request?.hasImages)
+        assertEquals(2, attempt.request?.imageCount)
     }
 
     @Test
-    fun `tool continuation failure falls back to baseline and records DEGRADED_SUCCESS across all three attempts`(
+    fun `tool continuation failure fails fast across two attempts and records AI Trace FAILED without baseline retry`(
         @TempDir tempDir: Path,
     ) = runTest {
         val (recorder, traceFile) = createRecorder(tempDir)
@@ -497,32 +483,18 @@ class SummaryAiTraceTest {
         val mockEngine =
             MockEngine {
                 callIndex++
-                when (callIndex) {
-                    1 -> {
-                        respond(
-                            content = toolCallResponse,
-                            status = HttpStatusCode.OK,
-                            headers = headersOf(HttpHeaders.ContentType, "application/json"),
-                        )
-                    }
-
-                    2 -> {
-                        respond(
-                            content = "Upstream error during continuation",
-                            status = HttpStatusCode.InternalServerError,
-                            headers = headersOf(HttpHeaders.ContentType, "text/plain"),
-                        )
-                    }
-
-                    else -> {
-                        respond(
-                            content =
-                                """{"id": "int-tc-base", "status": "completed", """ +
-                                    """"steps": [{"type": "model_output", "content": [{"type": "text", "text": "TL;DR:\nBaseline fallback summary."}]}]}""",
-                            status = HttpStatusCode.OK,
-                            headers = headersOf(HttpHeaders.ContentType, "application/json"),
-                        )
-                    }
+                if (callIndex == 1) {
+                    respond(
+                        content = toolCallResponse,
+                        status = HttpStatusCode.OK,
+                        headers = headersOf(HttpHeaders.ContentType, "application/json"),
+                    )
+                } else {
+                    respond(
+                        content = "Upstream error during continuation",
+                        status = HttpStatusCode.InternalServerError,
+                        headers = headersOf(HttpHeaders.ContentType, "text/plain"),
+                    )
                 }
             }
 
@@ -536,19 +508,21 @@ class SummaryAiTraceTest {
         val result = summarizer.summarize(SummaryInput(content = "Recent slice")) { "Earlier messages" }
         recorder.flushAndClose()
 
-        assertTrue(result is SummaryResult.Success)
+        assertTrue(result is SummaryResult.Error.ApiError)
+        assertEquals(2, callIndex, "Must stop after round-2 continuation failure without a 3rd baseline retry")
         val traces = readTraces(traceFile)
         assertEquals(1, traces.size)
         val trace = traces.first()
 
-        assertEquals(AiTraceOutcome.DEGRADED_SUCCESS, trace.outcome)
-        assertTrue(trace.degraded)
-        assertEquals(3, trace.attemptCount)
+        assertEquals(AiTraceOutcome.FAILED, trace.outcome)
+        assertFalse(trace.degraded)
+        assertEquals(AiTraceFailureCategory.HTTP_ERROR, trace.failureCategory)
+        assertNotNull(trace.errorSummary)
+        assertEquals(2, trace.attemptCount)
         assertEquals(
             listOf(
                 "SUMMARY_GENERATE:grounded+lookback",
                 "SUMMARY_TOOL_CONTINUATION:fetch_earlier_messages",
-                "SUMMARY_GENERATE:baseline",
             ),
             trace.fallbackPath,
         )
@@ -556,7 +530,60 @@ class SummaryAiTraceTest {
         assertEquals(AiAttemptOutcome.ERROR, trace.attempts[1].parsedOutcome)
         assertEquals(500, trace.attempts[1].httpStatus)
         assertEquals("Upstream error during continuation", trace.attempts[1].responseRaw)
-        assertEquals(AiAttemptOutcome.SUCCESS, trace.attempts[2].parsedOutcome)
+        assertNotNull(trace.attempts[1].errorMessage)
+    }
+
+    @Test
+    fun `lookbackProvider exception records single TOOL_CALL attempt and AI Trace FAILED without baseline retry`(
+        @TempDir tempDir: Path,
+    ) = runTest {
+        val (recorder, traceFile) = createRecorder(tempDir)
+        var callIndex = 0
+
+        val toolCallResponse =
+            """
+            {
+              "id": "int-lb-fail-1",
+              "status": "requires_action",
+              "steps": [
+                { "type": "function_call", "id": "call-lbf", "name": "fetch_earlier_messages", "arguments": { "reason": "Need history" } }
+              ]
+            }
+            """.trimIndent()
+
+        val mockEngine =
+            MockEngine {
+                callIndex++
+                respond(
+                    content = toolCallResponse,
+                    status = HttpStatusCode.OK,
+                    headers = headersOf(HttpHeaders.ContentType, "application/json"),
+                )
+            }
+
+        val summarizer =
+            GeminiSummarizer(
+                config = GeminiConfig(apiKey = "secret-gemini-api-key", searchGroundingEnabled = true),
+                httpClient = createTestClient(mockEngine),
+                traceRecorder = recorder,
+            )
+
+        val result =
+            summarizer.summarize(SummaryInput(content = "Recent slice")) {
+                throw IllegalStateException("Discord history unavailable")
+            }
+        recorder.flushAndClose()
+
+        assertTrue(result is SummaryResult.Error.Generic)
+        assertEquals(1, callIndex)
+        val trace = readTraces(traceFile).single()
+        assertEquals(AiTraceOutcome.FAILED, trace.outcome)
+        assertFalse(trace.degraded)
+        assertEquals(AiTraceFailureCategory.CONTEXT_ERROR, trace.failureCategory)
+        assertTrue(trace.errorSummary?.contains("Discord history unavailable") == true)
+        assertEquals(1, trace.attemptCount)
+        assertEquals(listOf("SUMMARY_GENERATE:grounded+lookback"), trace.fallbackPath)
+        assertEquals(AiAttemptOutcome.TOOL_CALL, trace.attempts.single().parsedOutcome)
     }
 
     @Test
@@ -1288,5 +1315,90 @@ class SummaryAiTraceTest {
         assertEquals(2, attempt.rawCitations.size)
         assertEquals(1, attempt.filteredCitations.size)
         assertEquals("https://blog.jetbrains.com/kotlin/k2", attempt.filteredCitations.single().url)
+    }
+
+    @Test
+    fun `unsafe url_context_result logs error and records retrieval statuses in AI Trace while preserving valid summary`(
+        @TempDir tempDir: Path,
+    ) = runTest {
+        val (recorder, traceFile) = createRecorder(tempDir)
+        val logger = LoggerFactory.getLogger(GeminiSummarizer::class.java) as Logger
+        val listAppender = ListAppender<ILoggingEvent>()
+        listAppender.start()
+        logger.addAppender(listAppender)
+
+        try {
+            val responseJson =
+                """
+                {
+                  "id": "int-uc-unsafe-trace",
+                  "status": "completed",
+                  "finish_reason": "STOP",
+                  "steps": [
+                    {
+                      "type": "url_context_result",
+                      "call_id": "uc-1",
+                      "result": [
+                        { "retrieved_url": "https://safe.example.com/ok", "status": "success" },
+                        { "retrieved_url": "https://unsafe.example.com/bad", "status": "unsafe" }
+                      ]
+                    },
+                    {
+                      "type": "model_output",
+                      "content": [
+                        { "type": "text", "text": "TL;DR:\n已根據安全內容完成摘要。" }
+                      ]
+                    }
+                  ]
+                }
+                """.trimIndent()
+
+            val mockEngine =
+                MockEngine {
+                    respond(
+                        content = responseJson,
+                        status = HttpStatusCode.OK,
+                        headers = headersOf(HttpHeaders.ContentType, "application/json"),
+                    )
+                }
+
+            val summarizer =
+                GeminiSummarizer(
+                    config = GeminiConfig(apiKey = "secret-gemini-api-key", urlContextEnabled = true),
+                    httpClient = createTestClient(mockEngine),
+                    traceRecorder = recorder,
+                )
+
+            val result =
+                summarizer.summarize(
+                    SummaryInput(
+                        content = "Compare https://safe.example.com/ok and https://unsafe.example.com/bad",
+                        webUrls = listOf("https://safe.example.com/ok", "https://unsafe.example.com/bad"),
+                    ),
+                )
+            recorder.flushAndClose()
+
+            assertTrue(result is SummaryResult.Success)
+            assertEquals("TL;DR:\n已根據安全內容完成摘要。", result.text)
+            assertTrue(
+                listAppender.list.any {
+                    it.level == Level.ERROR &&
+                        it.formattedMessage.contains("https://unsafe.example.com/bad") &&
+                        it.formattedMessage.contains("unsafe")
+                },
+            )
+
+            val trace = readTraces(traceFile).single()
+            assertEquals(AiTraceOutcome.SUCCESS, trace.outcome)
+            assertFalse(trace.degraded)
+            val attempt = trace.attempts.single()
+            assertEquals(2, attempt.urlContextResults.size)
+            assertEquals("success", attempt.urlContextResults[0].status)
+            assertEquals("unsafe", attempt.urlContextResults[1].status)
+            assertEquals("https://unsafe.example.com/bad", attempt.urlContextResults[1].retrievedUrl)
+        } finally {
+            logger.detachAppender(listAppender)
+            listAppender.stop()
+        }
     }
 }

@@ -1,5 +1,10 @@
 package luna.summarizer
 
+import ch.qos.logback.classic.Level
+import ch.qos.logback.classic.Logger
+import ch.qos.logback.classic.spi.ILoggingEvent
+import ch.qos.logback.core.read.ListAppender
+import com.sun.net.httpserver.HttpServer
 import dev.kord.common.entity.MessageType
 import dev.kord.common.entity.Snowflake
 import dev.kord.core.entity.Attachment
@@ -12,7 +17,10 @@ import dev.socialpeek.model.Platform
 import io.mockk.every
 import io.mockk.mockk
 import kotlinx.coroutines.test.runTest
+import luna.core.ai.VideoProcessingMode
 import org.junit.jupiter.api.BeforeEach
+import org.slf4j.LoggerFactory
+import java.net.InetSocketAddress
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -1106,5 +1114,143 @@ class ConversationSliceCollectorTest {
             assertEquals(listOf("https://www.youtube.com/watch?v=mixed123"), peekedUrls)
             assertEquals("https://www.youtube.com/watch?v=mixed123", slice.summaryInput.videoUri)
             assertEquals(listOf("https://docs.example.org/spec"), slice.summaryInput.webUrls)
+        }
+
+    @Test
+    fun `default ConversationSliceCollector uses SocialPeekFactory without GenericWebResolver for general web URLs`() =
+        runTest {
+            var hitCount = 0
+            val server = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)
+            server.createContext("/article") { exchange ->
+                hitCount++
+                val body = "<html><head><title>Local Article</title></head><body>Hello</body></html>".toByteArray()
+                exchange.sendResponseHeaders(200, body.size.toLong())
+                exchange.responseBody.use { it.write(body) }
+            }
+            server.start()
+            try {
+                val webUrl = "http://127.0.0.1:${server.address.port}/article"
+                val targetMsg = createMockMessage(9501L, "Alice", "Check $webUrl")
+
+                val defaultCollector =
+                    ConversationSliceCollector(
+                        historyFetcher = { _, _ -> emptyList() },
+                        forwardFetcher = { _, _ -> emptyList() },
+                    )
+
+                assertNull(defaultCollector.peekResolver(webUrl), "Default peekResolver must exclude GenericWebResolver")
+                assertEquals(0, hitCount, "Default peekResolver must not scrape general web URLs")
+
+                val slice = defaultCollector.collectSlice(targetMsg)
+                assertNotNull(slice)
+                assertEquals(0, hitCount)
+                assertEquals(webUrl, slice.primaryUrl)
+                assertEquals(listOf(webUrl), slice.summaryInput.webUrls)
+                assertNull(slice.summaryInput.title)
+                assertTrue(slice.summaryInput.comments.isEmpty())
+                assertNotNull(slice.lookbackProvider)
+            } finally {
+                server.stop(0)
+            }
+        }
+
+    @Test
+    fun `collectSlice enriches YouTube metadata and falls back to regex videoUri when peekResolver fails`() =
+        runTest {
+            val logger = LoggerFactory.getLogger(ConversationSliceCollector::class.java) as Logger
+            val listAppender = ListAppender<ILoggingEvent>()
+            listAppender.start()
+            logger.addAppender(listAppender)
+
+            try {
+                val baseTime = Instant.parse("2026-11-06T12:00:00Z")
+                val ytUrl = "https://youtu.be/dQw4w9WgXcQ"
+                val webUrl = "https://kotlinlang.org/docs/home.html"
+                val msg1 = createMockMessage(9601L, "Alice", "Docs: $webUrl", timestamp = baseTime)
+                val targetMsg = createMockMessage(9602L, "Bob", "Watch: $ytUrl", timestamp = baseTime + 1.minutes)
+
+                // Case 1: YouTubeResolver succeeds via peekResolver
+                val successCollector =
+                    ConversationSliceCollector(
+                        historyFetcher = { _, _ -> listOf(msg1) },
+                        forwardFetcher = { _, _ -> emptyList() },
+                        peekResolver = { url ->
+                            PeekPost(
+                                platform = Platform.YOUTUBE,
+                                id = "dQw4w9WgXcQ",
+                                originalUrl = url,
+                                cleanUrl = "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+                                author = Author(username = "Creator"),
+                                title = "Demo Talk",
+                                content = "Creator description body",
+                                comments = listOf(Comment(author = "viewer1", content = "Helpful breakdown")),
+                                rawData = mapOf("durationSeconds" to "240"),
+                            )
+                        },
+                    )
+                val enrichedSlice = successCollector.collectSlice(targetMsg)
+                assertNotNull(enrichedSlice)
+                assertFalse(enrichedSlice.durationExceeded)
+                assertEquals("https://www.youtube.com/watch?v=dQw4w9WgXcQ", enrichedSlice.summaryInput.videoUri)
+                assertEquals(240L, enrichedSlice.summaryInput.videoDurationSeconds)
+                assertTrue(enrichedSlice.summaryInput.content.contains("Creator description body"))
+                assertEquals(listOf("Helpful breakdown"), enrichedSlice.summaryInput.comments)
+                assertEquals(listOf(webUrl), enrichedSlice.summaryInput.webUrls)
+
+                // Case 2: peekResolver returns null (e.g. missing YouTube Data API key)
+                val nullCollector =
+                    ConversationSliceCollector(
+                        historyFetcher = { _, _ -> listOf(msg1) },
+                        forwardFetcher = { _, _ -> emptyList() },
+                        peekResolver = { null },
+                    )
+                val nullSlice = nullCollector.collectSlice(targetMsg)
+                assertNotNull(nullSlice)
+                assertFalse(nullSlice.durationExceeded)
+                assertEquals(ytUrl, nullSlice.primaryUrl)
+                assertEquals(ytUrl, nullSlice.summaryInput.videoUri)
+                assertNull(nullSlice.summaryInput.videoDurationSeconds)
+                assertEquals(
+                    VideoProcessingMode.STATIC,
+                    GeminiPromptBuilder.resolveProcessingMode(nullSlice.summaryInput.videoDurationSeconds),
+                )
+                assertEquals(listOf(webUrl), nullSlice.summaryInput.webUrls)
+                assertNotNull(nullSlice.lookbackProvider)
+                assertTrue(
+                    listAppender.list.any {
+                        it.level == Level.WARN && it.formattedMessage.contains(ytUrl)
+                    },
+                )
+
+                listAppender.list.clear()
+
+                // Case 3: peekResolver throws exception
+                val throwingCollector =
+                    ConversationSliceCollector(
+                        historyFetcher = { _, _ -> listOf(msg1) },
+                        forwardFetcher = { _, _ -> emptyList() },
+                        peekResolver = { throw IllegalStateException("YouTube Data API 403") },
+                    )
+                val throwSlice = throwingCollector.collectSlice(targetMsg)
+                assertNotNull(throwSlice)
+                assertFalse(throwSlice.durationExceeded)
+                assertEquals(ytUrl, throwSlice.primaryUrl)
+                assertEquals(ytUrl, throwSlice.summaryInput.videoUri)
+                assertNull(throwSlice.summaryInput.videoDurationSeconds)
+                assertEquals(
+                    VideoProcessingMode.STATIC,
+                    GeminiPromptBuilder.resolveProcessingMode(throwSlice.summaryInput.videoDurationSeconds),
+                )
+                assertEquals(listOf(webUrl), throwSlice.summaryInput.webUrls)
+                assertNotNull(throwSlice.lookbackProvider)
+                assertTrue(
+                    listAppender.list.any {
+                        it.level == Level.WARN && it.formattedMessage.contains(ytUrl)
+                    },
+                )
+            } finally {
+                logger.detachAppender(listAppender)
+                listAppender.stop()
+            }
         }
 }

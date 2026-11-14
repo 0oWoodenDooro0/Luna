@@ -1,5 +1,9 @@
 package luna.summarizer
 
+import ch.qos.logback.classic.Level
+import ch.qos.logback.classic.Logger
+import ch.qos.logback.classic.spi.ILoggingEvent
+import ch.qos.logback.core.read.ListAppender
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.mock.MockEngine
 import io.ktor.client.engine.mock.respond
@@ -17,6 +21,7 @@ import kotlinx.serialization.json.JsonPrimitive
 import luna.core.ai.ChatImageAttachment
 import luna.core.ai.GeminiInteractionTools
 import luna.core.ai.GroundingCitation
+import org.slf4j.LoggerFactory
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -170,76 +175,53 @@ class GeminiSummarizerMultimodalGroundingTest {
         }
 
     @Test
-    fun `summarize falls back to text-only when image attachment causes Gemini API 400 error`() =
+    fun `summarize fails fast with 1 request and logs error when image attachment causes Gemini API 400 error`() =
         runTest {
-            var requestCount = 0
-            val recordedBodies = mutableListOf<String>()
+            val logger = LoggerFactory.getLogger(GeminiSummarizer::class.java) as Logger
+            val listAppender = ListAppender<ILoggingEvent>()
+            listAppender.start()
+            logger.addAppender(listAppender)
 
-            val fallbackResponseJson =
-                """
-                {
-                  "id": "int-img-fallback",
-                  "status": "completed",
-                  "steps": [
-                    {
-                      "type": "model_output",
-                      "content": [
-                        {
-                          "type": "text",
-                          "text": "TL;DR:\n已完成純文字摘要（圖片無法存取）。"
-                        }
-                      ]
-                    }
-                  ]
-                }
-                """.trimIndent()
-
-            val mockEngine =
-                MockEngine { request ->
-                    requestCount++
-                    recordedBodies.add(request.body.toByteArray().decodeToString())
-                    if (requestCount == 1) {
+            try {
+                var requestCount = 0
+                val mockEngine =
+                    MockEngine {
+                        requestCount++
                         respond(
                             content = """{"error": {"code": 400, "message": "Unable to fetch image from URI", "status": "INVALID_ARGUMENT"}}""",
                             status = HttpStatusCode.BadRequest,
                             headers = headersOf(HttpHeaders.ContentType, "application/json"),
                         )
-                    } else {
-                        respond(
-                            content = fallbackResponseJson,
-                            status = HttpStatusCode.OK,
-                            headers = headersOf(HttpHeaders.ContentType, "application/json"),
-                        )
                     }
-                }
 
-            val summarizer =
-                GeminiSummarizer(
-                    config = GeminiConfig(apiKey = "test-key", searchGroundingEnabled = false),
-                    httpClient = createTestClient(mockEngine),
-                )
+                val summarizer =
+                    GeminiSummarizer(
+                        config = GeminiConfig(apiKey = "test-key", searchGroundingEnabled = false),
+                        httpClient = createTestClient(mockEngine),
+                    )
 
-            val input =
-                SummaryInput(
-                    content = "[Alice]: 看看這張圖片討論的部署方案",
-                    imageAttachments =
-                        listOf(
-                            ChatImageAttachment(
-                                url = "https://cdn.discordapp.com/attachments/100/200/expired.png",
-                                mimeType = "image/png",
-                                filename = "expired.png",
+                val input =
+                    SummaryInput(
+                        content = "[Alice]: 看看這張圖片討論的部署方案",
+                        imageAttachments =
+                            listOf(
+                                ChatImageAttachment(
+                                    url = "https://cdn.discordapp.com/attachments/100/200/expired.png",
+                                    mimeType = "image/png",
+                                    filename = "expired.png",
+                                ),
                             ),
-                        ),
-                )
+                    )
 
-            val result = summarizer.summarize(input)
-            assertIs<SummaryResult.Success>(result)
-            assertTrue(result.text.contains("已完成純文字摘要"))
-            assertEquals(2, requestCount)
-
-            assertTrue(recordedBodies[0].contains("https://cdn.discordapp.com/attachments/100/200/expired.png"))
-            assertFalse(recordedBodies[1].contains("https://cdn.discordapp.com/attachments/100/200/expired.png"))
-            assertFalse(recordedBodies[1].contains("\"type\":\"image\""))
+                val result = summarizer.summarize(input)
+                assertIs<SummaryResult.Error.ApiError>(result)
+                assertEquals(400, result.statusCode)
+                assertEquals(1, requestCount, "Image failure must NOT retry without images")
+                assertTrue(listAppender.list.any { it.level == Level.ERROR })
+            } finally {
+                logger.detachAppender(listAppender)
+                listAppender.stop()
+            }
         }
 
     @Test
@@ -438,119 +420,132 @@ class GeminiSummarizerMultimodalGroundingTest {
         }
 
     @Test
-    fun `summarize falls back to text-only when multimodal payload with images fails`() =
+    fun `summarize fails fast with 1 request and logs error when multimodal payload with images and tools fails`() =
         runTest {
-            var requestCount = 0
-            val recordedBodies = mutableListOf<String>()
+            val logger = LoggerFactory.getLogger(GeminiSummarizer::class.java) as Logger
+            val listAppender = ListAppender<ILoggingEvent>()
+            listAppender.start()
+            logger.addAppender(listAppender)
 
-            val mockEngine =
-                MockEngine { request ->
-                    requestCount++
-                    recordedBodies.add(request.body.toByteArray().decodeToString())
-                    if (requestCount == 1) {
+            try {
+                var requestCount = 0
+                val mockEngine =
+                    MockEngine {
+                        requestCount++
                         respond(
                             content = """{"error": {"code": 400, "message": "Cannot download image URL"}}""",
                             status = HttpStatusCode.BadRequest,
                             headers = headersOf(HttpHeaders.ContentType, "application/json"),
                         )
-                    } else {
-                        respond(
-                            content =
-                                """{"id": "int-no-img", "status": "completed", """ +
-                                    """"steps": [{"type": "model_output", "content": [{"type": "text", "text": "TL;DR:\nText-only fallback summary."}]}]}""",
-                            status = HttpStatusCode.OK,
-                            headers = headersOf(HttpHeaders.ContentType, "application/json"),
-                        )
                     }
-                }
 
-            val summarizer =
-                GeminiSummarizer(
-                    config = GeminiConfig(apiKey = "test-key", searchGroundingEnabled = true),
-                    httpClient = createTestClient(mockEngine),
-                )
+                val summarizer =
+                    GeminiSummarizer(
+                        config = GeminiConfig(apiKey = "test-key", searchGroundingEnabled = true, urlContextEnabled = true),
+                        httpClient = createTestClient(mockEngine),
+                    )
 
-            val input =
-                SummaryInput(
-                    content = "Check this broken image link",
-                    imageAttachments =
-                        listOf(
-                            ChatImageAttachment(
-                                url = "https://cdn.discordapp.com/attachments/1/2/broken.png",
-                                mimeType = "image/png",
-                                filename = "broken.png",
+                val input =
+                    SummaryInput(
+                        content = "Check this broken image link and https://example.com/spec",
+                        webUrls = listOf("https://example.com/spec"),
+                        imageAttachments =
+                            listOf(
+                                ChatImageAttachment(
+                                    url = "https://cdn.discordapp.com/attachments/1/2/broken.png",
+                                    mimeType = "image/png",
+                                    filename = "broken.png",
+                                ),
                             ),
-                        ),
-                )
+                    )
 
-            val result = summarizer.summarize(input)
-            assertIs<SummaryResult.Success>(result)
-            assertEquals("TL;DR:\nText-only fallback summary.", result.text)
-            assertEquals(2, requestCount)
-            assertTrue(recordedBodies[0].contains("broken.png"))
-            assertFalse(recordedBodies[1].contains("broken.png"))
-            assertFalse(recordedBodies[1].contains("\"type\":\"image\""))
+                val result = summarizer.summarize(input)
+                assertIs<SummaryResult.Error.ApiError>(result)
+                assertEquals(400, result.statusCode)
+                assertEquals(1, requestCount, "Must fail fast with 1 upstream attempt and zero no-images/no-search retries")
+                assertTrue(listAppender.list.any { it.level == Level.ERROR })
+            } finally {
+                logger.detachAppender(listAppender)
+                listAppender.stop()
+            }
         }
 
     @Test
-    fun `summarize preserves valid model_output when url_context_result contains unsafe status and excludes retrieved URLs`() =
+    fun `summarize preserves valid model_output when url_context_result contains unsafe status logs error and excludes retrieved URLs`() =
         runTest {
-            val responseJson =
-                """
-                {
-                  "id": "int-partial-uc",
-                  "status": "completed",
-                  "steps": [
+            val logger = LoggerFactory.getLogger(GeminiSummarizer::class.java) as Logger
+            val listAppender = ListAppender<ILoggingEvent>()
+            listAppender.start()
+            logger.addAppender(listAppender)
+
+            try {
+                val responseJson =
+                    """
                     {
-                      "type": "url_context_result",
-                      "call_id": "uc-1",
-                      "result": [
-                        { "retrieved_url": "https://safe.example.com/guide", "status": "success" },
-                        { "retrieved_url": "https://blocked.example.com/unsafe", "status": "unsafe" }
-                      ]
-                    },
-                    {
-                      "type": "model_output",
-                      "content": [
+                      "id": "int-partial-uc",
+                      "status": "completed",
+                      "steps": [
                         {
-                          "type": "text",
-                          "text": "TL;DR:\n已依據安全網頁完成摘要。",
-                          "annotations": [
-                            { "type": "url_citation", "url": "https://blocked.example.com/unsafe", "title": "Blocked" },
-                            { "type": "url_citation", "url": "https://external.example.org/ref", "title": "External Ref" }
+                          "type": "url_context_result",
+                          "call_id": "uc-1",
+                          "result": [
+                            { "retrieved_url": "https://safe.example.com/guide", "status": "success" },
+                            { "retrieved_url": "https://blocked.example.com/unsafe", "status": "unsafe" }
+                          ]
+                        },
+                        {
+                          "type": "model_output",
+                          "content": [
+                            {
+                              "type": "text",
+                              "text": "TL;DR:\n已依據安全網頁完成摘要。",
+                              "annotations": [
+                                { "type": "url_citation", "url": "https://blocked.example.com/unsafe", "title": "Blocked" },
+                                { "type": "url_citation", "url": "https://external.example.org/ref", "title": "External Ref" }
+                              ]
+                            }
                           ]
                         }
                       ]
                     }
-                  ]
-                }
-                """.trimIndent()
+                    """.trimIndent()
 
-            val mockEngine =
-                MockEngine {
-                    respond(
-                        content = responseJson,
-                        status = HttpStatusCode.OK,
-                        headers = headersOf(HttpHeaders.ContentType, "application/json"),
+                val mockEngine =
+                    MockEngine {
+                        respond(
+                            content = responseJson,
+                            status = HttpStatusCode.OK,
+                            headers = headersOf(HttpHeaders.ContentType, "application/json"),
+                        )
+                    }
+
+                val summarizer =
+                    GeminiSummarizer(
+                        config = GeminiConfig(apiKey = "test-key", searchGroundingEnabled = true, urlContextEnabled = true),
+                        httpClient = createTestClient(mockEngine),
                     )
-                }
 
-            val summarizer =
-                GeminiSummarizer(
-                    config = GeminiConfig(apiKey = "test-key", searchGroundingEnabled = true, urlContextEnabled = true),
-                    httpClient = createTestClient(mockEngine),
+                val result =
+                    summarizer.summarize(
+                        SummaryInput(
+                            content = "Compare https://safe.example.com/guide and https://blocked.example.com/unsafe",
+                            webUrls = listOf("https://safe.example.com/guide", "https://blocked.example.com/unsafe"),
+                        ),
+                    )
+
+                assertIs<SummaryResult.Success>(result)
+                assertEquals("TL;DR:\n已依據安全網頁完成摘要。", result.text)
+                assertEquals(listOf(GroundingCitation("External Ref", "https://external.example.org/ref")), result.citations)
+                assertTrue(
+                    listAppender.list.any {
+                        it.level == Level.ERROR &&
+                            it.formattedMessage.contains("https://blocked.example.com/unsafe") &&
+                            it.formattedMessage.contains("unsafe")
+                    },
                 )
-
-            val result =
-                summarizer.summarize(
-                    SummaryInput(
-                        content = "Compare https://safe.example.com/guide and https://blocked.example.com/unsafe",
-                        webUrls = listOf("https://safe.example.com/guide", "https://blocked.example.com/unsafe"),
-                    ),
-                )
-
-            assertIs<SummaryResult.Success>(result)
-            assertEquals("TL;DR:\n已依據安全網頁完成摘要。", result.text)
-            assertEquals(listOf(GroundingCitation("External Ref", "https://external.example.org/ref")), result.citations)
+            } finally {
+                logger.detachAppender(listAppender)
+                listAppender.stop()
+            }
         }
 }

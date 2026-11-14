@@ -15,7 +15,6 @@ import luna.core.ai.AiTraceFailureCategory
 import luna.core.ai.AiTracePipeline
 import luna.core.ai.AiTraceRecorder
 import luna.core.ai.AiTraceRedactor
-import luna.core.ai.AiTraceSession
 import luna.core.ai.AiTraceTrigger
 import luna.core.ai.ContextUrlClassifier
 import luna.core.ai.GeminiInteractionClient
@@ -131,7 +130,7 @@ open class GeminiSummarizer(
                 )
             },
         ) { session, isStandalone ->
-            val result = executeSummarize(input, lookbackProvider, session)
+            val result = executeSummarize(input, lookbackProvider)
             if (isStandalone && session != null) {
                 when (result) {
                     is SummaryResult.Success -> {
@@ -160,7 +159,6 @@ open class GeminiSummarizer(
     private suspend fun executeSummarize(
         input: SummaryInput,
         lookbackProvider: (suspend (reason: String) -> String?)?,
-        session: AiTraceSession?,
     ): SummaryResult {
         if (!config.isConfigured) {
             logger.warn("Skipping Gemini summarization: GEMINI_API_KEY is not configured")
@@ -180,77 +178,12 @@ open class GeminiSummarizer(
             return summarizeAgentic(input)
         }
 
+        val initialTools = buildTools(input, includeLookback = lookbackProvider != null)
+        val initialVariant = resolveVariant(initialTools)
+        val initialResult = runSyncInteraction(input, tools = initialTools, variant = initialVariant)
+
         if (lookbackProvider == null) {
-            val initialTools = buildTools(input, includeLookback = false)
-            val initialVariant = resolveVariant(initialTools)
-
-            val initialResult =
-                try {
-                    runSyncInteraction(input, tools = initialTools, variant = initialVariant)
-                } catch (e: Exception) {
-                    if (input.imageAttachments.isNotEmpty()) {
-                        logger.warn(
-                            "Multimodal summarization with {} images threw exception ({}), retrying text-only",
-                            input.imageAttachments.size,
-                            e.message,
-                        )
-                        session?.markDegraded("Image summarization exception: ${e.message}")
-                        return runSyncInteraction(
-                            input = input.copy(imageAttachments = emptyList()),
-                            tools = emptyList(),
-                            variant = "no-images",
-                        )
-                    }
-                    throw e
-                }
-
-            if (initialResult is SummaryResult.Error && input.imageAttachments.isNotEmpty()) {
-                logger.warn(
-                    "Multimodal summarization with {} images failed ({}), retrying text-only",
-                    input.imageAttachments.size,
-                    initialResult.message,
-                )
-                session?.markDegraded("Image summarization failed: ${initialResult.message}")
-                return runSyncInteraction(
-                    input = input.copy(imageAttachments = emptyList()),
-                    tools = emptyList(),
-                    variant = "no-images",
-                )
-            }
-
             return initialResult
-        }
-
-        val toolEnabledTools = buildTools(input, includeLookback = true)
-        val toolVariant = resolveVariant(toolEnabledTools)
-        val nonLookbackTools =
-            buildTools(input, includeLookback = false).filterNot {
-                it.type == GeminiInteractionTool.TYPE_FUNCTION && it.name == GeminiTools.FETCH_EARLIER_MESSAGES
-            }
-
-        val initialResult =
-            try {
-                runSyncInteraction(input, tools = toolEnabledTools, variant = toolVariant)
-            } catch (e: Exception) {
-                logger.warn("Tool-enabled summarization failed with exception, falling back to baseline", e)
-                session?.markDegraded("Tool-enabled summarization exception: ${e.message}")
-                return retryBaseline(
-                    input = input,
-                    tools = nonLookbackTools,
-                    session = session,
-                    initialVariant = "baseline",
-                )
-            }
-
-        if (initialResult is SummaryResult.Error) {
-            logger.warn("Tool-enabled summarization returned error ({}), falling back to baseline", initialResult.message)
-            session?.markDegraded("Tool-enabled summarization error: ${initialResult.message}")
-            return retryBaseline(
-                input = input,
-                tools = nonLookbackTools,
-                session = session,
-                initialVariant = "baseline",
-            )
         }
 
         if (initialResult is SummaryResult.ToolCall) {
@@ -261,13 +194,11 @@ open class GeminiSummarizer(
                     try {
                         lookbackProvider(reason) ?: ConversationSliceCollector.NO_FURTHER_HISTORY_MESSAGE
                     } catch (e: Exception) {
-                        logger.warn("Lookback provider threw exception, falling back to baseline summary", e)
-                        session?.markDegraded("Lookback provider failed: ${e.message}")
-                        return retryBaseline(
-                            input = input,
-                            tools = nonLookbackTools,
-                            session = session,
-                            initialVariant = "baseline",
+                        logger.error("Lookback provider threw exception while fetching earlier messages", e)
+                        return SummaryResult.Error.Generic(
+                            message = "Lookback provider failed: ${e.message}",
+                            cause = e,
+                            failureCategory = AiTraceFailureCategory.CONTEXT_ERROR,
                         )
                     }
 
@@ -275,75 +206,42 @@ open class GeminiSummarizer(
                     try {
                         initialResult.continuation.invoke(earlierContext)
                     } catch (e: Exception) {
-                        logger.warn("Tool continuation threw exception, falling back to baseline summary", e)
-                        session?.markDegraded("Tool continuation exception: ${e.message}")
-                        return retryBaseline(
-                            input = input,
-                            tools = nonLookbackTools,
-                            session = session,
-                            initialVariant = "baseline",
+                        logger.error("Tool continuation threw exception", e)
+                        return SummaryResult.Error.Generic(
+                            message = "Tool continuation failed: ${e.message}",
+                            cause = e,
+                            failureCategory = classifySummaryException(e),
                         )
                     }
 
-                return if (lookbackResult is SummaryResult.Success) {
-                    lookbackResult
-                } else {
-                    logger.warn("Model failed or attempted multiple lookback turns after tool response, falling back to baseline")
-                    session?.markDegraded("Lookback continuation did not succeed: $lookbackResult")
-                    retryBaseline(
-                        input = input,
-                        tools = nonLookbackTools,
-                        session = session,
-                        initialVariant = "baseline",
-                    )
+                return when (lookbackResult) {
+                    is SummaryResult.Success -> {
+                        lookbackResult
+                    }
+
+                    is SummaryResult.ToolCall -> {
+                        logger.error("Model attempted multiple lookback turns after tool response")
+                        SummaryResult.Error.Generic(
+                            message = "Model attempted multiple lookback turns after tool response",
+                            failureCategory = AiTraceFailureCategory.PARSE_ERROR,
+                        )
+                    }
+
+                    is SummaryResult.Error -> {
+                        lookbackResult
+                    }
                 }
             } else {
-                logger.warn("Unhandled tool call or missing continuation for {}, falling back to baseline", initialResult.name)
-                session?.markDegraded("Unhandled tool call ${initialResult.name}")
-                return retryBaseline(
-                    input = input,
-                    tools = nonLookbackTools,
-                    session = session,
-                    initialVariant = "baseline",
+                logger.error("Unhandled tool call or missing continuation for {}", initialResult.name)
+                return SummaryResult.Error.Generic(
+                    message = "Unhandled tool call or missing continuation for ${initialResult.name}",
+                    failureCategory = AiTraceFailureCategory.PARSE_ERROR,
                 )
             }
         }
 
         return initialResult
     }
-
-    private suspend fun retryBaseline(
-        input: SummaryInput,
-        tools: List<GeminiInteractionTool>,
-        session: AiTraceSession?,
-        initialVariant: String = "baseline",
-    ): SummaryResult =
-        try {
-            val res = runSyncInteraction(input, tools = tools, variant = initialVariant)
-            if (res is SummaryResult.Error && input.imageAttachments.isNotEmpty()) {
-                logger.warn("Baseline summarization with images failed ({}), retrying text-only", res.message)
-                session?.markDegraded("Baseline with images failed: ${res.message}")
-                runSyncInteraction(
-                    input = input.copy(imageAttachments = emptyList()),
-                    tools = emptyList(),
-                    variant = "no-images",
-                )
-            } else {
-                res
-            }
-        } catch (e: Exception) {
-            if (input.imageAttachments.isNotEmpty()) {
-                logger.warn("Baseline summarization threw exception ({}), retrying text-only", e.message)
-                session?.markDegraded("Baseline exception with images: ${e.message}")
-                runSyncInteraction(
-                    input = input.copy(imageAttachments = emptyList()),
-                    tools = emptyList(),
-                    variant = "no-images",
-                )
-            } else {
-                throw e
-            }
-        }
 
     private suspend fun summarizeAgentic(input: SummaryInput): SummaryResult {
         val systemInstruction = GeminiPromptBuilder.buildSystemInstruction(input)
@@ -360,7 +258,7 @@ open class GeminiSummarizer(
                 systemInstruction = systemInstruction,
                 imageAttachments = input.imageAttachments,
                 videoUri = input.videoUri,
-                videoMimeType = "video/mp4",
+                videoMimeType = null,
                 videoProcessingMode = VideoProcessingMode.AGENTIC,
                 videoDurationSeconds = input.videoDurationSeconds,
                 webUrlCount = input.webUrls.size,
@@ -390,7 +288,7 @@ open class GeminiSummarizer(
                 systemInstruction = systemInstruction,
                 imageAttachments = input.imageAttachments,
                 videoUri = input.videoUri,
-                videoMimeType = if (input.videoUri.isNullOrBlank()) null else "video/mp4",
+                videoMimeType = null,
                 videoProcessingMode = GeminiPromptBuilder.resolveProcessingMode(input.videoDurationSeconds),
                 videoDurationSeconds = input.videoDurationSeconds,
                 webUrlCount = input.webUrls.size,
@@ -411,6 +309,16 @@ open class GeminiSummarizer(
     ): SummaryResult =
         when (result) {
             is InteractionExecutionResult.Success -> {
+                for (entry in result.urlContextResults) {
+                    if (!entry.isSuccess) {
+                        logger.error(
+                            "Gemini url_context retrieval reported non-success status (interactionId={}, retrieved_url={}, status={})",
+                            result.interactionId,
+                            entry.retrievedUrl,
+                            entry.status,
+                        )
+                    }
+                }
                 SummaryResult.Success(
                     text = result.text,
                     citations = result.citations,
@@ -418,6 +326,7 @@ open class GeminiSummarizer(
             }
 
             is InteractionExecutionResult.Error.RateLimitExceeded -> {
+                logger.error("Gemini Interactions API rate limited: {}", result.message)
                 SummaryResult.Error.RateLimitExceeded(
                     message = result.message,
                     retryAfterSeconds = result.retryAfterSeconds,
@@ -425,6 +334,7 @@ open class GeminiSummarizer(
             }
 
             is InteractionExecutionResult.Error.Timeout -> {
+                logger.error("Gemini Interactions API timed out: {}", result.message)
                 SummaryResult.Error.Timeout(
                     message = result.message,
                     cause = result.cause,
@@ -432,6 +342,7 @@ open class GeminiSummarizer(
             }
 
             is InteractionExecutionResult.Error.ApiError -> {
+                logger.error("Gemini Interactions API error (status={}): {}", result.statusCode, result.message)
                 SummaryResult.Error.ApiError(
                     statusCode = result.statusCode,
                     message = result.message,
@@ -439,6 +350,7 @@ open class GeminiSummarizer(
             }
 
             is InteractionExecutionResult.Error.EmptyOutput -> {
+                logger.error("Gemini Interactions API returned empty output: {}", result.message)
                 SummaryResult.Error.Generic(
                     message = result.message,
                     failureCategory = result.failureCategory,
@@ -446,6 +358,7 @@ open class GeminiSummarizer(
             }
 
             is InteractionExecutionResult.Error.SafetyBlock -> {
+                logger.error("Gemini Interactions API blocked output due to safety: {}", result.message)
                 SummaryResult.Error.Generic(
                     message = result.message,
                     failureCategory = result.failureCategory,
@@ -453,6 +366,7 @@ open class GeminiSummarizer(
             }
 
             is InteractionExecutionResult.Error.Generic -> {
+                logger.error("Gemini Interactions API failed: {}", result.message, result.cause)
                 SummaryResult.Error.Generic(
                     message = result.message,
                     cause = result.cause,
@@ -472,7 +386,7 @@ open class GeminiSummarizer(
     ): SummaryResult {
         val functionCall = result.functionCalls.firstOrNull()
         if (functionCall == null || functionCall.name.isBlank()) {
-            logger.warn("Gemini returned function_call step with missing function name")
+            logger.error("Gemini returned function_call step with missing function name")
             return SummaryResult.Error.Generic(
                 message = "Malformed tool call: missing function name",
                 failureCategory = AiTraceFailureCategory.PARSE_ERROR,
@@ -485,7 +399,7 @@ open class GeminiSummarizer(
                 .mapNotNull { it.name?.trim()?.takeIf { n -> n.isNotBlank() } }
                 .toSet()
         if (declaredToolNames.isNotEmpty() && !declaredToolNames.contains(functionCall.name)) {
-            logger.warn("Gemini requested unknown tool '{}' which was not declared", functionCall.name)
+            logger.error("Gemini requested unknown tool '{}' which was not declared", functionCall.name)
             return SummaryResult.Error.Generic(
                 message = "Unknown tool call requested by Gemini: ${functionCall.name}",
                 failureCategory = AiTraceFailureCategory.PARSE_ERROR,
@@ -494,7 +408,7 @@ open class GeminiSummarizer(
 
         val args = functionCall.argumentsAsStrings()
         if (functionCall.name == GeminiTools.FETCH_EARLIER_MESSAGES && args["reason"].isNullOrBlank()) {
-            logger.warn("Gemini tool call '{}' missing required 'reason' argument", functionCall.name)
+            logger.error("Gemini tool call '{}' missing required 'reason' argument", functionCall.name)
             return SummaryResult.Error.Generic(
                 message = "Malformed tool call: missing required 'reason' parameter for ${functionCall.name}",
                 failureCategory = AiTraceFailureCategory.PARSE_ERROR,

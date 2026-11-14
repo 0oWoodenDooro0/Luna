@@ -1,5 +1,9 @@
 package luna.summarizer
 
+import ch.qos.logback.classic.Level
+import ch.qos.logback.classic.Logger
+import ch.qos.logback.classic.spi.ILoggingEvent
+import ch.qos.logback.core.read.ListAppender
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.mock.MockEngine
 import io.ktor.client.engine.mock.respond
@@ -18,6 +22,7 @@ import kotlinx.serialization.json.JsonPrimitive
 import luna.core.ai.AiTraceFailureCategory
 import luna.core.ai.GeminiInteractionTools
 import luna.core.ai.GeminiTools
+import org.slf4j.LoggerFactory
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -539,270 +544,221 @@ class GeminiSummarizerLookbackTest {
         }
 
     @Test
-    fun `falls back to baseline summary without fetch_earlier_messages when tool-enabled call fails`() =
+    fun `fails fast without baseline retry and logs error when tool-enabled call fails`() =
         runTest {
-            var requestCount = 0
-            val recordedPayloads = mutableListOf<String>()
+            val logger = LoggerFactory.getLogger(GeminiSummarizer::class.java) as Logger
+            val listAppender = ListAppender<ILoggingEvent>()
+            listAppender.start()
+            logger.addAppender(listAppender)
 
-            val baselineResponse =
-                """
-                {
-                  "id": "int-baseline-ok",
-                  "status": "completed",
-                  "steps": [
-                    {
-                      "type": "model_output",
-                      "content": [{ "type": "text", "text": "TL;DR:\nBaseline fallback summary succeeded." }]
-                    }
-                  ]
-                }
-                """.trimIndent()
-
-            val mockEngine =
-                MockEngine { request ->
-                    requestCount++
-                    recordedPayloads.add(request.body.toByteArray().decodeToString())
-                    if (requestCount == 1) {
+            try {
+                var requestCount = 0
+                val mockEngine =
+                    MockEngine {
+                        requestCount++
                         respond(
                             content = """{"error": {"code": 500, "message": "Tool call failed"}}""",
                             status = HttpStatusCode.InternalServerError,
                             headers = headersOf(HttpHeaders.ContentType, "application/json"),
                         )
-                    } else {
-                        respond(
-                            content = baselineResponse,
-                            status = HttpStatusCode.OK,
-                            headers = headersOf(HttpHeaders.ContentType, "application/json"),
-                        )
                     }
-                }
 
-            val summarizer =
-                GeminiSummarizer(
-                    config = GeminiConfig(apiKey = "test-key"),
-                    httpClient = createTestClient(mockEngine),
-                )
-
-            val input = SummaryInput(content = "[Alice]: Discussion content")
-            val result =
-                summarizer.summarize(input) { _ ->
-                    "Earlier messages"
-                }
-
-            assertIs<SummaryResult.Success>(result)
-            assertTrue(result.text.contains("Baseline fallback summary succeeded"))
-            assertEquals(2, requestCount)
-            assertTrue(recordedPayloads[0].contains("fetch_earlier_messages"))
-            assertFalse(recordedPayloads[1].contains("fetch_earlier_messages"))
-        }
-
-    @Test
-    fun `falls back to baseline summary when model attempts more than one lookback turn`() =
-        runTest {
-            var requestCount = 0
-            val recordedPayloads = mutableListOf<String>()
-
-            val toolCallResponse =
-                """
-                {
-                  "id": "int-loop-1",
-                  "status": "requires_action",
-                  "steps": [
-                    {
-                      "type": "function_call",
-                      "id": "call-loop",
-                      "name": "fetch_earlier_messages",
-                      "arguments": { "reason": "Need even more history" }
-                    }
-                  ]
-                }
-                """.trimIndent()
-
-            val baselineResponse =
-                """
-                {
-                  "id": "int-loop-baseline",
-                  "status": "completed",
-                  "steps": [
-                    {
-                      "type": "model_output",
-                      "content": [{ "type": "text", "text": "TL;DR:\nFallback summary after loop limit." }]
-                    }
-                  ]
-                }
-                """.trimIndent()
-
-            val mockEngine =
-                MockEngine { request ->
-                    requestCount++
-                    recordedPayloads.add(request.body.toByteArray().decodeToString())
-                    if (requestCount <= 2) {
-                        respond(
-                            content = toolCallResponse,
-                            status = HttpStatusCode.OK,
-                            headers = headersOf(HttpHeaders.ContentType, "application/json"),
-                        )
-                    } else {
-                        respond(
-                            content = baselineResponse,
-                            status = HttpStatusCode.OK,
-                            headers = headersOf(HttpHeaders.ContentType, "application/json"),
-                        )
-                    }
-                }
-
-            val summarizer =
-                GeminiSummarizer(
-                    config = GeminiConfig(apiKey = "test-key"),
-                    httpClient = createTestClient(mockEngine),
-                )
-
-            val input = SummaryInput(content = "Target conversation")
-            val result =
-                summarizer.summarize(input) { _ ->
-                    "Earlier context chunk"
-                }
-
-            assertIs<SummaryResult.Success>(result)
-            assertTrue(result.text.contains("Fallback summary after loop limit"))
-            assertEquals(3, requestCount)
-            assertFalse(recordedPayloads[2].contains("fetch_earlier_messages"))
-        }
-
-    @Test
-    fun `falls back to baseline summary when lookbackProvider throws an exception`() =
-        runTest {
-            var requestCount = 0
-            val recordedPayloads = mutableListOf<String>()
-
-            val toolCallResponse =
-                """
-                {
-                  "id": "int-prov-err",
-                  "status": "requires_action",
-                  "steps": [
-                    {
-                      "type": "function_call",
-                      "id": "call-pe",
-                      "name": "fetch_earlier_messages",
-                      "arguments": { "reason": "Need history" }
-                    }
-                  ]
-                }
-                """.trimIndent()
-
-            val baselineResponse =
-                """
-                {
-                  "id": "int-prov-base",
-                  "status": "completed",
-                  "steps": [
-                    {
-                      "type": "model_output",
-                      "content": [{ "type": "text", "text": "TL;DR:\nBaseline summary after provider failure." }]
-                    }
-                  ]
-                }
-                """.trimIndent()
-
-            val mockEngine =
-                MockEngine { request ->
-                    requestCount++
-                    recordedPayloads.add(request.body.toByteArray().decodeToString())
-                    val body = if (requestCount == 1) toolCallResponse else baselineResponse
-                    respond(
-                        content = body,
-                        status = HttpStatusCode.OK,
-                        headers = headersOf(HttpHeaders.ContentType, "application/json"),
+                val summarizer =
+                    GeminiSummarizer(
+                        config = GeminiConfig(apiKey = "test-key"),
+                        httpClient = createTestClient(mockEngine),
                     )
-                }
 
-            val summarizer =
-                GeminiSummarizer(
-                    config = GeminiConfig(apiKey = "test-key"),
-                    httpClient = createTestClient(mockEngine),
-                )
+                val input = SummaryInput(content = "[Alice]: Discussion content")
+                val result =
+                    summarizer.summarize(input) { _ ->
+                        "Earlier messages"
+                    }
 
-            val input = SummaryInput(content = "Target conversation")
-            val result =
-                summarizer.summarize(input) { _ ->
-                    throw IllegalStateException("Discord API fetch failed")
-                }
-
-            assertIs<SummaryResult.Success>(result)
-            assertTrue(result.text.contains("Baseline summary after provider failure"))
-            assertEquals(2, requestCount)
-            assertFalse(recordedPayloads[1].contains("fetch_earlier_messages"))
+                assertIs<SummaryResult.Error.ApiError>(result)
+                assertEquals(500, result.statusCode)
+                assertEquals(1, requestCount, "Must fail fast with 1 upstream attempt and no baseline retry")
+                assertTrue(listAppender.list.any { it.level == Level.ERROR })
+            } finally {
+                logger.detachAppender(listAppender)
+                listAppender.stop()
+            }
         }
 
     @Test
-    fun `falls back to baseline summary when tool continuation throws network exception`() =
+    fun `fails without baseline retry and logs error when model attempts more than one lookback turn`() =
         runTest {
-            var requestCount = 0
+            val logger = LoggerFactory.getLogger(GeminiSummarizer::class.java) as Logger
+            val listAppender = ListAppender<ILoggingEvent>()
+            listAppender.start()
+            logger.addAppender(listAppender)
 
-            val toolCallResponse =
-                """
-                {
-                  "id": "int-cont-exc",
-                  "status": "requires_action",
-                  "steps": [
+            try {
+                var requestCount = 0
+                val toolCallResponse =
+                    """
                     {
-                      "type": "function_call",
-                      "id": "call-ce",
-                      "name": "fetch_earlier_messages",
-                      "arguments": { "reason": "Need history" }
+                      "id": "int-loop-1",
+                      "status": "requires_action",
+                      "steps": [
+                        {
+                          "type": "function_call",
+                          "id": "call-loop",
+                          "name": "fetch_earlier_messages",
+                          "arguments": { "reason": "Need even more history" }
+                        }
+                      ]
                     }
-                  ]
-                }
-                """.trimIndent()
+                    """.trimIndent()
 
-            val baselineResponse =
-                """
-                {
-                  "id": "int-cont-base",
-                  "status": "completed",
-                  "steps": [
-                    {
-                      "type": "model_output",
-                      "content": [{ "type": "text", "text": "TL;DR:\nBaseline summary after continuation exception." }]
-                    }
-                  ]
-                }
-                """.trimIndent()
-
-            val mockEngine =
-                MockEngine {
-                    requestCount++
-                    if (requestCount == 1) {
+                val mockEngine =
+                    MockEngine {
+                        requestCount++
                         respond(
                             content = toolCallResponse,
                             status = HttpStatusCode.OK,
                             headers = headersOf(HttpHeaders.ContentType, "application/json"),
                         )
-                    } else if (requestCount == 2) {
-                        throw HttpRequestTimeoutException("https://generativelanguage.googleapis.com", 30000L)
-                    } else {
+                    }
+
+                val summarizer =
+                    GeminiSummarizer(
+                        config = GeminiConfig(apiKey = "test-key"),
+                        httpClient = createTestClient(mockEngine),
+                    )
+
+                val input = SummaryInput(content = "Target conversation")
+                val result =
+                    summarizer.summarize(input) { _ ->
+                        "Earlier context chunk"
+                    }
+
+                assertIs<SummaryResult.Error.Generic>(result)
+                assertEquals(AiTraceFailureCategory.PARSE_ERROR, classifySummaryError(result))
+                assertEquals(2, requestCount, "Must stop after round-2 continuation without a 3rd baseline retry")
+                assertTrue(listAppender.list.any { it.level == Level.ERROR })
+            } finally {
+                logger.detachAppender(listAppender)
+                listAppender.stop()
+            }
+        }
+
+    @Test
+    fun `fails without baseline retry and logs error when lookbackProvider throws an exception`() =
+        runTest {
+            val logger = LoggerFactory.getLogger(GeminiSummarizer::class.java) as Logger
+            val listAppender = ListAppender<ILoggingEvent>()
+            listAppender.start()
+            logger.addAppender(listAppender)
+
+            try {
+                var requestCount = 0
+                val toolCallResponse =
+                    """
+                    {
+                      "id": "int-prov-err",
+                      "status": "requires_action",
+                      "steps": [
+                        {
+                          "type": "function_call",
+                          "id": "call-pe",
+                          "name": "fetch_earlier_messages",
+                          "arguments": { "reason": "Need history" }
+                        }
+                      ]
+                    }
+                    """.trimIndent()
+
+                val mockEngine =
+                    MockEngine {
+                        requestCount++
                         respond(
-                            content = baselineResponse,
+                            content = toolCallResponse,
                             status = HttpStatusCode.OK,
                             headers = headersOf(HttpHeaders.ContentType, "application/json"),
                         )
                     }
-                }
 
-            val summarizer =
-                GeminiSummarizer(
-                    config = GeminiConfig(apiKey = "test-key"),
-                    httpClient = createTestClient(mockEngine),
-                )
+                val summarizer =
+                    GeminiSummarizer(
+                        config = GeminiConfig(apiKey = "test-key"),
+                        httpClient = createTestClient(mockEngine),
+                    )
 
-            val input = SummaryInput(content = "Target conversation")
-            val result =
-                summarizer.summarize(input) { _ ->
-                    "Context data"
-                }
+                val input = SummaryInput(content = "Target conversation")
+                val result =
+                    summarizer.summarize(input) { _ ->
+                        throw IllegalStateException("Discord API fetch failed")
+                    }
 
-            assertIs<SummaryResult.Success>(result)
-            assertTrue(result.text.contains("Baseline summary after continuation exception"))
+                assertIs<SummaryResult.Error.Generic>(result)
+                assertEquals(AiTraceFailureCategory.CONTEXT_ERROR, classifySummaryError(result))
+                assertEquals(1, requestCount, "Lookback provider failure must not trigger baseline retry")
+                assertTrue(listAppender.list.any { it.level == Level.ERROR })
+            } finally {
+                logger.detachAppender(listAppender)
+                listAppender.stop()
+            }
+        }
+
+    @Test
+    fun `fails without baseline retry and logs error when tool continuation throws network exception`() =
+        runTest {
+            val logger = LoggerFactory.getLogger(GeminiSummarizer::class.java) as Logger
+            val listAppender = ListAppender<ILoggingEvent>()
+            listAppender.start()
+            logger.addAppender(listAppender)
+
+            try {
+                var requestCount = 0
+                val toolCallResponse =
+                    """
+                    {
+                      "id": "int-cont-exc",
+                      "status": "requires_action",
+                      "steps": [
+                        {
+                          "type": "function_call",
+                          "id": "call-ce",
+                          "name": "fetch_earlier_messages",
+                          "arguments": { "reason": "Need history" }
+                        }
+                      ]
+                    }
+                    """.trimIndent()
+
+                val mockEngine =
+                    MockEngine {
+                        requestCount++
+                        if (requestCount == 1) {
+                            respond(
+                                content = toolCallResponse,
+                                status = HttpStatusCode.OK,
+                                headers = headersOf(HttpHeaders.ContentType, "application/json"),
+                            )
+                        } else {
+                            throw HttpRequestTimeoutException("https://generativelanguage.googleapis.com", 30000L)
+                        }
+                    }
+
+                val summarizer =
+                    GeminiSummarizer(
+                        config = GeminiConfig(apiKey = "test-key"),
+                        httpClient = createTestClient(mockEngine),
+                    )
+
+                val input = SummaryInput(content = "Target conversation")
+                val result =
+                    summarizer.summarize(input) { _ ->
+                        "Context data"
+                    }
+
+                assertIs<SummaryResult.Error.Timeout>(result)
+                assertEquals(2, requestCount, "Continuation failure must stop after round 2 without baseline retry")
+                assertTrue(listAppender.list.any { it.level == Level.ERROR })
+            } finally {
+                logger.detachAppender(listAppender)
+                listAppender.stop()
+            }
         }
 }

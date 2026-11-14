@@ -1,5 +1,9 @@
 package luna.summarizer
 
+import ch.qos.logback.classic.Level
+import ch.qos.logback.classic.Logger
+import ch.qos.logback.classic.spi.ILoggingEvent
+import ch.qos.logback.core.read.ListAppender
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.mock.MockEngine
 import io.ktor.client.engine.mock.respond
@@ -14,7 +18,7 @@ import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.Json
 import luna.core.ai.ChatImageAttachment
 import luna.core.ai.EmojiSanitizer
-import luna.core.ai.GeminiTools
+import org.slf4j.LoggerFactory
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -621,5 +625,133 @@ class GeminiSummarizerTest {
             )
             assertFalse(recordedPayloads[2].contains("\"type\":\"url_context\""))
             assertTrue(recordedPayloads[2].contains("\"type\":\"google_search\""))
+        }
+
+    @Test
+    fun `negative boundary performs zero layered retries and logs error when interaction fails with images and tools`() =
+        runTest {
+            val logger = LoggerFactory.getLogger(GeminiSummarizer::class.java) as Logger
+            val listAppender = ListAppender<ILoggingEvent>()
+            listAppender.start()
+            logger.addAppender(listAppender)
+
+            try {
+                var requestCount = 0
+                val mockEngine =
+                    MockEngine {
+                        requestCount++
+                        respond(
+                            content = """{"error": {"code": 400, "message": "Unable to fetch image"}}""",
+                            status = HttpStatusCode.BadRequest,
+                            headers = headersOf(HttpHeaders.ContentType, "application/json"),
+                        )
+                    }
+
+                val summarizer =
+                    GeminiSummarizer(
+                        config =
+                            GeminiConfig(
+                                apiKey = "test-key",
+                                searchGroundingEnabled = true,
+                                urlContextEnabled = true,
+                            ),
+                        httpClient = createTestClient(mockEngine),
+                    )
+
+                val result =
+                    summarizer.summarize(
+                        SummaryInput(
+                            content = "Check https://example.com/a",
+                            webUrls = listOf("https://example.com/a"),
+                            imageAttachments =
+                                listOf(
+                                    ChatImageAttachment(
+                                        url = "https://cdn.discordapp.com/attachments/1/2/bad.png",
+                                        mimeType = "image/png",
+                                        filename = "bad.png",
+                                    ),
+                                ),
+                        ),
+                        lookbackProvider = { "Earlier history" },
+                    )
+
+                assertIs<SummaryResult.Error.ApiError>(result)
+                assertEquals(400, result.statusCode)
+                assertEquals(1, requestCount, "GeminiSummarizer must fail fast with 1 upstream request and zero retries")
+                assertTrue(listAppender.list.any { it.level == Level.ERROR })
+            } finally {
+                logger.detachAppender(listAppender)
+                listAppender.stop()
+            }
+        }
+
+    @Test
+    fun `logs error on non-success url_context_result while preserving valid generated summary`() =
+        runTest {
+            val logger = LoggerFactory.getLogger(GeminiSummarizer::class.java) as Logger
+            val listAppender = ListAppender<ILoggingEvent>()
+            listAppender.start()
+            logger.addAppender(listAppender)
+
+            try {
+                val responseJson =
+                    """
+                    {
+                      "id": "int-uc-err",
+                      "status": "completed",
+                      "steps": [
+                        {
+                          "type": "url_context_result",
+                          "call_id": "uc-1",
+                          "result": [
+                            { "retrieved_url": "https://blocked.example.com/bad", "status": "error" }
+                          ]
+                        },
+                        {
+                          "type": "model_output",
+                          "content": [
+                            { "type": "text", "text": "TL;DR:\n已依據對話完成摘要。" }
+                          ]
+                        }
+                      ]
+                    }
+                    """.trimIndent()
+
+                val mockEngine =
+                    MockEngine {
+                        respond(
+                            content = responseJson,
+                            status = HttpStatusCode.OK,
+                            headers = headersOf(HttpHeaders.ContentType, "application/json"),
+                        )
+                    }
+
+                val summarizer =
+                    GeminiSummarizer(
+                        config = GeminiConfig(apiKey = "test-key", urlContextEnabled = true),
+                        httpClient = createTestClient(mockEngine),
+                    )
+
+                val result =
+                    summarizer.summarize(
+                        SummaryInput(
+                            content = "Read https://blocked.example.com/bad",
+                            webUrls = listOf("https://blocked.example.com/bad"),
+                        ),
+                    )
+
+                assertIs<SummaryResult.Success>(result)
+                assertEquals("TL;DR:\n已依據對話完成摘要。", result.text)
+                assertTrue(
+                    listAppender.list.any {
+                        it.level == Level.ERROR &&
+                            it.formattedMessage.contains("https://blocked.example.com/bad") &&
+                            it.formattedMessage.contains("error")
+                    },
+                )
+            } finally {
+                logger.detachAppender(listAppender)
+                listAppender.stop()
+            }
         }
 }

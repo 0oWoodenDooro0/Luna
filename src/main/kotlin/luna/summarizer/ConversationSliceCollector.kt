@@ -2,13 +2,13 @@ package luna.summarizer
 
 import dev.kord.common.entity.Snowflake
 import dev.kord.core.entity.Message
-import dev.socialpeek.SocialPeek
 import dev.socialpeek.model.PeekPost
 import dev.socialpeek.model.Platform
 import kotlinx.coroutines.flow.toList
 import luna.core.ai.ChatImageAttachment
 import luna.core.ai.ChatImageAttachmentExtractor
 import luna.core.ai.ContextUrlClassifier
+import luna.core.ai.SocialPeekFactory
 import org.slf4j.LoggerFactory
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.minutes
@@ -40,7 +40,7 @@ open class ConversationSliceCollector(
     val maxLookbackMessages: Int = resolveMaxLookbackMessages(),
     val maxImageBytes: Int = ChatImageAttachmentExtractor.DEFAULT_MAX_IMAGE_BYTES,
     val noiseFilter: DialogueNoiseFilter = DialogueNoiseFilter(),
-    val peekResolver: suspend (String) -> PeekPost? = { SocialPeek.peekOrNull(it) },
+    val peekResolver: suspend (String) -> PeekPost? = SocialPeekFactory.buildPeekResolver(),
     val historyFetcher: suspend (message: Message, limit: Int) -> List<Message> = { message, limit ->
         message.channel
             .getMessagesBefore(message.id, limit = limit)
@@ -139,6 +139,7 @@ open class ConversationSliceCollector(
                 }
             }
 
+        var fallbackVideoUri: String? = null
         if (peekTargetUrl != null) {
             val post =
                 runCatching { peekResolver(peekTargetUrl) }
@@ -189,6 +190,12 @@ open class ConversationSliceCollector(
                     primaryUrl = peekTargetUrl,
                     durationExceeded = false,
                 )
+            } else if (peekTargetUrl in classifiedUrls.youtubeUrls) {
+                logger.warn(
+                    "YouTubeResolver failed or returned null for '{}'; falling back to regex-detected videoUri for static Video Understanding",
+                    peekTargetUrl,
+                )
+                fallbackVideoUri = peekTargetUrl
             } else {
                 logger.debug("No post resolved for SocialPeek URL {}, summarizing message context directly", peekTargetUrl)
             }
@@ -236,6 +243,8 @@ open class ConversationSliceCollector(
                     url = primaryUrl,
                     webUrls = classifiedUrls.webUrls,
                     originalUrls = classifiedUrls.allOriginalUrls,
+                    videoUri = fallbackVideoUri,
+                    videoDurationSeconds = null,
                     imageAttachments = sliceImageAttachments,
                 ),
             primaryUrl = primaryUrl,
