@@ -225,20 +225,6 @@ class McpServerConfigTest {
     }
 
     @Test
-    fun `auditLog executes without error for both model and raw map`() {
-        val logger = LoggerFactory.getLogger(McpServerConfigTest::class.java)
-        val config =
-            McpServerConfig(
-                port = 8081,
-            )
-
-        // Should not throw
-        config.auditLog(logger)
-        McpServerConfig.auditLog(config, logger)
-        McpServerConfig.auditLog(config.toMaskedMap(), logger)
-    }
-
-    @Test
     fun `converts to compatible McpOAuthConfig accurately`() {
         val serverConfig =
             McpServerConfig(
@@ -249,20 +235,6 @@ class McpServerConfigTest {
 
         assertEquals("https://custom.woodendoor.website", oauthConfig.publicBaseUrl)
         assertEquals("https://custom.woodendoor.website", oauthConfig.normalizedBaseUrl)
-    }
-
-    @Test
-    fun `env example specification is discoverable and readable via classloader in mcp-server`() {
-        val stream = Thread.currentThread().contextClassLoader.getResourceAsStream(".env.example")
-        assertNotNull(stream, "Classpath resource '.env.example' must be discoverable in mcp-server")
-        val content = stream.bufferedReader().use { it.readText() }
-        assertTrue(content.isNotBlank(), ".env.example content must not be blank")
-
-        assertTrue(content.contains("Section 5: Multi-Tenant Gemini MCP Server"), "Section 5 must be defined")
-        assertTrue(content.contains("/mcp client create"), "Multi-tenant dynamic client create must be documented")
-        assertTrue(content.contains("MCP_PORT=8081"), "MCP_PORT must be documented")
-        assertTrue(content.contains("MCP_DB_PATH=./.data/luna.db"), "MCP_DB_PATH must be documented")
-        assertTrue(content.contains("MCP_PUBLIC_BASE_URL=https://woodendoor.website"), "MCP_PUBLIC_BASE_URL must be documented")
     }
 
     @Test

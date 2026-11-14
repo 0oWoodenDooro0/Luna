@@ -17,6 +17,7 @@ import io.ktor.http.contentType
 import io.ktor.http.headersOf
 import io.ktor.serialization.kotlinx.json.json
 import io.ktor.server.testing.testApplication
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.Json
@@ -138,24 +139,20 @@ class McpServerTest {
                 }
 
             sseClient.sse("/mcp/sse?token=$defaultToken") {
-                var endpointUri = ""
-                var messageData = ""
-                val testScope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Default)
-                val job =
-                    testScope.launch {
+                val endpointDeferred = CompletableDeferred<String>()
+                val messageDeferred = CompletableDeferred<String>()
+                val collectJob =
+                    launch {
                         incoming.collect { sseEvent ->
-                            if (sseEvent.event == "endpoint") {
-                                endpointUri = sseEvent.data.orEmpty()
-                            } else if (sseEvent.event == "message") {
-                                messageData = sseEvent.data.orEmpty()
+                            if (sseEvent.event == "endpoint" && !endpointDeferred.isCompleted) {
+                                endpointDeferred.complete(sseEvent.data.orEmpty())
+                            } else if (sseEvent.event == "message" && !messageDeferred.isCompleted) {
+                                messageDeferred.complete(sseEvent.data.orEmpty())
                             }
                         }
                     }
 
-                // Wait until endpoint event received
-                while (endpointUri.isEmpty()) {
-                    kotlinx.coroutines.delay(10)
-                }
+                val endpointUri = endpointDeferred.await()
                 assertTrue(endpointUri.startsWith("/mcp/messages?sessionId="))
 
                 val postResponse =
@@ -165,11 +162,8 @@ class McpServerTest {
                     }
                 assertEquals(HttpStatusCode.OK, postResponse.status)
 
-                // Wait until message event received
-                while (messageData.isEmpty()) {
-                    kotlinx.coroutines.delay(10)
-                }
-                job.cancel()
+                val messageData = messageDeferred.await()
+                collectJob.cancel()
 
                 val json = Json.parseToJsonElement(messageData).jsonObject
                 assertEquals("2.0", json["jsonrpc"]?.jsonPrimitive?.content)
@@ -591,9 +585,17 @@ class McpServerTest {
                 }
 
             sseClient.sse("/mcp/sse?token=$tokenSse") {
-                val event = incoming.first()
-                assertEquals("endpoint", event.event)
-                val endpointUri = event.data.orEmpty()
+                val endpointDeferred = CompletableDeferred<String>()
+                val collectJob =
+                    launch {
+                        incoming.collect { event ->
+                            if (event.event == "endpoint" && !endpointDeferred.isCompleted) {
+                                endpointDeferred.complete(event.data.orEmpty())
+                            }
+                        }
+                    }
+
+                val endpointUri = endpointDeferred.await()
                 assertTrue(endpointUri.startsWith("/mcp/messages?sessionId="))
 
                 val postResponse =
@@ -601,6 +603,7 @@ class McpServerTest {
                         contentType(ContentType.Application.Json)
                         setBody("""{"jsonrpc":"2.0","id":30,"method":"tools/call","params":{"name":"list_targets","arguments":{}}}""")
                     }
+                collectJob.cancel()
                 assertEquals(HttpStatusCode.OK, postResponse.status)
                 val jsonResponse = Json.parseToJsonElement(postResponse.bodyAsText()).jsonObject
                 val text =

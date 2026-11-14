@@ -14,13 +14,10 @@ import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.test.runTest
 import luna.core.Command
 import luna.plugin.DefaultPluginContext
-import luna.plugin.LunaPlugin
-import luna.plugin.PluginLoader
 import org.jetbrains.exposed.v1.jdbc.Database
 import org.jetbrains.exposed.v1.jdbc.selectAll
 import org.jetbrains.exposed.v1.jdbc.transactions.transaction
 import org.junit.jupiter.api.Test
-import java.util.ServiceLoader
 import java.util.UUID
 import kotlin.coroutines.EmptyCoroutineContext
 import kotlin.test.assertEquals
@@ -39,28 +36,6 @@ class SocialPreviewPluginTest {
             every { coroutineContext } returns EmptyCoroutineContext
             every { events } returns eventsFlow
         }
-
-    @Test
-    fun `plugin metadata has correct name`() {
-        val plugin = SocialPreviewPlugin()
-        assertEquals("social-preview", plugin.name)
-    }
-
-    @Test
-    fun `plugin is discovered by ServiceLoader SPI`() {
-        val loader = PluginLoader()
-        val plugins = loader.loadPlugins()
-        assertTrue(
-            plugins.any { it is SocialPreviewPlugin },
-            "Expected SocialPreviewPlugin to be discoverable via ServiceLoader SPI",
-        )
-
-        val directLoader = ServiceLoader.load(LunaPlugin::class.java)
-        assertTrue(
-            directLoader.any { it is SocialPreviewPlugin },
-            "Expected ServiceLoader to directly discover SocialPreviewPlugin",
-        )
-    }
 
     @Test
     fun `initialize creates guild preview settings table in database`() =

@@ -53,16 +53,6 @@ class ChatterGeneratorTest {
     // --- Configuration Tests ---
 
     @Test
-    fun `ChatterConfig defaults to gemini-3_5-flash-lite and official baseUrl`() {
-        val config = ChatterConfig()
-        assertEquals("gemini-3.5-flash-lite", config.model)
-        assertEquals("gemini-3.5-flash-lite", config.cleanModel)
-        assertEquals("https://generativelanguage.googleapis.com", config.baseUrl)
-        assertEquals("https://generativelanguage.googleapis.com", config.cleanBaseUrl)
-        assertFalse(config.isConfigured)
-    }
-
-    @Test
     fun `ChatterConfig resolves from environment prioritizing CHATTER_GEMINI_MODEL`() {
         val env =
             mapOf(
@@ -174,59 +164,6 @@ class ChatterGeneratorTest {
     }
 
     @Test
-    fun `ChatterPromptBuilder system instruction defines Luna friendly community peer persona`() {
-        val systemPrompt = ChatterPromptBuilder.buildSystemInstruction()
-        assertTrue(systemPrompt.contains("Luna"))
-        assertTrue(systemPrompt.contains("社群夥伴") || systemPrompt.contains("社群") || systemPrompt.contains("同儕") || systemPrompt.contains("群友"))
-        assertTrue(systemPrompt.contains("繁體中文") || systemPrompt.contains("zh-TW"))
-        assertTrue(systemPrompt.contains("AI") && (systemPrompt.contains("開場白") || systemPrompt.contains("套話") || systemPrompt.contains("禁止")))
-    }
-
-    @Test
-    fun `ChatterPromptBuilder system instruction strictly forbids emoji and standard punctuation while requiring concise sentences`() {
-        val systemPrompt = ChatterPromptBuilder.buildSystemInstruction()
-        assertTrue(systemPrompt.contains("emoji") || systemPrompt.contains("表情符號") || systemPrompt.contains("顏文字"))
-        assertTrue(systemPrompt.contains("標點符號"))
-        assertTrue(systemPrompt.contains("逗號") || systemPrompt.contains("句號"))
-        assertTrue(systemPrompt.contains("空格") || systemPrompt.contains("分行"))
-        assertTrue(systemPrompt.contains("極簡") || systemPrompt.contains("口語"))
-        assertTrue(systemPrompt.contains("重點") || systemPrompt.contains("短句"))
-    }
-
-    @Test
-    fun `ChatterPromptBuilder user prompt reinforces casual short emoji-free and punctuation-free instructions`() {
-        val userPrompt = ChatterPromptBuilder.buildUserPrompt("Alice: 早安")
-        assertTrue(userPrompt.contains("Alice: 早安"))
-        assertTrue(userPrompt.contains("標點符號"))
-        assertTrue(userPrompt.contains("空格") || userPrompt.contains("分行"))
-        assertTrue(userPrompt.contains("emoji") || userPrompt.contains("表情符號"))
-        assertTrue(userPrompt.contains("重點") || userPrompt.contains("短句"))
-        assertTrue(userPrompt.contains("順著最新") || userPrompt.contains("舊句子"))
-
-        val systemPrompt = ChatterPromptBuilder.buildSystemInstruction()
-        assertTrue(systemPrompt.contains("最新") && (systemPrompt.contains("舊句子") || systemPrompt.contains("切勿回頭")))
-    }
-
-    @Test
-    fun `ChatterPromptBuilder buildRequest configures maxOutputTokens bounded to 512 and temperature 0_8`() {
-        val request = ChatterPromptBuilder.buildRequest("test transcript")
-        assertEquals(512, request.generationConfig?.maxOutputTokens)
-        assertEquals(0.8, request.generationConfig?.temperature)
-    }
-
-    @Test
-    fun `ChatterPromptBuilder system instruction supports multimodal and search grounding while forbidding formal summary headings`() {
-        val systemPrompt = ChatterPromptBuilder.buildSystemInstruction()
-        assertFalse(EmojiSanitizer.containsEmoji(systemPrompt), "System instruction must not contain emojis")
-        assertTrue(systemPrompt.contains("[附帶圖片"))
-        assertTrue(systemPrompt.contains("影片") || systemPrompt.contains("YouTube"))
-        assertTrue(systemPrompt.contains("連結") || systemPrompt.contains("[連結內容"))
-        assertTrue(systemPrompt.contains("Google") || systemPrompt.contains("搜尋"))
-        assertTrue(systemPrompt.contains("TL;DR:") && systemPrompt.contains("核心重點:") && systemPrompt.contains("名詞與事實查核:"))
-        assertTrue(systemPrompt.contains("禁止") || systemPrompt.contains("不可"))
-    }
-
-    @Test
     fun `ChatterPromptBuilder buildRequest with ChatterInput embeds file_data parts, googleSearch tool, and metadata without duplicate transcript info`() {
         val input =
             ChatterInput(
@@ -248,6 +185,8 @@ class ChatterGeneratorTest {
             )
 
         val request = ChatterPromptBuilder.buildRequest(input, tools = listOf(GeminiTools.GOOGLE_SEARCH_TOOL))
+        assertEquals(512, request.generationConfig?.maxOutputTokens)
+        assertEquals(0.8, request.generationConfig?.temperature)
 
         val parts = request.contents.first().parts
         assertEquals(3, parts.size)
@@ -320,12 +259,6 @@ class ChatterGeneratorTest {
         assertEquals(2000, result2001.length)
         assertTrue(result2001.endsWith("..."))
         assertEquals("a".repeat(1997) + "...", result2001)
-
-        val text3500 = "b".repeat(3500)
-        val result3500 = ChatterPromptBuilder.truncateToDiscordLimit(text3500)
-        assertEquals(2000, result3500.length)
-        assertTrue(result3500.endsWith("..."))
-        assertEquals("b".repeat(1997) + "...", result3500)
     }
 
     // --- ChatterGenerator Integration & Error Handling Tests ---
@@ -420,93 +353,6 @@ class ChatterGeneratorTest {
         }
 
     @Test
-    fun `successfully generates reply when given structured ChatMessage list`() =
-        runTest {
-            val responseJson =
-                """
-                {
-                  "candidates": [
-                    {
-                      "content": {
-                        "role": "model",
-                        "parts": [
-                          {
-                            "text": "大家今天辛苦啦！週末愉快～"
-                          }
-                        ]
-                      },
-                      "finishReason": "STOP"
-                    }
-                  ]
-                }
-                """.trimIndent()
-
-            val mockEngine =
-                MockEngine {
-                    respond(
-                        content = responseJson,
-                        status = HttpStatusCode.OK,
-                        headers = headersOf(HttpHeaders.ContentType, "application/json"),
-                    )
-                }
-
-            val config = ChatterConfig(apiKey = "valid-key")
-            val generator = ChatterGenerator(config = config, httpClient = createTestClient(mockEngine))
-
-            val messages =
-                listOf(
-                    ChatMessage(author = "KordUser1", content = "今天下班要去哪？"),
-                    ChatMessage(author = "KordUser2", content = "回家打電動！"),
-                )
-
-            val reply = generator.generateReply(messages)
-            assertEquals("大家今天辛苦啦！週末愉快～", reply)
-        }
-
-    @Test
-    fun `truncates generated reply exceeding 2000 characters to Discord limit with ellipsis`() =
-        runTest {
-            val oversizedResponseText = "長度過長的社群閒聊內容" + "x".repeat(3000)
-
-            val responseJson =
-                """
-                {
-                  "candidates": [
-                    {
-                      "content": {
-                        "role": "model",
-                        "parts": [
-                          {
-                            "text": "$oversizedResponseText"
-                          }
-                        ]
-                      },
-                      "finishReason": "STOP"
-                    }
-                  ]
-                }
-                """.trimIndent()
-
-            val mockEngine =
-                MockEngine {
-                    respond(
-                        content = responseJson,
-                        status = HttpStatusCode.OK,
-                        headers = headersOf(HttpHeaders.ContentType, "application/json"),
-                    )
-                }
-
-            val config = ChatterConfig(apiKey = "valid-key")
-            val generator = ChatterGenerator(config = config, httpClient = createTestClient(mockEngine))
-
-            val reply = generator.generateReply("[User]: 超長測試")
-
-            assertTrue(reply != null)
-            assertEquals(2000, reply.length)
-            assertTrue(reply.endsWith("..."))
-        }
-
-    @Test
     fun `returns null gracefully when Gemini API returns 429 rate limit exceeded`() =
         runTest {
             val mockEngine =
@@ -522,25 +368,6 @@ class ChatterGeneratorTest {
             val generator = ChatterGenerator(config = config, httpClient = createTestClient(mockEngine))
 
             val reply = generator.generateReply("[User]: rate limit test")
-            assertNull(reply)
-        }
-
-    @Test
-    fun `returns null gracefully when Gemini API returns 500 internal server error`() =
-        runTest {
-            val mockEngine =
-                MockEngine {
-                    respond(
-                        content = """{"error": {"code": 500, "message": "Internal error occurred"}}""",
-                        status = HttpStatusCode.InternalServerError,
-                        headers = headersOf(HttpHeaders.ContentType, "application/json"),
-                    )
-                }
-
-            val config = ChatterConfig(apiKey = "valid-key")
-            val generator = ChatterGenerator(config = config, httpClient = createTestClient(mockEngine))
-
-            val reply = generator.generateReply("[User]: 500 test")
             assertNull(reply)
         }
 

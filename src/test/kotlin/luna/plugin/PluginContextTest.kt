@@ -5,16 +5,11 @@ import io.ktor.server.routing.Routing
 import io.mockk.mockk
 import org.jetbrains.exposed.v1.jdbc.Database
 import org.junit.jupiter.api.Test
-import java.util.UUID
 import kotlin.test.assertEquals
 import kotlin.test.assertNull
 
 class PluginContextTest {
-    private fun createTestDb(): Database =
-        Database.connect(
-            "jdbc:h2:mem:test_${UUID.randomUUID()};DB_CLOSE_DELAY=-1;",
-            driver = "org.h2.Driver",
-        )
+    private fun createTestDb(): Database = mockk(relaxed = true)
 
     private fun createContext(configMap: Map<String, Any?> = emptyMap()): DefaultPluginContext =
         DefaultPluginContext(

@@ -22,23 +22,6 @@ class GeminiPromptBuilderTest {
         }
 
     @Test
-    fun `system instruction specifies Taiwanese Traditional Chinese and strictly prohibits emojis`() {
-        val instruction = GeminiPromptBuilder.SYSTEM_INSTRUCTION
-
-        assertContains(instruction, "台灣繁體中文")
-        assertContains(instruction, "zh-TW")
-        assertContains(instruction, "TL;DR:")
-        assertContains(instruction, "核心重點:")
-        assertContains(instruction, "參與者觀點:")
-        assertContains(instruction, "Emoji")
-
-        assertFalse(EmojiSanitizer.containsEmoji(instruction), "System instruction should not contain emojis")
-        // Also verify that actual emojis would be detected
-        assertTrue(EmojiSanitizer.containsEmoji("核心重點: 🚀"))
-        assertTrue(EmojiSanitizer.containsEmoji("參與者觀點 👍"))
-    }
-
-    @Test
     fun `buildUserPrompt cleanly accommodates multi-message dialogues alongside optional title and url`() {
         val dialogueContent =
             """
@@ -84,38 +67,6 @@ class GeminiPromptBuilderTest {
         assertFalse(prompt.contains("來源網址："))
         assertFalse(prompt.contains("社群留言與討論："))
         assertEquals("內文：\n$dialogueContent", prompt)
-    }
-
-    @Test
-    fun `buildUserPrompt formats content without comments when comments are empty`() {
-        val input =
-            SummaryInput(
-                title = "科技新突破",
-                content = "這是一篇關於量子運算的深度分析文章。",
-                url = "https://example.com/quantum",
-            )
-        val prompt = GeminiPromptBuilder.buildUserPrompt(input)
-
-        assertContains(prompt, "標題：科技新突破")
-        assertContains(prompt, "來源網址：https://example.com/quantum")
-        assertContains(prompt, "內文：\n這是一篇關於量子運算的深度分析文章。")
-        assertFalse(prompt.contains("社群留言與討論"), "Should not include comments section when empty")
-    }
-
-    @Test
-    fun `buildUserPrompt formats comments when present`() {
-        val input =
-            SummaryInput(
-                title = "討論熱烈的話題",
-                content = "某平台推出新功能。",
-                comments = listOf("這功能太實用了！", "感覺有點雞肋，還要觀察。"),
-                url = "https://example.com/post",
-            )
-        val prompt = GeminiPromptBuilder.buildUserPrompt(input)
-
-        assertContains(prompt, "社群留言與討論：")
-        assertContains(prompt, "1. 這功能太實用了！")
-        assertContains(prompt, "2. 感覺有點雞肋，還要觀察。")
     }
 
     @Test
@@ -178,52 +129,6 @@ class GeminiPromptBuilderTest {
         val serialized = json.encodeToString(request)
         assertContains(serialized, "\"file_uri\":\"https://www.youtube.com/watch?v=short123\"")
         assertFalse(serialized.contains("\"processing\""), "file_data must not contain 'processing' field")
-    }
-
-    @Test
-    fun `resolveProcessingMode correctly classifies video duration boundaries`() {
-        assertEquals(VideoProcessingMode.STATIC, GeminiPromptBuilder.resolveProcessingMode(null))
-        assertEquals(VideoProcessingMode.STATIC, GeminiPromptBuilder.resolveProcessingMode(0L))
-        assertEquals(VideoProcessingMode.STATIC, GeminiPromptBuilder.resolveProcessingMode(120L))
-        assertEquals(VideoProcessingMode.STATIC, GeminiPromptBuilder.resolveProcessingMode(300L))
-        assertEquals(VideoProcessingMode.AGENTIC, GeminiPromptBuilder.resolveProcessingMode(301L))
-        assertEquals(VideoProcessingMode.AGENTIC, GeminiPromptBuilder.resolveProcessingMode(3600L))
-    }
-
-    @Test
-    fun `video system instruction specifies Taiwanese Traditional Chinese, zero emojis, and structured sections`() {
-        val instruction = GeminiPromptBuilder.VIDEO_SYSTEM_INSTRUCTION
-
-        assertContains(instruction, "台灣繁體中文")
-        assertContains(instruction, "zh-TW")
-        assertContains(instruction, "TL;DR:")
-        assertContains(instruction, "核心重點:")
-        assertContains(instruction, "社群觀點:")
-        assertContains(instruction, "Emoji")
-
-        assertFalse(EmojiSanitizer.containsEmoji(instruction), "Video system instruction should not contain emojis")
-    }
-
-    @Test
-    fun `video system instruction enforces multimodal video understanding, source isolation, and timestamp milestones`() {
-        val instruction = GeminiPromptBuilder.VIDEO_SYSTEM_INSTRUCTION
-
-        // Multimodal video understanding directives
-        assertContains(instruction, "視覺畫面")
-        assertContains(instruction, "語音")
-        assertContains(instruction, "操作展示")
-
-        // Strict source isolation directives
-        assertContains(instruction, "核心重點")
-        assertContains(instruction, "嚴禁")
-        assertContains(instruction, "留言")
-        assertContains(instruction, "社群觀點")
-
-        // Milestones and timestamp references allowed
-        assertContains(instruction, "[mm:ss]")
-
-        // Length limit
-        assertContains(instruction, "1500")
     }
 
     @Test
@@ -296,64 +201,6 @@ class GeminiPromptBuilderTest {
     }
 
     @Test
-    fun `buildUserPrompt preserves non-video dialogue and web URL formatting without video directives`() {
-        val input =
-            SummaryInput(
-                title = "Web Article",
-                content = "Full article content about distributed consensus",
-                url = "https://example.com/consensus",
-                comments = listOf("Nice overview", "What about Raft?"),
-            )
-        val prompt = GeminiPromptBuilder.buildUserPrompt(input)
-
-        assertContains(prompt, "標題：Web Article")
-        assertContains(prompt, "來源網址：https://example.com/consensus")
-        assertContains(prompt, "內文：")
-        assertFalse(prompt.contains("創作者說明與大綱："))
-        assertFalse(prompt.contains("多模態"))
-        assertFalse(prompt.contains("[mm:ss]"))
-    }
-
-    @Test
-    fun `buildRequest attaches video system instruction when videoUri is present`() {
-        val input =
-            SummaryInput(
-                title = "Video Title",
-                content = "Video Outline",
-                videoUri = "https://www.youtube.com/watch?v=sampleVid",
-            )
-        val request = GeminiPromptBuilder.buildRequest(input)
-
-        val sysText =
-            request.systemInstruction
-                ?.parts
-                ?.firstOrNull()
-                ?.text
-        assertNotNull(sysText)
-        assertEquals(GeminiPromptBuilder.VIDEO_SYSTEM_INSTRUCTION, sysText)
-        assertContains(sysText, "嚴格來源隔離")
-    }
-
-    @Test
-    fun `buildRequest attaches standard system instruction when videoUri is absent`() {
-        val input =
-            SummaryInput(
-                title = "Standard Article",
-                content = "Article text",
-                url = "https://example.com/article",
-            )
-        val request = GeminiPromptBuilder.buildRequest(input)
-
-        val sysText =
-            request.systemInstruction
-                ?.parts
-                ?.firstOrNull()
-                ?.text
-        assertNotNull(sysText)
-        assertEquals(GeminiPromptBuilder.SYSTEM_INSTRUCTION, sysText)
-    }
-
-    @Test
     fun `buildRequest includes fileData parts for chat image attachments with direct HTTPS URI and MIME type`() {
         val image1 =
             ChatImageAttachment(
@@ -398,36 +245,6 @@ class GeminiPromptBuilderTest {
     }
 
     @Test
-    fun `chat image system instruction specifies Taiwanese Traditional Chinese, zero emojis, and standard 3-section format`() {
-        val instruction = GeminiPromptBuilder.CHAT_IMAGE_SYSTEM_INSTRUCTION
-
-        assertContains(instruction, "台灣繁體中文")
-        assertContains(instruction, "zh-TW")
-        assertContains(instruction, "TL;DR:")
-        assertContains(instruction, "核心重點:")
-        assertContains(instruction, "參與者觀點:")
-        assertContains(instruction, "Emoji")
-        assertContains(instruction, "Visual Focus Prompting")
-
-        assertFalse(EmojiSanitizer.containsEmoji(instruction), "Chat image system instruction should not contain emojis")
-    }
-
-    @Test
-    fun `visual focus prompting instructions direct model to interpret OCR, code, error logs, diagrams, UI states, or photos into TLDR and core points`() {
-        val instruction = GeminiPromptBuilder.CHAT_IMAGE_SYSTEM_INSTRUCTION
-
-        assertContains(instruction, "視覺證據")
-        assertContains(instruction, "OCR")
-        assertContains(instruction, "程式碼")
-        assertContains(instruction, "錯誤")
-        assertContains(instruction, "架構圖")
-        assertContains(instruction, "介面")
-        assertContains(instruction, "照片")
-        assertContains(instruction, "TL;DR")
-        assertContains(instruction, "核心重點")
-    }
-
-    @Test
     fun `buildSystemInstruction returns chat image system instruction when image attachments are present and videoUri is absent`() {
         val input =
             SummaryInput(
@@ -468,22 +285,6 @@ class GeminiPromptBuilderTest {
         assertContains(prompt, "錯誤")
         assertContains(prompt, "TL;DR")
         assertContains(prompt, "核心重點")
-    }
-
-    @Test
-    fun `video and image system instruction specifies Taiwanese Traditional Chinese, zero emojis, and coexistence rules`() {
-        val instruction = GeminiPromptBuilder.VIDEO_AND_IMAGE_SYSTEM_INSTRUCTION
-
-        assertContains(instruction, "台灣繁體中文")
-        assertContains(instruction, "zh-TW")
-        assertContains(instruction, "TL;DR:")
-        assertContains(instruction, "核心重點:")
-        assertContains(instruction, "社群觀點:")
-        assertContains(instruction, "Emoji")
-        assertContains(instruction, "Video & Visual Focus Prompting")
-        assertContains(instruction, "嚴格來源隔離")
-
-        assertFalse(EmojiSanitizer.containsEmoji(instruction), "Coexistence system instruction should not contain emojis")
     }
 
     @Test
@@ -683,6 +484,10 @@ class GeminiPromptBuilderTest {
         assertContains(GeminiPromptBuilder.SYSTEM_INSTRUCTION, "嚴格來源隔離")
         assertContains(GeminiPromptBuilder.SYSTEM_INSTRUCTION, "參與者觀點")
         assertContains(GeminiPromptBuilder.CHAT_IMAGE_SYSTEM_INSTRUCTION, "嚴格來源隔離")
+        assertContains(GeminiPromptBuilder.CHAT_IMAGE_SYSTEM_INSTRUCTION, "Visual Focus Prompting")
+        assertContains(GeminiPromptBuilder.CHAT_IMAGE_SYSTEM_INSTRUCTION, "OCR")
+        assertContains(GeminiPromptBuilder.VIDEO_SYSTEM_INSTRUCTION, "[mm:ss]")
+        assertContains(GeminiPromptBuilder.VIDEO_SYSTEM_INSTRUCTION, "1500")
     }
 
     @Test

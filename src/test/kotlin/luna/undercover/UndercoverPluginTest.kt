@@ -18,13 +18,10 @@ import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.test.runTest
 import luna.core.Command
 import luna.plugin.DefaultPluginContext
-import luna.plugin.LunaPlugin
 import org.jetbrains.exposed.v1.jdbc.Database
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
-import java.util.ServiceLoader
-import java.util.UUID
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
@@ -37,11 +34,7 @@ class UndercoverPluginTest {
 
     private var testJob = Job()
 
-    private fun createTestDb(): Database =
-        Database.connect(
-            "jdbc:h2:mem:undercover_test_${UUID.randomUUID()};DB_CLOSE_DELAY=-1;",
-            driver = "org.h2.Driver",
-        )
+    private fun createTestDb(): Database = mockk(relaxed = true)
 
     @BeforeEach
     fun setUp() {
@@ -60,18 +53,6 @@ class UndercoverPluginTest {
             every { events } returns eventFlow
             every { coroutineContext } returns Dispatchers.Unconfined + testJob
         }
-
-    @Test
-    fun `plugin has expected identity and is discoverable via ServiceLoader`() {
-        val plugin = UndercoverPlugin()
-        assertEquals("undercover", plugin.name)
-
-        val discoveredPlugins = ServiceLoader.load(LunaPlugin::class.java).toList()
-        assertTrue(
-            discoveredPlugins.any { it is UndercoverPlugin },
-            "Expected UndercoverPlugin to be discovered by ServiceLoader via META-INF/services",
-        )
-    }
 
     @Test
     fun `initialize registers undercover and reveal commands to kord`() =

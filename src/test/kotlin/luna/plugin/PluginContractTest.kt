@@ -5,23 +5,16 @@ import io.ktor.server.routing.Routing
 import io.mockk.mockk
 import org.jetbrains.exposed.v1.jdbc.Database
 import org.junit.jupiter.api.Test
-import java.util.UUID
 import kotlin.test.assertEquals
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 class PluginContractTest {
-    private fun createTestDb(): Database =
-        Database.connect(
-            "jdbc:h2:mem:test_${UUID.randomUUID()};DB_CLOSE_DELAY=-1;",
-            driver = "org.h2.Driver",
-        )
-
     @Test
     fun `plugin context provides capability references and typed config access`() {
         val mockKord = mockk<Kord>(relaxed = true)
         val mockRouting = mockk<Routing>(relaxed = true)
-        val testDb = createTestDb()
+        val testDb = mockk<Database>(relaxed = true)
 
         val configMap =
             mapOf(

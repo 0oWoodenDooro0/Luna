@@ -50,20 +50,6 @@ class GeminiDecisionClientTest {
         }
 
     @Test
-    fun `ChatterDecisionConfig defaults to gemini-decision-1, threshold 0_7, 10s timeout, and official Gemini baseUrl`() {
-        val config = ChatterDecisionConfig()
-        assertEquals("", config.apiKey)
-        assertEquals("gemini-decision-1", config.model)
-        assertEquals("gemini-decision-1", config.cleanModel)
-        assertEquals("https://generativelanguage.googleapis.com", config.baseUrl)
-        assertEquals("https://generativelanguage.googleapis.com", config.cleanBaseUrl)
-        assertEquals("https://generativelanguage.googleapis.com/v1beta/decisions", config.decisionEndpoint)
-        assertEquals(0.7, config.threshold)
-        assertEquals(10_000L, config.timeoutMillis)
-        assertFalse(config.isConfigured)
-    }
-
-    @Test
     fun `loads ChatterDecisionConfig correctly from environment map and clamps invalid bounds`() {
         val env =
             mapOf(

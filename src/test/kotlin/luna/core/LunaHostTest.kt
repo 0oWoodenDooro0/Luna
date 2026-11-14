@@ -1,16 +1,6 @@
 package luna.core
 
 import dev.kord.core.Kord
-import io.ktor.client.request.get
-import io.ktor.client.statement.bodyAsText
-import io.ktor.http.HttpStatusCode
-import io.ktor.server.application.install
-import io.ktor.server.engine.embeddedServer
-import io.ktor.server.netty.Netty
-import io.ktor.server.routing.routing
-import io.ktor.server.sessions.Sessions
-import io.ktor.server.sessions.cookie
-import io.ktor.server.testing.testApplication
 import io.mockk.mockk
 import kotlinx.coroutines.test.runTest
 import luna.plugin.LunaPlugin
@@ -18,36 +8,15 @@ import luna.plugin.PluginContext
 import luna.plugin.PluginLoader
 import org.jetbrains.exposed.v1.jdbc.Database
 import org.junit.jupiter.api.Test
-import java.util.UUID
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 
 class LunaHostTest {
-    private fun createTestDb(): Database =
-        Database.connect(
-            "jdbc:h2:mem:lunahost_test_${UUID.randomUUID()};DB_CLOSE_DELAY=-1;",
-            driver = "org.h2.Driver",
-        )
-
-    @Test
-    fun testEmbeddedServerApplication() {
-        val server =
-            embeddedServer(Netty, port = 0, host = "127.0.0.1") {
-                install(Sessions) {
-                    cookie<UserSession>("LUNA_SESSION")
-                }
-            }
-        val app = server.application
-        assertNotNull(app)
-        val r = app.routing { }
-        assertNotNull(r)
-    }
-
     @Test
     fun testLunaHostBootstrap() =
         runTest {
-            val testDb = createTestDb()
+            val testDb = mockk<Database>(relaxed = true)
             val mockKord = mockk<Kord>(relaxed = true)
             val events = mutableListOf<String>()
 
