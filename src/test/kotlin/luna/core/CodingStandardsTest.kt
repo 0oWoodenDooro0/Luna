@@ -317,6 +317,48 @@ class CodingStandardsTest {
         )
     }
 
+    @Test
+    fun `first-party plugins must not import sibling plugin packages`() {
+        val pluginPackages = setOf("chatter", "summarizer", "curtly", "mcp", "preview", "undercover")
+        val sharedMcpSubpackages = setOf("data", "server")
+        val importRegex = Regex("""^import\s+luna\.([a-zA-Z0-9_]+)(?:\.([a-zA-Z0-9_]+))?""")
+        val violations = mutableListOf<String>()
+
+        val roots = findKotlinSourceRoots("main") + findKotlinSourceRoots("test")
+        roots.forEach { root ->
+            pluginPackages.forEach { ownerPlugin ->
+                val pluginDir = File(root, "luna/$ownerPlugin")
+                if (!pluginDir.exists()) return@forEach
+
+                pluginDir.walkTopDown().filter { it.extension == "kt" }.forEach { file ->
+                    file.useLines { lines ->
+                        lines.forEachIndexed { index, line ->
+                            val match = importRegex.find(line.trim()) ?: return@forEachIndexed
+                            val importedPkg = match.groupValues[1]
+                            val importedSubPkg = match.groupValues[2]
+                            val isSiblingPlugin =
+                                importedPkg in pluginPackages &&
+                                    importedPkg != ownerPlugin &&
+                                    !(importedPkg == "mcp" && importedSubPkg in sharedMcpSubpackages)
+                            if (isSiblingPlugin) {
+                                violations.add(
+                                    "${file.relativeTo(projectRoot)}:${index + 1}: " +
+                                        "Plugin '$ownerPlugin' must not import sibling plugin '$importedPkg' (${line.trim()}). " +
+                                        "Extract shared logic into 'luna.core' instead.",
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        assertTrue(
+            violations.isEmpty(),
+            "Found cross-plugin coupling violations:\n" + violations.joinToString("\n"),
+        )
+    }
+
     private fun findKotlinSourceRoots(parentDirName: String): List<File> =
         projectRoot
             .walkTopDown()

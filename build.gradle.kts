@@ -98,19 +98,33 @@ tasks.jar {
 tasks.register("installGitHooks") {
     description = "Configures git core.hooksPath to .githooks"
     group = "help"
-    doLast {
+    onlyIf {
         val hooksDir = file(".githooks")
-        if (hooksDir.exists() && file(".git").exists()) {
-            ProcessBuilder("git", "config", "core.hooksPath", ".githooks")
-                .directory(projectDir)
-                .start()
-                .waitFor()
-            val preCommit = file(".githooks/pre-commit")
-            if (preCommit.exists() && !preCommit.canExecute()) {
-                preCommit.setExecutable(true)
-            }
-            logger.lifecycle("Configured git core.hooksPath to .githooks")
+        if (!hooksDir.exists() || !file(".git").exists()) {
+            false
+        } else {
+            val currentHooksPath =
+                runCatching {
+                    ProcessBuilder("git", "config", "--get", "core.hooksPath")
+                        .directory(projectDir)
+                        .start()
+                        .let { proc ->
+                            proc.inputStream.bufferedReader().readText().trim().also { proc.waitFor() }
+                        }
+                }.getOrDefault("")
+            currentHooksPath != ".githooks"
         }
+    }
+    doLast {
+        ProcessBuilder("git", "config", "core.hooksPath", ".githooks")
+            .directory(projectDir)
+            .start()
+            .waitFor()
+        val preCommit = file(".githooks/pre-commit")
+        if (preCommit.exists() && !preCommit.canExecute()) {
+            preCommit.setExecutable(true)
+        }
+        logger.lifecycle("Configured git core.hooksPath to .githooks")
     }
 }
 
