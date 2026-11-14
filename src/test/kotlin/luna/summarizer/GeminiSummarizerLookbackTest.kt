@@ -12,8 +12,11 @@ import io.ktor.http.headersOf
 import io.ktor.serialization.kotlinx.json.json
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.Json
-import luna.core.ai.ChatImageAttachment
-import luna.core.ai.EmojiSanitizer
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import luna.core.ai.AiTraceFailureCategory
+import luna.core.ai.GeminiInteractionTools
 import luna.core.ai.GeminiTools
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -28,6 +31,7 @@ class GeminiSummarizerLookbackTest {
             ignoreUnknownKeys = true
             isLenient = true
             encodeDefaults = false
+            explicitNulls = false
         }
 
     private fun createTestClient(engine: MockEngine): HttpClient =
@@ -38,20 +42,19 @@ class GeminiSummarizerLookbackTest {
         }
 
     @Test
-    fun `serializes tool declaration schema with fetch_earlier_messages and reason parameter`() =
+    fun `serializes tools array with fetch_earlier_messages function declaration when tools are provided`() =
         runTest {
             var recordedBody: String? = null
 
             val responseJson =
                 """
                 {
-                  "candidates": [
+                  "id": "int-lb-1",
+                  "status": "completed",
+                  "steps": [
                     {
-                      "content": {
-                        "parts": [
-                          { "text": "TL;DR:\n摘要完成\n\n核心重點:\n• 重點" }
-                        ]
-                      }
+                      "type": "model_output",
+                      "content": [{ "type": "text", "text": "TL;DR: Summary without lookback." }]
                     }
                   ]
                 }
@@ -75,19 +78,17 @@ class GeminiSummarizerLookbackTest {
 
             val input =
                 SummaryInput(
-                    content = "Discussion needing context",
-                    tools = listOf(GeminiTools.FETCH_EARLIER_MESSAGES_TOOL),
+                    content = "[Alice]: Let's wrap up.",
+                    tools = listOf(GeminiInteractionTools.FETCH_EARLIER_MESSAGES),
                 )
             val result = summarizer.summarize(input)
             assertIs<SummaryResult.Success>(result)
 
-            val body = recordedBody
-            kotlin.test.assertNotNull(body)
-            assertTrue(body.contains("tools"))
-            assertTrue(body.contains("fetch_earlier_messages"))
-            assertTrue(body.contains("functionDeclarations"))
+            val body = checkNotNull(recordedBody)
+            assertTrue(body.contains("\"tools\""))
+            assertTrue(body.contains("\"type\":\"function\""))
+            assertTrue(body.contains(GeminiTools.FETCH_EARLIER_MESSAGES))
             assertTrue(body.contains("reason"))
-            assertTrue(body.contains("OBJECT"))
         }
 
     @Test
@@ -98,13 +99,12 @@ class GeminiSummarizerLookbackTest {
             val responseJson =
                 """
                 {
-                  "candidates": [
+                  "id": "int-no-tools",
+                  "status": "completed",
+                  "steps": [
                     {
-                      "content": {
-                        "parts": [
-                          { "text": "TL;DR:\n一般摘要\n\n核心重點:\n• 重點" }
-                        ]
-                      }
+                      "type": "model_output",
+                      "content": [{ "type": "text", "text": "TL;DR: Normal summary." }]
                     }
                   ]
                 }
@@ -122,41 +122,33 @@ class GeminiSummarizerLookbackTest {
 
             val summarizer =
                 GeminiSummarizer(
-                    config = GeminiConfig(apiKey = "test-key", searchGroundingEnabled = false),
+                    config = GeminiConfig(apiKey = "test-key", searchGroundingEnabled = false, urlContextEnabled = false),
                     httpClient = createTestClient(mockEngine),
                 )
 
-            val input = SummaryInput(content = "Plain text summarization")
-            val result = summarizer.summarize(input)
+            val result = summarizer.summarize(SummaryInput(content = "[Alice]: Normal discussion"))
             assertIs<SummaryResult.Success>(result)
 
-            val body = recordedBody
-            kotlin.test.assertNotNull(body)
+            val body = checkNotNull(recordedBody)
             assertFalse(body.contains("\"tools\""))
         }
 
     @Test
-    fun `parses functionCall from Gemini response candidate and returns ToolCall with arguments`() =
+    fun `parses function_call step from Gemini and returns ToolCall result with continuation`() =
         runTest {
-            val responseJson =
+            val toolCallResponse =
                 """
                 {
-                  "candidates": [
+                  "id": "int-turn-1",
+                  "status": "requires_action",
+                  "steps": [
                     {
-                      "content": {
-                        "role": "model",
-                        "parts": [
-                          {
-                            "functionCall": {
-                              "name": "fetch_earlier_messages",
-                              "args": {
-                                "reason": "Need earlier conversation to determine disagreement origin"
-                              }
-                            }
-                          }
-                        ]
-                      },
-                      "finishReason": "STOP"
+                      "type": "function_call",
+                      "id": "call-101",
+                      "name": "fetch_earlier_messages",
+                      "arguments": {
+                        "reason": "Need earlier context to identify what 'it' refers to"
+                      }
                     }
                   ]
                 }
@@ -165,7 +157,7 @@ class GeminiSummarizerLookbackTest {
             val mockEngine =
                 MockEngine {
                     respond(
-                        content = responseJson,
+                        content = toolCallResponse,
                         status = HttpStatusCode.OK,
                         headers = headersOf(HttpHeaders.ContentType, "application/json"),
                     )
@@ -179,40 +171,35 @@ class GeminiSummarizerLookbackTest {
 
             val input =
                 SummaryInput(
-                    content = "Recent message slice",
-                    tools = listOf(GeminiTools.FETCH_EARLIER_MESSAGES_TOOL),
+                    content = "[Bob]: Let's proceed with it.",
+                    tools = listOf(GeminiInteractionTools.FETCH_EARLIER_MESSAGES),
                 )
             val result = summarizer.summarize(input)
 
             assertIs<SummaryResult.ToolCall>(result)
             assertEquals("fetch_earlier_messages", result.name)
-            assertEquals("Need earlier conversation to determine disagreement origin", result.args["reason"])
-            kotlin.test.assertNotNull(result.continuation)
+            assertEquals("Need earlier context to identify what 'it' refers to", result.args["reason"])
+            assertNotNull(result.continuation)
         }
 
     @Test
-    fun `multi-turn tool execution succeeds when continuation is invoked with earlier messages`() =
+    fun `continues multi-turn summarization via previous_interaction_id and function_result`() =
         runTest {
             var requestCount = 0
-            var continuationBody: String? = null
+            var secondRequestBody: String? = null
 
             val toolCallResponse =
                 """
                 {
-                  "candidates": [
+                  "id": "int-turn-abc",
+                  "status": "requires_action",
+                  "steps": [
                     {
-                      "content": {
-                        "role": "model",
-                        "parts": [
-                          {
-                            "functionCall": {
-                              "name": "fetch_earlier_messages",
-                              "args": {
-                                "reason": "Missing context"
-                              }
-                            }
-                          }
-                        ]
+                      "type": "function_call",
+                      "id": "call-abc",
+                      "name": "fetch_earlier_messages",
+                      "arguments": {
+                        "reason": "Missing initial topic"
                       }
                     }
                   ]
@@ -222,16 +209,17 @@ class GeminiSummarizerLookbackTest {
             val finalSummaryResponse =
                 """
                 {
-                  "candidates": [
+                  "id": "int-turn-final",
+                  "status": "completed",
+                  "steps": [
                     {
-                      "content": {
-                        "role": "model",
-                        "parts": [
-                          {
-                            "text": "TL;DR:\n完整脈絡繁體中文摘要\n\n核心重點:\n• 早期討論要點\n• 後續共識"
-                          }
-                        ]
-                      }
+                      "type": "model_output",
+                      "content": [
+                        {
+                          "type": "text",
+                          "text": "TL;DR:\n團隊決定採用方案 B 進行系統重構。\n\n核心重點:\n• 方案 B 支援向後相容"
+                        }
+                      ]
                     }
                   ]
                 }
@@ -240,6 +228,7 @@ class GeminiSummarizerLookbackTest {
             val mockEngine =
                 MockEngine { request ->
                     requestCount++
+                    val body = request.body.toByteArray().decodeToString()
                     if (requestCount == 1) {
                         respond(
                             content = toolCallResponse,
@@ -247,7 +236,7 @@ class GeminiSummarizerLookbackTest {
                             headers = headersOf(HttpHeaders.ContentType, "application/json"),
                         )
                     } else {
-                        continuationBody = request.body.toByteArray().decodeToString()
+                        secondRequestBody = body
                         respond(
                             content = finalSummaryResponse,
                             status = HttpStatusCode.OK,
@@ -264,49 +253,43 @@ class GeminiSummarizerLookbackTest {
 
             val input =
                 SummaryInput(
-                    content = "Later part of discussion",
-                    tools = listOf(GeminiTools.FETCH_EARLIER_MESSAGES_TOOL),
+                    content = "[Bob]: 我同意這個決定。",
+                    tools = listOf(GeminiInteractionTools.FETCH_EARLIER_MESSAGES),
                 )
-
             val initialResult = summarizer.summarize(input)
             assertIs<SummaryResult.ToolCall>(initialResult)
 
-            val continuation = initialResult.continuation
-            kotlin.test.assertNotNull(continuation)
-
-            val earlierHistory = "User A: We should adopt Kotlin 2.0. User B: Agreed."
-            val finalResult = continuation.invoke(earlierHistory)
+            val continuation = checkNotNull(initialResult.continuation)
+            val finalResult = continuation("[Alice]: 我們要選方案 A 還是方案 B？我建議方案 B。")
 
             assertIs<SummaryResult.Success>(finalResult)
-            assertTrue(finalResult.text.contains("TL;DR:\n完整脈絡繁體中文摘要"))
+            assertTrue(finalResult.text.contains("團隊決定採用方案 B 進行系統重構"))
             assertEquals(2, requestCount)
 
-            val contBody = continuationBody
-            kotlin.test.assertNotNull(contBody)
-            assertTrue(contBody.contains("functionResponse"))
-            assertTrue(contBody.contains("fetch_earlier_messages"))
-            assertTrue(contBody.contains("User A: We should adopt Kotlin 2.0"))
+            val contPayload = Json.parseToJsonElement(checkNotNull(secondRequestBody)) as JsonObject
+            assertEquals("int-turn-abc", (contPayload["previous_interaction_id"] as JsonPrimitive).content)
+            val contInputs = contPayload["input"] as JsonArray
+            val fnResultBlock = contInputs[0] as JsonObject
+            assertEquals("function_result", (fnResultBlock["type"] as JsonPrimitive).content)
+            assertEquals("call-abc", (fnResultBlock["call_id"] as JsonPrimitive).content)
+            assertEquals("fetch_earlier_messages", (fnResultBlock["name"] as JsonPrimitive).content)
+            assertTrue(fnResultBlock.toString().contains("方案 B"))
         }
 
     @Test
-    fun `handles malformed tool response with blank function name gracefully`() =
+    fun `returns Error when Gemini returns requires_action with malformed function_call missing name`() =
         runTest {
             val malformedResponse =
                 """
                 {
-                  "candidates": [
+                  "id": "int-malformed",
+                  "status": "requires_action",
+                  "steps": [
                     {
-                      "content": {
-                        "role": "model",
-                        "parts": [
-                          {
-                            "functionCall": {
-                              "name": "   ",
-                              "args": {}
-                            }
-                          }
-                        ]
-                      }
+                      "type": "function_call",
+                      "id": "call-bad",
+                      "name": "   ",
+                      "arguments": {}
                     }
                   ]
                 }
@@ -330,85 +313,29 @@ class GeminiSummarizerLookbackTest {
             val result =
                 summarizer.summarize(
                     SummaryInput(
-                        content = "Chat",
-                        tools = listOf(GeminiTools.FETCH_EARLIER_MESSAGES_TOOL),
+                        content = "Test",
+                        tools = listOf(GeminiInteractionTools.FETCH_EARLIER_MESSAGES),
                     ),
                 )
+
             assertIs<SummaryResult.Error.Generic>(result)
-            assertTrue(result.message.contains("missing function name", ignoreCase = true))
+            assertEquals(AiTraceFailureCategory.PARSE_ERROR, classifySummaryError(result))
         }
 
     @Test
-    fun `handles malformed tool response when required reason argument is missing`() =
-        runTest {
-            val missingReasonResponse =
-                """
-                {
-                  "candidates": [
-                    {
-                      "content": {
-                        "role": "model",
-                        "parts": [
-                          {
-                            "functionCall": {
-                              "name": "fetch_earlier_messages",
-                              "args": {}
-                            }
-                          }
-                        ]
-                      }
-                    }
-                  ]
-                }
-                """.trimIndent()
-
-            val mockEngine =
-                MockEngine {
-                    respond(
-                        content = missingReasonResponse,
-                        status = HttpStatusCode.OK,
-                        headers = headersOf(HttpHeaders.ContentType, "application/json"),
-                    )
-                }
-
-            val summarizer =
-                GeminiSummarizer(
-                    config = GeminiConfig(apiKey = "test-key"),
-                    httpClient = createTestClient(mockEngine),
-                )
-
-            val result =
-                summarizer.summarize(
-                    SummaryInput(
-                        content = "Chat",
-                        tools = listOf(GeminiTools.FETCH_EARLIER_MESSAGES_TOOL),
-                    ),
-                )
-            assertIs<SummaryResult.Error.Generic>(result)
-            assertTrue(result.message.contains("reason", ignoreCase = true))
-        }
-
-    @Test
-    fun `handles unknown tool call gracefully when model requests undeclared function`() =
+    fun `returns Error when Gemini returns unknown tool name not declared in tools`() =
         runTest {
             val unknownToolResponse =
                 """
                 {
-                  "candidates": [
+                  "id": "int-unknown-tool",
+                  "status": "requires_action",
+                  "steps": [
                     {
-                      "content": {
-                        "role": "model",
-                        "parts": [
-                          {
-                            "functionCall": {
-                              "name": "unsupported_shell_execute",
-                              "args": {
-                                "cmd": "ls"
-                              }
-                            }
-                          }
-                        ]
-                      }
+                      "type": "function_call",
+                      "id": "call-unk",
+                      "name": "unsupported_shell_execute",
+                      "arguments": { "cmd": "ls" }
                     }
                   ]
                 }
@@ -432,36 +359,30 @@ class GeminiSummarizerLookbackTest {
             val result =
                 summarizer.summarize(
                     SummaryInput(
-                        content = "Chat",
-                        tools = listOf(GeminiTools.FETCH_EARLIER_MESSAGES_TOOL),
+                        content = "Test",
+                        tools = listOf(GeminiInteractionTools.FETCH_EARLIER_MESSAGES),
                     ),
                 )
+
             assertIs<SummaryResult.Error.Generic>(result)
             assertTrue(result.message.contains("Unknown tool call", ignoreCase = true))
+            assertTrue(result.message.contains("unsupported_shell_execute"))
         }
 
     @Test
-    fun `handles HTTP error during tool response continuation gracefully`() =
+    fun `returns Error when fetch_earlier_messages function_call is missing required reason argument`() =
         runTest {
-            var requestCount = 0
-            val toolCallResponse =
+            val missingReasonResponse =
                 """
                 {
-                  "candidates": [
+                  "id": "int-no-reason",
+                  "status": "requires_action",
+                  "steps": [
                     {
-                      "content": {
-                        "role": "model",
-                        "parts": [
-                          {
-                            "functionCall": {
-                              "name": "fetch_earlier_messages",
-                              "args": {
-                                "reason": "Need context"
-                              }
-                            }
-                          }
-                        ]
-                      }
+                      "type": "function_call",
+                      "id": "call-nr",
+                      "name": "fetch_earlier_messages",
+                      "arguments": {}
                     }
                   ]
                 }
@@ -469,20 +390,11 @@ class GeminiSummarizerLookbackTest {
 
             val mockEngine =
                 MockEngine {
-                    requestCount++
-                    if (requestCount == 1) {
-                        respond(
-                            content = toolCallResponse,
-                            status = HttpStatusCode.OK,
-                            headers = headersOf(HttpHeaders.ContentType, "application/json"),
-                        )
-                    } else {
-                        respond(
-                            content = "Internal Gemini error",
-                            status = HttpStatusCode.InternalServerError,
-                            headers = headersOf(HttpHeaders.ContentType, "text/plain"),
-                        )
-                    }
+                    respond(
+                        content = missingReasonResponse,
+                        status = HttpStatusCode.OK,
+                        headers = headersOf(HttpHeaders.ContentType, "application/json"),
+                    )
                 }
 
             val summarizer =
@@ -491,59 +403,32 @@ class GeminiSummarizerLookbackTest {
                     httpClient = createTestClient(mockEngine),
                 )
 
-            val initialResult =
+            val result =
                 summarizer.summarize(
                     SummaryInput(
-                        content = "Chat",
-                        tools = listOf(GeminiTools.FETCH_EARLIER_MESSAGES_TOOL),
+                        content = "Test",
+                        tools = listOf(GeminiInteractionTools.FETCH_EARLIER_MESSAGES),
                     ),
                 )
-            assertIs<SummaryResult.ToolCall>(initialResult)
 
-            val continuationResult = initialResult.continuation?.invoke("Earlier messages")
-            assertIs<SummaryResult.Error.ApiError>(continuationResult)
-            assertEquals(500, continuationResult.statusCode)
+            assertIs<SummaryResult.Error.Generic>(result)
+            assertTrue(result.message.contains("reason", ignoreCase = true))
         }
 
     @Test
-    fun `summarize coordinates lookbackProvider automatically when model requests fetch_earlier_messages`() =
+    fun `returns Error when fetch_earlier_messages function_call has blank reason argument`() =
         runTest {
-            var requestCount = 0
-            val toolCallResponse =
+            val blankReasonResponse =
                 """
                 {
-                  "candidates": [
+                  "id": "int-blank-reason",
+                  "status": "requires_action",
+                  "steps": [
                     {
-                      "content": {
-                        "role": "model",
-                        "parts": [
-                          {
-                            "functionCall": {
-                              "name": "fetch_earlier_messages",
-                              "args": {
-                                "reason": "Requires earlier context"
-                              }
-                            }
-                          }
-                        ]
-                      }
-                    }
-                  ]
-                }
-                """.trimIndent()
-
-            val finalSummaryResponse =
-                """
-                {
-                  "candidates": [
-                    {
-                      "content": {
-                        "parts": [
-                          {
-                            "text": "TL;DR:\nLookback succeeded\n\n核心重點:\n• 成功擴充對話背景"
-                          }
-                        ]
-                      }
+                      "type": "function_call",
+                      "id": "call-br",
+                      "name": "fetch_earlier_messages",
+                      "arguments": { "reason": "   " }
                     }
                   ]
                 }
@@ -551,10 +436,8 @@ class GeminiSummarizerLookbackTest {
 
             val mockEngine =
                 MockEngine {
-                    requestCount++
-                    val content = if (requestCount == 1) toolCallResponse else finalSummaryResponse
                     respond(
-                        content = content,
+                        content = blankReasonResponse,
                         status = HttpStatusCode.OK,
                         headers = headersOf(HttpHeaders.ContentType, "application/json"),
                     )
@@ -566,148 +449,54 @@ class GeminiSummarizerLookbackTest {
                     httpClient = createTestClient(mockEngine),
                 )
 
-            var lookbackCalled = false
-            val input = SummaryInput(content = "Baseline conversation")
             val result =
-                summarizer.summarize(input) { reason ->
-                    lookbackCalled = true
-                    assertEquals("Requires earlier context", reason)
-                    "Expanded earlier history"
-                }
-
-            assertIs<SummaryResult.Success>(result)
-            assertTrue(lookbackCalled)
-            assertTrue(result.text.contains("Lookback succeeded"))
-            assertEquals(2, requestCount)
-        }
-
-    @Test
-    fun `summarize falls back to baseline when lookback provider fails`() =
-        runTest {
-            var requestCount = 0
-            val toolCallResponse =
-                """
-                {
-                  "candidates": [
-                    {
-                      "content": {
-                        "role": "model",
-                        "parts": [
-                          {
-                            "functionCall": {
-                              "name": "fetch_earlier_messages",
-                              "args": {
-                                "reason": "Requires earlier context"
-                              }
-                            }
-                          }
-                        ]
-                      }
-                    }
-                  ]
-                }
-                """.trimIndent()
-
-            val baselineResponse =
-                """
-                {
-                  "candidates": [
-                    {
-                      "content": {
-                        "parts": [
-                          {
-                            "text": "TL;DR:\nBaseline summary fallback\n\n核心重點:\n• 摘要降級成功"
-                          }
-                        ]
-                      }
-                    }
-                  ]
-                }
-                """.trimIndent()
-
-            val mockEngine =
-                MockEngine {
-                    requestCount++
-                    val content = if (requestCount == 1) toolCallResponse else baselineResponse
-                    respond(
-                        content = content,
-                        status = HttpStatusCode.OK,
-                        headers = headersOf(HttpHeaders.ContentType, "application/json"),
-                    )
-                }
-
-            val summarizer =
-                GeminiSummarizer(
-                    config = GeminiConfig(apiKey = "test-key"),
-                    httpClient = createTestClient(mockEngine),
+                summarizer.summarize(
+                    SummaryInput(
+                        content = "Test",
+                        tools = listOf(GeminiInteractionTools.FETCH_EARLIER_MESSAGES),
+                    ),
                 )
 
-            val input = SummaryInput(content = "Baseline conversation")
-            val result =
-                summarizer.summarize(input) { _ ->
-                    throw RuntimeException("Database timeout on history fetch")
-                }
-
-            assertIs<SummaryResult.Success>(result)
-            assertTrue(result.text.contains("Baseline summary fallback"))
+            assertIs<SummaryResult.Error.Generic>(result)
+            assertTrue(result.message.contains("reason", ignoreCase = true))
         }
 
     @Test
-    fun `enforces single lookback limit by falling back to baseline summary when model attempts second tool call`() =
+    fun `executes multi-turn lookback when lookbackProvider is passed and model invokes fetch_earlier_messages`() =
         runTest {
             var requestCount = 0
+            val recordedPayloads = mutableListOf<String>()
+
             val toolCallResponse =
                 """
                 {
-                  "candidates": [
+                  "id": "int-multi-1",
+                  "status": "requires_action",
+                  "steps": [
                     {
-                      "content": {
-                        "role": "model",
-                        "parts": [
-                          {
-                            "functionCall": {
-                              "name": "fetch_earlier_messages",
-                              "args": { "reason": "Round 1" }
-                            }
-                          }
-                        ]
-                      }
+                      "type": "function_call",
+                      "id": "call-m1",
+                      "name": "fetch_earlier_messages",
+                      "arguments": { "reason": "Reference to earlier discussion is unclear" }
                     }
                   ]
                 }
                 """.trimIndent()
 
-            val secondToolCallResponse =
+            val finalResponse =
                 """
                 {
-                  "candidates": [
+                  "id": "int-multi-2",
+                  "status": "completed",
+                  "steps": [
                     {
-                      "content": {
-                        "role": "model",
-                        "parts": [
-                          {
-                            "functionCall": {
-                              "name": "fetch_earlier_messages",
-                              "args": { "reason": "Round 2 attempt" }
-                            }
-                          }
-                        ]
-                      }
-                    }
-                  ]
-                }
-                """.trimIndent()
-
-            val baselineResponse =
-                """
-                {
-                  "candidates": [
-                    {
-                      "content": {
-                        "parts": [
-                          { "text": "TL;DR:\nBaseline summary after round limit" }
-                        ]
-                      }
+                      "type": "model_output",
+                      "content": [
+                        {
+                          "type": "text",
+                          "text": "TL;DR:\n團隊針對資料庫與架構完成深入討論並達成共識。\n\n核心重點:\n• 確認採用 PostgreSQL"
+                        }
+                      ]
                     }
                   ]
                 }
@@ -716,14 +505,213 @@ class GeminiSummarizerLookbackTest {
             val mockEngine =
                 MockEngine { request ->
                     requestCount++
-                    val content =
-                        when (requestCount) {
-                            1 -> toolCallResponse
-                            2 -> secondToolCallResponse
-                            else -> baselineResponse
-                        }
+                    recordedPayloads.add(request.body.toByteArray().decodeToString())
+                    val body = if (requestCount == 1) toolCallResponse else finalResponse
                     respond(
-                        content = content,
+                        content = body,
+                        status = HttpStatusCode.OK,
+                        headers = headersOf(HttpHeaders.ContentType, "application/json"),
+                    )
+                }
+
+            val summarizer =
+                GeminiSummarizer(
+                    config = GeminiConfig(apiKey = "test-key"),
+                    httpClient = createTestClient(mockEngine),
+                )
+
+            val input = SummaryInput(content = "[Charlie]: I agree with that database choice.")
+            var capturedReason: String? = null
+            val result =
+                summarizer.summarize(input) { reason ->
+                    capturedReason = reason
+                    "[前置歷史背景]\n[Alice]: Let's use PostgreSQL.\n\n[當前核心討論]\n[Charlie]: I agree with that database choice."
+                }
+
+            assertIs<SummaryResult.Success>(result)
+            assertEquals("Reference to earlier discussion is unclear", capturedReason)
+            assertTrue(result.text.contains("團隊針對資料庫與架構完成深入討論並達成共識"))
+            assertEquals(2, requestCount)
+            assertTrue(recordedPayloads[0].contains("fetch_earlier_messages"))
+            assertTrue(recordedPayloads[1].contains("\"previous_interaction_id\":\"int-multi-1\""))
+            assertTrue(recordedPayloads[1].contains("function_result"))
+            assertTrue(recordedPayloads[1].contains("Let's use PostgreSQL"))
+        }
+
+    @Test
+    fun `falls back to baseline summary without fetch_earlier_messages when tool-enabled call fails`() =
+        runTest {
+            var requestCount = 0
+            val recordedPayloads = mutableListOf<String>()
+
+            val baselineResponse =
+                """
+                {
+                  "id": "int-baseline-ok",
+                  "status": "completed",
+                  "steps": [
+                    {
+                      "type": "model_output",
+                      "content": [{ "type": "text", "text": "TL;DR:\nBaseline fallback summary succeeded." }]
+                    }
+                  ]
+                }
+                """.trimIndent()
+
+            val mockEngine =
+                MockEngine { request ->
+                    requestCount++
+                    recordedPayloads.add(request.body.toByteArray().decodeToString())
+                    if (requestCount == 1) {
+                        respond(
+                            content = """{"error": {"code": 500, "message": "Tool call failed"}}""",
+                            status = HttpStatusCode.InternalServerError,
+                            headers = headersOf(HttpHeaders.ContentType, "application/json"),
+                        )
+                    } else {
+                        respond(
+                            content = baselineResponse,
+                            status = HttpStatusCode.OK,
+                            headers = headersOf(HttpHeaders.ContentType, "application/json"),
+                        )
+                    }
+                }
+
+            val summarizer =
+                GeminiSummarizer(
+                    config = GeminiConfig(apiKey = "test-key"),
+                    httpClient = createTestClient(mockEngine),
+                )
+
+            val input = SummaryInput(content = "[Alice]: Discussion content")
+            val result =
+                summarizer.summarize(input) { _ ->
+                    "Earlier messages"
+                }
+
+            assertIs<SummaryResult.Success>(result)
+            assertTrue(result.text.contains("Baseline fallback summary succeeded"))
+            assertEquals(2, requestCount)
+            assertTrue(recordedPayloads[0].contains("fetch_earlier_messages"))
+            assertFalse(recordedPayloads[1].contains("fetch_earlier_messages"))
+        }
+
+    @Test
+    fun `falls back to baseline summary when model attempts more than one lookback turn`() =
+        runTest {
+            var requestCount = 0
+            val recordedPayloads = mutableListOf<String>()
+
+            val toolCallResponse =
+                """
+                {
+                  "id": "int-loop-1",
+                  "status": "requires_action",
+                  "steps": [
+                    {
+                      "type": "function_call",
+                      "id": "call-loop",
+                      "name": "fetch_earlier_messages",
+                      "arguments": { "reason": "Need even more history" }
+                    }
+                  ]
+                }
+                """.trimIndent()
+
+            val baselineResponse =
+                """
+                {
+                  "id": "int-loop-baseline",
+                  "status": "completed",
+                  "steps": [
+                    {
+                      "type": "model_output",
+                      "content": [{ "type": "text", "text": "TL;DR:\nFallback summary after loop limit." }]
+                    }
+                  ]
+                }
+                """.trimIndent()
+
+            val mockEngine =
+                MockEngine { request ->
+                    requestCount++
+                    recordedPayloads.add(request.body.toByteArray().decodeToString())
+                    if (requestCount <= 2) {
+                        respond(
+                            content = toolCallResponse,
+                            status = HttpStatusCode.OK,
+                            headers = headersOf(HttpHeaders.ContentType, "application/json"),
+                        )
+                    } else {
+                        respond(
+                            content = baselineResponse,
+                            status = HttpStatusCode.OK,
+                            headers = headersOf(HttpHeaders.ContentType, "application/json"),
+                        )
+                    }
+                }
+
+            val summarizer =
+                GeminiSummarizer(
+                    config = GeminiConfig(apiKey = "test-key"),
+                    httpClient = createTestClient(mockEngine),
+                )
+
+            val input = SummaryInput(content = "Target conversation")
+            val result =
+                summarizer.summarize(input) { _ ->
+                    "Earlier context chunk"
+                }
+
+            assertIs<SummaryResult.Success>(result)
+            assertTrue(result.text.contains("Fallback summary after loop limit"))
+            assertEquals(3, requestCount)
+            assertFalse(recordedPayloads[2].contains("fetch_earlier_messages"))
+        }
+
+    @Test
+    fun `falls back to baseline summary when lookbackProvider throws an exception`() =
+        runTest {
+            var requestCount = 0
+            val recordedPayloads = mutableListOf<String>()
+
+            val toolCallResponse =
+                """
+                {
+                  "id": "int-prov-err",
+                  "status": "requires_action",
+                  "steps": [
+                    {
+                      "type": "function_call",
+                      "id": "call-pe",
+                      "name": "fetch_earlier_messages",
+                      "arguments": { "reason": "Need history" }
+                    }
+                  ]
+                }
+                """.trimIndent()
+
+            val baselineResponse =
+                """
+                {
+                  "id": "int-prov-base",
+                  "status": "completed",
+                  "steps": [
+                    {
+                      "type": "model_output",
+                      "content": [{ "type": "text", "text": "TL;DR:\nBaseline summary after provider failure." }]
+                    }
+                  ]
+                }
+                """.trimIndent()
+
+            val mockEngine =
+                MockEngine { request ->
+                    requestCount++
+                    recordedPayloads.add(request.body.toByteArray().decodeToString())
+                    val body = if (requestCount == 1) toolCallResponse else baselineResponse
+                    respond(
+                        content = body,
                         status = HttpStatusCode.OK,
                         headers = headersOf(HttpHeaders.ContentType, "application/json"),
                     )
@@ -737,35 +725,32 @@ class GeminiSummarizerLookbackTest {
 
             val input = SummaryInput(content = "Target conversation")
             val result =
-                summarizer.summarize(input) { reason ->
-                    "Lookback response for $reason"
+                summarizer.summarize(input) { _ ->
+                    throw IllegalStateException("Discord API fetch failed")
                 }
 
             assertIs<SummaryResult.Success>(result)
-            assertTrue(result.text.contains("Baseline summary after round limit"))
-            assertEquals(3, requestCount)
+            assertTrue(result.text.contains("Baseline summary after provider failure"))
+            assertEquals(2, requestCount)
+            assertFalse(recordedPayloads[1].contains("fetch_earlier_messages"))
         }
 
     @Test
-    fun `falls back gracefully to baseline summary when tool continuation throws exception`() =
+    fun `falls back to baseline summary when tool continuation throws network exception`() =
         runTest {
             var requestCount = 0
+
             val toolCallResponse =
                 """
                 {
-                  "candidates": [
+                  "id": "int-cont-exc",
+                  "status": "requires_action",
+                  "steps": [
                     {
-                      "content": {
-                        "role": "model",
-                        "parts": [
-                          {
-                            "functionCall": {
-                              "name": "fetch_earlier_messages",
-                              "args": { "reason": "Need context" }
-                            }
-                          }
-                        ]
-                      }
+                      "type": "function_call",
+                      "id": "call-ce",
+                      "name": "fetch_earlier_messages",
+                      "arguments": { "reason": "Need history" }
                     }
                   ]
                 }
@@ -774,20 +759,19 @@ class GeminiSummarizerLookbackTest {
             val baselineResponse =
                 """
                 {
-                  "candidates": [
+                  "id": "int-cont-base",
+                  "status": "completed",
+                  "steps": [
                     {
-                      "content": {
-                        "parts": [
-                          { "text": "TL;DR:\nBaseline summary after continuation exception" }
-                        ]
-                      }
+                      "type": "model_output",
+                      "content": [{ "type": "text", "text": "TL;DR:\nBaseline summary after continuation exception." }]
                     }
                   ]
                 }
                 """.trimIndent()
 
             val mockEngine =
-                MockEngine { request ->
+                MockEngine {
                     requestCount++
                     if (requestCount == 1) {
                         respond(

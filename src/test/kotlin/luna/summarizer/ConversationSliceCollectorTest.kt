@@ -942,11 +942,11 @@ class ConversationSliceCollectorTest {
         }
 
     @Test
-    fun `collectSlice resolves most recent URL via peekResolver and degrades cleanly when unresolved`() =
+    fun `collectSlice resolves most recent SocialPeek URL via peekResolver and degrades cleanly when unresolved`() =
         runTest {
             val baseTime = Instant.parse("2026-11-06T12:00:00Z")
-            val msg1 = createMockMessage(9101L, "Alice", "Old link: https://example.com/first", timestamp = baseTime)
-            val msg2 = createMockMessage(9102L, "Bob", "New link: https://example.com/second", timestamp = baseTime + 1.minutes)
+            val msg1 = createMockMessage(9101L, "Alice", "Old post: https://x.com/alice/status/111", timestamp = baseTime)
+            val msg2 = createMockMessage(9102L, "Bob", "New post: https://x.com/bob/status/222", timestamp = baseTime + 1.minutes)
             val targetMsg = createMockMessage(9103L, "Charlie", "Thoughts?", timestamp = baseTime + 2.minutes)
 
             var resolvedUrl: String? = null
@@ -956,23 +956,24 @@ class ConversationSliceCollectorTest {
                     peekResolver = { url ->
                         resolvedUrl = url
                         PeekPost(
-                            platform = Platform.GENERIC,
-                            id = "second-1",
+                            platform = Platform.X,
+                            id = "222",
                             originalUrl = url,
                             author = Author(username = "bob"),
-                            title = "Second Link Title",
-                            content = "Resolved article body.",
+                            title = "Second Post Title",
+                            content = "Resolved social post body.",
                             comments = listOf(Comment(author = "reader1", content = "Clear explanation")),
                         )
                     },
                 ).collectSlice(targetMsg)
 
             assertNotNull(enrichedSlice)
-            assertEquals("https://example.com/second", resolvedUrl)
-            assertEquals("https://example.com/second", enrichedSlice.summaryInput.url)
-            assertEquals("Second Link Title", enrichedSlice.summaryInput.title)
+            assertEquals("https://x.com/bob/status/222", resolvedUrl)
+            assertEquals("https://x.com/bob/status/222", enrichedSlice.summaryInput.url)
+            assertEquals("Second Post Title", enrichedSlice.summaryInput.title)
             assertEquals(listOf("Clear explanation"), enrichedSlice.summaryInput.comments)
-            assertTrue(enrichedSlice.summaryInput.content.contains("Resolved article body."))
+            assertTrue(enrichedSlice.summaryInput.content.contains("Resolved social post body."))
+            assertTrue(enrichedSlice.summaryInput.webUrls.isEmpty())
 
             val fallbackSlice =
                 ConversationSliceCollector(
@@ -981,9 +982,129 @@ class ConversationSliceCollectorTest {
                 ).collectSlice(targetMsg)
 
             assertNotNull(fallbackSlice)
-            assertEquals("https://example.com/second", fallbackSlice.summaryInput.url)
+            assertEquals("https://x.com/bob/status/222", fallbackSlice.summaryInput.url)
             assertNull(fallbackSlice.summaryInput.title)
             assertEquals(emptyList(), fallbackSlice.summaryInput.comments)
-            assertTrue(fallbackSlice.summaryInput.content.contains("[Bob]: New link: https://example.com/second"))
+            assertTrue(fallbackSlice.summaryInput.content.contains("[Bob]: New post: https://x.com/bob/status/222"))
+            assertNotNull(fallbackSlice.lookbackProvider)
+        }
+
+    @Test
+    fun `collectSlice skips peekResolver for general public web URLs populates deduplicated webUrls and preserves lookbackProvider`() =
+        runTest {
+            val baseTime = Instant.parse("2026-11-06T12:00:00Z")
+            val embed = SummaryTestFixtures.createMockEmbed(title = "OpenGraph Title", description = "OpenGraph snippet")
+            val msg1 =
+                createMockMessage(
+                    9201L,
+                    "Alice",
+                    "Read https://kotlinlang.org/docs/whatsnew20.html",
+                    timestamp = baseTime,
+                    embeds = listOf(embed),
+                )
+            val msg2 =
+                createMockMessage(
+                    9202L,
+                    "Bob",
+                    "Also check https://docs.example.org/guide and https://kotlinlang.org/docs/whatsnew20.html/",
+                    timestamp = baseTime + 1.minutes,
+                )
+            val targetMsg = createMockMessage(9203L, "Charlie", "Can someone summarize these docs?", timestamp = baseTime + 2.minutes)
+
+            var peekCalled = false
+            val slice =
+                ConversationSliceCollector(
+                    historyFetcher = { _, _ -> listOf(msg1, msg2) },
+                    peekResolver = {
+                        peekCalled = true
+                        null
+                    },
+                ).collectSlice(targetMsg)
+
+            assertNotNull(slice)
+            assertFalse(peekCalled, "peekResolver must not be invoked for general public web URLs")
+            assertEquals(
+                listOf(
+                    "https://kotlinlang.org/docs/whatsnew20.html",
+                    "https://docs.example.org/guide",
+                ),
+                slice.summaryInput.webUrls,
+            )
+            assertEquals("https://docs.example.org/guide", slice.primaryUrl)
+            assertEquals("https://docs.example.org/guide", slice.summaryInput.url)
+            assertTrue(slice.summaryInput.content.contains("https://kotlinlang.org/docs/whatsnew20.html"))
+            assertTrue(slice.summaryInput.content.contains("https://docs.example.org/guide"))
+            assertNotNull(slice.lookbackProvider, "lookbackProvider must be preserved for web URL slices")
+        }
+
+    @Test
+    fun `collectSlice excludes Discord CDN URLs from webUrls and enforces 20 URL cap`() =
+        runTest {
+            val baseTime = Instant.parse("2026-11-06T12:00:00Z")
+            val cdnAttachment = createMockAttachment("https://cdn.discordapp.com/attachments/1/2/diagram.png", "image/png", "diagram.png")
+            val urlsPart1 = (1..12).joinToString(" ") { "https://site$it.example.com/article" }
+            val urlsPart2 = (13..24).joinToString(" ") { "https://site$it.example.com/article" }
+
+            val msg1 =
+                createMockMessage(
+                    9301L,
+                    "Alice",
+                    "CDN link https://cdn.discordapp.com/attachments/1/2/diagram.png and https://media.discordapp.net/attachments/9/8/pic.webp $urlsPart1",
+                    timestamp = baseTime,
+                    attachments = setOf(cdnAttachment),
+                )
+            val targetMsg = createMockMessage(9302L, "Bob", "More links: $urlsPart2", timestamp = baseTime + 1.minutes)
+
+            var peekCalled = false
+            val slice =
+                ConversationSliceCollector(
+                    historyFetcher = { _, _ -> listOf(msg1) },
+                    peekResolver = {
+                        peekCalled = true
+                        null
+                    },
+                ).collectSlice(targetMsg)
+
+            assertNotNull(slice)
+            assertFalse(peekCalled)
+            assertEquals(20, slice.summaryInput.webUrls.size)
+            assertEquals("https://site1.example.com/article", slice.summaryInput.webUrls.first())
+            assertEquals("https://site20.example.com/article", slice.summaryInput.webUrls.last())
+            assertFalse(slice.summaryInput.webUrls.any { it.contains("discordapp") })
+            assertTrue(slice.summaryInput.originalUrls.size >= 24)
+            assertTrue(slice.summaryInput.originalUrls.contains("https://site24.example.com/article"))
+        }
+
+    @Test
+    fun `collectSlice resolves SocialPeek URL alongside web URLs in same slice without losing webUrls`() =
+        runTest {
+            val baseTime = Instant.parse("2026-11-06T12:00:00Z")
+            val msg1 = createMockMessage(9401L, "Alice", "Reference doc: https://docs.example.org/spec", timestamp = baseTime)
+            val msg2 = createMockMessage(9402L, "Bob", "Video talk: https://www.youtube.com/watch?v=mixed123", timestamp = baseTime + 1.minutes)
+            val targetMsg = createMockMessage(9403L, "Charlie", "Summarize both", timestamp = baseTime + 2.minutes)
+
+            val peekedUrls = mutableListOf<String>()
+            val slice =
+                ConversationSliceCollector(
+                    historyFetcher = { _, _ -> listOf(msg1, msg2) },
+                    peekResolver = { url ->
+                        peekedUrls.add(url)
+                        PeekPost(
+                            platform = Platform.YOUTUBE,
+                            id = "mixed123",
+                            originalUrl = url,
+                            cleanUrl = url,
+                            author = Author(username = "Speaker"),
+                            title = "Mixed Talk",
+                            content = "00:00 Intro",
+                            rawData = mapOf("durationSeconds" to "120"),
+                        )
+                    },
+                ).collectSlice(targetMsg)
+
+            assertNotNull(slice)
+            assertEquals(listOf("https://www.youtube.com/watch?v=mixed123"), peekedUrls)
+            assertEquals("https://www.youtube.com/watch?v=mixed123", slice.summaryInput.videoUri)
+            assertEquals(listOf("https://docs.example.org/spec"), slice.summaryInput.webUrls)
         }
 }
