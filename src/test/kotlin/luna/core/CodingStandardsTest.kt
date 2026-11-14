@@ -392,6 +392,35 @@ class CodingStandardsTest {
         )
     }
 
+    @Test
+    fun `test suites must stay within 600 lines`() {
+        val maxLines = 600
+        val testRoots = findKotlinSourceRoots("test")
+        assertTrue(testRoots.isNotEmpty(), "At least one src/test/kotlin directory must exist")
+
+        val violations = mutableListOf<String>()
+        testRoots.forEach { root ->
+            root
+                .walkTopDown()
+                .filter { it.isFile && it.name.endsWith("Test.kt") }
+                .forEach { file ->
+                    val relPath = file.relativeTo(projectRoot).path.replace('\\', '/')
+                    val lineCount = file.useLines { it.count() }
+                    if (lineCount > maxLines) {
+                        violations.add(
+                            "$relPath: $lineCount lines exceeds limit $maxLines. " +
+                                "Split new concerns into a focused *Test.kt file per CODING_STANDARDS.md §5.",
+                        )
+                    }
+                }
+        }
+
+        assertTrue(
+            violations.isEmpty(),
+            "Found oversized test suite violations:\n" + violations.joinToString("\n"),
+        )
+    }
+
     private fun findKotlinSourceRoots(parentDirName: String): List<File> =
         projectRoot
             .walkTopDown()
