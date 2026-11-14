@@ -1130,4 +1130,377 @@ class ChatterAiTraceTest {
             assertSame(customService, plugin.service)
             plugin.shutdown()
         }
+
+    @Test
+    fun `ChatterService direct-mention long-video AGENTIC_VIDEO success emits MENTION trace with single collapsed attempt`(
+        @TempDir tempDir: Path,
+    ) = runTest {
+        val apiKey = "secret-chatter-agentic-key"
+        var pollCount = 0
+        val completedJson =
+            """{"id": "chat-int-1", "status": "completed", "output_text": "這支長影片重點在後半段的實測 👍"}"""
+
+        val mockEngine =
+            MockEngine { request ->
+                when {
+                    request.url.encodedPath.endsWith("/interactions") && request.method.value == "POST" -> {
+                        respond(
+                            content = """{"id": "chat-int-1", "status": "in_progress"}""",
+                            status = HttpStatusCode.OK,
+                            headers = headersOf(HttpHeaders.ContentType, "application/json"),
+                        )
+                    }
+
+                    request.url.encodedPath.endsWith("/interactions/chat-int-1") && request.method.value == "GET" -> {
+                        pollCount++
+                        val body =
+                            if (pollCount == 1) {
+                                """{"id": "chat-int-1", "status": "in_progress"}"""
+                            } else {
+                                completedJson
+                            }
+                        respond(
+                            content = body,
+                            status = HttpStatusCode.OK,
+                            headers = headersOf(HttpHeaders.ContentType, "application/json"),
+                        )
+                    }
+
+                    else -> {
+                        respond("Not found", status = HttpStatusCode.NotFound)
+                    }
+                }
+            }
+
+        val recorder = JsonlAiTraceRecorder(traceDir = tempDir, clock = fixedClock)
+        val httpClient = createHttpClient(mockEngine)
+        val longVideoPost =
+            dev.socialpeek.model.PeekPost(
+                platform = dev.socialpeek.model.Platform.YOUTUBE,
+                id = "longChatter720",
+                originalUrl = "https://www.youtube.com/watch?v=longChatter720",
+                cleanUrl = "https://www.youtube.com/watch?v=longChatter720",
+                author = dev.socialpeek.model.Author(username = "Creator"),
+                title = "Long Architecture Talk",
+                content = "Talk summary",
+                rawData = mapOf("durationSeconds" to "720"),
+            )
+        val filter = ChatterNoiseFilter()
+        val collector =
+            ChatterContextCollector(
+                noiseFilter = filter,
+                peekResolver = { longVideoPost },
+            )
+        val sentMessages = mutableListOf<String>()
+        val service =
+            ChatterService(
+                filter = filter,
+                decisionClient =
+                    GeminiDecisionClient(
+                        config = ChatterDecisionConfig(apiKey = apiKey),
+                        httpClient = httpClient,
+                        traceRecorder = recorder,
+                    ),
+                chatterGenerator =
+                    ChatterGenerator(
+                        config = ChatterConfig(apiKey = apiKey, searchGroundingEnabled = true),
+                        httpClient = httpClient,
+                        pollingDelayMs = 1L,
+                        maxPollingAttempts = 5,
+                        traceRecorder = recorder,
+                    ),
+                historyFetcher = { _, _ -> emptyList() },
+                messageSender = { _, content ->
+                    sentMessages.add(content)
+                    mockk(relaxed = true)
+                },
+                contextCollector = collector,
+                traceRecorder = recorder,
+            )
+
+        val selfId = Snowflake(9999L)
+        val mentionMsg =
+            createMockMessage(
+                id = 901L,
+                channelId = 902L,
+                guildId = 903L,
+                authorId = 904L,
+                username = "Alice",
+                content = "<@9999> 幫我看這支片 https://www.youtube.com/watch?v=longChatter720",
+                mentionedUserIds = setOf(selfId),
+                selfId = selfId,
+            )
+
+        val handled = service.processMessage(mentionMsg)
+        recorder.flushAndClose()
+
+        assertTrue(handled)
+        assertEquals(listOf("這支長影片重點在後半段的實測"), sentMessages)
+
+        val traces = readTraceLines(tempDir)
+        assertEquals(1, traces.size)
+        val trace = traces.single()
+        assertEquals(AiTracePipeline.CHATTER, trace.pipeline)
+        assertEquals(AiTraceTrigger.MENTION, trace.trigger)
+        assertEquals(AiTraceOutcome.SUCCESS, trace.outcome)
+        assertFalse(trace.degraded)
+        assertNull(trace.failureCategory)
+        assertEquals(1, trace.attemptCount)
+        assertEquals(listOf("AGENTIC_VIDEO"), trace.fallbackPath)
+        assertEquals("這支長影片重點在後半段的實測", trace.finalOutput)
+
+        val attempt = trace.attempts.single()
+        assertEquals(1, attempt.attemptIndex)
+        assertEquals(AiAttemptStage.AGENTIC_VIDEO, attempt.stage)
+        assertEquals("https://generativelanguage.googleapis.com/v1beta/interactions?key=******", attempt.endpoint)
+        assertEquals(2, attempt.pollingAttempts)
+        assertEquals(200, attempt.httpStatus)
+        assertEquals(completedJson, attempt.responseRaw)
+        assertEquals(AiAttemptOutcome.SUCCESS, attempt.parsedOutcome)
+        assertEquals(true, attempt.request?.hasVideo)
+        assertEquals(720L, attempt.request?.videoDurationSeconds)
+
+        val jsonlFile = tempDir.resolve("ai-2026-11-14.jsonl")
+        assertFalse(Files.readString(jsonlFile).contains(apiKey))
+    }
+
+    @Test
+    fun `ChatterService direct-mention agentic timeout degrades to generateContent without videoUri and records DEGRADED_SUCCESS`(
+        @TempDir tempDir: Path,
+    ) = runTest {
+        val apiKey = "secret-chatter-degrade-key"
+        var pollCount = 0
+        val pendingJson = """{"id": "chat-int-to", "status": "in_progress"}"""
+        val fallbackJson =
+            """
+            {
+              "candidates": [
+                {
+                  "content": {"parts": [{"text": "影片目前無法直接解析 不過留言大家都推 12 分鐘那段"}]},
+                  "finishReason": "STOP"
+                }
+              ]
+            }
+            """.trimIndent()
+
+        val mockEngine =
+            MockEngine { request ->
+                val path = request.url.encodedPath
+                when {
+                    path.endsWith("/interactions") && request.method.value == "POST" -> {
+                        respond(
+                            content = pendingJson,
+                            status = HttpStatusCode.OK,
+                            headers = headersOf(HttpHeaders.ContentType, "application/json"),
+                        )
+                    }
+
+                    path.contains("/interactions/chat-int-to") && request.method.value == "GET" -> {
+                        pollCount++
+                        respond(
+                            content = pendingJson,
+                            status = HttpStatusCode.OK,
+                            headers = headersOf(HttpHeaders.ContentType, "application/json"),
+                        )
+                    }
+
+                    path.endsWith(":generateContent") -> {
+                        respond(
+                            content = fallbackJson,
+                            status = HttpStatusCode.OK,
+                            headers = headersOf(HttpHeaders.ContentType, "application/json"),
+                        )
+                    }
+
+                    else -> {
+                        respond("Not found", status = HttpStatusCode.NotFound)
+                    }
+                }
+            }
+
+        val recorder = JsonlAiTraceRecorder(traceDir = tempDir, clock = fixedClock)
+        val httpClient = createHttpClient(mockEngine)
+        val longVideoPost =
+            dev.socialpeek.model.PeekPost(
+                platform = dev.socialpeek.model.Platform.YOUTUBE,
+                id = "longTimeout900",
+                originalUrl = "https://www.youtube.com/watch?v=longTimeout900",
+                cleanUrl = "https://www.youtube.com/watch?v=longTimeout900",
+                author = dev.socialpeek.model.Author(username = "Creator"),
+                title = "Long Stream Replay",
+                content = "Stream outline",
+                comments =
+                    listOf(
+                        dev.socialpeek.model.Comment(author = "viewer", content = "12:00 精華必看"),
+                    ),
+                rawData = mapOf("durationSeconds" to "900"),
+            )
+        val filter = ChatterNoiseFilter()
+        val service =
+            ChatterService(
+                filter = filter,
+                decisionClient =
+                    GeminiDecisionClient(
+                        config = ChatterDecisionConfig(apiKey = apiKey),
+                        httpClient = httpClient,
+                        traceRecorder = recorder,
+                    ),
+                chatterGenerator =
+                    ChatterGenerator(
+                        config = ChatterConfig(apiKey = apiKey, searchGroundingEnabled = true),
+                        httpClient = httpClient,
+                        pollingDelayMs = 1L,
+                        maxPollingAttempts = 2,
+                        traceRecorder = recorder,
+                    ),
+                historyFetcher = { _, _ -> emptyList() },
+                messageSender = { _, _ -> mockk(relaxed = true) },
+                contextCollector = ChatterContextCollector(noiseFilter = filter, peekResolver = { longVideoPost }),
+                traceRecorder = recorder,
+            )
+
+        val selfId = Snowflake(9999L)
+        val mentionMsg =
+            createMockMessage(
+                id = 911L,
+                channelId = 912L,
+                guildId = 913L,
+                authorId = 914L,
+                username = "Alice",
+                content = "<@9999> 幫忙看 https://www.youtube.com/watch?v=longTimeout900",
+                mentionedUserIds = setOf(selfId),
+                selfId = selfId,
+            )
+
+        val handled = service.processMessage(mentionMsg)
+        recorder.flushAndClose()
+
+        assertTrue(handled)
+        assertEquals(2, pollCount)
+
+        val trace = readTraceLines(tempDir).single()
+        assertEquals(AiTracePipeline.CHATTER, trace.pipeline)
+        assertEquals(AiTraceTrigger.MENTION, trace.trigger)
+        assertEquals(AiTraceOutcome.DEGRADED_SUCCESS, trace.outcome)
+        assertTrue(trace.degraded)
+        assertEquals(2, trace.attemptCount)
+        assertEquals(listOf("AGENTIC_VIDEO", "CHATTER_GENERATE"), trace.fallbackPath)
+        assertEquals("影片目前無法直接解析 不過留言大家都推 12 分鐘那段", trace.finalOutput)
+
+        val agenticAttempt = trace.attempts[0]
+        assertEquals(1, agenticAttempt.attemptIndex)
+        assertEquals(AiAttemptStage.AGENTIC_VIDEO, agenticAttempt.stage)
+        assertEquals(2, agenticAttempt.pollingAttempts)
+        assertEquals(AiAttemptOutcome.ERROR, agenticAttempt.parsedOutcome)
+        assertEquals(900L, agenticAttempt.request?.videoDurationSeconds)
+
+        val generateAttempt = trace.attempts[1]
+        assertEquals(2, generateAttempt.attemptIndex)
+        assertEquals(AiAttemptStage.CHATTER_GENERATE, generateAttempt.stage)
+        assertEquals(200, generateAttempt.httpStatus)
+        assertEquals(AiAttemptOutcome.SUCCESS, generateAttempt.parsedOutcome)
+        assertFalse(generateAttempt.request?.hasVideo ?: true)
+        assertFalse(
+            generateAttempt.request
+                ?.payload
+                ?.toString()
+                ?.contains("longTimeout900") == true &&
+                generateAttempt.request
+                    ?.payload
+                    ?.toString()
+                    ?.contains("file_data") == true,
+        )
+    }
+
+    @Test
+    fun `standalone ChatterGenerator failed interaction degrades through search fallback and preserves ordered attempts`(
+        @TempDir tempDir: Path,
+    ) = runTest {
+        val apiKey = "secret-standalone-agentic-key"
+        val failedInteractionJson = """{"id": "chat-fail-1", "status": "failed", "error": {"message": "Video unavailable"}}"""
+        var generateCall = 0
+
+        val mockEngine =
+            MockEngine { request ->
+                val path = request.url.encodedPath
+                when {
+                    path.endsWith("/interactions") && request.method.value == "POST" -> {
+                        respond(
+                            content = """{"id": "chat-fail-1", "status": "in_progress"}""",
+                            status = HttpStatusCode.OK,
+                            headers = headersOf(HttpHeaders.ContentType, "application/json"),
+                        )
+                    }
+
+                    path.contains("/interactions/chat-fail-1") && request.method.value == "GET" -> {
+                        respond(
+                            content = failedInteractionJson,
+                            status = HttpStatusCode.OK,
+                            headers = headersOf(HttpHeaders.ContentType, "application/json"),
+                        )
+                    }
+
+                    else -> {
+                        generateCall++
+                        if (generateCall == 1) {
+                            respond(
+                                content = """{"error":{"code":400,"message":"googleSearch unsupported"}}""",
+                                status = HttpStatusCode.BadRequest,
+                                headers = headersOf(HttpHeaders.ContentType, "application/json"),
+                            )
+                        } else {
+                            respond(
+                                content = """{"candidates":[{"content":{"parts":[{"text":"文字備援回覆成功"}]},"finishReason":"STOP"}]}""",
+                                status = HttpStatusCode.OK,
+                                headers = headersOf(HttpHeaders.ContentType, "application/json"),
+                            )
+                        }
+                    }
+                }
+            }
+
+        val recorder = JsonlAiTraceRecorder(traceDir = tempDir, clock = fixedClock)
+        val generator =
+            ChatterGenerator(
+                config = ChatterConfig(apiKey = apiKey, searchGroundingEnabled = true),
+                httpClient = createHttpClient(mockEngine),
+                pollingDelayMs = 1L,
+                maxPollingAttempts = 3,
+                traceRecorder = recorder,
+            )
+
+        val reply =
+            generator.generateReply(
+                ChatterInput(
+                    transcript = "[Alice]: 看看這支長影片\n標題：Long Video",
+                    videoUri = "https://www.youtube.com/watch?v=longFail950",
+                    videoDurationSeconds = 950L,
+                    isDirectMention = true,
+                ),
+            )
+        recorder.flushAndClose()
+
+        assertEquals("文字備援回覆成功", reply)
+        val traces = readTraceLines(tempDir)
+        assertEquals(1, traces.size)
+        val trace = traces.single()
+        assertEquals(AiTracePipeline.CHATTER, trace.pipeline)
+        assertEquals(AiTraceTrigger.MENTION, trace.trigger)
+        assertEquals(AiTraceOutcome.DEGRADED_SUCCESS, trace.outcome)
+        assertTrue(trace.degraded)
+        assertEquals(3, trace.attemptCount)
+        assertEquals(
+            listOf("AGENTIC_VIDEO", "CHATTER_GENERATE", "CHATTER_GENERATE:no-search"),
+            trace.fallbackPath,
+        )
+        assertEquals(listOf(1, 2, 3), trace.attempts.map { it.attemptIndex })
+        assertEquals(AiAttemptStage.AGENTIC_VIDEO, trace.attempts[0].stage)
+        assertEquals(1, trace.attempts[0].pollingAttempts)
+        assertEquals(failedInteractionJson, trace.attempts[0].responseRaw)
+        assertEquals(950L, trace.attempts[0].request?.videoDurationSeconds)
+        assertEquals(AiAttemptStage.CHATTER_GENERATE, trace.attempts[1].stage)
+        assertEquals(AiAttemptOutcome.ERROR, trace.attempts[1].parsedOutcome)
+        assertEquals(AiAttemptStage.CHATTER_GENERATE, trace.attempts[2].stage)
+        assertEquals(AiAttemptOutcome.SUCCESS, trace.attempts[2].parsedOutcome)
+    }
 }

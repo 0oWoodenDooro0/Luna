@@ -1009,4 +1009,190 @@ class SummaryAiTraceTest {
         assertEquals(luna.core.ai.AiTraceFailureCategory.SAFETY_BLOCK, blockedTrace.failureCategory)
         assertEquals("SAFETY", blockedTrace.attempts.last().blockReason)
     }
+
+    @Test
+    fun `SummaryService long-video AGENTIC_VIDEO run records pipeline SUMMARY trigger REACTION and single collapsed attempt`(
+        @TempDir tempDir: Path,
+    ) = runTest {
+        val apiKey = "secret-summary-agentic-key"
+        val (recorder, traceFile) = createRecorder(tempDir, apiKey)
+        var pollCount = 0
+        val completedJson =
+            """{"id": "sum-int-1", "status": "completed", "output_text": "TL;DR:\n長影片核心摘要 🚀\n\n核心重點:\n• 第一段重點"}"""
+
+        val mockEngine =
+            MockEngine { request ->
+                when {
+                    request.url.encodedPath.endsWith("/interactions") && request.method.value == "POST" -> {
+                        respond(
+                            content = """{"id": "sum-int-1", "status": "in_progress"}""",
+                            status = HttpStatusCode.OK,
+                            headers = headersOf(HttpHeaders.ContentType, "application/json"),
+                        )
+                    }
+
+                    request.url.encodedPath.endsWith("/interactions/sum-int-1") && request.method.value == "GET" -> {
+                        pollCount++
+                        val body =
+                            if (pollCount == 1) {
+                                """{"id": "sum-int-1", "status": "in_progress"}"""
+                            } else {
+                                completedJson
+                            }
+                        respond(
+                            content = body,
+                            status = HttpStatusCode.OK,
+                            headers = headersOf(HttpHeaders.ContentType, "application/json"),
+                        )
+                    }
+
+                    else -> {
+                        respond("Unexpected endpoint", status = HttpStatusCode.NotFound)
+                    }
+                }
+            }
+
+        val summarizer =
+            GeminiSummarizer(
+                config = GeminiConfig(apiKey = apiKey, model = "models/gemini-3.5-flash-lite", searchGroundingEnabled = true),
+                httpClient = createTestClient(mockEngine),
+                pollingDelayMs = 1L,
+                maxPollingAttempts = 5,
+                traceRecorder = recorder,
+            )
+
+        val longVideoPost =
+            dev.socialpeek.model.PeekPost(
+                platform = dev.socialpeek.model.Platform.YOUTUBE,
+                id = "longTalk900",
+                originalUrl = "https://www.youtube.com/watch?v=longTalk900",
+                cleanUrl = "https://www.youtube.com/watch?v=longTalk900",
+                author = dev.socialpeek.model.Author(username = "Conference"),
+                title = "Deep Dive Keynote",
+                content = "Deep Dive Keynote description",
+                rawData = mapOf("durationSeconds" to "900"),
+            )
+
+        var sentReply: String? = null
+        val service =
+            SummaryService(
+                summarizer = summarizer,
+                collector =
+                    ConversationSliceCollector(
+                        historyFetcher = { _, _ -> emptyList() },
+                        forwardFetcher = { _, _ -> emptyList() },
+                        peekResolver = { longVideoPost },
+                    ),
+                replySender = { _, text -> sentReply = text },
+                traceRecorder = recorder,
+            )
+
+        val targetMsg =
+            SummaryTestFixtures.createMockMessage(
+                id = 9201L,
+                username = "alice",
+                content = "https://www.youtube.com/watch?v=longTalk900",
+            )
+        service.handleReaction(SummaryTestFixtures.createMockReactionEvent(targetMessage = targetMsg))
+        recorder.flushAndClose()
+
+        assertNotNull(sentReply)
+        assertTrue(sentReply!!.contains("長影片核心摘要"))
+
+        val traces = readTraces(traceFile)
+        assertEquals(1, traces.size)
+        val trace = traces.single()
+        assertEquals(AiTracePipeline.SUMMARY, trace.pipeline)
+        assertEquals(AiTraceTrigger.REACTION, trace.trigger)
+        assertEquals("9201", trace.discord.messageId)
+        assertEquals(AiTraceOutcome.SUCCESS, trace.outcome)
+        assertFalse(trace.degraded)
+        assertEquals(1, trace.attemptCount)
+        assertEquals(listOf("AGENTIC_VIDEO"), trace.fallbackPath)
+        assertEquals(sentReply, trace.finalOutput)
+
+        val attempt = trace.attempts.single()
+        assertEquals(1, attempt.attemptIndex)
+        assertEquals(AiAttemptStage.AGENTIC_VIDEO, attempt.stage)
+        assertEquals("gemini-3.5-flash-lite", attempt.model)
+        assertEquals(
+            "https://generativelanguage.googleapis.com/v1beta/interactions?key=******",
+            attempt.endpoint,
+        )
+        assertEquals(2, attempt.pollingAttempts)
+        assertEquals(200, attempt.httpStatus)
+        assertEquals(completedJson, attempt.responseRaw)
+        assertEquals(AiAttemptOutcome.SUCCESS, attempt.parsedOutcome)
+        assertEquals(true, attempt.request?.hasVideo)
+        assertEquals(900L, attempt.request?.videoDurationSeconds)
+        assertTrue((attempt.request?.transcriptLength ?: 0) > 0)
+
+        assertFalse(Files.readString(traceFile).contains(apiKey))
+    }
+
+    @Test
+    fun `GeminiSummarizer long-video AGENTIC_VIDEO failure records single FAILED attempt without duplicate search-grounding retry`(
+        @TempDir tempDir: Path,
+    ) = runTest {
+        val (recorder, traceFile) = createRecorder(tempDir)
+        var submitCount = 0
+        val failedJson = """{"id": "sum-fail-1", "status": "failed", "error": {"message": "Video processing failed"}}"""
+
+        val mockEngine =
+            MockEngine { request ->
+                if (request.url.encodedPath.endsWith("/interactions")) {
+                    submitCount++
+                    respond(
+                        content = """{"id": "sum-fail-1", "status": "in_progress"}""",
+                        status = HttpStatusCode.OK,
+                        headers = headersOf(HttpHeaders.ContentType, "application/json"),
+                    )
+                } else {
+                    respond(
+                        content = failedJson,
+                        status = HttpStatusCode.OK,
+                        headers = headersOf(HttpHeaders.ContentType, "application/json"),
+                    )
+                }
+            }
+
+        val summarizer =
+            GeminiSummarizer(
+                config = GeminiConfig(apiKey = "secret-gemini-api-key", searchGroundingEnabled = true),
+                httpClient = createTestClient(mockEngine),
+                pollingDelayMs = 1L,
+                maxPollingAttempts = 3,
+                traceRecorder = recorder,
+            )
+
+        val result =
+            summarizer.summarize(
+                SummaryInput(
+                    content = "Long talk",
+                    videoUri = "https://www.youtube.com/watch?v=longFail",
+                    videoDurationSeconds = 600L,
+                ),
+            )
+        recorder.flushAndClose()
+
+        assertTrue(result is SummaryResult.Error.Generic)
+        assertEquals(1, submitCount)
+
+        val trace = readTraces(traceFile).single()
+        assertEquals(AiTracePipeline.SUMMARY, trace.pipeline)
+        assertEquals(AiTraceOutcome.FAILED, trace.outcome)
+        assertFalse(trace.degraded)
+        assertEquals(1, trace.attemptCount)
+        assertEquals(listOf("AGENTIC_VIDEO"), trace.fallbackPath)
+        assertEquals(AiAttemptStage.AGENTIC_VIDEO, trace.attempts.single().stage)
+        assertEquals(1, trace.attempts.single().pollingAttempts)
+        assertEquals(failedJson, trace.attempts.single().responseRaw)
+        assertEquals(
+            600L,
+            trace.attempts
+                .single()
+                .request
+                ?.videoDurationSeconds,
+        )
+    }
 }

@@ -34,6 +34,7 @@ import luna.core.ai.GeminiTools
 import luna.core.ai.GeminiUsageMetadata
 import luna.core.ai.NoOpAiTraceRecorder
 import luna.core.ai.currentAiTraceSession
+import luna.core.ai.withAiTraceSession
 import org.slf4j.LoggerFactory
 import java.net.SocketTimeoutException
 
@@ -55,6 +56,7 @@ open class ChatterGenerator(
             httpClient = httpClient,
             pollingDelayMs = pollingDelayMs,
             maxPollingAttempts = maxPollingAttempts,
+            traceRecorder = traceRecorder,
         )
 
     private sealed class GenerateAttempt {
@@ -96,76 +98,96 @@ open class ChatterGenerator(
         val isStandalone = standaloneSession != null
         session?.registerSecret(config.apiKey)
 
-        return try {
-            if (!config.isConfigured) {
-                logger.warn("ChatterGenerator cannot proceed: Gemini API key is not configured")
-                session?.fail(
-                    AiTraceFailureCategory.NOT_CONFIGURED,
-                    "GEMINI_API_KEY is not configured",
+        return if (standaloneSession != null) {
+            try {
+                withAiTraceSession(standaloneSession) {
+                    executeGenerateReply(input, standaloneSession, isStandalone = true)
+                }
+            } catch (e: Exception) {
+                standaloneSession.fail(
+                    AiTraceFailureCategory.UNEXPECTED_ERROR,
+                    e.message ?: e::class.simpleName ?: "Unexpected error",
                 )
-                return null
+                throw e
+            } finally {
+                standaloneSession.finish()
             }
-            if (input.transcript.isBlank() && input.imageAttachments.isEmpty() && input.videoUri.isNullOrBlank()) {
-                logger.debug("ChatterGenerator received blank dialogue input, returning null")
-                session?.fail(
-                    AiTraceFailureCategory.CONTEXT_ERROR,
-                    "ChatterGenerator received blank dialogue input",
-                )
-                return null
-            }
+        } else {
+            executeGenerateReply(input, activeSession, isStandalone = false)
+        }
+    }
 
-            val rawVideoUri = input.videoUri?.trim()?.takeIf { it.isNotEmpty() }
-            val duration = input.videoDurationSeconds
+    private suspend fun executeGenerateReply(
+        input: ChatterInput,
+        session: AiTraceSession?,
+        isStandalone: Boolean,
+    ): String? {
+        if (!config.isConfigured) {
+            logger.warn("ChatterGenerator cannot proceed: Gemini API key is not configured")
+            session?.fail(
+                AiTraceFailureCategory.NOT_CONFIGURED,
+                "GEMINI_API_KEY is not configured",
+            )
+            return null
+        }
+        if (input.transcript.isBlank() && input.imageAttachments.isEmpty() && input.videoUri.isNullOrBlank()) {
+            logger.debug("ChatterGenerator received blank dialogue input, returning null")
+            session?.fail(
+                AiTraceFailureCategory.CONTEXT_ERROR,
+                "ChatterGenerator received blank dialogue input",
+            )
+            return null
+        }
 
-            val replyText =
-                if (rawVideoUri != null) {
-                    when {
-                        duration != null && duration > MAX_VIDEO_DURATION_SECONDS -> {
-                            logger.warn(
-                                "YouTube video duration {}s exceeds 2-hour cap ({}s) for {}; omitting videoUri and proceeding with transcript metadata/comments",
-                                duration,
-                                MAX_VIDEO_DURATION_SECONDS,
-                                rawVideoUri,
-                            )
-                            generateWithFallback(input.copy(videoUri = null), session)
-                        }
+        val rawVideoUri = input.videoUri?.trim()?.takeIf { it.isNotEmpty() }
+        val duration = input.videoDurationSeconds
 
-                        duration != null && duration > MAX_STATIC_VIDEO_DURATION_SECONDS -> {
-                            if (input.isDirectMention) {
-                                val agenticReply = generateAgenticVideoReply(input.copy(videoUri = rawVideoUri))
-                                if (agenticReply != null) {
-                                    agenticReply
-                                } else {
-                                    session?.markDegraded(
-                                        "Agentic video interaction failed; degrading to generateContent without videoUri",
-                                    )
-                                    generateWithFallback(input.copy(videoUri = null), session)
-                                }
+        val replyText =
+            if (rawVideoUri != null) {
+                when {
+                    duration != null && duration > MAX_VIDEO_DURATION_SECONDS -> {
+                        logger.warn(
+                            "YouTube video duration {}s exceeds 2-hour cap ({}s) for {}; omitting videoUri and proceeding with transcript metadata/comments",
+                            duration,
+                            MAX_VIDEO_DURATION_SECONDS,
+                            rawVideoUri,
+                        )
+                        generateWithFallback(input.copy(videoUri = null), session)
+                    }
+
+                    duration != null && duration > MAX_STATIC_VIDEO_DURATION_SECONDS -> {
+                        if (input.isDirectMention) {
+                            val agenticReply = generateAgenticVideoReply(input.copy(videoUri = rawVideoUri))
+                            if (agenticReply != null) {
+                                agenticReply
                             } else {
-                                logger.info(
-                                    "Ambient Chatter on long YouTube video ({}s > {}s) omits videoUri to preserve low latency; relying on transcript metadata/comments",
-                                    duration,
-                                    MAX_STATIC_VIDEO_DURATION_SECONDS,
+                                session?.markDegraded(
+                                    "Agentic video interaction failed; degrading to generateContent without videoUri",
                                 )
                                 generateWithFallback(input.copy(videoUri = null), session)
                             }
-                        }
-
-                        else -> {
-                            generateWithFallback(input.copy(videoUri = rawVideoUri), session)
+                        } else {
+                            logger.info(
+                                "Ambient Chatter on long YouTube video ({}s > {}s) omits videoUri to preserve low latency; relying on transcript metadata/comments",
+                                duration,
+                                MAX_STATIC_VIDEO_DURATION_SECONDS,
+                            )
+                            generateWithFallback(input.copy(videoUri = null), session)
                         }
                     }
-                } else {
-                    generateWithFallback(input.copy(videoUri = null), session)
-                }
 
-            if (isStandalone && replyText != null) {
-                standaloneSession.complete(finalOutput = replyText)
+                    else -> {
+                        generateWithFallback(input.copy(videoUri = rawVideoUri), session)
+                    }
+                }
+            } else {
+                generateWithFallback(input.copy(videoUri = null), session)
             }
-            replyText
-        } finally {
-            standaloneSession?.finish()
+
+        if (isStandalone && replyText != null) {
+            session?.complete(finalOutput = replyText)
         }
+        return replyText
     }
 
     /**
@@ -203,6 +225,7 @@ open class ChatterGenerator(
                     model = config.cleanModel,
                     videoUri = input.videoUri.orEmpty(),
                     promptText = promptText,
+                    videoDurationSeconds = input.videoDurationSeconds,
                 )
         ) {
             is GeminiInteractionResult.Success -> {
