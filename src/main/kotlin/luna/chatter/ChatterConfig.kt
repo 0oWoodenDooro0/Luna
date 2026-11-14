@@ -11,6 +11,7 @@ import luna.plugin.config
  * @property baseUrl Base URL for Google Generative Language API.
  * @property maxOutputCharacters Maximum length of generated Discord response (defaults to 2000).
  * @property searchGroundingEnabled Whether autonomous Google Search Grounding is enabled (defaults to true).
+ * @property urlContextEnabled Whether Gemini URL Context tool is enabled for general public web URLs (defaults to true).
  */
 data class ChatterConfig(
     val apiKey: String = "",
@@ -18,6 +19,7 @@ data class ChatterConfig(
     val baseUrl: String = DEFAULT_BASE_URL,
     val maxOutputCharacters: Int = DEFAULT_MAX_OUTPUT_CHARACTERS,
     val searchGroundingEnabled: Boolean = DEFAULT_SEARCH_GROUNDING_ENABLED,
+    val urlContextEnabled: Boolean = DEFAULT_URL_CONTEXT_ENABLED,
 ) {
     val isConfigured: Boolean
         get() = apiKey.isNotBlank()
@@ -33,6 +35,7 @@ data class ChatterConfig(
         const val DEFAULT_BASE_URL = "https://generativelanguage.googleapis.com"
         const val DEFAULT_MAX_OUTPUT_CHARACTERS = 2000
         const val DEFAULT_SEARCH_GROUNDING_ENABLED = true
+        const val DEFAULT_URL_CONTEXT_ENABLED = true
 
         fun fromEnv(env: Map<String, String> = System.getenv()): ChatterConfig {
             val key = env["GEMINI_API_KEY"]?.trim().orEmpty()
@@ -51,11 +54,18 @@ data class ChatterConfig(
                     ?.toBooleanStrictOrNull()
                     ?: DEFAULT_SEARCH_GROUNDING_ENABLED
 
+            val urlContextEnabled =
+                env["GEMINI_URL_CONTEXT_ENABLED"]
+                    ?.trim()
+                    ?.toBooleanStrictOrNull()
+                    ?: DEFAULT_URL_CONTEXT_ENABLED
+
             return ChatterConfig(
                 apiKey = key,
                 model = model,
                 baseUrl = baseUrl,
                 searchGroundingEnabled = searchGroundingEnabled,
+                urlContextEnabled = urlContextEnabled,
             )
         }
 
@@ -87,11 +97,19 @@ data class ChatterConfig(
                     ?: (config["gemini.searchGroundingEnabled"] as? String)?.trim()?.toBooleanStrictOrNull()
                     ?: DEFAULT_SEARCH_GROUNDING_ENABLED
 
+            val urlContextEnabled =
+                (config["GEMINI_URL_CONTEXT_ENABLED"] as? Boolean)
+                    ?: (config["GEMINI_URL_CONTEXT_ENABLED"] as? String)?.trim()?.toBooleanStrictOrNull()
+                    ?: (config["gemini.urlContextEnabled"] as? Boolean)
+                    ?: (config["gemini.urlContextEnabled"] as? String)?.trim()?.toBooleanStrictOrNull()
+                    ?: DEFAULT_URL_CONTEXT_ENABLED
+
             return ChatterConfig(
                 apiKey = key,
                 model = model,
                 baseUrl = baseUrl,
                 searchGroundingEnabled = searchGroundingEnabled,
+                urlContextEnabled = urlContextEnabled,
             )
         }
 
@@ -123,11 +141,19 @@ data class ChatterConfig(
                     ?: context.config<String>("gemini.searchGroundingEnabled")?.trim()?.toBooleanStrictOrNull()
                     ?: DEFAULT_SEARCH_GROUNDING_ENABLED
 
+            val urlContextEnabled =
+                context.config<Boolean>("GEMINI_URL_CONTEXT_ENABLED")
+                    ?: context.config<String>("GEMINI_URL_CONTEXT_ENABLED")?.trim()?.toBooleanStrictOrNull()
+                    ?: context.config<Boolean>("gemini.urlContextEnabled")
+                    ?: context.config<String>("gemini.urlContextEnabled")?.trim()?.toBooleanStrictOrNull()
+                    ?: DEFAULT_URL_CONTEXT_ENABLED
+
             return ChatterConfig(
                 apiKey = key,
                 model = model,
                 baseUrl = baseUrl,
                 searchGroundingEnabled = searchGroundingEnabled,
+                urlContextEnabled = urlContextEnabled,
             )
         }
     }

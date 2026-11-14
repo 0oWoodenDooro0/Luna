@@ -126,12 +126,20 @@ class SummarizerPlugin(
                 ?: context.config<String>("gemini.searchGroundingEnabled")?.toBooleanStrictOrNull()
                 ?: GeminiConfig.DEFAULT_SEARCH_GROUNDING_ENABLED
 
+        val urlContext =
+            context.config<Boolean>("GEMINI_URL_CONTEXT_ENABLED")
+                ?: context.config<String>("GEMINI_URL_CONTEXT_ENABLED")?.trim()?.toBooleanStrictOrNull()
+                ?: context.config<Boolean>("gemini.urlContextEnabled")
+                ?: context.config<String>("gemini.urlContextEnabled")?.trim()?.toBooleanStrictOrNull()
+                ?: GeminiConfig.DEFAULT_URL_CONTEXT_ENABLED
+
         val geminiConfig =
             GeminiConfig(
                 apiKey = apiKey,
                 model = model,
                 baseUrl = baseUrl,
                 searchGroundingEnabled = searchGrounding,
+                urlContextEnabled = urlContext,
             )
 
         val gemini =

@@ -18,7 +18,9 @@ import luna.plugin.DefaultPluginContext
 import org.jetbrains.exposed.v1.jdbc.Database
 import org.junit.jupiter.api.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
+import kotlin.test.assertTrue
 import kotlin.time.Duration.Companion.minutes
 
 class SummarizerPluginTest {
@@ -299,4 +301,48 @@ class SummarizerPluginTest {
             listenerJob.cancel()
         }
     }
+
+    @Test
+    fun `initialize resolves GEMINI_URL_CONTEXT_ENABLED and gemini dot urlContextEnabled into GeminiConfig with invalid fallback`() =
+        runTest {
+            val listenerJob = Job()
+            val testScope = CoroutineScope(Dispatchers.Unconfined + listenerJob)
+            val mockKord = mockk<Kord>(relaxed = true)
+            every { mockKord.events } returns MutableSharedFlow()
+            every { mockKord.coroutineContext } returns testScope.coroutineContext
+            val mockRouting = mockk<Routing>(relaxed = true)
+            val testDb = createTestDb()
+
+            suspend fun captureConfig(configMap: Map<String, Any?>): GeminiConfig {
+                var captured: GeminiConfig? = null
+                val plugin =
+                    SummarizerPlugin(
+                        summarizerFactory = { cfg ->
+                            captured = cfg
+                            mockk(relaxed = true)
+                        },
+                    )
+                val context =
+                    DefaultPluginContext(
+                        kord = mockKord,
+                        routing = mockRouting,
+                        database = testDb,
+                        configMap = configMap,
+                    )
+                plugin.initialize(context)
+                return assertNotNull(captured)
+            }
+
+            assertTrue(captureConfig(emptyMap()).urlContextEnabled)
+            assertFalse(captureConfig(mapOf("GEMINI_URL_CONTEXT_ENABLED" to false)).urlContextEnabled)
+            assertFalse(captureConfig(mapOf("GEMINI_URL_CONTEXT_ENABLED" to " false ")).urlContextEnabled)
+            assertFalse(captureConfig(mapOf("gemini.urlContextEnabled" to false)).urlContextEnabled)
+            assertFalse(captureConfig(mapOf("gemini.urlContextEnabled" to "false")).urlContextEnabled)
+            assertTrue(captureConfig(mapOf("GEMINI_URL_CONTEXT_ENABLED" to "true")).urlContextEnabled)
+
+            // Negative boundary: invalid value falls back to default true
+            assertTrue(captureConfig(mapOf("GEMINI_URL_CONTEXT_ENABLED" to "invalid")).urlContextEnabled)
+
+            listenerJob.cancel()
+        }
 }

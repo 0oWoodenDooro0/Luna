@@ -631,6 +631,7 @@ class ChatterServiceTest {
                             "YOUTUBE_API_KEY" to "yt-secret-key",
                             "SUMMARY_MAX_IMAGES" to 6,
                             "GEMINI_SEARCH_GROUNDING_ENABLED" to false,
+                            "GEMINI_URL_CONTEXT_ENABLED" to false,
                         ),
                 )
 
@@ -641,6 +642,7 @@ class ChatterServiceTest {
             assertEquals(6, customPlugin.contextCollector?.maxImages)
             assertSame(customPlugin.contextCollector, customPlugin.service?.contextCollector)
             assertFalse(customPlugin.chatterGenerator?.config?.searchGroundingEnabled ?: true)
+            assertFalse(customPlugin.chatterGenerator?.config?.urlContextEnabled ?: true)
             customPlugin.shutdown()
 
             val defaultContext =
@@ -658,6 +660,7 @@ class ChatterServiceTest {
             assertEquals(10, defaultPlugin.contextCollector?.maxImages)
             assertSame(defaultPlugin.contextCollector, defaultPlugin.service?.contextCollector)
             assertTrue(defaultPlugin.chatterGenerator?.config?.searchGroundingEnabled ?: false)
+            assertTrue(defaultPlugin.chatterGenerator?.config?.urlContextEnabled ?: false)
             assertEquals(5_000L, defaultPlugin.filter?.cooldownDurationMs)
             assertEquals(5_000L, defaultPlugin.cooldownCache?.defaultCooldownDurationMs)
             assertNotNull(defaultPlugin.inFlightTracker)

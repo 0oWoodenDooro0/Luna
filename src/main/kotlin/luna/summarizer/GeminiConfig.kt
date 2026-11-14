@@ -7,12 +7,14 @@ package luna.summarizer
  * @property model Model identifier to use for summarization (defaults to `gemini-3.5-flash-lite`).
  * @property baseUrl Base URL for Google Generative Language API.
  * @property searchGroundingEnabled Whether autonomous Google Search Grounding is enabled (defaults to true).
+ * @property urlContextEnabled Whether Gemini URL Context tool is enabled for general public web URLs (defaults to true).
  */
 data class GeminiConfig(
     val apiKey: String = "",
     val model: String = DEFAULT_MODEL,
     val baseUrl: String = DEFAULT_BASE_URL,
     val searchGroundingEnabled: Boolean = DEFAULT_SEARCH_GROUNDING_ENABLED,
+    val urlContextEnabled: Boolean = DEFAULT_URL_CONTEXT_ENABLED,
 ) {
     val isConfigured: Boolean
         get() = apiKey.isNotBlank()
@@ -27,6 +29,7 @@ data class GeminiConfig(
         const val DEFAULT_MODEL = "gemini-3.5-flash-lite"
         const val DEFAULT_BASE_URL = "https://generativelanguage.googleapis.com"
         const val DEFAULT_SEARCH_GROUNDING_ENABLED = true
+        const val DEFAULT_URL_CONTEXT_ENABLED = true
 
         fun fromEnv(env: Map<String, String> = emptyMap()): GeminiConfig {
             val key = env["GEMINI_API_KEY"]?.trim().orEmpty()
@@ -39,11 +42,17 @@ data class GeminiConfig(
                     ?.trim()
                     ?.toBooleanStrictOrNull()
                     ?: DEFAULT_SEARCH_GROUNDING_ENABLED
+            val urlContextEnabled =
+                env["GEMINI_URL_CONTEXT_ENABLED"]
+                    ?.trim()
+                    ?.toBooleanStrictOrNull()
+                    ?: DEFAULT_URL_CONTEXT_ENABLED
             return GeminiConfig(
                 apiKey = key,
                 model = model,
                 baseUrl = baseUrl,
                 searchGroundingEnabled = searchGroundingEnabled,
+                urlContextEnabled = urlContextEnabled,
             )
         }
     }

@@ -146,6 +146,63 @@ class ChatterGeneratorTest {
         assertFalse(ChatterConfig.fromPluginContext(contextDotDisabled).searchGroundingEnabled)
     }
 
+    @Test
+    fun `ChatterConfig defaults urlContextEnabled to true and resolves across fromEnv, fromConfig, and fromPluginContext with invalid fallback`() {
+        assertTrue(ChatterConfig.DEFAULT_URL_CONTEXT_ENABLED)
+        assertTrue(ChatterConfig().urlContextEnabled)
+        assertTrue(ChatterConfig.fromEnv(emptyMap()).urlContextEnabled)
+
+        assertFalse(ChatterConfig.fromEnv(mapOf("GEMINI_URL_CONTEXT_ENABLED" to "false")).urlContextEnabled)
+        assertFalse(ChatterConfig.fromEnv(mapOf("GEMINI_URL_CONTEXT_ENABLED" to " false ")).urlContextEnabled)
+        assertTrue(ChatterConfig.fromEnv(mapOf("GEMINI_URL_CONTEXT_ENABLED" to "true")).urlContextEnabled)
+        assertTrue(ChatterConfig.fromEnv(mapOf("GEMINI_URL_CONTEXT_ENABLED" to "invalid")).urlContextEnabled)
+
+        assertFalse(ChatterConfig.fromConfig(mapOf("GEMINI_URL_CONTEXT_ENABLED" to false)).urlContextEnabled)
+        assertFalse(ChatterConfig.fromConfig(mapOf("GEMINI_URL_CONTEXT_ENABLED" to "false")).urlContextEnabled)
+        assertFalse(ChatterConfig.fromConfig(mapOf("gemini.urlContextEnabled" to false)).urlContextEnabled)
+        assertFalse(ChatterConfig.fromConfig(mapOf("gemini.urlContextEnabled" to " false ")).urlContextEnabled)
+        assertTrue(ChatterConfig.fromConfig(mapOf("GEMINI_URL_CONTEXT_ENABLED" to "invalid")).urlContextEnabled)
+
+        val contextDisabled =
+            DefaultPluginContext(
+                kord = mockk<Kord>(relaxed = true),
+                routing = mockk<Routing>(relaxed = true),
+                database = mockk<Database>(relaxed = true),
+                configMap =
+                    mapOf(
+                        "GEMINI_API_KEY" to "test-key",
+                        "GEMINI_URL_CONTEXT_ENABLED" to false,
+                    ),
+            )
+        assertFalse(ChatterConfig.fromPluginContext(contextDisabled).urlContextEnabled)
+
+        val contextDotDisabled =
+            DefaultPluginContext(
+                kord = mockk<Kord>(relaxed = true),
+                routing = mockk<Routing>(relaxed = true),
+                database = mockk<Database>(relaxed = true),
+                configMap =
+                    mapOf(
+                        "GEMINI_API_KEY" to "test-key",
+                        "gemini.urlContextEnabled" to "false",
+                    ),
+            )
+        assertFalse(ChatterConfig.fromPluginContext(contextDotDisabled).urlContextEnabled)
+
+        val contextInvalidFallback =
+            DefaultPluginContext(
+                kord = mockk<Kord>(relaxed = true),
+                routing = mockk<Routing>(relaxed = true),
+                database = mockk<Database>(relaxed = true),
+                configMap =
+                    mapOf(
+                        "GEMINI_API_KEY" to "test-key",
+                        "GEMINI_URL_CONTEXT_ENABLED" to "not-a-boolean",
+                    ),
+            )
+        assertTrue(ChatterConfig.fromPluginContext(contextInvalidFallback).urlContextEnabled)
+    }
+
     // --- Prompt Builder & Persona Tests ---
 
     @Test
