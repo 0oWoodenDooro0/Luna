@@ -34,6 +34,10 @@ Single-context repository layout (`GLOSSARY.md` and `docs/adr/`). See `docs/agen
 Judgement calls for daemon state bounds, transient error eviction, library boundaries, negative boundary coverage, and observable fallback degraded logs. See `CODING_STANDARDS.md`. Mechanical rules (daemon state collections, assertion styles, test naming, Dockerfile subproject parity, sensitive key synchronization, and cross-plugin import isolation) are checked deterministically by [`CodingStandardsTest`](src/test/kotlin/luna/core/CodingStandardsTest.kt) — run it rather than reading it end-to-end.
 Unified environment configuration architecture and navigation pointers between `:root` and `:mcp-server` are documented in [`docs/architecture/configuration.md`](docs/architecture/configuration.md).
 
+### AI Trace debugging
+
+Full `Summary Pipeline` and `Chatter Pipeline` AI request/fallback/response traces are written as daily JSONL files at `data/logs/ai/ai-YYYY-MM-DD.jsonl` (one line per Discord trigger, cross-referenced via `traceId` in `data/logs/luna-json.log` under `layer: "AI_TRACE"`). See [`docs/architecture/ai-tracing.md`](docs/architecture/ai-tracing.md) for the complete JSONL schema, environment variables, and copy-pasteable `jq`/`rg` diagnostic queries.
+
 ### Library & dependency exploration
 
 Inspect library APIs and dependencies directly via their `build.gradle.kts` declarations, source/interface definitions, or pre-documented cheatsheets (such as [`docs/kord-recipes.md`](docs/kord-recipes.md)) rather than running shell classpath extraction scripts or decompiling JARs with `javap`.
