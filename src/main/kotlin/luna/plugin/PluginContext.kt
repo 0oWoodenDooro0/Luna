@@ -2,6 +2,8 @@ package luna.plugin
 
 import dev.kord.core.Kord
 import io.ktor.server.routing.Routing
+import luna.core.ai.AiTraceRecorder
+import luna.core.ai.NoOpAiTraceRecorder
 import org.jetbrains.exposed.v1.jdbc.Database
 
 /**
@@ -12,6 +14,8 @@ interface PluginContext {
     val kord: Kord
     val routing: Routing
     val database: Database
+    val aiTraceRecorder: AiTraceRecorder
+        get() = NoOpAiTraceRecorder
 
     /**
      * Retrieves a configuration property associated with the given [key], casting or converting
@@ -61,17 +65,20 @@ class DefaultPluginContext(
     override val routing: Routing,
     override val database: Database,
     private val configResolver: (String, Class<*>) -> Any?,
+    override val aiTraceRecorder: AiTraceRecorder = NoOpAiTraceRecorder,
 ) : PluginContext {
     constructor(
         kord: Kord,
         routing: Routing,
         database: Database,
         configMap: Map<String, Any?> = emptyMap(),
+        aiTraceRecorder: AiTraceRecorder = NoOpAiTraceRecorder,
     ) : this(
         kord = kord,
         routing = routing,
         database = database,
         configResolver = { key, clazz -> resolveFromMap(configMap, key, clazz) },
+        aiTraceRecorder = aiTraceRecorder,
     )
 
     @Suppress("UNCHECKED_CAST")

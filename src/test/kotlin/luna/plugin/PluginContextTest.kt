@@ -243,5 +243,43 @@ class PluginContextTest {
 
         assertEquals("value", customContext.config("known", "fallback"))
         assertEquals("fallback", customContext.config("unknown", "fallback"))
+        assertEquals(luna.core.ai.NoOpAiTraceRecorder, customContext.aiTraceRecorder)
+    }
+
+    @Test
+    fun `AiTraceConfig resolves dual-namespace keys from PluginContext`() {
+        val envContext =
+            createContext(
+                mapOf(
+                    "AI_TRACE_ENABLED" to "false",
+                    "AI_TRACE_DIR" to "/tmp/ai-env",
+                    "AI_TRACE_MAX_DAYS" to "30",
+                    "AI_TRACE_MAX_TOTAL_MB" to "512",
+                ),
+            )
+        val fromEnv =
+            luna.core.ai.AiTraceConfig
+                .fromPluginContext(envContext)
+        assertEquals(false, fromEnv.enabled)
+        assertEquals("/tmp/ai-env", fromEnv.dir)
+        assertEquals(30, fromEnv.maxDays)
+        assertEquals(512, fromEnv.maxTotalMb)
+
+        val dottedContext =
+            createContext(
+                mapOf(
+                    "ai.trace.enabled" to true,
+                    "ai.trace.dir" to "/tmp/ai-dotted",
+                    "ai.trace.maxDays" to 21,
+                    "ai.trace.maxTotalMb" to 100,
+                ),
+            )
+        val fromDotted =
+            luna.core.ai.AiTraceConfig
+                .fromPluginContext(dottedContext)
+        assertEquals(true, fromDotted.enabled)
+        assertEquals("/tmp/ai-dotted", fromDotted.dir)
+        assertEquals(21, fromDotted.maxDays)
+        assertEquals(100, fromDotted.maxTotalMb)
     }
 }

@@ -229,7 +229,7 @@ is_recognized_key() {
     PATH|HOME|USER|LOGNAME|SHELL|PWD|OLDPWD|TERM|LANG|LC_ALL|LC_CTYPE|JAVA_HOME|HOSTNAME|SHLVL|_|LS_COLORS|EDITOR|PAGER|TZ|NODE_VERSION|CI|CLASSPATH)
       return 0
       ;;
-    PLUGINS_*_ENABLED|plugins.*.enabled|curtly.*|CURTLY_*|summarizer.*|summary.*|SUMMARY_*|gemini.*|GEMINI_*|youtube.*|YOUTUBE_*|undercover.*|UNDERCOVER_*|mcp.*|MCP_*)
+    PLUGINS_*_ENABLED|plugins.*.enabled|curtly.*|CURTLY_*|summarizer.*|summary.*|SUMMARY_*|gemini.*|GEMINI_*|youtube.*|YOUTUBE_*|undercover.*|UNDERCOVER_*|mcp.*|MCP_*|ai.trace.*|AI_TRACE_*)
       return 0
       ;;
   esac
@@ -267,6 +267,18 @@ get_candidate_keys() {
       ;;
     MCP_PUBLIC_BASE_URL)
       candidates+=("publicBaseUrl" "mcp.publicBaseUrl")
+      ;;
+    AI_TRACE_ENABLED)
+      candidates+=("ai.trace.enabled")
+      ;;
+    AI_TRACE_DIR)
+      candidates+=("ai.trace.dir")
+      ;;
+    AI_TRACE_MAX_DAYS)
+      candidates+=("ai.trace.maxDays" "ai.trace.max_days")
+      ;;
+    AI_TRACE_MAX_TOTAL_MB)
+      candidates+=("ai.trace.maxTotalMb" "ai.trace.max_total_mb")
       ;;
   esac
   echo "${candidates[@]}"

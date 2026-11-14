@@ -425,6 +425,12 @@ object ConfigLoader {
                 "redirectUri" to listOf("DISCORD_REDIRECT_URI"),
                 "REDIRECT_URI" to listOf("DISCORD_REDIRECT_URI"),
                 "luna.redirectUri" to listOf("DISCORD_REDIRECT_URI"),
+                "ai.trace.enabled" to listOf("AI_TRACE_ENABLED"),
+                "ai.trace.dir" to listOf("AI_TRACE_DIR"),
+                "ai.trace.maxDays" to listOf("AI_TRACE_MAX_DAYS"),
+                "ai.trace.max_days" to listOf("AI_TRACE_MAX_DAYS"),
+                "ai.trace.maxTotalMb" to listOf("AI_TRACE_MAX_TOTAL_MB"),
+                "ai.trace.max_total_mb" to listOf("AI_TRACE_MAX_TOTAL_MB"),
             )
 
         val auditResult =
