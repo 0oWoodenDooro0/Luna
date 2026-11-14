@@ -267,4 +267,36 @@ class SummarizerPluginTest {
 
             verify(exactly = 1) { mockSummarizer.close() }
         }
+
+    @Test
+    fun `initialize injects aiTraceRecorder from PluginContext into GeminiSummarizer and SummaryService`(
+        @org.junit.jupiter.api.io.TempDir tempDir: java.nio.file.Path,
+    ) = runTest {
+        val listenerJob = Job()
+        val testScope = CoroutineScope(Dispatchers.Unconfined + listenerJob)
+        val mockKord = mockk<Kord>(relaxed = true)
+        every { mockKord.events } returns MutableSharedFlow()
+        every { mockKord.coroutineContext } returns testScope.coroutineContext
+
+        val recorder = luna.core.ai.JsonlAiTraceRecorder(traceDir = tempDir.resolve("traces"))
+        try {
+            val context =
+                DefaultPluginContext(
+                    kord = mockKord,
+                    routing = mockk(relaxed = true),
+                    database = createTestDb(),
+                    configMap = mapOf("GEMINI_API_KEY" to "test-key"),
+                    aiTraceRecorder = recorder,
+                )
+
+            val plugin = SummarizerPlugin()
+            plugin.initialize(context)
+
+            kotlin.test.assertSame(recorder, plugin.summarizer?.traceRecorder)
+            kotlin.test.assertSame(recorder, plugin.summaryService?.traceRecorder)
+        } finally {
+            recorder.flushAndClose()
+            listenerJob.cancel()
+        }
+    }
 }

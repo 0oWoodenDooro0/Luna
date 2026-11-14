@@ -95,6 +95,8 @@ object SummaryTestFixtures {
         emoji: ReactionEmoji = ReactionEmoji.Unicode("📝"),
         userId: Long = 55L,
         userIsBot: Boolean = false,
+        channelId: Long = 777L,
+        guildId: Long? = 999L,
     ): ReactionAddEvent {
         val user = mockk<User>()
         every { user.isBot } returns userIsBot
@@ -103,6 +105,9 @@ object SummaryTestFixtures {
         every { event.emoji } returns emoji
         every { event.userId } returns Snowflake(userId)
         every { event.messageId } returns targetMessage.id
+        every { event.channelId } returns Snowflake(channelId)
+        every { event.guildId } returns guildId?.let { Snowflake(it) }
+        every { event.messageAuthorId } returns runCatching { targetMessage.author?.id }.getOrNull()
         coEvery { event.getUserOrNull() } returns user
         coEvery { event.getMessageOrNull() } returns targetMessage
         return event

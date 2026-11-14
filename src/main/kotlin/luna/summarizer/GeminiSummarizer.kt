@@ -1,7 +1,6 @@
 package luna.summarizer
 
 import io.ktor.client.HttpClient
-import io.ktor.client.call.body
 import io.ktor.client.engine.cio.CIO
 import io.ktor.client.plugins.HttpRequestTimeoutException
 import io.ktor.client.plugins.HttpTimeout
@@ -16,7 +15,19 @@ import io.ktor.http.contentType
 import io.ktor.http.isSuccess
 import io.ktor.serialization.kotlinx.json.json
 import kotlinx.coroutines.TimeoutCancellationException
+import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.Json
+import luna.core.ai.AiAttemptOutcome
+import luna.core.ai.AiAttemptRecord
+import luna.core.ai.AiAttemptRequest
+import luna.core.ai.AiAttemptStage
+import luna.core.ai.AiTraceDiscordContext
+import luna.core.ai.AiTraceFailureCategory
+import luna.core.ai.AiTraceJson
+import luna.core.ai.AiTracePipeline
+import luna.core.ai.AiTraceRecorder
+import luna.core.ai.AiTraceSession
+import luna.core.ai.AiTraceTrigger
 import luna.core.ai.EmojiSanitizer
 import luna.core.ai.GeminiContent
 import luna.core.ai.GeminiFunctionResponse
@@ -27,8 +38,12 @@ import luna.core.ai.GeminiInteractionResult
 import luna.core.ai.GeminiPart
 import luna.core.ai.GeminiTool
 import luna.core.ai.GeminiTools
+import luna.core.ai.GeminiUsageMetadata
 import luna.core.ai.GroundingCitation
+import luna.core.ai.NoOpAiTraceRecorder
 import luna.core.ai.VideoProcessingMode
+import luna.core.ai.currentAiTraceSession
+import luna.core.ai.withAiTraceSession
 import org.slf4j.LoggerFactory
 import java.net.SocketTimeoutException
 
@@ -41,6 +56,7 @@ open class GeminiSummarizer(
     private val httpClient: HttpClient = createDefaultHttpClient(),
     private val pollingDelayMs: Long = 2000L,
     private val maxPollingAttempts: Int = 30,
+    val traceRecorder: AiTraceRecorder = NoOpAiTraceRecorder,
 ) : AutoCloseable {
     private val logger = LoggerFactory.getLogger(GeminiSummarizer::class.java)
     private val interactionClient =
@@ -49,6 +65,45 @@ open class GeminiSummarizer(
             pollingDelayMs = pollingDelayMs,
             maxPollingAttempts = maxPollingAttempts,
         )
+
+    private data class AttemptRequestMetadata(
+        val hasImages: Boolean = false,
+        val imageCount: Int = 0,
+        val hasVideo: Boolean = false,
+        val videoDurationSeconds: Long? = null,
+        val transcriptLength: Int = 0,
+    )
+
+    private data class HandledResponse(
+        val result: SummaryResult,
+        val responseRaw: String? = null,
+        val finishReason: String? = null,
+        val blockReason: String? = null,
+        val usageMetadata: GeminiUsageMetadata? = null,
+    )
+
+    private fun SummaryInput.toAttemptMetadata(extraTranscriptLength: Int = 0): AttemptRequestMetadata =
+        AttemptRequestMetadata(
+            hasImages = imageAttachments.isNotEmpty(),
+            imageCount = imageAttachments.size,
+            hasVideo = !videoUri.isNullOrBlank(),
+            videoDurationSeconds = videoDurationSeconds,
+            transcriptLength = content.length + extraTranscriptLength,
+        )
+
+    private fun resolveVariant(tools: List<GeminiTool>?): String {
+        val hasSearch = tools?.any { it.actualGoogleSearch != null } == true
+        val hasLookback =
+            tools?.any { tool ->
+                tool.actualFunctionDeclarations.any { it.name == GeminiTools.FETCH_EARLIER_MESSAGES }
+            } == true
+        return when {
+            hasSearch && hasLookback -> "grounded+lookback"
+            hasSearch -> "grounded"
+            hasLookback -> "lookback"
+            else -> "baseline"
+        }
+    }
 
     suspend fun summarize(
         content: String,
@@ -68,6 +123,7 @@ open class GeminiSummarizer(
     private suspend fun summarizeDirect(
         input: SummaryInput,
         tools: List<GeminiTool>? = input.tools,
+        variant: String = resolveVariant(tools),
     ): SummaryResult {
         val mode =
             if (!input.videoUri.isNullOrBlank()) {
@@ -79,7 +135,7 @@ open class GeminiSummarizer(
         return if (mode == VideoProcessingMode.AGENTIC && !input.videoUri.isNullOrBlank()) {
             summarizeAgentic(input)
         } else {
-            summarizeStatic(input, tools)
+            summarizeStatic(input, tools, variant)
         }
     }
 
@@ -87,27 +143,100 @@ open class GeminiSummarizer(
         input: SummaryInput,
         lookbackProvider: (suspend (reason: String) -> String?)? = null,
     ): SummaryResult {
+        val existingSession = currentAiTraceSession()
+        val standaloneSession =
+            if (existingSession == null && traceRecorder.isEnabled()) {
+                traceRecorder.startSession(
+                    pipeline = AiTracePipeline.SUMMARY,
+                    trigger = AiTraceTrigger.REACTION,
+                    discord =
+                        AiTraceDiscordContext(
+                            channelId = "direct",
+                            messageId = "direct",
+                        ),
+                )
+            } else {
+                null
+            }
+
+        return if (standaloneSession != null) {
+            try {
+                withAiTraceSession(standaloneSession) {
+                    standaloneSession.registerSecret(config.apiKey)
+                    val result = executeSummarize(input, lookbackProvider, standaloneSession)
+                    when (result) {
+                        is SummaryResult.Success -> {
+                            standaloneSession.complete(
+                                finalOutput = result.text,
+                                citations = result.citations,
+                            )
+                        }
+
+                        is SummaryResult.Error -> {
+                            standaloneSession.fail(
+                                failureCategory = classifySummaryError(result),
+                                errorSummary = result.message,
+                            )
+                        }
+
+                        is SummaryResult.ToolCall -> {
+                            standaloneSession.complete(finalOutput = null)
+                        }
+                    }
+                    result
+                }
+            } catch (e: Exception) {
+                standaloneSession.fail(
+                    failureCategory = classifySummaryException(e),
+                    errorSummary = e.message ?: e::class.simpleName ?: "Unexpected error",
+                )
+                throw e
+            } finally {
+                standaloneSession.finish()
+            }
+        } else {
+            existingSession?.registerSecret(config.apiKey)
+            executeSummarize(input, lookbackProvider, existingSession)
+        }
+    }
+
+    private suspend fun executeSummarize(
+        input: SummaryInput,
+        lookbackProvider: (suspend (reason: String) -> String?)?,
+        session: AiTraceSession?,
+    ): SummaryResult {
         if (!config.isConfigured) {
-            return SummaryResult.Error.MissingApiKey()
+            val error = SummaryResult.Error.MissingApiKey()
+            session?.fail(AiTraceFailureCategory.NOT_CONFIGURED, error.message)
+            return error
         }
         if (input.content.isBlank()) {
-            return SummaryResult.Error.Generic("Content to summarize cannot be blank")
+            val error = SummaryResult.Error.Generic("Content to summarize cannot be blank")
+            session?.fail(AiTraceFailureCategory.CONTEXT_ERROR, error.message)
+            return error
         }
 
         val activeSearchTools = if (config.searchGroundingEnabled) listOf(GeminiTools.GOOGLE_SEARCH_TOOL) else emptyList()
 
         if (lookbackProvider == null) {
             val initialTools = input.tools ?: activeSearchTools.takeIf { it.isNotEmpty() }
+            val initialVariant = resolveVariant(initialTools)
             val res =
                 try {
-                    summarizeDirect(input, tools = initialTools)
+                    summarizeDirect(input, tools = initialTools, variant = initialVariant)
                 } catch (e: Exception) {
                     if (initialTools != null && input.tools == null) {
                         logger.warn("Search grounding failed with exception: {}. Retrying baseline without search.", e.message)
-                        retryBaseline(input.copy(tools = null))
+                        session?.markDegraded("Search grounding failed with exception: ${e.message}")
+                        retryBaseline(input.copy(tools = null), session = session, initialVariant = "no-search")
                     } else if (input.imageAttachments.isNotEmpty()) {
                         logger.warn("Multimodal summarization failed with exception: {}. Retrying text baseline without images.", e.message)
-                        retryBaseline(input.copy(imageAttachments = emptyList(), tools = null))
+                        session?.markDegraded("Multimodal summarization failed with exception: ${e.message}")
+                        retryBaseline(
+                            input.copy(imageAttachments = emptyList(), tools = null),
+                            session = session,
+                            initialVariant = "no-images",
+                        )
                     } else {
                         throw e
                     }
@@ -115,10 +244,16 @@ open class GeminiSummarizer(
             return if (res is SummaryResult.Error) {
                 if (initialTools != null && input.tools == null) {
                     logger.warn("Search grounding returned error: {}. Retrying baseline without search.", res.message)
-                    retryBaseline(input.copy(tools = null))
+                    session?.markDegraded("Search grounding failed: ${res.message}")
+                    retryBaseline(input.copy(tools = null), session = session, initialVariant = "no-search")
                 } else if (input.imageAttachments.isNotEmpty()) {
                     logger.warn("Multimodal summarization returned error: {}. Retrying text baseline without images.", res.message)
-                    retryBaseline(input.copy(imageAttachments = emptyList(), tools = null))
+                    session?.markDegraded("Multimodal summarization failed: ${res.message}")
+                    retryBaseline(
+                        input.copy(imageAttachments = emptyList(), tools = null),
+                        session = session,
+                        initialVariant = "no-images",
+                    )
                 } else {
                     res
                 }
@@ -130,18 +265,24 @@ open class GeminiSummarizer(
         val baselineInput = input.copy(tools = null)
         val combinedTools = (activeSearchTools + GeminiTools.FETCH_EARLIER_MESSAGES_TOOL).distinct()
         val toolEnabledInput = input.copy(tools = combinedTools)
+        val toolVariant = resolveVariant(combinedTools)
+        var baselineAttempted = false
 
         var result: SummaryResult =
             try {
-                summarizeDirect(toolEnabledInput, tools = toolEnabledInput.tools)
+                summarizeDirect(toolEnabledInput, tools = toolEnabledInput.tools, variant = toolVariant)
             } catch (e: Exception) {
                 logger.warn("Tool-enabled summarization failed: {}. Retrying baseline fallback.", e.message)
-                retryBaseline(baselineInput)
+                session?.markDegraded("Tool-enabled summarization failed: ${e.message}")
+                baselineAttempted = true
+                retryBaseline(baselineInput, session = session, initialVariant = "baseline")
             }
 
-        if (result is SummaryResult.Error) {
+        if (result is SummaryResult.Error && !baselineAttempted) {
             logger.warn("Tool-enabled summarization returned error: {}. Retrying baseline fallback.", result.message)
-            result = retryBaseline(baselineInput)
+            session?.markDegraded("Tool-enabled summarization failed: ${result.message}")
+            baselineAttempted = true
+            result = retryBaseline(baselineInput, session = session, initialVariant = "baseline")
         }
 
         if (result is SummaryResult.ToolCall) {
@@ -155,6 +296,7 @@ open class GeminiSummarizer(
                             lookbackProvider(reason) ?: ConversationSliceCollector.NO_FURTHER_HISTORY_MESSAGE
                         } catch (e: Exception) {
                             logger.warn("Lookback provider failed: {}", e.message)
+                            session?.markDegraded("Lookback provider failed: ${e.message}")
                             null
                         }
 
@@ -164,6 +306,7 @@ open class GeminiSummarizer(
                                 continuation(toolOutput)
                             } catch (e: Exception) {
                                 logger.warn("Lookback continuation failed: {}", e.message)
+                                session?.markDegraded("Lookback continuation failed: ${e.message}")
                                 null
                             }
 
@@ -171,35 +314,54 @@ open class GeminiSummarizer(
                             result = lookbackResult
                         } else {
                             logger.warn("Lookback continuation returned non-success: {}. Falling back to baseline.", lookbackResult)
-                            result = retryBaseline(baselineInput)
+                            val reasonMsg = (lookbackResult as? SummaryResult.Error)?.message ?: "non-success tool continuation"
+                            session?.markDegraded("Lookback continuation fallback: $reasonMsg")
+                            baselineAttempted = true
+                            result = retryBaseline(baselineInput, session = session, initialVariant = "baseline")
                         }
                     } else {
-                        result = retryBaseline(baselineInput)
+                        baselineAttempted = true
+                        result = retryBaseline(baselineInput, session = session, initialVariant = "baseline")
                     }
                 } else {
                     logger.warn("No continuation provided for tool call, falling back to baseline")
-                    result = retryBaseline(baselineInput)
+                    session?.markDegraded("No continuation provided for tool call")
+                    baselineAttempted = true
+                    result = retryBaseline(baselineInput, session = session, initialVariant = "baseline")
                 }
             } else {
                 logger.warn("Unhandled tool call {}, falling back to baseline", result.name)
-                result = retryBaseline(baselineInput)
+                session?.markDegraded("Unhandled tool call: ${result.name}")
+                baselineAttempted = true
+                result = retryBaseline(baselineInput, session = session, initialVariant = "baseline")
             }
         }
 
-        if (result is SummaryResult.Error && input.imageAttachments.isNotEmpty()) {
+        if (result is SummaryResult.Error && input.imageAttachments.isNotEmpty() && !baselineAttempted) {
             logger.warn("Multimodal summarization failed: {}. Retrying text-only fallback.", result.message)
-            result = retryBaseline(baselineInput.copy(imageAttachments = emptyList()))
+            session?.markDegraded("Multimodal summarization failed: ${result.message}")
+            result =
+                retryBaseline(
+                    baselineInput.copy(imageAttachments = emptyList()),
+                    session = session,
+                    initialVariant = "no-images",
+                )
         }
 
         return result
     }
 
-    private suspend fun retryBaseline(input: SummaryInput): SummaryResult =
+    private suspend fun retryBaseline(
+        input: SummaryInput,
+        session: AiTraceSession?,
+        initialVariant: String = "baseline",
+    ): SummaryResult =
         try {
-            val res = summarizeDirect(input, tools = null)
+            val res = summarizeDirect(input, tools = null, variant = initialVariant)
             if (res is SummaryResult.Error && input.imageAttachments.isNotEmpty()) {
                 logger.warn("Baseline retry with images failed: {}. Retrying text-only fallback.", res.message)
-                summarizeDirect(input.copy(imageAttachments = emptyList()), tools = null)
+                session?.markDegraded("Baseline retry with images failed: ${res.message}")
+                summarizeDirect(input.copy(imageAttachments = emptyList()), tools = null, variant = "no-images")
             } else {
                 res
             }
@@ -208,7 +370,8 @@ open class GeminiSummarizer(
             if (input.imageAttachments.isNotEmpty()) {
                 try {
                     logger.warn("Retrying text-only fallback after baseline exception: {}", e.message)
-                    summarizeDirect(input.copy(imageAttachments = emptyList()), tools = null)
+                    session?.markDegraded("Baseline retry exception: ${e.message}")
+                    summarizeDirect(input.copy(imageAttachments = emptyList()), tools = null, variant = "no-images")
                 } catch (e2: Exception) {
                     SummaryResult.Error.Generic("Baseline fallback failed: ${e2.message}", cause = e2)
                 }
@@ -220,39 +383,108 @@ open class GeminiSummarizer(
     private suspend fun postGenerateContent(
         requestPayload: GeminiGenerateContentRequest,
         activeTools: List<GeminiTool>?,
+        stage: AiAttemptStage = AiAttemptStage.SUMMARY_GENERATE,
+        variant: String? = resolveVariant(activeTools),
+        requestMeta: AttemptRequestMetadata = AttemptRequestMetadata(),
     ): SummaryResult {
-        val endpoint =
-            "${config.cleanBaseUrl}/v1beta/models/${config.cleanModel}:generateContent?key=${config.apiKey}"
+        val cleanEndpoint = "${config.cleanBaseUrl}/v1beta/models/${config.cleanModel}:generateContent"
+        val endpointWithKey = "$cleanEndpoint?key=${config.apiKey}"
+        val session = currentAiTraceSession()
+        val startNano = System.nanoTime()
 
-        return try {
-            val response: HttpResponse =
-                httpClient.post(endpoint) {
-                    contentType(ContentType.Application.Json)
-                    setBody(requestPayload)
+        var httpStatus: Int? = null
+        var responseRaw: String? = null
+        var finishReason: String? = null
+        var blockReason: String? = null
+        var usageMetadata: GeminiUsageMetadata? = null
+
+        val result: SummaryResult =
+            try {
+                val response: HttpResponse =
+                    httpClient.post(endpointWithKey) {
+                        contentType(ContentType.Application.Json)
+                        setBody(requestPayload)
+                    }
+                httpStatus = response.status.value
+
+                val handled =
+                    handleResponse(
+                        response = response,
+                        originalRequest = requestPayload,
+                        activeTools = activeTools,
+                        requestMeta = requestMeta,
+                    )
+                responseRaw = handled.responseRaw
+                finishReason = handled.finishReason
+                blockReason = handled.blockReason
+                usageMetadata = handled.usageMetadata
+                handled.result
+            } catch (e: HttpRequestTimeoutException) {
+                SummaryResult.Error.Timeout("Gemini API request timed out: ${e.message}", cause = e)
+            } catch (e: SocketTimeoutException) {
+                SummaryResult.Error.Timeout("Gemini API socket timed out: ${e.message}", cause = e)
+            } catch (e: TimeoutCancellationException) {
+                SummaryResult.Error.Timeout("Gemini API coroutine timed out: ${e.message}", cause = e)
+            } catch (e: Exception) {
+                SummaryResult.Error.Generic("Unexpected error invoking Gemini API: ${e.message}", cause = e)
+            }
+
+        val latencyMs = ((System.nanoTime() - startNano) / 1_000_000L).coerceAtLeast(0L)
+        if (session != null && session.isEnabled) {
+            val parsedOutcome =
+                when (result) {
+                    is SummaryResult.Success -> AiAttemptOutcome.SUCCESS
+                    is SummaryResult.ToolCall -> AiAttemptOutcome.TOOL_CALL
+                    is SummaryResult.Error -> AiAttemptOutcome.ERROR
                 }
+            val errorMessage = (result as? SummaryResult.Error)?.message
+            val encodedPayload =
+                runCatching {
+                    AiTraceJson.encodeToJsonElement(GeminiGenerateContentRequest.serializer(), requestPayload)
+                }.getOrNull()
 
-            handleResponse(
-                response = response,
-                originalRequest = requestPayload,
-                activeTools = activeTools,
+            session.recordAttempt(
+                stage = stage,
+                variant = variant,
+                model = config.cleanModel,
+                endpoint = cleanEndpoint,
+                latencyMs = latencyMs,
+                httpStatus = httpStatus,
+                request =
+                    AiAttemptRequest(
+                        payload = encodedPayload,
+                        hasImages = requestMeta.hasImages,
+                        imageCount = requestMeta.imageCount,
+                        hasVideo = requestMeta.hasVideo,
+                        videoDurationSeconds = requestMeta.videoDurationSeconds,
+                        transcriptLength = requestMeta.transcriptLength,
+                    ),
+                responseRaw = responseRaw,
+                finishReason = finishReason,
+                blockReason = blockReason,
+                usageMetadata = usageMetadata,
+                pollingAttempts = null,
+                parsedOutcome = parsedOutcome,
+                errorMessage = errorMessage,
             )
-        } catch (e: HttpRequestTimeoutException) {
-            SummaryResult.Error.Timeout("Gemini API request timed out: ${e.message}", cause = e)
-        } catch (e: SocketTimeoutException) {
-            SummaryResult.Error.Timeout("Gemini API socket timed out: ${e.message}", cause = e)
-        } catch (e: TimeoutCancellationException) {
-            SummaryResult.Error.Timeout("Gemini API coroutine timed out: ${e.message}", cause = e)
-        } catch (e: Exception) {
-            SummaryResult.Error.Generic("Unexpected error invoking Gemini API: ${e.message}", cause = e)
         }
+
+        return result
     }
 
     private suspend fun summarizeStatic(
         input: SummaryInput,
         tools: List<GeminiTool>? = input.tools,
+        variant: String = resolveVariant(tools),
     ): SummaryResult {
         val requestPayload = GeminiPromptBuilder.buildRequest(input, tools)
-        return postGenerateContent(requestPayload, tools)
+        return postGenerateContent(
+            requestPayload = requestPayload,
+            activeTools = tools,
+            stage = AiAttemptStage.SUMMARY_GENERATE,
+            variant = variant,
+            requestMeta = input.toAttemptMetadata(),
+        )
     }
 
     private suspend fun executeToolResponse(
@@ -261,6 +493,7 @@ open class GeminiSummarizer(
         toolName: String,
         toolResponseContent: String,
         tools: List<GeminiTool>? = null,
+        requestMeta: AttemptRequestMetadata = AttemptRequestMetadata(transcriptLength = toolResponseContent.length),
     ): SummaryResult {
         if (!config.isConfigured) {
             return SummaryResult.Error.MissingApiKey()
@@ -293,7 +526,13 @@ open class GeminiSummarizer(
                 toolConfig = previousRequest.toolConfig,
             )
 
-        return postGenerateContent(nextRequest, tools)
+        return postGenerateContent(
+            requestPayload = nextRequest,
+            activeTools = tools,
+            stage = AiAttemptStage.SUMMARY_TOOL_CONTINUATION,
+            variant = toolName,
+            requestMeta = requestMeta,
+        )
     }
 
     private suspend fun summarizeAgentic(input: SummaryInput): SummaryResult {
@@ -344,13 +583,19 @@ open class GeminiSummarizer(
         response: HttpResponse,
         originalRequest: GeminiGenerateContentRequest? = null,
         activeTools: List<GeminiTool>? = null,
-    ): SummaryResult {
+        requestMeta: AttemptRequestMetadata = AttemptRequestMetadata(),
+    ): HandledResponse {
         when {
             response.status == HttpStatusCode.TooManyRequests -> {
                 val retryAfter = response.headers["Retry-After"]?.toLongOrNull()
-                return SummaryResult.Error.RateLimitExceeded(
-                    message = "Gemini API rate limit exceeded (HTTP 429)",
-                    retryAfterSeconds = retryAfter,
+                val rawBody = runCatching { response.bodyAsText() }.getOrNull()
+                return HandledResponse(
+                    result =
+                        SummaryResult.Error.RateLimitExceeded(
+                            message = "Gemini API rate limit exceeded (HTTP 429)",
+                            retryAfterSeconds = retryAfter,
+                        ),
+                    responseRaw = rawBody,
                 )
             }
 
@@ -363,41 +608,75 @@ open class GeminiSummarizer(
                         null
                     }
                 val message = parsedMessage ?: errorBody.ifBlank { "HTTP error ${response.status.value}" }
-                return SummaryResult.Error.ApiError(
-                    statusCode = response.status.value,
-                    message = "Gemini API error (${response.status.value}): $message",
+                return HandledResponse(
+                    result =
+                        SummaryResult.Error.ApiError(
+                            statusCode = response.status.value,
+                            message = "Gemini API error (${response.status.value}): $message",
+                        ),
+                    responseRaw = errorBody,
                 )
             }
 
             else -> {
+                val rawBody = response.bodyAsText()
                 val parsedResponse =
                     try {
-                        response.body<GeminiGenerateContentResponse>()
-                    } catch (_: Exception) {
-                        val rawBody = response.bodyAsText()
                         jsonParser.decodeFromString<GeminiGenerateContentResponse>(rawBody)
+                    } catch (e: Exception) {
+                        return HandledResponse(
+                            result =
+                                SummaryResult.Error.Generic(
+                                    message = "Failed to parse Gemini API response: ${e.message}",
+                                    cause = e,
+                                ),
+                            responseRaw = rawBody,
+                        )
                     }
 
+                val candidate = parsedResponse.candidates?.firstOrNull()
+                val finishReason = candidate?.finishReason
+                val blockReason = parsedResponse.promptFeedback?.blockReason
+                val usageMetadata = parsedResponse.usageMetadata
+
                 if (parsedResponse.error != null) {
-                    return SummaryResult.Error.ApiError(
-                        statusCode = parsedResponse.error.code ?: response.status.value,
-                        message = parsedResponse.error.message ?: "Unknown API error",
+                    return HandledResponse(
+                        result =
+                            SummaryResult.Error.ApiError(
+                                statusCode = parsedResponse.error.code ?: response.status.value,
+                                message = parsedResponse.error.message ?: "Unknown API error",
+                            ),
+                        responseRaw = rawBody,
+                        finishReason = finishReason,
+                        blockReason = blockReason,
+                        usageMetadata = usageMetadata,
                     )
                 }
 
-                val promptFeedback = parsedResponse.promptFeedback
-                if (promptFeedback?.blockReason != null) {
-                    return SummaryResult.Error.Generic(
-                        "Gemini prompt blocked due to: ${promptFeedback.blockReason}",
+                if (blockReason != null) {
+                    return HandledResponse(
+                        result =
+                            SummaryResult.Error.Generic(
+                                "Gemini prompt blocked due to: $blockReason",
+                            ),
+                        responseRaw = rawBody,
+                        finishReason = finishReason,
+                        blockReason = blockReason,
+                        usageMetadata = usageMetadata,
                     )
                 }
 
                 val candidates = parsedResponse.candidates
                 if (candidates.isNullOrEmpty()) {
-                    return SummaryResult.Error.Generic("No summary candidates returned by Gemini")
+                    return HandledResponse(
+                        result = SummaryResult.Error.Generic("No summary candidates returned by Gemini"),
+                        responseRaw = rawBody,
+                        finishReason = finishReason,
+                        blockReason = blockReason,
+                        usageMetadata = usageMetadata,
+                    )
                 }
 
-                val candidate = candidates.firstOrNull()
                 val candidateContent = candidate?.content
                 val parts = candidateContent?.parts ?: emptyList()
 
@@ -406,7 +685,13 @@ open class GeminiSummarizer(
 
                 if (functionCall != null) {
                     if (functionCall.name.isBlank()) {
-                        return SummaryResult.Error.Generic("Malformed tool call: missing function name")
+                        return HandledResponse(
+                            result = SummaryResult.Error.Generic("Malformed tool call: missing function name"),
+                            responseRaw = rawBody,
+                            finishReason = finishReason,
+                            blockReason = blockReason,
+                            usageMetadata = usageMetadata,
+                        )
                     }
 
                     val declaredToolNames =
@@ -416,14 +701,27 @@ open class GeminiSummarizer(
                             ?.toSet()
 
                     if (declaredToolNames != null && declaredToolNames.isNotEmpty() && !declaredToolNames.contains(functionCall.name)) {
-                        return SummaryResult.Error.Generic("Unknown tool call requested by Gemini: ${functionCall.name}")
+                        return HandledResponse(
+                            result = SummaryResult.Error.Generic("Unknown tool call requested by Gemini: ${functionCall.name}"),
+                            responseRaw = rawBody,
+                            finishReason = finishReason,
+                            blockReason = blockReason,
+                            usageMetadata = usageMetadata,
+                        )
                     }
 
                     if (functionCall.name == GeminiTools.FETCH_EARLIER_MESSAGES) {
                         val reason = functionCall.argsAsStrings()["reason"]
                         if (reason.isNullOrBlank()) {
-                            return SummaryResult.Error.Generic(
-                                "Malformed tool call: missing required 'reason' parameter for ${functionCall.name}",
+                            return HandledResponse(
+                                result =
+                                    SummaryResult.Error.Generic(
+                                        "Malformed tool call: missing required 'reason' parameter for ${functionCall.name}",
+                                    ),
+                                responseRaw = rawBody,
+                                finishReason = finishReason,
+                                blockReason = blockReason,
+                                usageMetadata = usageMetadata,
                             )
                         }
                     }
@@ -437,17 +735,28 @@ open class GeminiSummarizer(
                                     toolName = functionCall.name,
                                     toolResponseContent = toolOutput,
                                     tools = activeTools?.takeIf { it.isNotEmpty() },
+                                    requestMeta =
+                                        requestMeta.copy(
+                                            transcriptLength = requestMeta.transcriptLength + toolOutput.length,
+                                        ),
                                 )
                             }
                         } else {
                             null
                         }
 
-                    return SummaryResult.ToolCall(
-                        name = functionCall.name,
-                        args = functionCall.argsAsStrings(),
-                        rawArgs = functionCall.effectiveArgs,
-                        continuation = continuation,
+                    return HandledResponse(
+                        result =
+                            SummaryResult.ToolCall(
+                                name = functionCall.name,
+                                args = functionCall.argsAsStrings(),
+                                rawArgs = functionCall.effectiveArgs,
+                                continuation = continuation,
+                            ),
+                        responseRaw = rawBody,
+                        finishReason = finishReason,
+                        blockReason = blockReason,
+                        usageMetadata = usageMetadata,
                     )
                 }
 
@@ -457,12 +766,30 @@ open class GeminiSummarizer(
                         .joinToString("\n")
                         .trim()
                 if (rawText.isBlank()) {
-                    return SummaryResult.Error.Generic("Empty text in Gemini summary response")
+                    val errorResult =
+                        if (finishReason in SAFETY_FINISH_REASONS) {
+                            SummaryResult.Error.Generic("Gemini response blocked due to finishReason: $finishReason")
+                        } else {
+                            SummaryResult.Error.Generic("Empty text in Gemini summary response")
+                        }
+                    return HandledResponse(
+                        result = errorResult,
+                        responseRaw = rawBody,
+                        finishReason = finishReason,
+                        blockReason = blockReason,
+                        usageMetadata = usageMetadata,
+                    )
                 }
 
                 val sanitized = EmojiSanitizer.stripEmojis(rawText).trim()
                 if (sanitized.isBlank()) {
-                    return SummaryResult.Error.Generic("Gemini summary output is empty or sanitized to blank")
+                    return HandledResponse(
+                        result = SummaryResult.Error.Generic("Gemini summary output is empty or sanitized to blank"),
+                        responseRaw = rawBody,
+                        finishReason = finishReason,
+                        blockReason = blockReason,
+                        usageMetadata = usageMetadata,
+                    )
                 }
 
                 val candidateGrounding = candidate?.actualGroundingMetadata
@@ -477,7 +804,13 @@ open class GeminiSummarizer(
                         }?.distinctBy { it.url }
                         ?.take(3) ?: emptyList()
 
-                return SummaryResult.Success(text = sanitized, citations = citations)
+                return HandledResponse(
+                    result = SummaryResult.Success(text = sanitized, citations = citations),
+                    responseRaw = rawBody,
+                    finishReason = finishReason,
+                    blockReason = blockReason,
+                    usageMetadata = usageMetadata,
+                )
             }
         }
     }
@@ -487,6 +820,9 @@ open class GeminiSummarizer(
     }
 
     companion object {
+        private val SAFETY_FINISH_REASONS =
+            setOf("SAFETY", "RECITATION", "PROHIBITED_CONTENT", "BLOCKLIST", "SPII")
+
         private val jsonParser =
             Json {
                 ignoreUnknownKeys = true
@@ -508,3 +844,71 @@ open class GeminiSummarizer(
             }
     }
 }
+
+internal fun classifySummaryError(error: SummaryResult.Error): AiTraceFailureCategory =
+    when (error) {
+        is SummaryResult.Error.MissingApiKey -> {
+            AiTraceFailureCategory.NOT_CONFIGURED
+        }
+
+        is SummaryResult.Error.RateLimitExceeded -> {
+            AiTraceFailureCategory.RATE_LIMIT
+        }
+
+        is SummaryResult.Error.Timeout -> {
+            AiTraceFailureCategory.TIMEOUT
+        }
+
+        is SummaryResult.Error.ApiError -> {
+            AiTraceFailureCategory.HTTP_ERROR
+        }
+
+        is SummaryResult.Error.Generic -> {
+            val msg = error.message
+            when {
+                error.cause is SerializationException ||
+                    msg.contains("parse", ignoreCase = true) ||
+                    msg.contains("Malformed tool call", ignoreCase = true) ||
+                    msg.contains("Unknown tool call", ignoreCase = true) -> {
+                    AiTraceFailureCategory.PARSE_ERROR
+                }
+
+                msg.contains("prompt blocked", ignoreCase = true) ||
+                    msg.contains("blocked due to", ignoreCase = true) ||
+                    msg.contains("SAFETY", ignoreCase = false) -> {
+                    AiTraceFailureCategory.SAFETY_BLOCK
+                }
+
+                msg.contains("empty", ignoreCase = true) ||
+                    msg.contains("No summary candidates", ignoreCase = true) -> {
+                    AiTraceFailureCategory.EMPTY_OUTPUT
+                }
+
+                msg.contains("cannot be blank", ignoreCase = true) -> {
+                    AiTraceFailureCategory.CONTEXT_ERROR
+                }
+
+                error.cause is HttpRequestTimeoutException ||
+                    error.cause is SocketTimeoutException ||
+                    error.cause is TimeoutCancellationException -> {
+                    AiTraceFailureCategory.TIMEOUT
+                }
+
+                else -> {
+                    AiTraceFailureCategory.UNEXPECTED_ERROR
+                }
+            }
+        }
+    }
+
+internal fun classifySummaryException(e: Throwable): AiTraceFailureCategory =
+    when (e) {
+        is HttpRequestTimeoutException,
+        is SocketTimeoutException,
+        is TimeoutCancellationException,
+        -> AiTraceFailureCategory.TIMEOUT
+
+        is SerializationException -> AiTraceFailureCategory.PARSE_ERROR
+
+        else -> AiTraceFailureCategory.UNEXPECTED_ERROR
+    }
