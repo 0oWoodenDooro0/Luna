@@ -541,16 +541,17 @@ class ChatterServiceTest {
         }
 
     @Test
-    fun `URL-only ambient message skips SocialPeek in decision stage and propagates resolved post content to ChatterGenerator`() =
+    fun `URL-only social ambient message skips SocialPeek in decision stage and propagates resolved post content to ChatterGenerator`() =
         runTest {
             val channelId = 603L
+            val socialUrl = "https://www.threads.net/@alice/post/kotlin-post"
             val callStages = mutableListOf<String>()
             val peekPost =
                 PeekPost(
-                    platform = Platform.GENERIC,
+                    platform = Platform.THREADS,
                     id = "article-1",
-                    originalUrl = "https://example.com/kotlin-post",
-                    cleanUrl = "https://example.com/kotlin-post",
+                    originalUrl = socialUrl,
+                    cleanUrl = socialUrl,
                     author = Author(username = "Author"),
                     title = "Kotlin 2.2 Released",
                     content = "Context parameters and new compiler improvements",
@@ -579,7 +580,7 @@ class ChatterServiceTest {
                     id = 603L,
                     channelId = channelId,
                     username = "Alice",
-                    content = "https://example.com/kotlin-post",
+                    content = socialUrl,
                 )
 
             coEvery { decisionClient.decide(any(), any()) } answers {
@@ -594,18 +595,68 @@ class ChatterServiceTest {
             val result = urlService.processMessage(urlMessage)
 
             assertTrue(result)
-            assertEquals(listOf("decide", "peek:https://example.com/kotlin-post", "generate"), callStages)
+            assertEquals(listOf("decide", "peek:$socialUrl", "generate"), callStages)
             coVerify(exactly = 1) {
                 chatterGenerator.generateReply(
                     match<ChatterInput> { input ->
                         !input.isDirectMention &&
                             input.title == "Kotlin 2.2 Released" &&
-                            input.url == "https://example.com/kotlin-post" &&
+                            input.url == socialUrl &&
                             input.comments == listOf("Looks clean!") &&
-                            input.transcript.contains("https://example.com/kotlin-post") &&
+                            input.webUrls.isEmpty() &&
+                            input.transcript.contains(socialUrl) &&
                             input.transcript.contains("Kotlin 2.2 Released") &&
                             input.transcript.contains("Context parameters and new compiler improvements") &&
                             input.transcript.contains("Looks clean!")
+                    },
+                )
+            }
+            coVerify(exactly = 1) { channel.createMessage("Kotlin 2.2 context parameters look neat") }
+        }
+
+    @Test
+    fun `general web URL ambient message skips SocialPeek completely and propagates webUrls to ChatterGenerator`() =
+        runTest {
+            val channelId = 604L
+            val webUrl = "https://example.com/kotlin-post"
+            var peekCalled = false
+            val customCollector =
+                ChatterContextCollector(
+                    noiseFilter = filter,
+                    peekResolver = {
+                        peekCalled = true
+                        null
+                    },
+                )
+            val urlService =
+                ChatterService(
+                    filter = filter,
+                    decisionClient = decisionClient,
+                    chatterGenerator = chatterGenerator,
+                    cooldownCache = cooldownCache,
+                    historyFetcher = { _, _ -> emptyList() },
+                    contextCollector = customCollector,
+                )
+
+            val urlMessage =
+                createMockMessage(
+                    id = 604L,
+                    channelId = channelId,
+                    username = "Alice",
+                    content = "Check $webUrl",
+                )
+
+            coEvery { decisionClient.decide(any(), any()) } returns ParticipationDecision(shouldParticipate = true, noul = 0.91)
+            coEvery { chatterGenerator.generateReply(any<ChatterInput>()) } returns "Kotlin 2.2 context parameters look neat"
+
+            assertTrue(urlService.processMessage(urlMessage))
+            assertFalse(peekCalled)
+            coVerify(exactly = 1) {
+                chatterGenerator.generateReply(
+                    match<ChatterInput> { input ->
+                        !input.isDirectMention &&
+                            input.webUrls == listOf(webUrl) &&
+                            input.transcript.contains(webUrl)
                     },
                 )
             }
@@ -631,6 +682,7 @@ class ChatterServiceTest {
                             "YOUTUBE_API_KEY" to "yt-secret-key",
                             "SUMMARY_MAX_IMAGES" to 6,
                             "GEMINI_SEARCH_GROUNDING_ENABLED" to false,
+                            "GEMINI_URL_CONTEXT_ENABLED" to false,
                         ),
                 )
 
@@ -641,6 +693,7 @@ class ChatterServiceTest {
             assertEquals(6, customPlugin.contextCollector?.maxImages)
             assertSame(customPlugin.contextCollector, customPlugin.service?.contextCollector)
             assertFalse(customPlugin.chatterGenerator?.config?.searchGroundingEnabled ?: true)
+            assertFalse(customPlugin.chatterGenerator?.config?.urlContextEnabled ?: true)
             customPlugin.shutdown()
 
             val defaultContext =
@@ -658,6 +711,7 @@ class ChatterServiceTest {
             assertEquals(10, defaultPlugin.contextCollector?.maxImages)
             assertSame(defaultPlugin.contextCollector, defaultPlugin.service?.contextCollector)
             assertTrue(defaultPlugin.chatterGenerator?.config?.searchGroundingEnabled ?: false)
+            assertTrue(defaultPlugin.chatterGenerator?.config?.urlContextEnabled ?: false)
             assertEquals(5_000L, defaultPlugin.filter?.cooldownDurationMs)
             assertEquals(5_000L, defaultPlugin.cooldownCache?.defaultCooldownDurationMs)
             assertNotNull(defaultPlugin.inFlightTracker)
@@ -760,24 +814,26 @@ class ChatterServiceTest {
     fun `ChatterService forwards framed decision context with external reply chaining and unframed enriched reply context`() =
         runTest {
             val botSelfId = Snowflake(9999L)
+            val socialUrl = "https://x.com/kotlin/status/98765"
+            val webUrl = "https://example.com/article"
             val externalTarget = createMockMessage(id = 801L, username = "ExtUser", content = "Original topic question")
-            val prior1 = createMockMessage(id = 810L, username = "Alice", content = "Earlier message")
+            val prior1 = createMockMessage(id = 810L, username = "Alice", content = "Earlier message $webUrl")
             val triggerMsg =
                 createMockMessage(
                     id = 811L,
                     channelId = 710L,
                     username = "Bob",
-                    content = "Check https://example.com/article",
+                    content = "Check $socialUrl",
                     selfId = botSelfId,
                     referencedMessage = externalTarget,
                 )
 
             val peekPost =
                 PeekPost(
-                    platform = Platform.GENERIC,
+                    platform = Platform.X,
                     id = "art-1",
-                    originalUrl = "https://example.com/article",
-                    cleanUrl = "https://example.com/article",
+                    originalUrl = socialUrl,
+                    cleanUrl = socialUrl,
                     author = Author(username = "Writer"),
                     title = "Article Title",
                     content = "Article summary body",
@@ -807,9 +863,9 @@ class ChatterServiceTest {
                     match { transcript ->
                         transcript.contains("[Bot Identity: Luna | Discord Mention: <@9999>]") &&
                             transcript.contains("[Recent Context]") &&
-                            transcript.contains("[Alice]: Earlier message") &&
+                            transcript.contains("[Alice]: Earlier message $webUrl") &&
                             transcript.contains("[Latest Message]") &&
-                            transcript.contains("[Bob 回覆 ExtUser「Original topic question」]: Check https://example.com/article") &&
+                            transcript.contains("[Bob 回覆 ExtUser「Original topic question」]: Check $socialUrl") &&
                             !transcript.contains("Article Title")
                     },
                     any(),
@@ -821,9 +877,10 @@ class ChatterServiceTest {
                         !input.transcript.contains("[Bot Identity:") &&
                             !input.transcript.contains("[Recent Context]") &&
                             !input.transcript.contains("[Latest Message]") &&
-                            input.transcript.contains("[Alice]: Earlier message") &&
-                            input.transcript.contains("[Bob 回覆 ExtUser「Original topic question」]: Check https://example.com/article") &&
-                            input.transcript.contains("Article Title")
+                            input.transcript.contains("[Alice]: Earlier message $webUrl") &&
+                            input.transcript.contains("[Bob 回覆 ExtUser「Original topic question」]: Check $socialUrl") &&
+                            input.transcript.contains("Article Title") &&
+                            input.webUrls == listOf(webUrl)
                     },
                 )
             }

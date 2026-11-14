@@ -1,8 +1,9 @@
 package luna.summarizer
 
 import kotlinx.serialization.json.JsonObject
+import luna.core.ai.AiTraceFailureCategory
 import luna.core.ai.ChatImageAttachment
-import luna.core.ai.GeminiTool
+import luna.core.ai.GeminiInteractionTool
 import luna.core.ai.GroundingCitation
 
 /**
@@ -12,6 +13,8 @@ import luna.core.ai.GroundingCitation
  * @property title Optional title of the page or post.
  * @property comments Optional list of user comments or discussion items.
  * @property url Optional source URL.
+ * @property webUrls Ordered, deduplicated general public web URLs eligible for `url_context` (capped at 20).
+ * @property originalUrls All distinct original URLs observed across the slice for citation exclusion.
  * @property videoUri Optional video URI for multimodal video understanding.
  * @property videoDurationSeconds Optional video duration in seconds for adaptive mode selection.
  * @property imageAttachments Optional list of chat image attachments for multimodal visual understanding.
@@ -23,10 +26,12 @@ data class SummaryInput(
     val title: String? = null,
     val comments: List<String> = emptyList(),
     val url: String? = null,
+    val webUrls: List<String> = emptyList(),
+    val originalUrls: List<String> = emptyList(),
     val videoUri: String? = null,
     val videoDurationSeconds: Long? = null,
     val imageAttachments: List<ChatImageAttachment> = emptyList(),
-    val tools: List<GeminiTool>? = null,
+    val tools: List<GeminiInteractionTool>? = null,
     val earlierContext: String? = null,
 )
 
@@ -92,6 +97,7 @@ sealed class SummaryResult {
         data class Generic(
             override val message: String,
             override val cause: Throwable? = null,
+            val failureCategory: AiTraceFailureCategory? = null,
         ) : Error(message, cause)
     }
 }

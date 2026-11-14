@@ -1,21 +1,20 @@
 package luna.chatter
 
 import luna.core.ai.EmojiSanitizer
-import luna.core.ai.GeminiContent
-import luna.core.ai.GeminiFileData
-import luna.core.ai.GeminiGenerateContentRequest
-import luna.core.ai.GeminiGenerationConfig
-import luna.core.ai.GeminiPart
-import luna.core.ai.GeminiTool
+import luna.core.ai.GeminiInteractionClient
+import luna.core.ai.GeminiInteractionGenerationConfig
+import luna.core.ai.GeminiInteractionRequest
+import luna.core.ai.GeminiInteractionTool
+import luna.core.ai.GeminiInteractionTools
+import luna.core.ai.VideoProcessingMode
 
 /**
- * Builds system persona instructions, user prompts, and request payloads for ChatterGenerator,
+ * Builds system persona instructions, user prompts, and Interactions API request payloads for [ChatterGenerator],
  * while providing output sanitization and Discord 2,000-character payload bound enforcement.
  */
 object ChatterPromptBuilder {
     const val DISCORD_MAX_LENGTH: Int = 2000
     const val MAX_OUTPUT_TOKENS: Int = 512
-    const val TEMPERATURE: Double = 0.8
     const val TRUNCATION_ELLIPSIS: String = "..."
 
     const val SYSTEM_INSTRUCTION: String =
@@ -30,8 +29,11 @@ object ChatterPromptBuilder {
             "7. 嚴格禁用 AI 套話與開場白：輸出中絕對嚴禁使用任何制式、官方或機械化的 AI 助理開場白或套話（例如「身為一個 AI」、「很高興為您服務」、「有什麼我可以幫忙的嗎」等），請直接切入話題搭話。\n" +
             "8. 對話脈絡理解：對話紀錄中標註了各發言者的名稱（例如 [使用者]: 內容）。請根據上下文脈絡隨性自然地搭話。\n" +
             "9. 順應最新話鋒：發言時只順著聊天紀錄最新、當前正在進行的話題接話，切勿回頭去回覆或挖掘紀錄更早之前已經結束的舊句子。\n" +
-            "10. 多模態與連結內容理解：若對話中附帶圖片（標記為 [附帶圖片 N]）、YouTube 影片、或社群/網頁連結內容（[連結內容: ...]），請自然融入視覺畫面、影片重點或連結資訊來搭話或回應，但仍維持口語簡短的聊天節奏，不可變成制式摘要。\n" +
-            "11. 搜尋查證與禁止摘要格式：必要時可透過 Google 搜尋確認不熟悉的名詞或事實，將查到的重點自然融入口語回覆中。絕對禁止輸出「TL;DR:」、「核心重點:」、「參與者觀點:」、「社群觀點:」、「名詞與事實查核:」等制式摘要標題，也不可附上參考來源網址清單或引用連結列表。"
+            "10. 多模態與連結內容理解：若對話中附帶圖片（標記為 [附帶圖片 N]）、YouTube 影片、社群連結內容（[連結內容: ...]）或一般公開網頁連結" +
+            "（可透過 url_context 工具讀取網頁內容），請自然融入視覺畫面、影片重點或網頁資訊來搭話或回應，但仍維持口語簡短的聊天節奏，不可變成制式摘要。\n" +
+            "11. 搜尋查證與禁止摘要格式：必要時可透過 google_search 工具查證不熟悉的名詞或即時事實，將查到的重點自然融入口語回覆中。" +
+            "絕對禁止輸出「TL;DR:」、「核心重點:」、「參與者觀點:」、「社群觀點:」、「名詞與事實查核:」等制式摘要標題，" +
+            "也絕對不可附上 Markdown 網址列表、參考來源網址清單或任何引用來源標註。"
 
     fun buildSystemInstruction(): String = SYSTEM_INSTRUCTION
 
@@ -85,6 +87,9 @@ object ChatterPromptBuilder {
         if (input.imageAttachments.isNotEmpty()) {
             mediaHints.add("對話中附帶圖片（[附帶圖片 N]）請自然結合視覺內容回應")
         }
+        if (input.webUrls.isNotEmpty()) {
+            mediaHints.add("對話中的一般網頁連結可透過 url_context 讀取內容並自然融入回應")
+        }
         val mediaDirective =
             if (mediaHints.isNotEmpty()) {
                 "（${mediaHints.joinToString("，")}）"
@@ -96,62 +101,46 @@ object ChatterPromptBuilder {
             "\n\n請以 Luna 的社群成員口吻回覆這段對話$mediaDirective。" +
                 "要求：順著最新聊天紀錄接話（切勿回頭回覆早前的舊句子）、極簡口語、一次講一句重點（最多兩到三句極短句）、" +
                 "不加標點符號（不加逗號、句號、驚嘆號，斷句用空格或分行）、嚴禁使用任何 emoji 或表情符號、" +
-                "切勿使用制式 AI 開場白與套話、不可輸出任何摘要標題或引用網址清單：",
+                "切勿使用制式 AI 開場白與套話、不可輸出任何摘要標題、Markdown 網址列表或引用來源標註：",
         )
         return sb.toString().trim()
     }
 
-    fun buildRequest(
-        transcript: String,
-        tools: List<GeminiTool>? = null,
-    ): GeminiGenerateContentRequest = buildRequest(ChatterInput(transcript = transcript), tools = tools)
+    fun buildTools(
+        config: ChatterConfig,
+        webUrls: List<String>,
+    ): List<GeminiInteractionTool> =
+        buildList {
+            if (config.urlContextEnabled && webUrls.isNotEmpty()) {
+                add(GeminiInteractionTools.URL_CONTEXT)
+            }
+            if (config.searchGroundingEnabled) {
+                add(GeminiInteractionTools.GOOGLE_SEARCH)
+            }
+        }
 
-    fun buildRequest(
+    fun buildInteractionRequest(
         input: ChatterInput,
-        tools: List<GeminiTool>? = null,
-    ): GeminiGenerateContentRequest {
-        val parts = mutableListOf<GeminiPart>()
-        if (!input.videoUri.isNullOrBlank()) {
-            parts.add(
-                GeminiPart(
-                    fileData =
-                        GeminiFileData(
-                            fileUri = input.videoUri,
-                        ),
-                ),
+        model: String = ChatterConfig.DEFAULT_MODEL,
+        tools: List<GeminiInteractionTool> = emptyList(),
+        videoProcessingMode: VideoProcessingMode = VideoProcessingMode.STATIC,
+        background: Boolean = false,
+    ): GeminiInteractionRequest {
+        val inputs =
+            GeminiInteractionClient.buildMultimodalInputs(
+                promptText = buildUserPrompt(input),
+                imageAttachments = input.imageAttachments,
+                videoUri = input.videoUri,
+                videoProcessingMode = videoProcessingMode,
             )
-        }
-        for (attachment in input.imageAttachments) {
-            parts.add(
-                GeminiPart(
-                    fileData =
-                        GeminiFileData(
-                            fileUri = attachment.url,
-                            mimeType = attachment.mimeType,
-                        ),
-                ),
-            )
-        }
-        parts.add(GeminiPart(text = buildUserPrompt(input)))
 
-        return GeminiGenerateContentRequest(
-            contents =
-                listOf(
-                    GeminiContent(
-                        role = "user",
-                        parts = parts,
-                    ),
-                ),
-            systemInstruction =
-                GeminiContent(
-                    parts = listOf(GeminiPart(text = buildSystemInstruction())),
-                ),
-            generationConfig =
-                GeminiGenerationConfig(
-                    temperature = TEMPERATURE,
-                    maxOutputTokens = MAX_OUTPUT_TOKENS,
-                ),
-            tools = tools?.takeIf { it.isNotEmpty() },
+        return GeminiInteractionRequest(
+            model = model.trim().removePrefix("models/"),
+            input = inputs,
+            systemInstruction = buildSystemInstruction(),
+            tools = tools.takeIf { it.isNotEmpty() },
+            generationConfig = GeminiInteractionGenerationConfig(maxOutputTokens = MAX_OUTPUT_TOKENS),
+            background = background,
         )
     }
 

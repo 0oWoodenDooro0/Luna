@@ -21,9 +21,13 @@ import io.mockk.mockk
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import luna.core.ai.ChatImageAttachment
 import luna.core.ai.EmojiSanitizer
-import luna.core.ai.GeminiTools
+import luna.core.ai.GeminiInteractionTools
+import luna.core.ai.VideoProcessingMode
 import luna.plugin.DefaultPluginContext
 import org.jetbrains.exposed.v1.jdbc.Database
 import org.slf4j.LoggerFactory
@@ -146,6 +150,63 @@ class ChatterGeneratorTest {
         assertFalse(ChatterConfig.fromPluginContext(contextDotDisabled).searchGroundingEnabled)
     }
 
+    @Test
+    fun `ChatterConfig defaults urlContextEnabled to true and resolves across fromEnv, fromConfig, and fromPluginContext with invalid fallback`() {
+        assertTrue(ChatterConfig.DEFAULT_URL_CONTEXT_ENABLED)
+        assertTrue(ChatterConfig().urlContextEnabled)
+        assertTrue(ChatterConfig.fromEnv(emptyMap()).urlContextEnabled)
+
+        assertFalse(ChatterConfig.fromEnv(mapOf("GEMINI_URL_CONTEXT_ENABLED" to "false")).urlContextEnabled)
+        assertFalse(ChatterConfig.fromEnv(mapOf("GEMINI_URL_CONTEXT_ENABLED" to " false ")).urlContextEnabled)
+        assertTrue(ChatterConfig.fromEnv(mapOf("GEMINI_URL_CONTEXT_ENABLED" to "true")).urlContextEnabled)
+        assertTrue(ChatterConfig.fromEnv(mapOf("GEMINI_URL_CONTEXT_ENABLED" to "invalid")).urlContextEnabled)
+
+        assertFalse(ChatterConfig.fromConfig(mapOf("GEMINI_URL_CONTEXT_ENABLED" to false)).urlContextEnabled)
+        assertFalse(ChatterConfig.fromConfig(mapOf("GEMINI_URL_CONTEXT_ENABLED" to "false")).urlContextEnabled)
+        assertFalse(ChatterConfig.fromConfig(mapOf("gemini.urlContextEnabled" to false)).urlContextEnabled)
+        assertFalse(ChatterConfig.fromConfig(mapOf("gemini.urlContextEnabled" to " false ")).urlContextEnabled)
+        assertTrue(ChatterConfig.fromConfig(mapOf("GEMINI_URL_CONTEXT_ENABLED" to "invalid")).urlContextEnabled)
+
+        val contextDisabled =
+            DefaultPluginContext(
+                kord = mockk<Kord>(relaxed = true),
+                routing = mockk<Routing>(relaxed = true),
+                database = mockk<Database>(relaxed = true),
+                configMap =
+                    mapOf(
+                        "GEMINI_API_KEY" to "test-key",
+                        "GEMINI_URL_CONTEXT_ENABLED" to false,
+                    ),
+            )
+        assertFalse(ChatterConfig.fromPluginContext(contextDisabled).urlContextEnabled)
+
+        val contextDotDisabled =
+            DefaultPluginContext(
+                kord = mockk<Kord>(relaxed = true),
+                routing = mockk<Routing>(relaxed = true),
+                database = mockk<Database>(relaxed = true),
+                configMap =
+                    mapOf(
+                        "GEMINI_API_KEY" to "test-key",
+                        "gemini.urlContextEnabled" to "false",
+                    ),
+            )
+        assertFalse(ChatterConfig.fromPluginContext(contextDotDisabled).urlContextEnabled)
+
+        val contextInvalidFallback =
+            DefaultPluginContext(
+                kord = mockk<Kord>(relaxed = true),
+                routing = mockk<Routing>(relaxed = true),
+                database = mockk<Database>(relaxed = true),
+                configMap =
+                    mapOf(
+                        "GEMINI_API_KEY" to "test-key",
+                        "GEMINI_URL_CONTEXT_ENABLED" to "not-a-boolean",
+                    ),
+            )
+        assertTrue(ChatterConfig.fromPluginContext(contextInvalidFallback).urlContextEnabled)
+    }
+
     // --- Prompt Builder & Persona Tests ---
 
     @Test
@@ -164,10 +225,10 @@ class ChatterGeneratorTest {
     }
 
     @Test
-    fun `ChatterPromptBuilder buildRequest with ChatterInput embeds file_data parts, googleSearch tool, and metadata without duplicate transcript info`() {
+    fun `ChatterPromptBuilder buildInteractionRequest embeds video image text inputs, tools, max_output_tokens without temperature`() {
         val input =
             ChatterInput(
-                transcript = "[Alice]: 看看這張圖跟影片 [附帶圖片 1: err.png]",
+                transcript = "[Alice]: 看看這張圖跟影片 [附帶圖片 1: err.png] https://kotlinlang.org/docs/",
                 imageAttachments =
                     listOf(
                         ChatImageAttachment(
@@ -182,40 +243,53 @@ class ChatterGeneratorTest {
                 title = "Kotlin Conf Keynote",
                 url = "https://www.youtube.com/watch?v=shortVid",
                 comments = listOf("Awesome demo!", "Super clean"),
+                webUrls = listOf("https://kotlinlang.org/docs/"),
             )
 
-        val request = ChatterPromptBuilder.buildRequest(input, tools = listOf(GeminiTools.GOOGLE_SEARCH_TOOL))
+        val request =
+            ChatterPromptBuilder.buildInteractionRequest(
+                input = input,
+                model = "gemini-3.5-flash-lite",
+                tools = listOf(GeminiInteractionTools.URL_CONTEXT, GeminiInteractionTools.GOOGLE_SEARCH),
+                videoProcessingMode = VideoProcessingMode.STATIC,
+                background = false,
+            )
         assertEquals(512, request.generationConfig?.maxOutputTokens)
-        assertEquals(0.8, request.generationConfig?.temperature)
+        assertFalse(request.background)
+        assertEquals(3, request.input.size)
 
-        val parts = request.contents.first().parts
-        assertEquals(3, parts.size)
+        val videoInput = request.input[0]
+        assertEquals("video", videoInput.type)
+        assertEquals("https://www.youtube.com/watch?v=shortVid", videoInput.uri)
+        assertNull(videoInput.mimeType)
+        assertEquals("static", videoInput.processing)
 
-        val videoFileData = parts[0].fileData
-        assertNotNull(videoFileData)
-        assertEquals("https://www.youtube.com/watch?v=shortVid", videoFileData.fileUri)
-        assertNull(videoFileData.mimeType)
+        val imageInput = request.input[1]
+        assertEquals("image", imageInput.type)
+        assertEquals("https://cdn.discordapp.com/attachments/1/2/err.png", imageInput.uri)
+        assertEquals("image/png", imageInput.mimeType)
 
-        val imageFileData = parts[1].fileData
-        assertNotNull(imageFileData)
-        assertEquals("https://cdn.discordapp.com/attachments/1/2/err.png", imageFileData.fileUri)
-        assertEquals("image/png", imageFileData.mimeType)
+        val textInput = request.input[2]
+        assertEquals("text", textInput.type)
+        val promptText = assertNotNull(textInput.text)
+        assertContains(promptText, "[Alice]: 看看這張圖跟影片 [附帶圖片 1: err.png] https://kotlinlang.org/docs/")
+        assertContains(promptText, "Kotlin Conf Keynote")
+        assertContains(promptText, "Awesome demo!")
+        assertContains(promptText, "url_context")
 
-        val textPart = parts[2].text
-        assertNotNull(textPart)
-        assertContains(textPart, "[Alice]: 看看這張圖跟影片 [附帶圖片 1: err.png]")
-        assertContains(textPart, "Kotlin Conf Keynote")
-        assertContains(textPart, "Awesome demo!")
+        val sys = assertNotNull(request.systemInstruction)
+        assertContains(sys, "url_context")
+        assertContains(sys, "google_search")
+        assertContains(sys, "TL;DR:")
 
-        assertEquals(1, request.tools?.size)
-        assertNotNull(request.tools?.first()?.actualGoogleSearch)
+        assertEquals(listOf("url_context", "google_search"), request.tools?.map { it.type })
 
         val serialized = json.encodeToString(request)
-        assertContains(serialized, "\"file_uri\":\"https://www.youtube.com/watch?v=shortVid\"")
-        assertContains(serialized, "\"file_uri\":\"https://cdn.discordapp.com/attachments/1/2/err.png\"")
-        assertContains(serialized, "\"mime_type\":\"image/png\"")
-        assertContains(serialized, "\"googleSearch\":{}")
-        assertFalse(serialized.contains("\"processing\""))
+        assertFalse(serialized.contains("\"temperature\""))
+        assertContains(serialized, "\"max_output_tokens\":512")
+        assertContains(serialized, "\"type\":\"url_context\"")
+        assertContains(serialized, "\"type\":\"google_search\"")
+        assertFalse(serialized.contains("\"mime_type\":\"video/mp4\""))
     }
 
     @Test
@@ -287,7 +361,7 @@ class ChatterGeneratorTest {
         }
 
     @Test
-    fun `successfully generates organic reply from transcript and verifies request parameters`() =
+    fun `successfully generates organic reply via sync interactions endpoint and verifies payload parameters`() =
         runTest {
             var recordedUrl: String? = null
             var recordedBody: String? = null
@@ -295,17 +369,17 @@ class ChatterGeneratorTest {
             val responseJson =
                 """
                 {
-                  "candidates": [
+                  "id": "int-sync-1",
+                  "status": "completed",
+                  "steps": [
                     {
-                      "content": {
-                        "role": "model",
-                        "parts": [
-                          {
-                            "text": "哈哈真的假的！咖啡團我也要加一，等等直接約在樓下大廳見！"
-                          }
-                        ]
-                      },
-                      "finishReason": "STOP"
+                      "type": "model_output",
+                      "content": [
+                        {
+                          "type": "text",
+                          "text": "哈哈真的假的 咖啡團我也要加一 等等直接約在樓下大廳見"
+                        }
+                      ]
                     }
                   ]
                 }
@@ -340,23 +414,39 @@ class ChatterGeneratorTest {
 
             val reply = generator.generateReply(transcript)
 
-            assertEquals("哈哈真的假的！咖啡團我也要加一，等等直接約在樓下大廳見！", reply)
-            val url = recordedUrl
-            val body = recordedBody
-            assertNotNull(url)
-            assertNotNull(body)
-            assertTrue(url.contains("models/gemini-3.5-flash-lite:generateContent"))
-            assertTrue(url.contains("key=chatter-test-secret-key"))
+            assertEquals("哈哈真的假的 咖啡團我也要加一 等等直接約在樓下大廳見", reply)
+            val url = assertNotNull(recordedUrl)
+            val body = assertNotNull(recordedBody)
+            assertTrue(url.contains("/v1beta/interactions?key=chatter-test-secret-key"))
+            assertFalse(url.contains(":generateContent"))
+
+            val reqObj = json.parseToJsonElement(body).jsonObject
+            assertEquals("gemini-3.5-flash-lite", reqObj["model"]?.jsonPrimitive?.content)
+            assertEquals(false, reqObj["background"]?.jsonPrimitive?.content?.toBooleanStrictOrNull())
+            assertFalse(body.contains("\"temperature\""))
+            assertEquals(
+                512,
+                reqObj["generation_config"]
+                    ?.jsonObject
+                    ?.get("max_output_tokens")
+                    ?.jsonPrimitive
+                    ?.content
+                    ?.toInt(),
+            )
             assertTrue(body.contains("Alice"))
             assertTrue(body.contains("Bob"))
             assertTrue(body.contains("Luna"))
+            val toolTypes = reqObj["tools"]?.jsonArray?.map { it.jsonObject["type"]?.jsonPrimitive?.content }
+            assertEquals(listOf("google_search"), toolTypes)
         }
 
     @Test
-    fun `returns null gracefully when Gemini API returns 429 rate limit exceeded`() =
+    fun `returns null gracefully without retry when Interactions API returns 429 rate limit exceeded`() =
         runTest {
+            var requestCount = 0
             val mockEngine =
                 MockEngine {
+                    requestCount++
                     respond(
                         content = """{"error": {"code": 429, "message": "Resource has been exhausted"}}""",
                         status = HttpStatusCode.TooManyRequests,
@@ -369,13 +459,16 @@ class ChatterGeneratorTest {
 
             val reply = generator.generateReply("[User]: rate limit test")
             assertNull(reply)
+            assertEquals(1, requestCount)
         }
 
     @Test
-    fun `returns null gracefully when Gemini API request throws timeout exception`() =
+    fun `returns null gracefully without retry when Interactions API request throws timeout exception`() =
         runTest {
+            var requestCount = 0
             val mockEngine =
                 MockEngine {
+                    requestCount++
                     throw HttpRequestTimeoutException("https://generativelanguage.googleapis.com", 30000L)
                 }
 
@@ -384,18 +477,19 @@ class ChatterGeneratorTest {
 
             val reply = generator.generateReply("[User]: timeout test")
             assertNull(reply)
+            assertEquals(1, requestCount)
         }
 
     @Test
-    fun `returns null gracefully when response has safety block or empty candidates`() =
+    fun `returns null gracefully when Interactions API response has safety block or empty output`() =
         runTest {
             val blockedJson =
                 """
                 {
-                  "promptFeedback": {
-                    "blockReason": "SAFETY"
-                  },
-                  "candidates": []
+                  "id": "int-safety-1",
+                  "status": "completed",
+                  "finish_reason": "SAFETY",
+                  "steps": []
                 }
                 """.trimIndent()
 
@@ -415,29 +509,35 @@ class ChatterGeneratorTest {
             assertNull(reply)
         }
 
-    // --- Multimodal, Tiered Video Latency Policy, Search Grounding & Degraded Fallback Tests ---
+    // --- Multimodal, Tiered Video Latency Policy, url_context & google_search, No-Fallback Tests ---
 
     @Test
-    fun `generateReply with ChatterInput sends file_data images and googleSearch tool without appending citation URLs`() =
+    fun `generateReply sends multimodal image inputs and both url_context and google_search when webUrls present without appending citations`() =
         runTest {
             var capturedBody: String? = null
             val responseJson =
                 """
                 {
-                  "candidates": [
+                  "id": "int-mm-1",
+                  "status": "completed",
+                  "steps": [
                     {
-                      "content": {
-                        "role": "model",
-                        "parts": [
-                          { "text": "這張截圖的錯誤是因為 port 8080 被佔用了 😂" }
-                        ]
-                      },
-                      "groundingMetadata": {
-                        "groundingChunks": [
-                          { "web": { "uri": "https://example.com/port-fix", "title": "Port Fix Guide" } }
-                        ]
-                      },
-                      "finishReason": "STOP"
+                      "type": "url_context_result",
+                      "result": [
+                        {"retrieved_url": "https://example.com/port-fix", "status": "success"}
+                      ]
+                    },
+                    {
+                      "type": "model_output",
+                      "content": [
+                        {
+                          "type": "text",
+                          "text": "這張截圖的錯誤是因為 port 8080 被佔用了 😂",
+                          "annotations": [
+                            {"type": "url_citation", "url": "https://docs.example.org/ports", "title": "Port Fix Guide"}
+                          ]
+                        }
+                      ]
                     }
                   ]
                 }
@@ -455,13 +555,13 @@ class ChatterGeneratorTest {
 
             val generator =
                 ChatterGenerator(
-                    config = ChatterConfig(apiKey = "valid-key", searchGroundingEnabled = true),
+                    config = ChatterConfig(apiKey = "valid-key", searchGroundingEnabled = true, urlContextEnabled = true),
                     httpClient = createTestClient(mockEngine),
                 )
 
             val input =
                 ChatterInput(
-                    transcript = "[Alice]: 幫我看一下這個錯 [附帶圖片 1: err.png]",
+                    transcript = "[Alice]: 幫我看一下這個錯 https://example.com/port-fix [連結預覽: Port Fix] [附帶圖片 1: err.png]",
                     imageAttachments =
                         listOf(
                             ChatImageAttachment(
@@ -470,41 +570,46 @@ class ChatterGeneratorTest {
                                 filename = "err.png",
                             ),
                         ),
+                    webUrls = listOf("https://example.com/port-fix"),
                 )
 
             val reply = generator.generateReply(input)
 
             assertEquals("這張截圖的錯誤是因為 port 8080 被佔用了", reply)
             val body = checkNotNull(capturedBody)
-            assertTrue(body.contains("\"file_uri\":\"https://cdn.discordapp.com/attachments/1/2/err.png\""))
-            assertTrue(body.contains("\"mime_type\":\"image/png\""))
-            assertTrue(body.contains("\"googleSearch\":{}"))
-            assertTrue(body.contains("\"maxOutputTokens\":512"))
-            assertFalse(reply.orEmpty().contains("https://example.com/port-fix"))
+            val reqObj = json.parseToJsonElement(body).jsonObject
+            assertEquals(false, reqObj["background"]?.jsonPrimitive?.content?.toBooleanStrictOrNull())
+            val inputBlocks = checkNotNull(reqObj["input"]?.jsonArray)
+            assertEquals("image", inputBlocks[0].jsonObject["type"]?.jsonPrimitive?.content)
+            assertEquals("https://cdn.discordapp.com/attachments/1/2/err.png", inputBlocks[0].jsonObject["uri"]?.jsonPrimitive?.content)
+            assertEquals("image/png", inputBlocks[0].jsonObject["mime_type"]?.jsonPrimitive?.content)
+            assertEquals("text", inputBlocks[1].jsonObject["type"]?.jsonPrimitive?.content)
+
+            val toolTypes = reqObj["tools"]?.jsonArray?.map { it.jsonObject["type"]?.jsonPrimitive?.content }
+            assertEquals(listOf("url_context", "google_search"), toolTypes)
+            assertEquals(
+                512,
+                reqObj["generation_config"]
+                    ?.jsonObject
+                    ?.get("max_output_tokens")
+                    ?.jsonPrimitive
+                    ?.content
+                    ?.toInt(),
+            )
+            assertFalse(reply.orEmpty().contains("https://docs.example.org/ports"))
             assertFalse(reply.orEmpty().contains("名詞與事實查核:"))
         }
 
     @Test
-    fun `negative boundary omits googleSearch tool when GEMINI_SEARCH_GROUNDING_ENABLED is false`() =
+    fun `negative boundary omits url_context when webUrls is empty or urlContextEnabled is false, and omits google_search when disabled`() =
         runTest {
-            var capturedBody: String? = null
+            val capturedBodies = mutableListOf<String>()
             val responseJson =
-                """
-                {
-                  "candidates": [
-                    {
-                      "content": {
-                        "role": "model",
-                        "parts": [{ "text": "好的收到" }]
-                      }
-                    }
-                  ]
-                }
-                """.trimIndent()
+                """{"id": "int-nb-1", "status": "completed", "output_text": "好的收到"}"""
 
             val mockEngine =
                 MockEngine { request ->
-                    capturedBody = request.body.toByteArray().decodeToString()
+                    capturedBodies.add(request.body.toByteArray().decodeToString())
                     respond(
                         content = responseJson,
                         status = HttpStatusCode.OK,
@@ -512,34 +617,63 @@ class ChatterGeneratorTest {
                     )
                 }
 
-            val config = ChatterConfig.fromEnv(mapOf("GEMINI_API_KEY" to "valid-key", "GEMINI_SEARCH_GROUNDING_ENABLED" to "false"))
-            val generator = ChatterGenerator(config = config, httpClient = createTestClient(mockEngine))
+            // 1. Both flags enabled, but webUrls is empty -> only google_search (no url_context)
+            val onlySearchGen =
+                ChatterGenerator(
+                    config = ChatterConfig(apiKey = "valid-key", searchGroundingEnabled = true, urlContextEnabled = true),
+                    httpClient = createTestClient(mockEngine),
+                )
+            assertEquals("好的收到", onlySearchGen.generateReply(ChatterInput(transcript = "[Alice]: 早安")))
 
-            val reply = generator.generateReply(ChatterInput(transcript = "[Alice]: 早安"))
-            assertEquals("好的收到", reply)
-            val body = checkNotNull(capturedBody)
-            assertFalse(body.contains("googleSearch"))
-            assertFalse(body.contains("\"tools\""))
+            // 2. webUrls non-empty, but urlContextEnabled = false -> only google_search
+            val urlCtxDisabledGen =
+                ChatterGenerator(
+                    config = ChatterConfig(apiKey = "valid-key", searchGroundingEnabled = true, urlContextEnabled = false),
+                    httpClient = createTestClient(mockEngine),
+                )
+            assertEquals(
+                "好的收到",
+                urlCtxDisabledGen.generateReply(
+                    ChatterInput(transcript = "[Alice]: https://example.com", webUrls = listOf("https://example.com")),
+                ),
+            )
+
+            // 3. Both flags disabled -> no tools key
+            val noToolsGen =
+                ChatterGenerator(
+                    config =
+                        ChatterConfig.fromEnv(
+                            mapOf(
+                                "GEMINI_API_KEY" to "valid-key",
+                                "GEMINI_SEARCH_GROUNDING_ENABLED" to "false",
+                                "GEMINI_URL_CONTEXT_ENABLED" to "false",
+                            ),
+                        ),
+                    httpClient = createTestClient(mockEngine),
+                )
+            assertEquals(
+                "好的收到",
+                noToolsGen.generateReply(
+                    ChatterInput(transcript = "[Alice]: https://example.com", webUrls = listOf("https://example.com")),
+                ),
+            )
+
+            assertEquals(3, capturedBodies.size)
+            val obj1 = json.parseToJsonElement(capturedBodies[0]).jsonObject
+            assertEquals(listOf("google_search"), obj1["tools"]?.jsonArray?.map { it.jsonObject["type"]?.jsonPrimitive?.content })
+            val obj2 = json.parseToJsonElement(capturedBodies[1]).jsonObject
+            assertEquals(listOf("google_search"), obj2["tools"]?.jsonArray?.map { it.jsonObject["type"]?.jsonPrimitive?.content })
+            val obj3 = json.parseToJsonElement(capturedBodies[2]).jsonObject
+            assertFalse(obj3.containsKey("tools"))
         }
 
     @Test
-    fun `tiered video policy uses static generateContent file_data for videos at most 300 seconds or unknown duration`() =
+    fun `tiered video policy uses sync static interaction without mime_type for videos at most 300 seconds or unknown duration`() =
         runTest {
             val recordedUrls = mutableListOf<String>()
             val recordedBodies = mutableListOf<String>()
             val responseJson =
-                """
-                {
-                  "candidates": [
-                    {
-                      "content": {
-                        "role": "model",
-                        "parts": [{ "text": "這段展示超順的" }]
-                      }
-                    }
-                  ]
-                }
-                """.trimIndent()
+                """{"id": "int-vid-static", "status": "completed", "output_text": "這段展示超順的"}"""
 
             val mockEngine =
                 MockEngine { request ->
@@ -580,30 +714,25 @@ class ChatterGeneratorTest {
             assertEquals("這段展示超順的", ambientShort)
             assertEquals("這段展示超順的", directUnknown)
             assertEquals(2, recordedUrls.size)
-            assertTrue(recordedUrls.all { it.contains(":generateContent") && !it.contains("/interactions") })
-            assertTrue(recordedBodies[0].contains("\"file_uri\":\"https://www.youtube.com/watch?v=short300\""))
-            assertTrue(recordedBodies[1].contains("\"file_uri\":\"https://www.youtube.com/watch?v=unknownDur\""))
-            assertTrue(recordedBodies.none { it.contains("\"processing\"") })
+            assertTrue(recordedUrls.all { it.contains("/v1beta/interactions") })
+
+            for (body in recordedBodies) {
+                val obj = json.parseToJsonElement(body).jsonObject
+                assertEquals(false, obj["background"]?.jsonPrimitive?.content?.toBooleanStrictOrNull())
+                val videoBlock = obj["input"]!!.jsonArray[0].jsonObject
+                assertEquals("video", videoBlock["type"]?.jsonPrimitive?.content)
+                assertEquals("static", videoBlock["processing"]?.jsonPrimitive?.content)
+                assertFalse(videoBlock.containsKey("mime_type"))
+            }
         }
 
     @Test
-    fun `tiered video policy omits videoUri and skips agentic polling for ambient replies over 300 seconds`() =
+    fun `tiered video policy omits videoUri and uses sync interaction for ambient replies over 300 seconds`() =
         runTest {
             val recordedUrls = mutableListOf<String>()
             var capturedBody: String? = null
             val responseJson =
-                """
-                {
-                  "candidates": [
-                    {
-                      "content": {
-                        "role": "model",
-                        "parts": [{ "text": "看留言大家都推 12 分鐘那段實測" }]
-                      }
-                    }
-                  ]
-                }
-                """.trimIndent()
+                """{"id": "int-vid-amb", "status": "completed", "output_text": "看留言大家都推 12 分鐘那段實測"}"""
 
             val mockEngine =
                 MockEngine { request ->
@@ -636,12 +765,14 @@ class ChatterGeneratorTest {
 
             assertEquals("看留言大家都推 12 分鐘那段實測", reply)
             assertEquals(1, recordedUrls.size)
-            assertTrue(recordedUrls.single().contains(":generateContent"))
-            assertFalse(recordedUrls.single().contains("/interactions"))
-            val body = checkNotNull(capturedBody)
-            assertFalse(body.contains("\"file_data\""))
-            assertTrue(body.contains("Kotlin Deep Dive"))
-            assertTrue(body.contains("12:00 實測很讚"))
+            assertTrue(recordedUrls.single().contains("/v1beta/interactions"))
+            val obj = json.parseToJsonElement(checkNotNull(capturedBody)).jsonObject
+            assertEquals(false, obj["background"]?.jsonPrimitive?.content?.toBooleanStrictOrNull())
+            val inputBlocks = obj["input"]!!.jsonArray
+            assertEquals(1, inputBlocks.size)
+            assertEquals("text", inputBlocks[0].jsonObject["type"]?.jsonPrimitive?.content)
+            assertTrue(capturedBody.orEmpty().contains("Kotlin Deep Dive"))
+            assertTrue(capturedBody.orEmpty().contains("12:00 實測很讚"))
         }
 
     @Test
@@ -690,10 +821,11 @@ class ChatterGeneratorTest {
             val reply =
                 generator.generateReply(
                     ChatterInput(
-                        transcript = "[Alice]: 幫我看這支片在講什麼",
+                        transcript = "[Alice]: 幫我看這支片在講什麼 https://kotlinlang.org/docs/coroutines.html",
                         videoUri = "https://www.youtube.com/watch?v=med7200",
                         videoDurationSeconds = 7200L,
                         isDirectMention = true,
+                        webUrls = listOf("https://kotlinlang.org/docs/coroutines.html"),
                     ),
                 )
 
@@ -702,8 +834,16 @@ class ChatterGeneratorTest {
             assertTrue(recordedUrls.drop(1).all { it.contains("/v1beta/interactions/interaction-chatter-1") })
             assertEquals(listOf(HttpMethod.Post, HttpMethod.Get, HttpMethod.Get), recordedMethods)
             val submitted = checkNotNull(interactionBody)
-            assertTrue(submitted.contains("\"processing\":\"agentic\""))
-            assertTrue(submitted.contains("\"uri\":\"https://www.youtube.com/watch?v=med7200\""))
+            val obj = json.parseToJsonElement(submitted).jsonObject
+            assertEquals(true, obj["background"]?.jsonPrimitive?.content?.toBooleanStrictOrNull())
+            val videoBlock = obj["input"]!!.jsonArray[0].jsonObject
+            assertEquals("agentic", videoBlock["processing"]?.jsonPrimitive?.content)
+            assertEquals("https://www.youtube.com/watch?v=med7200", videoBlock["uri"]?.jsonPrimitive?.content)
+            assertFalse(videoBlock.containsKey("mime_type"))
+            assertEquals(
+                listOf("url_context", "google_search"),
+                obj["tools"]?.jsonArray?.map { it.jsonObject["type"]?.jsonPrimitive?.content },
+            )
             assertTrue(submitted.contains("幫我看這支片在講什麼"))
         }
 
@@ -713,18 +853,7 @@ class ChatterGeneratorTest {
             val recordedUrls = mutableListOf<String>()
             var capturedBody: String? = null
             val responseJson =
-                """
-                {
-                  "candidates": [
-                    {
-                      "content": {
-                        "role": "model",
-                        "parts": [{ "text": "這場直播兩小時多太長了 不過留言說重點在後半段" }]
-                      }
-                    }
-                  ]
-                }
-                """.trimIndent()
+                """{"id": "int-vid-cap", "status": "completed", "output_text": "這場直播兩小時多太長了 不過留言說重點在後半段"}"""
 
             val mockEngine =
                 MockEngine { request ->
@@ -755,15 +884,15 @@ class ChatterGeneratorTest {
 
             assertEquals("這場直播兩小時多太長了 不過留言說重點在後半段", reply)
             assertEquals(1, recordedUrls.size)
-            assertTrue(recordedUrls.single().contains(":generateContent"))
-            assertFalse(recordedUrls.single().contains("/interactions"))
-            val body = checkNotNull(capturedBody)
-            assertFalse(body.contains("\"file_data\""))
-            assertTrue(body.contains("3 Hour Conference"))
+            assertTrue(recordedUrls.single().contains("/v1beta/interactions"))
+            val obj = json.parseToJsonElement(checkNotNull(capturedBody)).jsonObject
+            assertEquals(false, obj["background"]?.jsonPrimitive?.content?.toBooleanStrictOrNull())
+            assertFalse(capturedBody.orEmpty().contains("\"type\":\"video\""))
+            assertTrue(capturedBody.orEmpty().contains("3 Hour Conference"))
         }
 
     @Test
-    fun `observable degraded fallback strips googleSearch then file_data sequentially on errors and emits warning logs`() =
+    fun `negative boundary performs zero layered retries and logs error when sync interaction fails with images and tools`() =
         runTest {
             val logger = LoggerFactory.getLogger(ChatterGenerator::class.java) as Logger
             val listAppender = ListAppender<ILoggingEvent>()
@@ -771,62 +900,27 @@ class ChatterGeneratorTest {
             logger.addAppender(listAppender)
 
             try {
-                val requestBodies = mutableListOf<String>()
                 var requestCount = 0
-
                 val mockEngine =
-                    MockEngine { request ->
+                    MockEngine {
                         requestCount++
-                        requestBodies.add(request.body.toByteArray().decodeToString())
-                        when (requestCount) {
-                            1 -> {
-                                respond(
-                                    content = """{"error":{"code":400,"message":"Search grounding unsupported"}}""",
-                                    status = HttpStatusCode.BadRequest,
-                                    headers = headersOf(HttpHeaders.ContentType, "application/json"),
-                                )
-                            }
-
-                            2 -> {
-                                respond(
-                                    content = """{"error":{"code":400,"message":"Failed to fetch CDN image"}}""",
-                                    status = HttpStatusCode.BadRequest,
-                                    headers = headersOf(HttpHeaders.ContentType, "application/json"),
-                                )
-                            }
-
-                            else -> {
-                                respond(
-                                    content =
-                                        """
-                                        {
-                                          "candidates": [
-                                            {
-                                              "content": {
-                                                "role": "model",
-                                                "parts": [{ "text": "雖然圖片讀不到 不過聽起來蠻有趣的" }]
-                                              }
-                                            }
-                                          ]
-                                        }
-                                        """.trimIndent(),
-                                    status = HttpStatusCode.OK,
-                                    headers = headersOf(HttpHeaders.ContentType, "application/json"),
-                                )
-                            }
-                        }
+                        respond(
+                            content = """{"error":{"code":400,"message":"Failed to fetch CDN image"}}""",
+                            status = HttpStatusCode.BadRequest,
+                            headers = headersOf(HttpHeaders.ContentType, "application/json"),
+                        )
                     }
 
                 val generator =
                     ChatterGenerator(
-                        config = ChatterConfig(apiKey = "valid-key", searchGroundingEnabled = true),
+                        config = ChatterConfig(apiKey = "valid-key", searchGroundingEnabled = true, urlContextEnabled = true),
                         httpClient = createTestClient(mockEngine),
                     )
 
                 val reply =
                     generator.generateReply(
                         ChatterInput(
-                            transcript = "[Alice]: 看看這張圖 [附帶圖片 1: expired.png]",
+                            transcript = "[Alice]: 看看這張圖 https://example.com/a",
                             imageAttachments =
                                 listOf(
                                     ChatImageAttachment(
@@ -835,24 +929,13 @@ class ChatterGeneratorTest {
                                         filename = "expired.png",
                                     ),
                                 ),
+                            webUrls = listOf("https://example.com/a"),
                         ),
                     )
 
-                assertEquals("雖然圖片讀不到 不過聽起來蠻有趣的", reply)
-                assertEquals(3, requestCount)
-                // 1st request: googleSearch + file_data
-                assertTrue(requestBodies[0].contains("googleSearch"))
-                assertTrue(requestBodies[0].contains("file_data"))
-                // 2nd request: no googleSearch, still has file_data
-                assertFalse(requestBodies[1].contains("googleSearch"))
-                assertTrue(requestBodies[1].contains("file_data"))
-                // 3rd request: text-only baseline (no googleSearch, no file_data)
-                assertFalse(requestBodies[2].contains("googleSearch"))
-                assertFalse(requestBodies[2].contains("file_data"))
-
-                val warnMessages = listAppender.list.filter { it.level == Level.WARN }.map { it.formattedMessage }
-                assertTrue(warnMessages.any { it.contains("googleSearch", ignoreCase = true) })
-                assertTrue(warnMessages.any { it.contains("file_data", ignoreCase = true) || it.contains("text-only", ignoreCase = true) })
+                assertNull(reply)
+                assertEquals(1, requestCount, "ChatterGenerator must NOT perform layered no-search or no-media retries")
+                assertTrue(listAppender.list.any { it.level == Level.ERROR })
             } finally {
                 logger.detachAppender(listAppender)
                 listAppender.stop()
@@ -860,7 +943,7 @@ class ChatterGeneratorTest {
         }
 
     @Test
-    fun `observable degraded fallback degrades agentic polling failure to generateContent baseline without videoUri while preserving images`() =
+    fun `negative boundary performs zero retries and logs error when direct-mention agentic polling fails`() =
         runTest {
             val logger = LoggerFactory.getLogger(ChatterGenerator::class.java) as Logger
             val listAppender = ListAppender<ILoggingEvent>()
@@ -869,38 +952,14 @@ class ChatterGeneratorTest {
 
             try {
                 val recordedUrls = mutableListOf<String>()
-                var generateContentBody: String? = null
-
                 val mockEngine =
                     MockEngine { request ->
-                        val url = request.url.toString()
-                        recordedUrls.add(url)
-                        if (url.contains("/v1beta/interactions")) {
-                            respond(
-                                content = """{"error":{"code":429,"message":"Rate limit on interactions"}}""",
-                                status = HttpStatusCode.TooManyRequests,
-                                headers = headersOf(HttpHeaders.ContentType, "application/json"),
-                            )
-                        } else {
-                            generateContentBody = request.body.toByteArray().decodeToString()
-                            respond(
-                                content =
-                                    """
-                                    {
-                                      "candidates": [
-                                        {
-                                          "content": {
-                                            "role": "model",
-                                            "parts": [{ "text": "影片暫時打不開 不過截圖看起來是依賴版本衝突" }]
-                                          }
-                                        }
-                                      ]
-                                    }
-                                    """.trimIndent(),
-                                status = HttpStatusCode.OK,
-                                headers = headersOf(HttpHeaders.ContentType, "application/json"),
-                            )
-                        }
+                        recordedUrls.add(request.url.toString())
+                        respond(
+                            content = """{"error":{"code":429,"message":"Rate limit on interactions"}}""",
+                            status = HttpStatusCode.TooManyRequests,
+                            headers = headersOf(HttpHeaders.ContentType, "application/json"),
+                        )
                     }
 
                 val generator =
@@ -914,32 +973,134 @@ class ChatterGeneratorTest {
                 val reply =
                     generator.generateReply(
                         ChatterInput(
-                            transcript = "[Alice]: 影片跟截圖都在這 [附帶圖片 1: dep.png]",
-                            imageAttachments =
-                                listOf(
-                                    ChatImageAttachment(
-                                        url = "https://cdn.discordapp.com/attachments/1/2/dep.png",
-                                        mimeType = "image/png",
-                                        filename = "dep.png",
-                                    ),
-                                ),
+                            transcript = "[Alice]: 影片跟截圖都在這",
                             videoUri = "https://www.youtube.com/watch?v=longVid",
                             videoDurationSeconds = 900L,
                             isDirectMention = true,
                         ),
                     )
 
-                assertEquals("影片暫時打不開 不過截圖看起來是依賴版本衝突", reply)
-                assertEquals(2, recordedUrls.size)
-                assertTrue(recordedUrls[0].contains("/v1beta/interactions"))
-                assertTrue(recordedUrls[1].contains(":generateContent"))
+                assertNull(reply)
+                assertEquals(1, recordedUrls.size, "Agentic interaction failure must fail cleanly with zero fallback retries")
+                assertTrue(listAppender.list.any { it.level == Level.ERROR })
+            } finally {
+                logger.detachAppender(listAppender)
+                listAppender.stop()
+            }
+        }
 
-                val fallbackBody = checkNotNull(generateContentBody)
-                assertFalse(fallbackBody.contains("https://www.youtube.com/watch?v=longVid"))
-                assertTrue(fallbackBody.contains("\"file_uri\":\"https://cdn.discordapp.com/attachments/1/2/dep.png\""))
+    @Test
+    fun `logs error on unsafe url_context_result while preserving valid sanitized model reply`() =
+        runTest {
+            val logger = LoggerFactory.getLogger(luna.core.ai.GeminiInteractionClient::class.java) as Logger
+            val listAppender = ListAppender<ILoggingEvent>()
+            listAppender.start()
+            logger.addAppender(listAppender)
 
-                val warnMessages = listAppender.list.filter { it.level == Level.WARN }.map { it.formattedMessage }
-                assertTrue(warnMessages.any { it.contains("agentic", ignoreCase = true) })
+            try {
+                val responseJson =
+                    """
+                    {
+                      "id": "int-unsafe-1",
+                      "status": "completed",
+                      "steps": [
+                        {
+                          "type": "url_context_result",
+                          "result": [
+                            {"retrieved_url": "https://unsafe.example.com/bad", "status": "unsafe"}
+                          ]
+                        },
+                        {
+                          "type": "model_output",
+                          "content": [
+                            {"type": "text", "text": "這個網址好像打不開 不過剛剛看話題蠻有趣的 😂"}
+                          ]
+                        }
+                      ]
+                    }
+                    """.trimIndent()
+
+                val mockEngine =
+                    MockEngine {
+                        respond(
+                            content = responseJson,
+                            status = HttpStatusCode.OK,
+                            headers = headersOf(HttpHeaders.ContentType, "application/json"),
+                        )
+                    }
+
+                val generator =
+                    ChatterGenerator(
+                        config = ChatterConfig(apiKey = "valid-key", urlContextEnabled = true),
+                        httpClient = createTestClient(mockEngine),
+                    )
+
+                val reply =
+                    generator.generateReply(
+                        ChatterInput(
+                            transcript = "[Alice]: 看看 https://unsafe.example.com/bad",
+                            webUrls = listOf("https://unsafe.example.com/bad"),
+                        ),
+                    )
+
+                assertEquals("這個網址好像打不開 不過剛剛看話題蠻有趣的", reply)
+                assertTrue(
+                    listAppender.list.any {
+                        it.level == Level.ERROR &&
+                            it.formattedMessage.contains("https://unsafe.example.com/bad") &&
+                            it.formattedMessage.contains("unsafe")
+                    },
+                )
+            } finally {
+                logger.detachAppender(listAppender)
+                listAppender.stop()
+            }
+        }
+
+    @Test
+    fun `enforces 2000-char Discord bound and handles sanitized-to-blank responses cleanly`() =
+        runTest {
+            val longText = "a".repeat(2500)
+            val longGen =
+                ChatterGenerator(
+                    config = ChatterConfig(apiKey = "valid-key"),
+                    httpClient =
+                        createTestClient(
+                            MockEngine {
+                                respond(
+                                    content = """{"id":"int-long","status":"completed","output_text":"$longText"}""",
+                                    status = HttpStatusCode.OK,
+                                    headers = headersOf(HttpHeaders.ContentType, "application/json"),
+                                )
+                            },
+                        ),
+                )
+
+            val boundedReply = assertNotNull(longGen.generateReply("[Alice]: tell me everything"))
+            assertEquals(2000, boundedReply.length)
+            assertTrue(boundedReply.endsWith("..."))
+
+            val logger = LoggerFactory.getLogger(ChatterGenerator::class.java) as Logger
+            val listAppender = ListAppender<ILoggingEvent>()
+            listAppender.start()
+            logger.addAppender(listAppender)
+            try {
+                val blankGen =
+                    ChatterGenerator(
+                        config = ChatterConfig(apiKey = "valid-key"),
+                        httpClient =
+                            createTestClient(
+                                MockEngine {
+                                    respond(
+                                        content = """{"id":"int-boilerplate","status":"completed","output_text":"身為一個AI語言模型，"}""",
+                                        status = HttpStatusCode.OK,
+                                        headers = headersOf(HttpHeaders.ContentType, "application/json"),
+                                    )
+                                },
+                            ),
+                    )
+                assertNull(blankGen.generateReply("[Alice]: hi"))
+                assertTrue(listAppender.list.any { it.level == Level.ERROR })
             } finally {
                 logger.detachAppender(listAppender)
                 listAppender.stop()

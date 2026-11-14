@@ -74,4 +74,20 @@ class GeminiConfigTest {
         assertEquals("gemini-2.0-flash", fromEnvConfig.cleanModel)
         assertEquals("https://custom.endpoint.com", fromEnvConfig.cleanBaseUrl)
     }
+
+    @Test
+    fun `urlContextEnabled defaults to true and parses GEMINI_URL_CONTEXT_ENABLED with invalid fallback`() {
+        assertTrue(GeminiConfig.DEFAULT_URL_CONTEXT_ENABLED)
+        assertTrue(GeminiConfig(apiKey = "key").urlContextEnabled)
+        assertTrue(GeminiConfig.fromEnv(emptyMap()).urlContextEnabled)
+
+        assertFalse(GeminiConfig.fromEnv(mapOf("GEMINI_URL_CONTEXT_ENABLED" to "false")).urlContextEnabled)
+        assertFalse(GeminiConfig.fromEnv(mapOf("GEMINI_URL_CONTEXT_ENABLED" to " false ")).urlContextEnabled)
+        assertTrue(GeminiConfig.fromEnv(mapOf("GEMINI_URL_CONTEXT_ENABLED" to "true")).urlContextEnabled)
+
+        // Negative boundary: invalid or blank values fall back to default true
+        assertTrue(GeminiConfig.fromEnv(mapOf("GEMINI_URL_CONTEXT_ENABLED" to "")).urlContextEnabled)
+        assertTrue(GeminiConfig.fromEnv(mapOf("GEMINI_URL_CONTEXT_ENABLED" to "   ")).urlContextEnabled)
+        assertTrue(GeminiConfig.fromEnv(mapOf("GEMINI_URL_CONTEXT_ENABLED" to "invalid")).urlContextEnabled)
+    }
 }

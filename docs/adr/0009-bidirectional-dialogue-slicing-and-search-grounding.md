@@ -1,5 +1,7 @@
 # Bidirectional Dialogue Slicing, Cross-Temporal Reply Chaining, and Autonomous Search Grounding
 
+Status: partially superseded by [ADR 0012](0012-interactions-api-url-context-and-no-fallback.md) (`:generateContent` `googleSearch` schema, `groundingChunks` extraction, and Section 5 baseline fallback retries are replaced by `/v1beta/interactions`, `url_citation` filtering, and strict no-fallback execution)
+
 ## Context
 
 Prior to this decision, the `Summary Pipeline` in Luna possessed two architectural limitations when summarizing Discord chat rooms:

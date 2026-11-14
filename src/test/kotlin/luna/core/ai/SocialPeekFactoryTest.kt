@@ -5,7 +5,6 @@ import dev.socialpeek.model.Platform
 import dev.socialpeek.network.SocialPeekHttpClient
 import dev.socialpeek.resolver.bilibili.BilibiliResolver
 import dev.socialpeek.resolver.facebook.FacebookResolver
-import dev.socialpeek.resolver.generic.GenericWebResolver
 import dev.socialpeek.resolver.instagram.InstagramResolver
 import dev.socialpeek.resolver.reddit.RedditResolver
 import dev.socialpeek.resolver.threads.ThreadsResolver
@@ -14,25 +13,41 @@ import dev.socialpeek.resolver.youtube.YouTubeResolver
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNotSame
 import kotlin.test.assertNull
-import kotlin.test.assertSame
 import kotlin.test.assertTrue
 
 class SocialPeekFactoryTest {
     @Test
-    fun `buildClient returns default SocialPeek client when youtubeApiKey is null or blank`() {
+    fun `buildClient excludes GenericWebResolver and SocialPeek defaultClient when youtubeApiKey is null or blank`() {
         val nullKeyClient = SocialPeekFactory.buildClient(null)
         val blankKeyClient = SocialPeekFactory.buildClient("   ")
 
-        assertSame(SocialPeek.defaultClient, nullKeyClient)
-        assertSame(SocialPeek.defaultClient, blankKeyClient)
+        assertNotSame(SocialPeek.defaultClient, nullKeyClient)
+        assertNotSame(SocialPeek.defaultClient, blankKeyClient)
+
+        val expectedResolvers =
+            listOf(
+                FacebookResolver::class,
+                BilibiliResolver::class,
+                XResolver::class,
+                InstagramResolver::class,
+                ThreadsResolver::class,
+                YouTubeResolver::class,
+                RedditResolver::class,
+            )
+        assertEquals(expectedResolvers, nullKeyClient.resolvers.map { it::class })
+        assertEquals(expectedResolvers, blankKeyClient.resolvers.map { it::class })
+
         assertTrue(nullKeyClient.canResolveSocial("https://www.youtube.com/watch?v=dQw4w9WgXcQ"))
-        assertTrue(nullKeyClient.canResolve("https://example.com/article"))
+        assertTrue(nullKeyClient.canResolveSocial("https://x.com/Kotlin/status/1800000000000000000"))
+        assertFalse(nullKeyClient.canResolve("https://example.com/article"))
+        assertFalse(blankKeyClient.canResolve("https://github.com/0oWoodenDooro0/Luna"))
     }
 
     @Test
-    fun `buildClient wires all social resolvers, GenericWebResolver, and configured YOUTUBE_API_KEY`() =
+    fun `buildClient wires social resolvers and configured YOUTUBE_API_KEY without GenericWebResolver`() =
         runTest {
             val client = SocialPeekFactory.buildClient("yt-secret-key")
             assertNotSame(SocialPeek.defaultClient, client)
@@ -46,10 +61,10 @@ class SocialPeekFactoryTest {
                     ThreadsResolver::class,
                     YouTubeResolver::class,
                     RedditResolver::class,
-                    GenericWebResolver::class,
                 ),
                 client.resolvers.map { it::class },
             )
+            assertFalse(client.canResolve("https://example.com/article"))
 
             val youtubeResolver = client.resolvers.filterIsInstance<YouTubeResolver>().single()
             val requestedUrls = mutableListOf<String>()
@@ -91,12 +106,14 @@ class SocialPeekFactoryTest {
         }
 
     @Test
-    fun `buildPeekResolver returns fail-open resolver lambda for both null and configured youtubeApiKey`() =
+    fun `buildPeekResolver returns null for general web URLs and malformed inputs`() =
         runTest {
             val defaultResolver = SocialPeekFactory.buildPeekResolver(null)
             val keyedResolver = SocialPeekFactory.buildPeekResolver("yt-key")
 
             assertNull(defaultResolver("not-a-url"))
             assertNull(keyedResolver("not-a-url"))
+            assertNull(defaultResolver("https://example.com/article"))
+            assertNull(keyedResolver("https://github.com/0oWoodenDooro0/Luna"))
         }
 }

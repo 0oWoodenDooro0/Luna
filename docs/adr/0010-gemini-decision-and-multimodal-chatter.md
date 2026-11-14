@@ -1,6 +1,6 @@
 # Gemini Decision 1 Participation Evaluation and Multimodal Chatter Pipeline
 
-Status: accepted
+Status: partially superseded by [ADR 0012](0012-interactions-api-url-context-and-no-fallback.md) (`ChatterGenerator` `:generateContent`, `GenericWebResolver` `primaryUrl` scraping, `file_data`, and sequential `ChatterGenerator` fallbacks are replaced by `/v1beta/interactions`, `url_context`, and strict no-fallback execution; `GeminiDecisionClient` on `/v1beta/decisions` remains active)
 
 ## Context
 

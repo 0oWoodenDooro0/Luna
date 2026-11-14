@@ -43,6 +43,7 @@ import luna.core.ai.AiTracePipeline
 import luna.core.ai.AiTraceRecord
 import luna.core.ai.AiTraceTrigger
 import luna.core.ai.ChatImageAttachment
+import luna.core.ai.GroundingCitation
 import luna.core.ai.JsonlAiTraceRecorder
 import luna.plugin.DefaultPluginContext
 import org.junit.jupiter.api.Test
@@ -327,59 +328,24 @@ class ChatterAiTraceTest {
     }
 
     @Test
-    fun `standalone ChatterGenerator records sequential googleSearch and file_data fallbacks as DEGRADED_SUCCESS`(
+    fun `standalone ChatterGenerator records single CHATTER_GENERATE FAILED attempt without retries on interaction error`(
         @TempDir tempDir: Path,
     ) = runTest {
         var callCount = 0
         val mockEngine =
             MockEngine {
                 callCount++
-                when (callCount) {
-                    1 -> {
-                        respond(
-                            content = """{"error":{"code":400,"message":"googleSearch tool not supported"}}""",
-                            status = HttpStatusCode.BadRequest,
-                            headers = headersOf(HttpHeaders.ContentType, "application/json"),
-                        )
-                    }
-
-                    2 -> {
-                        respond(
-                            content = """{"error":{"code":400,"message":"Cannot fetch image URI"}}""",
-                            status = HttpStatusCode.BadRequest,
-                            headers = headersOf(HttpHeaders.ContentType, "application/json"),
-                        )
-                    }
-
-                    else -> {
-                        respond(
-                            content =
-                                """
-                                {
-                                  "candidates": [
-                                    {
-                                      "content": {"parts": [{"text": "這張圖看起來挺酷的"}]},
-                                      "finishReason": "STOP"
-                                    }
-                                  ],
-                                  "usageMetadata": {
-                                    "promptTokenCount": 50,
-                                    "candidatesTokenCount": 12,
-                                    "totalTokenCount": 62
-                                  }
-                                }
-                                """.trimIndent(),
-                            status = HttpStatusCode.OK,
-                            headers = headersOf(HttpHeaders.ContentType, "application/json"),
-                        )
-                    }
-                }
+                respond(
+                    content = """{"error":{"code":400,"message":"Cannot fetch image URI"}}""",
+                    status = HttpStatusCode.BadRequest,
+                    headers = headersOf(HttpHeaders.ContentType, "application/json"),
+                )
             }
 
         val recorder = JsonlAiTraceRecorder(traceDir = tempDir, clock = fixedClock)
         val generator =
             ChatterGenerator(
-                config = ChatterConfig(apiKey = "secret-chatter-key", searchGroundingEnabled = true),
+                config = ChatterConfig(apiKey = "secret-chatter-key", searchGroundingEnabled = true, urlContextEnabled = true),
                 httpClient = createHttpClient(mockEngine),
                 traceRecorder = recorder,
             )
@@ -387,7 +353,7 @@ class ChatterAiTraceTest {
         val reply =
             generator.generateReply(
                 ChatterInput(
-                    transcript = "[Alice]: 看看這張圖",
+                    transcript = "[Alice]: 看看這張圖 https://example.com/guide",
                     imageAttachments =
                         listOf(
                             ChatImageAttachment(
@@ -395,58 +361,125 @@ class ChatterAiTraceTest {
                                 mimeType = "image/png",
                             ),
                         ),
+                    webUrls = listOf("https://example.com/guide"),
                     isDirectMention = true,
                 ),
             )
         recorder.flushAndClose()
 
-        assertEquals("這張圖看起來挺酷的", reply)
+        assertNull(reply)
+        assertEquals(1, callCount)
         val traces = readTraceLines(tempDir)
         assertEquals(1, traces.size)
         val trace = traces.single()
         assertEquals(AiTracePipeline.CHATTER, trace.pipeline)
         assertEquals(AiTraceTrigger.MENTION, trace.trigger)
-        assertEquals(AiTraceOutcome.DEGRADED_SUCCESS, trace.outcome)
-        assertTrue(trace.degraded)
-        assertEquals(3, trace.attemptCount)
+        assertEquals(AiTraceOutcome.FAILED, trace.outcome)
+        assertFalse(trace.degraded)
+        assertEquals(AiTraceFailureCategory.HTTP_ERROR, trace.failureCategory)
+        assertEquals(1, trace.attemptCount)
+        assertEquals(listOf("CHATTER_GENERATE"), trace.fallbackPath)
+
+        val attempt = trace.attempts.single()
+        assertEquals(400, attempt.httpStatus)
+        assertEquals(AiAttemptOutcome.ERROR, attempt.parsedOutcome)
         assertEquals(
-            listOf("CHATTER_GENERATE", "CHATTER_GENERATE:no-search", "CHATTER_GENERATE:no-media"),
-            trace.fallbackPath,
+            "https://generativelanguage.googleapis.com/v1beta/interactions?key=******",
+            attempt.endpoint,
         )
-        assertEquals("這張圖看起來挺酷的", trace.finalOutput)
+        assertTrue(attempt.request?.hasImages == true)
+        assertEquals(1, attempt.request?.webUrlCount)
+        assertEquals(listOf("url_context", "google_search"), attempt.request?.enabledTools)
+    }
 
-        val attempt1 = trace.attempts[0]
-        assertEquals(400, attempt1.httpStatus)
-        assertEquals(AiAttemptOutcome.ERROR, attempt1.parsedOutcome)
+    @Test
+    fun `standalone ChatterGenerator records webUrlCount enabledTools urlContextResults googleSearchQueries and filtered citations in AI Trace`(
+        @TempDir tempDir: Path,
+    ) = runTest {
+        val mockEngine =
+            MockEngine {
+                respond(
+                    content =
+                        """
+                        {
+                          "id": "int-chatter-trace-1",
+                          "status": "completed",
+                          "usage": {
+                            "input_tokens": 120,
+                            "output_tokens": 25,
+                            "total_tokens": 145
+                          },
+                          "steps": [
+                            {
+                              "type": "url_context_result",
+                              "call_id": "uc-1",
+                              "result": [
+                                {"retrieved_url": "https://kotlinlang.org/docs/coroutines.html", "status": "success"},
+                                {"retrieved_url": "https://unsafe.example.com/bad", "status": "unsafe"}
+                              ]
+                            },
+                            {
+                              "type": "google_search_call",
+                              "id": "gs-1",
+                              "arguments": {"queries": ["kotlin coroutines structured concurrency"]}
+                            },
+                            {
+                              "type": "model_output",
+                              "content": [
+                                {
+                                  "type": "text",
+                                  "text": "結構化並發用起來超乾淨",
+                                  "annotations": [
+                                    {"type": "url_citation", "url": "https://kotlinlang.org/docs/coroutines.html", "title": "Kotlin Docs"},
+                                    {"type": "url_citation", "url": "https://docs.oracle.com/concurrency", "title": "Concurrency Reference"}
+                                  ]
+                                }
+                              ]
+                            }
+                          ]
+                        }
+                        """.trimIndent(),
+                    status = HttpStatusCode.OK,
+                    headers = headersOf(HttpHeaders.ContentType, "application/json"),
+                )
+            }
+
+        val recorder = JsonlAiTraceRecorder(traceDir = tempDir, clock = fixedClock)
+        val generator =
+            ChatterGenerator(
+                config = ChatterConfig(apiKey = "secret-chatter-key", searchGroundingEnabled = true, urlContextEnabled = true),
+                httpClient = createHttpClient(mockEngine),
+                traceRecorder = recorder,
+            )
+
+        val reply =
+            generator.generateReply(
+                ChatterInput(
+                    transcript = "[Alice]: 看這篇 https://kotlinlang.org/docs/coroutines.html 跟 https://unsafe.example.com/bad",
+                    webUrls = listOf("https://kotlinlang.org/docs/coroutines.html", "https://unsafe.example.com/bad"),
+                    isDirectMention = true,
+                ),
+            )
+        recorder.flushAndClose()
+
+        assertEquals("結構化並發用起來超乾淨", reply)
+        val trace = readTraceLines(tempDir).single()
+        assertEquals(AiTraceOutcome.SUCCESS, trace.outcome)
+        assertTrue(trace.citations.isEmpty(), "Chatter must not append citations to Discord output")
+
+        val attempt = trace.attempts.single()
+        assertEquals(2, attempt.request?.webUrlCount)
+        assertEquals(listOf("url_context", "google_search"), attempt.request?.enabledTools)
+        assertEquals(2, attempt.urlContextResults.size)
+        assertEquals("success", attempt.urlContextResults[0].status)
+        assertEquals("unsafe", attempt.urlContextResults[1].status)
+        assertEquals(listOf("kotlin coroutines structured concurrency"), attempt.googleSearchQueries)
+        assertEquals(2, attempt.rawCitations.size)
         assertEquals(
-            "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent",
-            attempt1.endpoint,
+            listOf(GroundingCitation(title = "Concurrency Reference", url = "https://docs.oracle.com/concurrency")),
+            attempt.filteredCitations,
         )
-        assertTrue(attempt1.request?.hasImages == true)
-        assertNotNull(
-            attempt1.request
-                ?.payload
-                ?.jsonObject
-                ?.get("tools"),
-        )
-
-        val attempt2 = trace.attempts[1]
-        assertEquals(400, attempt2.httpStatus)
-        assertEquals(AiAttemptOutcome.ERROR, attempt2.parsedOutcome)
-        assertTrue(attempt2.request?.hasImages == true)
-        assertFalse(
-            attempt2.request
-                ?.payload
-                ?.jsonObject
-                ?.containsKey("tools") == true,
-        )
-
-        val attempt3 = trace.attempts[2]
-        assertEquals(200, attempt3.httpStatus)
-        assertEquals(AiAttemptOutcome.SUCCESS, attempt3.parsedOutcome)
-        assertEquals("STOP", attempt3.finishReason)
-        assertEquals(62, attempt3.usageMetadata?.totalTokenCount)
-        assertFalse(attempt3.request?.hasImages ?: true)
+        assertEquals(145, attempt.usageMetadata?.totalTokenCount)
     }
 
     @Test
@@ -539,17 +572,20 @@ class ChatterAiTraceTest {
                         content =
                             """
                             {
-                              "candidates": [
+                              "id": "int-mention-1",
+                              "status": "completed",
+                              "finish_reason": "STOP",
+                              "usage": {
+                                "input_tokens": 80,
+                                "output_tokens": 14,
+                                "total_tokens": 94
+                              },
+                              "steps": [
                                 {
-                                  "content": {"parts": [{"text": "Kotlin 協程寫起來超順手 😄"}]},
-                                  "finishReason": "STOP"
+                                  "type": "model_output",
+                                  "content": [{"type": "text", "text": "Kotlin 協程寫起來超順手 😄"}]
                                 }
-                              ],
-                              "usageMetadata": {
-                                "promptTokenCount": 80,
-                                "candidatesTokenCount": 14,
-                                "totalTokenCount": 94
-                              }
+                              ]
                             }
                             """.trimIndent(),
                         status = HttpStatusCode.OK,
@@ -628,6 +664,10 @@ class ChatterAiTraceTest {
             assertEquals(200, genAttempt.httpStatus)
             assertEquals("STOP", genAttempt.finishReason)
             assertEquals(94, genAttempt.usageMetadata?.totalTokenCount)
+            assertEquals(
+                "https://generativelanguage.googleapis.com/v1beta/interactions?key=******",
+                genAttempt.endpoint,
+            )
             assertFalse(genAttempt.endpoint?.contains("secret-gemini-key") == true)
 
             val correlationEvent =
@@ -754,11 +794,10 @@ class ChatterAiTraceTest {
     }
 
     @Test
-    fun `ChatterService ambient multimodal decision retry and ChatterGenerator fallbacks preserve degraded true and fallbackPath`(
+    fun `ChatterService ambient multimodal decision retry and Interactions CHATTER_GENERATE preserve degraded true and fallbackPath`(
         @TempDir tempDir: Path,
     ) = runTest {
         var decisionCall = 0
-        var generateCall = 0
         val mockEngine =
             MockEngine { request ->
                 if (request.url.encodedPath.endsWith("/decisions")) {
@@ -777,32 +816,11 @@ class ChatterAiTraceTest {
                         )
                     }
                 } else {
-                    generateCall++
-                    when (generateCall) {
-                        1 -> {
-                            respond(
-                                content = """{"error":{"code":400,"message":"googleSearch disabled"}}""",
-                                status = HttpStatusCode.BadRequest,
-                                headers = headersOf(HttpHeaders.ContentType, "application/json"),
-                            )
-                        }
-
-                        2 -> {
-                            respond(
-                                content = """{"error":{"code":400,"message":"image fetch failed"}}""",
-                                status = HttpStatusCode.BadRequest,
-                                headers = headersOf(HttpHeaders.ContentType, "application/json"),
-                            )
-                        }
-
-                        else -> {
-                            respond(
-                                content = """{"candidates":[{"content":{"parts":[{"text":"這題看起來不難"}]},"finishReason":"STOP"}]}""",
-                                status = HttpStatusCode.OK,
-                                headers = headersOf(HttpHeaders.ContentType, "application/json"),
-                            )
-                        }
-                    }
+                    respond(
+                        content = """{"id":"int-amb-1","status":"completed","finish_reason":"STOP","output_text":"這題看起來不難"}""",
+                        status = HttpStatusCode.OK,
+                        headers = headersOf(HttpHeaders.ContentType, "application/json"),
+                    )
                 }
             }
 
@@ -846,19 +864,17 @@ class ChatterAiTraceTest {
         assertEquals(AiTraceTrigger.AMBIENT, trace.trigger)
         assertEquals(AiTraceOutcome.DEGRADED_SUCCESS, trace.outcome)
         assertTrue(trace.degraded)
-        assertEquals(5, trace.attemptCount)
+        assertEquals(3, trace.attemptCount)
         assertEquals(
             listOf(
                 "DECISION:multimodal",
                 "DECISION:text-only",
                 "CHATTER_GENERATE",
-                "CHATTER_GENERATE:no-search",
-                "CHATTER_GENERATE:no-media",
             ),
             trace.fallbackPath,
         )
         assertEquals("這題看起來不難", trace.finalOutput)
-        assertEquals(listOf(1, 2, 3, 4, 5), trace.attempts.map { it.attemptIndex })
+        assertEquals(listOf(1, 2, 3), trace.attempts.map { it.attemptIndex })
     }
 
     @Test
@@ -925,7 +941,7 @@ class ChatterAiTraceTest {
             val engine =
                 MockEngine {
                     respond(
-                        content = """{"promptFeedback":{"blockReason":"SAFETY"}}""",
+                        content = """{"id":"int-safety","status":"completed","finish_reason":"SAFETY","steps":[]}""",
                         status = HttpStatusCode.OK,
                         headers = headersOf(HttpHeaders.ContentType, "application/json"),
                     )
@@ -944,7 +960,7 @@ class ChatterAiTraceTest {
             val engine =
                 MockEngine {
                     respond(
-                        content = """{"candidates":[]}""",
+                        content = """{"id":"int-empty","status":"completed","steps":[]}""",
                         status = HttpStatusCode.OK,
                         headers = headersOf(HttpHeaders.ContentType, "application/json"),
                     )
@@ -972,7 +988,7 @@ class ChatterAiTraceTest {
             traces.map { it.failureCategory },
         )
         assertTrue(traces.all { it.outcome == AiTraceOutcome.FAILED })
-        assertEquals("SAFETY", traces[3].attempts.single().blockReason)
+        assertEquals("SAFETY", traces[3].attempts.single().finishReason)
     }
 
     @Test
@@ -983,7 +999,7 @@ class ChatterAiTraceTest {
         val engine =
             MockEngine {
                 respond(
-                    content = """{"candidates":[{"content":{"parts":[]},"finishReason":"RECITATION"}]}""",
+                    content = """{"id":"int-recite","status":"completed","finish_reason":"RECITATION","steps":[]}""",
                     status = HttpStatusCode.OK,
                     headers = headersOf(HttpHeaders.ContentType, "application/json"),
                 )
@@ -1079,7 +1095,7 @@ class ChatterAiTraceTest {
             val genEngine =
                 MockEngine {
                     respond(
-                        content = """{"candidates":[{"content":{"parts":[{"text":"Reply text"}]},"finishReason":"STOP"}]}""",
+                        content = """{"id":"int-deliv","status":"completed","finish_reason":"STOP","output_text":"Reply text"}""",
                         status = HttpStatusCode.OK,
                         headers = headersOf(HttpHeaders.ContentType, "application/json"),
                     )
@@ -1363,23 +1379,12 @@ class ChatterAiTraceTest {
     }
 
     @Test
-    fun `ChatterService direct-mention agentic timeout degrades to generateContent without videoUri and records DEGRADED_SUCCESS`(
+    fun `ChatterService direct-mention agentic timeout fails without retry and records FAILED AGENTIC_VIDEO trace`(
         @TempDir tempDir: Path,
     ) = runTest {
         val apiKey = "secret-chatter-degrade-key"
         var pollCount = 0
         val pendingJson = """{"id": "chat-int-to", "status": "in_progress"}"""
-        val fallbackJson =
-            """
-            {
-              "candidates": [
-                {
-                  "content": {"parts": [{"text": "影片目前無法直接解析 不過留言大家都推 12 分鐘那段"}]},
-                  "finishReason": "STOP"
-                }
-              ]
-            }
-            """.trimIndent()
 
         val mockEngine =
             MockEngine { request ->
@@ -1402,16 +1407,8 @@ class ChatterAiTraceTest {
                         )
                     }
 
-                    path.endsWith(":generateContent") -> {
-                        respond(
-                            content = fallbackJson,
-                            status = HttpStatusCode.OK,
-                            headers = headersOf(HttpHeaders.ContentType, "application/json"),
-                        )
-                    }
-
                     else -> {
-                        respond("Not found", status = HttpStatusCode.NotFound)
+                        error("Unexpected fallback HTTP call to $path")
                     }
                 }
             }
@@ -1473,50 +1470,32 @@ class ChatterAiTraceTest {
         val handled = service.processMessage(mentionMsg)
         recorder.flushAndClose()
 
-        assertTrue(handled)
+        assertFalse(handled)
         assertEquals(2, pollCount)
 
         val trace = readTraceLines(tempDir).single()
         assertEquals(AiTracePipeline.CHATTER, trace.pipeline)
         assertEquals(AiTraceTrigger.MENTION, trace.trigger)
-        assertEquals(AiTraceOutcome.DEGRADED_SUCCESS, trace.outcome)
-        assertTrue(trace.degraded)
-        assertEquals(2, trace.attemptCount)
-        assertEquals(listOf("AGENTIC_VIDEO", "CHATTER_GENERATE"), trace.fallbackPath)
-        assertEquals("影片目前無法直接解析 不過留言大家都推 12 分鐘那段", trace.finalOutput)
+        assertEquals(AiTraceOutcome.FAILED, trace.outcome)
+        assertFalse(trace.degraded)
+        assertEquals(AiTraceFailureCategory.TIMEOUT, trace.failureCategory)
+        assertEquals(1, trace.attemptCount)
+        assertEquals(listOf("AGENTIC_VIDEO"), trace.fallbackPath)
 
-        val agenticAttempt = trace.attempts[0]
+        val agenticAttempt = trace.attempts.single()
         assertEquals(1, agenticAttempt.attemptIndex)
         assertEquals(AiAttemptStage.AGENTIC_VIDEO, agenticAttempt.stage)
         assertEquals(2, agenticAttempt.pollingAttempts)
         assertEquals(AiAttemptOutcome.ERROR, agenticAttempt.parsedOutcome)
         assertEquals(900L, agenticAttempt.request?.videoDurationSeconds)
-
-        val generateAttempt = trace.attempts[1]
-        assertEquals(2, generateAttempt.attemptIndex)
-        assertEquals(AiAttemptStage.CHATTER_GENERATE, generateAttempt.stage)
-        assertEquals(200, generateAttempt.httpStatus)
-        assertEquals(AiAttemptOutcome.SUCCESS, generateAttempt.parsedOutcome)
-        assertFalse(generateAttempt.request?.hasVideo ?: true)
-        assertFalse(
-            generateAttempt.request
-                ?.payload
-                ?.toString()
-                ?.contains("longTimeout900") == true &&
-                generateAttempt.request
-                    ?.payload
-                    ?.toString()
-                    ?.contains("file_data") == true,
-        )
     }
 
     @Test
-    fun `standalone ChatterGenerator failed interaction degrades through search fallback and preserves ordered attempts`(
+    fun `standalone ChatterGenerator failed agentic interaction records single FAILED AGENTIC_VIDEO attempt without retry`(
         @TempDir tempDir: Path,
     ) = runTest {
         val apiKey = "secret-standalone-agentic-key"
         val failedInteractionJson = """{"id": "chat-fail-1", "status": "failed", "error": {"message": "Video unavailable"}}"""
-        var generateCall = 0
 
         val mockEngine =
             MockEngine { request ->
@@ -1539,20 +1518,7 @@ class ChatterAiTraceTest {
                     }
 
                     else -> {
-                        generateCall++
-                        if (generateCall == 1) {
-                            respond(
-                                content = """{"error":{"code":400,"message":"googleSearch unsupported"}}""",
-                                status = HttpStatusCode.BadRequest,
-                                headers = headersOf(HttpHeaders.ContentType, "application/json"),
-                            )
-                        } else {
-                            respond(
-                                content = """{"candidates":[{"content":{"parts":[{"text":"文字備援回覆成功"}]},"finishReason":"STOP"}]}""",
-                                status = HttpStatusCode.OK,
-                                headers = headersOf(HttpHeaders.ContentType, "application/json"),
-                            )
-                        }
+                        error("Unexpected fallback HTTP call to $path")
                     }
                 }
             }
@@ -1578,27 +1544,143 @@ class ChatterAiTraceTest {
             )
         recorder.flushAndClose()
 
-        assertEquals("文字備援回覆成功", reply)
+        assertNull(reply)
         val traces = readTraceLines(tempDir)
         assertEquals(1, traces.size)
         val trace = traces.single()
         assertEquals(AiTracePipeline.CHATTER, trace.pipeline)
         assertEquals(AiTraceTrigger.MENTION, trace.trigger)
-        assertEquals(AiTraceOutcome.DEGRADED_SUCCESS, trace.outcome)
-        assertTrue(trace.degraded)
-        assertEquals(3, trace.attemptCount)
-        assertEquals(
-            listOf("AGENTIC_VIDEO", "CHATTER_GENERATE", "CHATTER_GENERATE:no-search"),
-            trace.fallbackPath,
-        )
-        assertEquals(listOf(1, 2, 3), trace.attempts.map { it.attemptIndex })
+        assertEquals(AiTraceOutcome.FAILED, trace.outcome)
+        assertFalse(trace.degraded)
+        assertEquals(AiTraceFailureCategory.UNEXPECTED_ERROR, trace.failureCategory)
+        assertEquals(1, trace.attemptCount)
+        assertEquals(listOf("AGENTIC_VIDEO"), trace.fallbackPath)
         assertEquals(AiAttemptStage.AGENTIC_VIDEO, trace.attempts[0].stage)
         assertEquals(1, trace.attempts[0].pollingAttempts)
         assertEquals(failedInteractionJson, trace.attempts[0].responseRaw)
         assertEquals(950L, trace.attempts[0].request?.videoDurationSeconds)
-        assertEquals(AiAttemptStage.CHATTER_GENERATE, trace.attempts[1].stage)
-        assertEquals(AiAttemptOutcome.ERROR, trace.attempts[1].parsedOutcome)
-        assertEquals(AiAttemptStage.CHATTER_GENERATE, trace.attempts[2].stage)
-        assertEquals(AiAttemptOutcome.SUCCESS, trace.attempts[2].parsedOutcome)
+    }
+
+    @Test
+    fun `ChatterService end-to-end with general web URL skips SocialPeek, enables url_context, and records full AI Trace`(
+        @TempDir tempDir: Path,
+    ) = runTest {
+        val apiKey = "secret-e2e-web-key"
+        val webUrl = "https://kotlinlang.org/docs/coroutines-overview.html"
+        var peekCalled = false
+
+        val mockEngine =
+            MockEngine { request ->
+                when {
+                    request.url.encodedPath.endsWith("/decisions") -> {
+                        respond(
+                            content = """{"answers":{"should_participate":{"type":"noul","noul":0.95,"confidence":0.95}}}""",
+                            status = HttpStatusCode.OK,
+                            headers = headersOf(HttpHeaders.ContentType, "application/json"),
+                        )
+                    }
+
+                    request.url.encodedPath.endsWith("/interactions") -> {
+                        respond(
+                            content =
+                                """
+                                {
+                                  "id": "int-e2e-web",
+                                  "status": "completed",
+                                  "steps": [
+                                    {
+                                      "type": "url_context_result",
+                                      "result": [{"retrieved_url": "$webUrl", "status": "success"}]
+                                    },
+                                    {
+                                      "type": "google_search_call",
+                                      "arguments": {"queries": ["kotlinx coroutines 1.9"]}
+                                    },
+                                    {
+                                      "type": "model_output",
+                                      "content": [
+                                        {
+                                          "type": "text",
+                                          "text": "官方文件寫得很清楚 新手照著看很快就能上手",
+                                          "annotations": [
+                                            {"type": "url_citation", "url": "$webUrl", "title": "Coroutines Overview"},
+                                            {"type": "url_citation", "url": "https://github.com/Kotlin/kotlinx.coroutines", "title": "kotlinx.coroutines"}
+                                          ]
+                                        }
+                                      ]
+                                    }
+                                  ]
+                                }
+                                """.trimIndent(),
+                            status = HttpStatusCode.OK,
+                            headers = headersOf(HttpHeaders.ContentType, "application/json"),
+                        )
+                    }
+
+                    else -> {
+                        respond("Not found", status = HttpStatusCode.NotFound)
+                    }
+                }
+            }
+
+        val recorder = JsonlAiTraceRecorder(traceDir = tempDir, clock = fixedClock)
+        val httpClient = createHttpClient(mockEngine)
+        val filter = ChatterNoiseFilter()
+        val sentMessages = mutableListOf<String>()
+        val service =
+            ChatterService(
+                filter = filter,
+                decisionClient =
+                    GeminiDecisionClient(
+                        config = ChatterDecisionConfig(apiKey = apiKey),
+                        httpClient = httpClient,
+                        traceRecorder = recorder,
+                    ),
+                chatterGenerator =
+                    ChatterGenerator(
+                        config = ChatterConfig(apiKey = apiKey, searchGroundingEnabled = true, urlContextEnabled = true),
+                        httpClient = httpClient,
+                        traceRecorder = recorder,
+                    ),
+                historyFetcher = { _, _ -> emptyList() },
+                messageSender = { _, content ->
+                    sentMessages.add(content)
+                    mockk(relaxed = true)
+                },
+                contextCollector =
+                    ChatterContextCollector(
+                        noiseFilter = filter,
+                        peekResolver = {
+                            peekCalled = true
+                            null
+                        },
+                    ),
+                traceRecorder = recorder,
+            )
+
+        val msg = createMockMessage(id = 990L, channelId = 991L, content = "推薦看一下 $webUrl")
+        assertTrue(service.processMessage(msg))
+        recorder.flushAndClose()
+
+        assertFalse(peekCalled)
+        assertEquals(listOf("官方文件寫得很清楚 新手照著看很快就能上手"), sentMessages)
+
+        val trace = readTraceLines(tempDir).single()
+        assertEquals(AiTraceOutcome.SUCCESS, trace.outcome)
+        assertEquals(2, trace.attemptCount)
+        assertTrue(trace.citations.isEmpty())
+
+        val genAttempt = trace.attempts[1]
+        assertEquals(AiAttemptStage.CHATTER_GENERATE, genAttempt.stage)
+        assertEquals(1, genAttempt.request?.webUrlCount)
+        assertEquals(listOf("url_context", "google_search"), genAttempt.request?.enabledTools)
+        assertEquals(1, genAttempt.urlContextResults.size)
+        assertEquals(webUrl, genAttempt.urlContextResults.single().retrievedUrl)
+        assertEquals(listOf("kotlinx coroutines 1.9"), genAttempt.googleSearchQueries)
+        assertEquals(2, genAttempt.rawCitations.size)
+        assertEquals(
+            listOf(GroundingCitation("kotlinx.coroutines", "https://github.com/Kotlin/kotlinx.coroutines")),
+            genAttempt.filteredCitations,
+        )
     }
 }

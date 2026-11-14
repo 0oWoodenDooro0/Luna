@@ -1,11 +1,9 @@
 package luna.summarizer
 
-import luna.core.ai.GeminiContent
-import luna.core.ai.GeminiFileData
-import luna.core.ai.GeminiGenerateContentRequest
-import luna.core.ai.GeminiGenerationConfig
-import luna.core.ai.GeminiPart
-import luna.core.ai.GeminiTool
+import luna.core.ai.GeminiInteractionClient
+import luna.core.ai.GeminiInteractionGenerationConfig
+import luna.core.ai.GeminiInteractionRequest
+import luna.core.ai.GeminiInteractionTool
 import luna.core.ai.GroundingCitation
 import luna.core.ai.VideoProcessingMode
 
@@ -20,6 +18,7 @@ object GeminiPromptBuilder {
             "2. 嚴格禁用 Emoji：輸出中絕對不可包含任何 Emoji、表情符號或繪文字圖示。\n" +
             "3. 搜尋查證與嚴格來源隔離（Search Grounding & Strict Source Isolation）：\n" +
             "   • 若對話內容涉及不熟悉之專業術語、爭議事實、時事人物或專有名詞，可自主透過 Google 搜尋查核事實或定義。\n" +
+            "   • 若對話中附帶一般公開網頁連結，可透過 url_context 工具讀取完整網頁內容並彙整要點至「核心重點」，不可僅憑對話片段臆測網頁內容。\n" +
             "   • 嚴格落實來源隔離：【TL;DR】、【核心重點】與【參與者觀點】必須純粹忠實反映對話參與者實際討論內容與各自發言，絕對嚴禁將外部搜尋查證之資訊混入對話摘要之中。\n" +
             "   • 外部查核結果僅能獨立記載於「名詞與事實查核:」區塊；若討論內容單純或無須查證，請完全省略「名詞與事實查核」區塊。\n" +
             "4. 輸出結構：必須依照下列結構分段輸出，標題格式請保持一致：\n" +
@@ -66,6 +65,7 @@ object GeminiPromptBuilder {
             "   • 將圖片分析的關鍵發現與重要資訊，綜整提煉至「TL;DR」與「核心重點」之中，避免空泛描述。\n" +
             "4. 搜尋查證與嚴格來源隔離（Search Grounding & Strict Source Isolation）：\n" +
             "   • 若對話或圖片內容涉及不熟悉之專業術語、爭議事實、時事人物或專有名詞，可自主透過 Google 搜尋查核事實或定義。\n" +
+            "   • 若對話中附帶一般公開網頁連結，可透過 url_context 工具讀取完整網頁內容並彙整要點至「核心重點」，不可僅憑對話片段臆測網頁內容。\n" +
             "   • 嚴格落實來源隔離：【TL;DR】、【核心重點】與【參與者觀點】必須純粹忠實反映對話參與者實際討論內容與圖片視覺發現，絕對嚴禁將外部搜尋查證之資訊混入對話發言摘要之中。\n" +
             "   • 外部查核結果僅能獨立記載於「名詞與事實查核:」區塊；若討論內容單純或無須查證，請完全省略「名詞與事實查核」區塊。\n" +
             "5. 輸出結構：必須依照下列結構分段輸出，標題格式請保持一致：\n" +
@@ -197,55 +197,38 @@ object GeminiPromptBuilder {
                 )
             }
         }
+        if (input.webUrls.isNotEmpty()) {
+            sb.append(
+                "\n\n【網頁連結讀取指示】：對話中包含 ${input.webUrls.size} 個公開網頁連結，請善用 url_context 工具讀取完整網頁內容並將網頁要點彙整至「核心重點」，不可僅憑對話中的簡短片段臆測網頁內容。",
+            )
+        }
         return sb.toString().trim()
     }
 
     fun buildRequest(
         input: SummaryInput,
-        tools: List<GeminiTool>? = input.tools,
-    ): GeminiGenerateContentRequest {
-        val parts = mutableListOf<GeminiPart>()
-        if (!input.videoUri.isNullOrBlank()) {
-            parts.add(
-                GeminiPart(
-                    fileData =
-                        GeminiFileData(
-                            fileUri = input.videoUri,
-                        ),
-                ),
+        model: String = GeminiConfig.DEFAULT_MODEL,
+        tools: List<GeminiInteractionTool>? = input.tools,
+        background: Boolean = false,
+    ): GeminiInteractionRequest {
+        val inputs =
+            GeminiInteractionClient.buildMultimodalInputs(
+                promptText = buildUserPrompt(input),
+                imageAttachments = input.imageAttachments,
+                videoUri = input.videoUri?.trim()?.takeIf { it.isNotBlank() },
+                videoProcessingMode = resolveProcessingMode(input.videoDurationSeconds),
             )
-        }
-        for (attachment in input.imageAttachments) {
-            parts.add(
-                GeminiPart(
-                    fileData =
-                        GeminiFileData(
-                            fileUri = attachment.url,
-                            mimeType = attachment.mimeType,
-                        ),
-                ),
-            )
-        }
-        parts.add(GeminiPart(text = buildUserPrompt(input)))
 
-        return GeminiGenerateContentRequest(
-            systemInstruction =
-                GeminiContent(
-                    parts = listOf(GeminiPart(text = buildSystemInstruction(input))),
-                ),
-            contents =
-                listOf(
-                    GeminiContent(
-                        role = "user",
-                        parts = parts,
-                    ),
-                ),
+        return GeminiInteractionRequest(
+            model = model.trim().removePrefix("models/"),
+            systemInstruction = buildSystemInstruction(input),
+            input = inputs,
+            tools = tools?.takeIf { it.isNotEmpty() },
             generationConfig =
-                GeminiGenerationConfig(
-                    temperature = 0.2,
+                GeminiInteractionGenerationConfig(
                     maxOutputTokens = 1024,
                 ),
-            tools = tools,
+            background = background,
         )
     }
 }

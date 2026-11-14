@@ -150,6 +150,10 @@ class AiTraceSession internal constructor(
         pollingAttempts: Int? = null,
         parsedOutcome: AiAttemptOutcome,
         errorMessage: String? = null,
+        urlContextResults: List<UrlContextResultEntry> = emptyList(),
+        googleSearchQueries: List<String> = emptyList(),
+        rawCitations: List<GroundingCitation> = emptyList(),
+        filteredCitations: List<GroundingCitation> = emptyList(),
     ) {
         if (!isEnabled) return
         synchronized(lock) {
@@ -177,6 +181,10 @@ class AiTraceSession internal constructor(
                     pollingAttempts = pollingAttempts,
                     parsedOutcome = parsedOutcome,
                     errorMessage = errorMessage,
+                    urlContextResults = urlContextResults,
+                    googleSearchQueries = googleSearchQueries,
+                    rawCitations = rawCitations,
+                    filteredCitations = filteredCitations,
                 ),
             )
         }

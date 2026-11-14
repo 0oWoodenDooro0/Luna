@@ -2,11 +2,13 @@ package luna.chatter
 
 import dev.kord.common.entity.Snowflake
 import dev.kord.core.entity.Message
-import dev.socialpeek.SocialPeek
 import dev.socialpeek.model.PeekPost
 import dev.socialpeek.model.Platform
 import luna.core.ai.ChatImageAttachment
 import luna.core.ai.ChatImageAttachmentExtractor
+import luna.core.ai.ContextUrlCategory
+import luna.core.ai.ContextUrlClassifier
+import luna.core.ai.SocialPeekFactory
 import org.slf4j.LoggerFactory
 
 /**
@@ -30,6 +32,7 @@ data class PreparedChatterContext(
     val comments: List<String> = emptyList(),
     val videoUri: String? = null,
     val videoDurationSeconds: Long? = null,
+    val webUrls: List<String> = emptyList(),
 ) {
     fun toChatterInput(isDirectMention: Boolean = false): ChatterInput =
         ChatterInput(
@@ -41,6 +44,7 @@ data class PreparedChatterContext(
             title = title,
             url = url,
             comments = comments,
+            webUrls = webUrls,
         )
 }
 
@@ -61,7 +65,7 @@ open class ChatterContextCollector(
     val maxImages: Int = DEFAULT_MAX_IMAGES,
     val maxImageBytes: Int = ChatImageAttachmentExtractor.DEFAULT_MAX_IMAGE_BYTES,
     val maxExternalReferences: Int = DEFAULT_MAX_EXTERNAL_REFERENCES,
-    val peekResolver: suspend (String) -> PeekPost? = { SocialPeek.peekOrNull(it) },
+    val peekResolver: suspend (String) -> PeekPost? = SocialPeekFactory.buildPeekResolver(),
     val referenceFetcher: suspend (message: Message) -> Message? = { msg ->
         runCatching {
             msg.referencedMessage
@@ -164,10 +168,26 @@ open class ChatterContextCollector(
                 kordSelfId = resolvedSelfId,
             )
 
-        val primaryUrl =
-            window
-                .asReversed()
-                .firstNotNullOfOrNull { msg -> ChatterNoiseFilter.URL_REGEX.find(msg.content)?.value }
+        val capturedAttachmentUrls = replyImages.map { it.url }
+        val classifiedUrls =
+            ContextUrlClassifier.classify(
+                messages = window.map { it.content },
+                capturedAttachmentUrls = capturedAttachmentUrls,
+            )
+
+        var primaryUrl: String? = null
+        var primaryCategory: ContextUrlCategory? = null
+        for (msg in window.asReversed()) {
+            for (url in ContextUrlClassifier.extractUrls(msg.content).asReversed()) {
+                val category = ContextUrlClassifier.classifyUrl(url, capturedAttachmentUrls)
+                if (category == ContextUrlCategory.SOCIAL || category == ContextUrlCategory.YOUTUBE) {
+                    primaryUrl = url
+                    primaryCategory = category
+                    break
+                }
+            }
+            if (primaryUrl != null) break
+        }
 
         if (primaryUrl != null) {
             val postOutcome = runCatching { peekResolver(primaryUrl) }
@@ -209,11 +229,28 @@ open class ChatterContextCollector(
                     comments = comments,
                     videoUri = videoUri,
                     videoDurationSeconds = videoDurationSeconds,
+                    webUrls = classifiedUrls.webUrls,
                 )
             } else if (postOutcome.isSuccess) {
                 logger.warn(
                     "SocialPeek returned null for primaryUrl '{}' (unsupported, blocked, or empty resolution); degrading to Discord message/embed transcript",
                     primaryUrl,
+                )
+            }
+
+            if (primaryCategory == ContextUrlCategory.YOUTUBE) {
+                logger.warn(
+                    "YouTubeResolver failed or returned null for '{}'; falling back to regex-detected videoUri for static Video Understanding",
+                    primaryUrl,
+                )
+                return PreparedChatterContext(
+                    transcript = dialogueTranscript,
+                    imageAttachments = replyImages,
+                    primaryUrl = primaryUrl,
+                    url = primaryUrl,
+                    videoUri = primaryUrl,
+                    videoDurationSeconds = null,
+                    webUrls = classifiedUrls.webUrls,
                 )
             }
         }
@@ -222,6 +259,7 @@ open class ChatterContextCollector(
             transcript = dialogueTranscript,
             imageAttachments = replyImages,
             primaryUrl = primaryUrl,
+            webUrls = classifiedUrls.webUrls,
         )
     }
 

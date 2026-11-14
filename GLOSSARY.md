@@ -13,7 +13,7 @@ The multi-stage content extraction and AI summarization workflow that transforms
 _Avoid_: Scraping flow, summarizer runner, summarization flow
 
 **Generic Web Resolver**:
-A resolver in the SocialPeek library that extracts title, main textual content, and metadata from arbitrary non-social websites.
+A resolver in `:libs:socialpeek` that extracts title, main textual content, and metadata from arbitrary non-social websites. Retired from Luna's AI pipelines (`Summary Pipeline` and `Chatter Pipeline`), where `SocialPeekFactory` uses `includeDefaultResolvers(false)` and omits `GenericWebResolver` so general public web URLs are routed to Gemini's `url_context` tool instead (while `:libs:socialpeek` and `SocialPreviewPlugin` retain it as a library capability).
 _Avoid_: Web scraper, raw HTML extractor, crawler
 
 **Gemini Summarizer**:
@@ -81,7 +81,7 @@ An image file (`image/jpeg`, `image/png`, `image/webp`, `image/gif`) attached to
 _Avoid_: Picture upload, chat photo, message media
 
 **CDN Direct Ingestion**:
-The multimodal delivery strategy of passing Discord's signed CDN attachment URL directly to Gemini API's `file_data.file_uri`, avoiding server-side binary proxying.
+The multimodal delivery strategy of passing Discord's signed CDN attachment URL directly to the Gemini Interactions API (`/v1beta/interactions`) via `type: "image"` input blocks (`uri` and `mime_type`), and low-resolution `type: "image"` blocks in `/v1beta/decisions`, instead of legacy `:generateContent` `file_data.file_uri`, avoiding server-side binary proxying.
 _Avoid_: Direct URL passing, Discord CDN proxy, raw URL injection
 
 **Webhook Replacement**:
@@ -113,11 +113,11 @@ The selective resolution and inline attribution of Discord replied-to messages t
 _Avoid_: Reply scraping, message jumping, thread follow
 
 **Search Grounding**:
-The model-controlled invocation of Google Search via the Gemini API to verify factual claims, look up real-time information, and define specialized terminology within the conversation summary pipeline.
+The model-controlled invocation of Google Search (`google_search` tool) via the Gemini Interactions API (`/v1beta/interactions`) across the `Summary Pipeline` and `Chatter Pipeline` to verify factual claims, look up real-time information, and define specialized terminology (alongside `url_context` when general web URLs are present).
 _Avoid_: Web scraping, Google search bot, search plugin
 
 **Grounding Source Attribution**:
-The structured presentation of search grounding citations at the conclusion of a summary with URL embed suppression to prevent Discord layout pollution.
+The extraction of `url_citation` annotations from Interactions API `model_output` steps—excluding `url_context_result.retrieved_url` entries and original conversation slice URLs—and structured presentation of up to 3 unique external citations at the conclusion of a summary with URL embed suppression (`[Title](<URL>)` and `suppressEmbeds = true`) to prevent Discord layout pollution (omitted in `Chatter Pipeline` replies).
 _Avoid_: Link spam, citation previews, embed footer
 
 **Chatter Pipeline**:

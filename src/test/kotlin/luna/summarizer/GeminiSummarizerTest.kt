@@ -1,5 +1,9 @@
 package luna.summarizer
 
+import ch.qos.logback.classic.Level
+import ch.qos.logback.classic.Logger
+import ch.qos.logback.classic.spi.ILoggingEvent
+import ch.qos.logback.core.read.ListAppender
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.mock.MockEngine
 import io.ktor.client.engine.mock.respond
@@ -14,7 +18,7 @@ import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.Json
 import luna.core.ai.ChatImageAttachment
 import luna.core.ai.EmojiSanitizer
-import luna.core.ai.GeminiTools
+import org.slf4j.LoggerFactory
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -64,21 +68,22 @@ class GeminiSummarizerTest {
         runTest {
             var recordedUrl: String? = null
             var recordedBody: String? = null
+            var hasApiRevision = false
 
             val responseJson =
                 """
                 {
-                  "candidates": [
+                  "id": "int-success-1",
+                  "status": "completed",
+                  "steps": [
                     {
-                      "content": {
-                        "role": "model",
-                        "parts": [
-                          {
-                            "text": "TL;DR:\n這是一段繁體中文摘要。\n\n重點摘要:\n• 重點一\n• 重點二\n• 重點三"
-                          }
-                        ]
-                      },
-                      "finishReason": "STOP"
+                      "type": "model_output",
+                      "content": [
+                        {
+                          "type": "text",
+                          "text": "TL;DR:\n這是一段繁體中文摘要。\n\n重點摘要:\n• 重點一\n• 重點二\n• 重點三"
+                        }
+                      ]
                     }
                   ]
                 }
@@ -86,6 +91,9 @@ class GeminiSummarizerTest {
 
             val mockEngine =
                 MockEngine { request ->
+                    if (request.headers.contains("Api-Revision")) {
+                        hasApiRevision = true
+                    }
                     recordedUrl = request.url.toString()
                     recordedBody = request.body.toByteArray().decodeToString()
 
@@ -119,33 +127,35 @@ class GeminiSummarizerTest {
                 result.text,
             )
 
-            // Verify URL contains model and API key query param
+            assertFalse(hasApiRevision, "Must never send removed Api-Revision header")
             assertEquals(
-                "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=secret-gemini-key",
+                "https://generativelanguage.googleapis.com/v1beta/interactions?key=secret-gemini-key",
                 recordedUrl,
             )
 
             val body = checkNotNull(recordedBody)
+            assertTrue(body.contains("\"model\":\"gemini-1.5-flash\""))
+            assertTrue(body.contains("\"background\":false"))
             assertTrue(body.contains("https://example.com/ai"))
         }
 
     @Test
-    fun `strips rogue emojis from Gemini candidate response text defensively`() =
+    fun `strips rogue emojis from Gemini interaction response text defensively`() =
         runTest {
             val responseWithEmojis =
                 """
                 {
-                  "candidates": [
+                  "id": "int-emoji-1",
+                  "status": "completed",
+                  "steps": [
                     {
-                      "content": {
-                        "role": "model",
-                        "parts": [
-                          {
-                            "text": "TL;DR:\n🚀 台灣團隊研發出新技術 👍！\n\n重點摘要:\n• 💡 重點一\n• ⚡ 重點二"
-                          }
-                        ]
-                      },
-                      "finishReason": "STOP"
+                      "type": "model_output",
+                      "content": [
+                        {
+                          "type": "text",
+                          "text": "TL;DR:\n🚀 台灣團隊研發出新技術 👍！\n\n重點摘要:\n• 💡 重點一\n• ⚡ 重點二"
+                        }
+                      ]
                     }
                   ]
                 }
@@ -265,14 +275,15 @@ class GeminiSummarizerTest {
         }
 
     @Test
-    fun `handles safety blocked prompt feedback and returns Generic error`() =
+    fun `handles safety blocked finish_reason and returns Generic error`() =
         runTest {
             val blockedResponse =
                 """
                 {
-                  "promptFeedback": {
-                    "blockReason": "SAFETY"
-                  }
+                  "id": "int-safety-1",
+                  "status": "completed",
+                  "finish_reason": "SAFETY",
+                  "steps": []
                 }
                 """.trimIndent()
 
@@ -297,9 +308,9 @@ class GeminiSummarizerTest {
         }
 
     @Test
-    fun `handles empty candidates in OK response and returns Generic error`() =
+    fun `handles empty steps in OK response and returns Generic error`() =
         runTest {
-            val emptyResponse = """{"candidates": []}"""
+            val emptyResponse = """{"id": "int-empty-1", "status": "completed", "steps": []}"""
 
             val mockEngine =
                 MockEngine {
@@ -318,7 +329,7 @@ class GeminiSummarizerTest {
 
             val result = summarizer.summarize("測試內容")
             assertIs<SummaryResult.Error.Generic>(result)
-            assertTrue(result.message.contains("candidates", ignoreCase = true))
+            assertTrue(result.message.contains("empty", ignoreCase = true))
         }
 
     @Test
@@ -429,13 +440,14 @@ class GeminiSummarizerTest {
             val responseJson =
                 """
                 {
-                    "candidates": [
+                    "id": "int-emoji-only-static",
+                    "status": "completed",
+                    "steps": [
                         {
-                            "content": {
-                                "parts": [
-                                    { "text": "  📝👍🎉  " }
-                                ]
-                            }
+                            "type": "model_output",
+                            "content": [
+                                { "type": "text", "text": "  📝👍🎉  " }
+                            ]
                         }
                     ]
                 }
@@ -561,5 +573,185 @@ class GeminiSummarizerTest {
             assertIs<SummaryResult.Success>(result)
             assertTrue(result.text.contains("TL;DR: Extract from steps succeeded"))
             assertTrue(result.text.contains("核心重點:"))
+        }
+
+    @Test
+    fun `enables url_context only when urlContextEnabled is true and webUrls is non-empty`() =
+        runTest {
+            val recordedPayloads = mutableListOf<String>()
+            val mockEngine =
+                MockEngine { request ->
+                    recordedPayloads.add(request.body.toByteArray().decodeToString())
+                    respond(
+                        content =
+                            """{"id": "int-uc", "status": "completed", """ +
+                                """"steps": [{"type": "model_output", "content": [{"type": "text", "text": "TL;DR: Done"}]}]}""",
+                        status = HttpStatusCode.OK,
+                        headers = headersOf(HttpHeaders.ContentType, "application/json"),
+                    )
+                }
+
+            // 1. urlContextEnabled = true & webUrls non-empty -> includes url_context + google_search
+            val enabledSummarizer =
+                GeminiSummarizer(
+                    config = GeminiConfig(apiKey = "test-key", searchGroundingEnabled = true, urlContextEnabled = true),
+                    httpClient = createTestClient(mockEngine),
+                )
+            enabledSummarizer.summarize(
+                SummaryInput(
+                    content = "Read https://kotlinlang.org/docs",
+                    webUrls = listOf("https://kotlinlang.org/docs"),
+                ),
+            )
+            assertTrue(recordedPayloads[0].contains("\"type\":\"url_context\""))
+            assertTrue(recordedPayloads[0].contains("\"type\":\"google_search\""))
+
+            // 2. urlContextEnabled = true & webUrls empty -> omits url_context
+            enabledSummarizer.summarize(SummaryInput(content = "No web URLs"))
+            assertFalse(recordedPayloads[1].contains("\"type\":\"url_context\""))
+            assertTrue(recordedPayloads[1].contains("\"type\":\"google_search\""))
+
+            // 3. urlContextEnabled = false & webUrls non-empty -> omits url_context
+            val disabledSummarizer =
+                GeminiSummarizer(
+                    config = GeminiConfig(apiKey = "test-key", searchGroundingEnabled = true, urlContextEnabled = false),
+                    httpClient = createTestClient(mockEngine),
+                )
+            disabledSummarizer.summarize(
+                SummaryInput(
+                    content = "Read https://kotlinlang.org/docs",
+                    webUrls = listOf("https://kotlinlang.org/docs"),
+                ),
+            )
+            assertFalse(recordedPayloads[2].contains("\"type\":\"url_context\""))
+            assertTrue(recordedPayloads[2].contains("\"type\":\"google_search\""))
+        }
+
+    @Test
+    fun `negative boundary performs zero layered retries and logs error when interaction fails with images and tools`() =
+        runTest {
+            val logger = LoggerFactory.getLogger(GeminiSummarizer::class.java) as Logger
+            val listAppender = ListAppender<ILoggingEvent>()
+            listAppender.start()
+            logger.addAppender(listAppender)
+
+            try {
+                var requestCount = 0
+                val mockEngine =
+                    MockEngine {
+                        requestCount++
+                        respond(
+                            content = """{"error": {"code": 400, "message": "Unable to fetch image"}}""",
+                            status = HttpStatusCode.BadRequest,
+                            headers = headersOf(HttpHeaders.ContentType, "application/json"),
+                        )
+                    }
+
+                val summarizer =
+                    GeminiSummarizer(
+                        config =
+                            GeminiConfig(
+                                apiKey = "test-key",
+                                searchGroundingEnabled = true,
+                                urlContextEnabled = true,
+                            ),
+                        httpClient = createTestClient(mockEngine),
+                    )
+
+                val result =
+                    summarizer.summarize(
+                        SummaryInput(
+                            content = "Check https://example.com/a",
+                            webUrls = listOf("https://example.com/a"),
+                            imageAttachments =
+                                listOf(
+                                    ChatImageAttachment(
+                                        url = "https://cdn.discordapp.com/attachments/1/2/bad.png",
+                                        mimeType = "image/png",
+                                        filename = "bad.png",
+                                    ),
+                                ),
+                        ),
+                        lookbackProvider = { "Earlier history" },
+                    )
+
+                assertIs<SummaryResult.Error.ApiError>(result)
+                assertEquals(400, result.statusCode)
+                assertEquals(1, requestCount, "GeminiSummarizer must fail fast with 1 upstream request and zero retries")
+                assertTrue(listAppender.list.any { it.level == Level.ERROR })
+            } finally {
+                logger.detachAppender(listAppender)
+                listAppender.stop()
+            }
+        }
+
+    @Test
+    fun `logs error on non-success url_context_result while preserving valid generated summary`() =
+        runTest {
+            val logger = LoggerFactory.getLogger(luna.core.ai.GeminiInteractionClient::class.java) as Logger
+            val listAppender = ListAppender<ILoggingEvent>()
+            listAppender.start()
+            logger.addAppender(listAppender)
+
+            try {
+                val responseJson =
+                    """
+                    {
+                      "id": "int-uc-err",
+                      "status": "completed",
+                      "steps": [
+                        {
+                          "type": "url_context_result",
+                          "call_id": "uc-1",
+                          "result": [
+                            { "retrieved_url": "https://blocked.example.com/bad", "status": "error" }
+                          ]
+                        },
+                        {
+                          "type": "model_output",
+                          "content": [
+                            { "type": "text", "text": "TL;DR:\n已依據對話完成摘要。" }
+                          ]
+                        }
+                      ]
+                    }
+                    """.trimIndent()
+
+                val mockEngine =
+                    MockEngine {
+                        respond(
+                            content = responseJson,
+                            status = HttpStatusCode.OK,
+                            headers = headersOf(HttpHeaders.ContentType, "application/json"),
+                        )
+                    }
+
+                val summarizer =
+                    GeminiSummarizer(
+                        config = GeminiConfig(apiKey = "test-key", urlContextEnabled = true),
+                        httpClient = createTestClient(mockEngine),
+                    )
+
+                val result =
+                    summarizer.summarize(
+                        SummaryInput(
+                            content = "Read https://blocked.example.com/bad",
+                            webUrls = listOf("https://blocked.example.com/bad"),
+                        ),
+                    )
+
+                assertIs<SummaryResult.Success>(result)
+                assertEquals("TL;DR:\n已依據對話完成摘要。", result.text)
+                assertTrue(
+                    listAppender.list.any {
+                        it.level == Level.ERROR &&
+                            it.formattedMessage.contains("https://blocked.example.com/bad") &&
+                            it.formattedMessage.contains("error")
+                    },
+                )
+            } finally {
+                logger.detachAppender(listAppender)
+                listAppender.stop()
+            }
         }
 }

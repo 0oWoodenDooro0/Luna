@@ -71,6 +71,23 @@ class GeminiInteractionAiTraceTest {
             .map { AiTraceJson.decodeFromString(AiTraceRecord.serializer(), it) }
     }
 
+    private fun agenticVideoRequest(
+        model: String,
+        videoUri: String,
+        promptText: String,
+    ): GeminiInteractionRequest =
+        GeminiInteractionRequest(
+            model = model,
+            input =
+                GeminiInteractionClient.buildMultimodalInputs(
+                    promptText = promptText,
+                    videoUri = videoUri,
+                    videoMimeType = "video/mp4",
+                    videoProcessingMode = VideoProcessingMode.AGENTIC,
+                ),
+            background = true,
+        )
+
     @Test
     fun `standalone submission and multi-poll completion records single collapsed AGENTIC_VIDEO attempt with redacted endpoint and no per-poll log spam`(
         @TempDir tempDir: Path,
@@ -127,17 +144,24 @@ class GeminiInteractionAiTraceTest {
                 )
 
             val result =
-                client.runAgenticVideo(
+                client.interact(
                     baseUrl = "https://generativelanguage.googleapis.com/v1beta/",
                     apiKey = apiKey,
-                    model = "models/gemini-3.5-flash-lite",
-                    videoUri = "https://www.youtube.com/watch?v=longVid123",
-                    promptText = "Summarize this 20 minute talk",
-                    videoDurationSeconds = 1200L,
+                    request =
+                        agenticVideoRequest(
+                            model = "models/gemini-3.5-flash-lite",
+                            videoUri = "https://www.youtube.com/watch?v=longVid123",
+                            promptText = "Summarize this 20 minute talk",
+                        ),
+                    traceContext =
+                        InteractionTraceContext(
+                            videoDurationSeconds = 1200L,
+                            stage = AiAttemptStage.AGENTIC_VIDEO,
+                        ),
                 )
             recorder.flushAndClose()
 
-            assertIs<GeminiInteractionResult.Success>(result)
+            assertIs<InteractionExecutionResult.Success>(result)
             assertEquals("Detailed long video breakdown", result.text)
             assertEquals(3, pollCount)
             assertTrue(
@@ -228,17 +252,24 @@ class GeminiInteractionAiTraceTest {
             )
 
         val result =
-            client.runAgenticVideo(
+            client.interact(
                 baseUrl = "https://generativelanguage.googleapis.com",
                 apiKey = "secret-interaction-key",
-                model = "gemini-3.5-flash-lite",
-                videoUri = "https://www.youtube.com/watch?v=failVid",
-                promptText = "Analyze video",
-                videoDurationSeconds = 900L,
+                request =
+                    agenticVideoRequest(
+                        model = "gemini-3.5-flash-lite",
+                        videoUri = "https://www.youtube.com/watch?v=failVid",
+                        promptText = "Analyze video",
+                    ),
+                traceContext =
+                    InteractionTraceContext(
+                        videoDurationSeconds = 900L,
+                        stage = AiAttemptStage.AGENTIC_VIDEO,
+                    ),
             )
         recorder.flushAndClose()
 
-        assertIs<GeminiInteractionResult.Error.Generic>(result)
+        assertIs<InteractionExecutionResult.Error.Generic>(result)
         val trace = readTraces(traceFile).single()
         assertEquals(AiTraceOutcome.FAILED, trace.outcome)
         assertEquals(AiTraceFailureCategory.UNEXPECTED_ERROR, trace.failureCategory)
@@ -277,14 +308,17 @@ class GeminiInteractionAiTraceTest {
                 traceRecorder = recorder,
             )
         val res429 =
-            submit429Client.runAgenticVideo(
+            submit429Client.interact(
                 baseUrl = "https://generativelanguage.googleapis.com",
                 apiKey = "secret-interaction-key",
-                model = "gemini-3.5-flash-lite",
-                videoUri = "https://www.youtube.com/watch?v=v429",
-                promptText = "Prompt",
+                request =
+                    agenticVideoRequest(
+                        model = "gemini-3.5-flash-lite",
+                        videoUri = "https://www.youtube.com/watch?v=v429",
+                        promptText = "Prompt",
+                    ),
             )
-        assertIs<GeminiInteractionResult.Error.RateLimitExceeded>(res429)
+        assertIs<InteractionExecutionResult.Error.RateLimitExceeded>(res429)
 
         var pollCall = 0
         val poll500Client =
@@ -320,14 +354,17 @@ class GeminiInteractionAiTraceTest {
                 traceRecorder = recorder,
             )
         val res500 =
-            poll500Client.runAgenticVideo(
+            poll500Client.interact(
                 baseUrl = "https://generativelanguage.googleapis.com",
                 apiKey = "secret-interaction-key",
-                model = "gemini-3.5-flash-lite",
-                videoUri = "https://www.youtube.com/watch?v=v500",
-                promptText = "Prompt",
+                request =
+                    agenticVideoRequest(
+                        model = "gemini-3.5-flash-lite",
+                        videoUri = "https://www.youtube.com/watch?v=v500",
+                        promptText = "Prompt",
+                    ),
             )
-        assertIs<GeminiInteractionResult.Error.ApiError>(res500)
+        assertIs<InteractionExecutionResult.Error.ApiError>(res500)
         recorder.flushAndClose()
 
         val traces = readTraces(traceFile)
@@ -375,14 +412,17 @@ class GeminiInteractionAiTraceTest {
                 traceRecorder = recorder,
             )
         val exhaustedRes =
-            exhaustedClient.runAgenticVideo(
+            exhaustedClient.interact(
                 baseUrl = "https://generativelanguage.googleapis.com",
                 apiKey = apiKey,
-                model = "gemini-3.5-flash-lite",
-                videoUri = "https://www.youtube.com/watch?v=stuck",
-                promptText = "Prompt",
+                request =
+                    agenticVideoRequest(
+                        model = "gemini-3.5-flash-lite",
+                        videoUri = "https://www.youtube.com/watch?v=stuck",
+                        promptText = "Prompt",
+                    ),
             )
-        assertIs<GeminiInteractionResult.Error.Timeout>(exhaustedRes)
+        assertIs<InteractionExecutionResult.Error.Timeout>(exhaustedRes)
 
         var pollNum = 0
         val networkTimeoutClient =
@@ -418,14 +458,17 @@ class GeminiInteractionAiTraceTest {
                 traceRecorder = recorder,
             )
         val networkTimeoutRes =
-            networkTimeoutClient.runAgenticVideo(
+            networkTimeoutClient.interact(
                 baseUrl = "https://generativelanguage.googleapis.com",
                 apiKey = apiKey,
-                model = "gemini-3.5-flash-lite",
-                videoUri = "https://www.youtube.com/watch?v=netto",
-                promptText = "Prompt",
+                request =
+                    agenticVideoRequest(
+                        model = "gemini-3.5-flash-lite",
+                        videoUri = "https://www.youtube.com/watch?v=netto",
+                        promptText = "Prompt",
+                    ),
             )
-        assertIs<GeminiInteractionResult.Error.Timeout>(networkTimeoutRes)
+        assertIs<InteractionExecutionResult.Error.Timeout>(networkTimeoutRes)
         recorder.flushAndClose()
 
         val traces = readTraces(traceFile)
@@ -469,28 +512,36 @@ class GeminiInteractionAiTraceTest {
 
         // 1. Standalone blank apiKey -> NOT_CONFIGURED
         val blankKeyRes =
-            client.runAgenticVideo(
+            client.interact(
                 baseUrl = "https://generativelanguage.googleapis.com",
                 apiKey = " ",
-                model = "gemini-3.5-flash-lite",
-                videoUri = "https://www.youtube.com/watch?v=abc",
-                promptText = "Prompt",
+                request =
+                    agenticVideoRequest(
+                        model = "gemini-3.5-flash-lite",
+                        videoUri = "https://www.youtube.com/watch?v=abc",
+                        promptText = "Prompt",
+                    ),
             )
-        assertIs<GeminiInteractionResult.Error.Generic>(blankKeyRes)
+        assertIs<InteractionExecutionResult.Error.Generic>(blankKeyRes)
+        assertEquals(AiTraceFailureCategory.NOT_CONFIGURED, blankKeyRes.failureCategory)
 
-        // 2. Standalone blank videoUri -> CONTEXT_ERROR
-        val blankVideoRes =
-            client.runAgenticVideo(
+        // 2. Standalone blank inputs -> CONTEXT_ERROR
+        val blankInputRes =
+            client.interact(
                 baseUrl = "https://generativelanguage.googleapis.com",
                 apiKey = "secret-interaction-key",
-                model = "gemini-3.5-flash-lite",
-                videoUri = "",
-                promptText = "Prompt",
-                videoDurationSeconds = 500L,
+                request =
+                    agenticVideoRequest(
+                        model = "gemini-3.5-flash-lite",
+                        videoUri = "",
+                        promptText = "",
+                    ),
+                traceContext = InteractionTraceContext(videoDurationSeconds = 500L),
             )
-        assertIs<GeminiInteractionResult.Error.Generic>(blankVideoRes)
+        assertIs<InteractionExecutionResult.Error.Generic>(blankInputRes)
+        assertEquals(AiTraceFailureCategory.CONTEXT_ERROR, blankInputRes.failureCategory)
 
-        // 3. Outer session active with blank videoUri -> appends attempt to outer session
+        // 3. Outer session active with blank inputs -> appends attempt to outer session
         val outerSession =
             recorder.startSession(
                 pipeline = AiTracePipeline.CHATTER,
@@ -498,14 +549,23 @@ class GeminiInteractionAiTraceTest {
                 discord = AiTraceDiscordContext(channelId = "10", messageId = "20", isDirectMention = true),
             )
         withAiTraceSession(outerSession) {
-            client.runAgenticVideo(
+            client.interact(
                 baseUrl = "https://generativelanguage.googleapis.com",
                 apiKey = "secret-interaction-key",
-                model = "gemini-3.5-flash-lite",
-                videoUri = " ",
-                promptText = "Prompt",
+                request =
+                    agenticVideoRequest(
+                        model = "gemini-3.5-flash-lite",
+                        videoUri = " ",
+                        promptText = " ",
+                    ),
+                traceContext =
+                    InteractionTraceContext(
+                        stage = AiAttemptStage.AGENTIC_VIDEO,
+                        pipeline = AiTracePipeline.CHATTER,
+                        trigger = AiTraceTrigger.MENTION,
+                    ),
             )
-            outerSession.fail(AiTraceFailureCategory.CONTEXT_ERROR, "blank uri")
+            outerSession.fail(AiTraceFailureCategory.CONTEXT_ERROR, "blank input")
         }
         outerSession.finish()
         recorder.flushAndClose()
@@ -535,5 +595,231 @@ class GeminiInteractionAiTraceTest {
         assertEquals(1, traces[2].attemptCount)
         assertEquals(AiAttemptStage.AGENTIC_VIDEO, traces[2].attempts.single().stage)
         assertEquals(0, traces[2].attempts.single().pollingAttempts)
+    }
+
+    @Test
+    fun `sync interaction records webUrlCount enabledTools urlContextResults googleSearchQueries raw and filtered citations and redacts secrets`(
+        @TempDir tempDir: Path,
+    ) = runTest {
+        val apiKey = "super-secret-sync-key-123"
+        val extraSecret = "embedded-token-xyz-999"
+        val traceDir = tempDir.resolve("ai-traces")
+        val recorder =
+            JsonlAiTraceRecorder(
+                traceDir = traceDir,
+                redactor = AiTraceRedactor(listOf(apiKey, extraSecret)),
+                clock = fixedClock,
+            )
+        val traceFile = traceDir.resolve("ai-2026-11-14.jsonl")
+
+        val engine =
+            MockEngine {
+                respond(
+                    content =
+                        """
+                        {
+                          "id": "int-trace-sync",
+                          "status": "completed",
+                          "usage": {
+                            "input_tokens": 300,
+                            "output_tokens": 80,
+                            "total_tokens": 410,
+                            "thoughts_tokens": 20,
+                            "tool_use_input_tokens": 10
+                          },
+                          "steps": [
+                            {
+                              "type": "url_context_result",
+                              "call_id": "uc-1",
+                              "result": [
+                                {"retrieved_url": "https://example.com/article?key=$apiKey", "status": "success"},
+                                {"retrieved_url": "https://unsafe.example.com/$extraSecret", "status": "unsafe"}
+                              ]
+                            },
+                            {"type": "google_search_call", "id": "gs-1", "arguments": {"queries": ["query with $extraSecret", "kotlin docs"]}},
+                            {
+                              "type": "model_output",
+                              "content": [
+                                {
+                                  "type": "text",
+                                  "text": "Summary output",
+                                  "annotations": [
+                                    {"type": "url_citation", "url": "https://example.com/article?key=$apiKey", "title": "Original"},
+                                    {"type": "url_citation", "url": "https://kotlinlang.org/docs", "title": "Kotlin Docs"},
+                                    {"type": "url_citation", "url": "https://kotlinlang.org/docs/", "title": "Kotlin Docs Dup"}
+                                  ]
+                                }
+                              ]
+                            }
+                          ]
+                        }
+                        """.trimIndent(),
+                    status = HttpStatusCode.OK,
+                    headers = headersOf(HttpHeaders.ContentType, "application/json"),
+                )
+            }
+
+        val client =
+            GeminiInteractionClient(
+                httpClient = createClient(engine),
+                pollingDelayMs = 1L,
+                traceRecorder = recorder,
+            )
+
+        val result =
+            client.interact(
+                baseUrl = "https://generativelanguage.googleapis.com",
+                apiKey = apiKey,
+                request =
+                    GeminiInteractionRequest(
+                        model = "gemini-3.5-flash-lite",
+                        input = listOf(GeminiInteractionInput.text("Summarize https://example.com/article")),
+                        tools = listOf(GeminiInteractionTools.URL_CONTEXT, GeminiInteractionTools.GOOGLE_SEARCH),
+                        generationConfig = GeminiInteractionGenerationConfig(maxOutputTokens = 1024),
+                        background = false,
+                    ),
+                traceContext =
+                    InteractionTraceContext(
+                        webUrlCount = 2,
+                        inputUrls = listOf("https://example.com/article?key=$apiKey"),
+                    ),
+            )
+        recorder.flushAndClose()
+
+        assertIs<InteractionExecutionResult.Success>(result)
+        val traces = readTraces(traceFile)
+        assertEquals(1, traces.size)
+        val trace = traces.single()
+        assertEquals(AiTraceOutcome.SUCCESS, trace.outcome)
+        assertEquals(listOf(GroundingCitation("Kotlin Docs", "https://kotlinlang.org/docs")), trace.citations)
+
+        val attempt = trace.attempts.single()
+        assertNull(attempt.pollingAttempts)
+        assertEquals(AiAttemptStage.SUMMARY_GENERATE, attempt.stage)
+        assertEquals(AiAttemptOutcome.SUCCESS, attempt.parsedOutcome)
+
+        val req = assertNotNull(attempt.request)
+        assertEquals(2, req.webUrlCount)
+        assertEquals(listOf("url_context", "google_search"), req.enabledTools)
+
+        assertEquals(2, attempt.urlContextResults.size)
+        assertEquals("https://example.com/article?key=******", attempt.urlContextResults[0].retrievedUrl)
+        assertEquals("https://unsafe.example.com/******", attempt.urlContextResults[1].retrievedUrl)
+        assertEquals("unsafe", attempt.urlContextResults[1].status)
+
+        assertEquals(listOf("query with ******", "kotlin docs"), attempt.googleSearchQueries)
+        assertEquals(3, attempt.rawCitations.size)
+        assertEquals("https://example.com/article?key=******", attempt.rawCitations[0].url)
+        assertEquals(listOf(GroundingCitation("Kotlin Docs", "https://kotlinlang.org/docs")), attempt.filteredCitations)
+        assertEquals(20, attempt.usageMetadata?.thoughtsTokenCount)
+        assertEquals(10, attempt.usageMetadata?.toolUseInputTokens)
+
+        val rawJsonLine = Files.readAllLines(traceFile).single()
+        assertFalse(rawJsonLine.contains(apiKey))
+        assertFalse(rawJsonLine.contains(extraSecret))
+    }
+
+    @Test
+    fun `multi-turn function_call and previous_interaction_id continuation records TOOL_CALL then SUCCESS attempts`(
+        @TempDir tempDir: Path,
+    ) = runTest {
+        val (recorder, traceFile) = createRecorder(tempDir)
+        var turn = 0
+
+        val engine =
+            MockEngine {
+                turn++
+                if (turn == 1) {
+                    respond(
+                        content =
+                            """
+                            {
+                              "id": "int-turn-1",
+                              "status": "requires_action",
+                              "steps": [
+                                {"type": "function_call", "id": "call-1", "name": "fetch_earlier_messages", "arguments": {"reason": "need context"}}
+                              ]
+                            }
+                            """.trimIndent(),
+                        status = HttpStatusCode.OK,
+                        headers = headersOf(HttpHeaders.ContentType, "application/json"),
+                    )
+                } else {
+                    respond(
+                        content =
+                            """
+                            {
+                              "id": "int-turn-2",
+                              "status": "completed",
+                              "steps": [
+                                {"type": "model_output", "content": [{"type": "text", "text": "Continued summary"}]}
+                              ]
+                            }
+                            """.trimIndent(),
+                        status = HttpStatusCode.OK,
+                        headers = headersOf(HttpHeaders.ContentType, "application/json"),
+                    )
+                }
+            }
+
+        val client = GeminiInteractionClient(httpClient = createClient(engine), pollingDelayMs = 1L, traceRecorder = recorder)
+        val session =
+            recorder.startSession(
+                pipeline = AiTracePipeline.SUMMARY,
+                trigger = AiTraceTrigger.REACTION,
+                discord = AiTraceDiscordContext(channelId = "c1", messageId = "m1"),
+            )
+        withAiTraceSession(session) {
+            val first =
+                client.interact(
+                    baseUrl = "https://generativelanguage.googleapis.com",
+                    apiKey = "secret-interaction-key",
+                    request =
+                        GeminiInteractionRequest(
+                            model = "gemini-3.5-flash-lite",
+                            input = listOf(GeminiInteractionInput.text("Summarize")),
+                            tools = listOf(GeminiInteractionTools.FETCH_EARLIER_MESSAGES),
+                            background = false,
+                        ),
+                )
+            assertIs<InteractionExecutionResult.FunctionCall>(first)
+            val second =
+                client.continueInteraction(
+                    baseUrl = "https://generativelanguage.googleapis.com",
+                    apiKey = "secret-interaction-key",
+                    model = "gemini-3.5-flash-lite",
+                    previousInteractionId = first.interactionId,
+                    functionResults =
+                        listOf(
+                            GeminiInteractionInput.functionResult(
+                                name = "fetch_earlier_messages",
+                                callId = first.functionCalls.single().id,
+                                result = "Earlier chat",
+                            ),
+                        ),
+                    tools = listOf(GeminiInteractionTools.FETCH_EARLIER_MESSAGES),
+                )
+            assertIs<InteractionExecutionResult.Success>(second)
+            session.complete(finalOutput = second.text, citations = second.citations)
+        }
+        session.finish()
+        recorder.flushAndClose()
+
+        val trace = readTraces(traceFile).single()
+        assertEquals(2, trace.attemptCount)
+        assertEquals(AiAttemptStage.SUMMARY_GENERATE, trace.attempts[0].stage)
+        assertEquals(AiAttemptOutcome.TOOL_CALL, trace.attempts[0].parsedOutcome)
+        assertEquals(listOf("fetch_earlier_messages"), trace.attempts[0].request?.enabledTools)
+
+        assertEquals(AiAttemptStage.SUMMARY_TOOL_CONTINUATION, trace.attempts[1].stage)
+        assertEquals(AiAttemptOutcome.SUCCESS, trace.attempts[1].parsedOutcome)
+        val contPayload =
+            assertNotNull(
+                trace.attempts[1]
+                    .request
+                    ?.payload
+                    ?.jsonObject,
+            )
+        assertEquals("int-turn-1", contPayload["previous_interaction_id"]?.jsonPrimitive?.content)
     }
 }
