@@ -479,7 +479,7 @@ class ChatterAiTraceTest {
     }
 
     @Test
-    fun `ChatterNoiseFilter rejections and ineligible ambient messages emit zero AI Trace records`(
+    fun `ChatterNoiseFilter rejections emit zero AI Trace records`(
         @TempDir tempDir: Path,
     ) = runTest {
         val recorder = JsonlAiTraceRecorder(traceDir = tempDir, clock = fixedClock)
@@ -511,8 +511,13 @@ class ChatterAiTraceTest {
         assertFalse(service.processMessage(createMockMessage(id = 4L, channelId = 200L, content = "Should we discuss Kotlin?")))
         // 4. Disallowed channel (999L not in whitelist)
         assertFalse(service.processMessage(createMockMessage(id = 5L, channelId = 999L, content = "Hello in disallowed channel?")))
-        // 5. Ineligible short ambient message
-        assertFalse(service.processMessage(createMockMessage(id = 6L, channelId = 201L, content = "ok")))
+        // 5. Blank message without attachments/embeds and system notice
+        assertFalse(service.processMessage(createMockMessage(id = 6L, channelId = 201L, content = "   ")))
+        assertFalse(
+            service.processMessage(
+                createMockMessage(id = 7L, channelId = 201L, type = MessageType.ChannelPinnedMessage, content = "Pinned"),
+            ),
+        )
 
         recorder.flushAndClose()
         assertEquals(emptyList(), readTraceLines(tempDir))
@@ -1139,7 +1144,7 @@ class ChatterAiTraceTest {
         run {
             val failingDecisionCollector =
                 object : ChatterContextCollector() {
-                    override fun collectDecisionContext(
+                    override suspend fun collectDecisionContext(
                         messages: List<Message>,
                         kordSelfId: Snowflake?,
                     ): ChatterDecisionContext = throw IllegalStateException("Decision context boom")

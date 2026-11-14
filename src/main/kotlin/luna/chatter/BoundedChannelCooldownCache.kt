@@ -17,7 +17,7 @@ class BoundedChannelCooldownCache(
 ) {
     companion object {
         const val DEFAULT_MAX_CAPACITY = 500
-        const val DEFAULT_COOLDOWN_MS = 30_000L // 30 seconds
+        const val DEFAULT_COOLDOWN_MS = 5_000L // 5 seconds
     }
 
     private val cache: MutableMap<Snowflake, Long> =

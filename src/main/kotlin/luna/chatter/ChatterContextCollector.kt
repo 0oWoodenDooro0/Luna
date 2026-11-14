@@ -46,8 +46,9 @@ data class PreparedChatterContext(
 
 /**
  * Collaborator seam responsible for the Lightweight-Heavy Multimodal Split in the Chatter Pipeline:
- * - Lightweight decision context: last [decisionMessageCount] filtered turns, Discord embed previews,
- *   and up to [maxDecisionImages] newest valid [ChatImageAttachment]s (never invokes SocialPeek).
+ * - Lightweight decision context: last [decisionMessageCount] filtered turns, external Reply Reference Chaining,
+ *   Discord embed previews, structural section framing, and up to [maxDecisionImages] newest valid
+ *   [ChatImageAttachment]s (never invokes SocialPeek or YouTube ingestion).
  * - Heavy reply context: last [historyMessageCount] filtered turns, external Reply Reference Chaining,
  *   Discord embed previews, up to [maxImages] valid [ChatImageAttachment]s, and SocialPeek resolution
  *   for the latest `primaryUrl` in the window.
@@ -73,10 +74,11 @@ open class ChatterContextCollector(
     private val logger = LoggerFactory.getLogger(ChatterContextCollector::class.java)
 
     /**
-     * Assembles lightweight decision context over the last [decisionMessageCount] filtered messages.
+     * Assembles lightweight decision context over the last [decisionMessageCount] filtered messages,
+     * including external Reply Reference Chaining and structural section framing.
      * Never invokes [peekResolver] or YouTube ingestion.
      */
-    open fun collectDecisionContext(
+    open suspend fun collectDecisionContext(
         messages: List<Message>,
         kordSelfId: Snowflake? = null,
     ): ChatterDecisionContext {
@@ -98,10 +100,21 @@ open class ChatterContextCollector(
                 maxImageBytes = maxImageBytes,
             )
         val decisionImages = imagesByMessage.values.flatten()
-        val transcript =
-            formatDialogueMessages(
+        val replyReferencesByMessage =
+            resolveExternalReplyReferences(
+                messages = window,
+                maxExternalReferences = maxExternalReferences.coerceAtLeast(0),
+            )
+        val formattedTurns =
+            formatDialogueTurnList(
                 messages = window,
                 imagesByMessage = imagesByMessage,
+                replyReferencesByMessage = replyReferencesByMessage,
+                kordSelfId = resolvedSelfId,
+            )
+        val transcript =
+            formatDecisionTranscript(
+                formattedTurns = formattedTurns,
                 kordSelfId = resolvedSelfId,
             )
 
@@ -279,14 +292,53 @@ open class ChatterContextCollector(
         return sb.toString().trim()
     }
 
+    internal fun formatDecisionTranscript(
+        formattedTurns: List<String>,
+        kordSelfId: Snowflake?,
+    ): String {
+        if (formattedTurns.isEmpty()) {
+            return ""
+        }
+        val identityHeader =
+            if (kordSelfId != null) {
+                "[Bot Identity: Luna | Discord Mention: <@$kordSelfId>]"
+            } else {
+                "[Bot Identity: Luna]"
+            }
+        val recentTurns = formattedTurns.dropLast(1)
+        val latestTurn = formattedTurns.last()
+        return buildString {
+            append(identityHeader)
+            if (recentTurns.isNotEmpty()) {
+                append("\n\n[Recent Context]\n")
+                append(recentTurns.joinToString("\n"))
+            }
+            append("\n\n[Latest Message]\n")
+            append(latestTurn)
+        }
+    }
+
     internal fun formatDialogueMessages(
         messages: List<Message>,
         imagesByMessage: Map<Snowflake, List<ChatImageAttachment>> = emptyMap(),
         replyReferencesByMessage: Map<Snowflake, Message> = emptyMap(),
         kordSelfId: Snowflake? = null,
-    ): String {
+    ): String =
+        formatDialogueTurnList(
+            messages = messages,
+            imagesByMessage = imagesByMessage,
+            replyReferencesByMessage = replyReferencesByMessage,
+            kordSelfId = kordSelfId,
+        ).joinToString("\n")
+
+    internal fun formatDialogueTurnList(
+        messages: List<Message>,
+        imagesByMessage: Map<Snowflake, List<ChatImageAttachment>> = emptyMap(),
+        replyReferencesByMessage: Map<Snowflake, Message> = emptyMap(),
+        kordSelfId: Snowflake? = null,
+    ): List<String> {
         var imageIndex = 1
-        return messages.joinToString("\n") { msg ->
+        return messages.map { msg ->
             val baseAuthor = resolveAuthorName(msg, kordSelfId)
             val refMsg = replyReferencesByMessage[msg.id]
             val author =
@@ -320,27 +372,23 @@ open class ChatterContextCollector(
                     ""
                 }
 
-            val strippedText = noiseFilter.stripLunaMentions(msg.content, kordSelfId)
-            val hasAttachments = runCatching { msg.attachments.isNotEmpty() }.getOrDefault(false)
-            val isDirectMention = noiseFilter.isDirectBotMention(msg, kordSelfId)
+            val rawText = msg.content.takeIf { it.isNotBlank() }
 
             val parts =
                 listOfNotNull(
-                    strippedText.takeIf { it.isNotEmpty() },
+                    rawText,
                     embedText.takeIf { it.isNotEmpty() },
                     markersText.takeIf { it.isNotEmpty() },
                 )
 
             val body =
-                when {
-                    parts.isNotEmpty() -> parts.joinToString(" ")
-                    isDirectMention -> ChatterNoiseFilter.CALLOUT_GREETING
-                    hasAttachments -> "[Attachment]"
-                    msg.content.isNotBlank() -> ChatterNoiseFilter.CALLOUT_GREETING
-                    else -> ""
+                if (parts.isNotEmpty()) {
+                    parts.joinToString(" ")
+                } else {
+                    ChatterNoiseFilter.resolveBlankMessagePlaceholder(msg).orEmpty()
                 }
 
-            "[$author]: $body".trimEnd()
+            if (body.isEmpty()) "[$author]:" else "[$author]: $body"
         }
     }
 
@@ -379,7 +427,7 @@ open class ChatterContextCollector(
     }
 
     companion object {
-        const val DEFAULT_DECISION_MESSAGE_COUNT = 3
+        const val DEFAULT_DECISION_MESSAGE_COUNT = 15
         const val DEFAULT_HISTORY_MESSAGE_COUNT = 15
         const val DEFAULT_MAX_DECISION_IMAGES = 3
         const val DEFAULT_MAX_IMAGES = 10

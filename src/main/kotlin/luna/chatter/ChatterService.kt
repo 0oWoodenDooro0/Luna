@@ -23,7 +23,7 @@ import org.slf4j.LoggerFactory
 /**
  * Service orchestrating the Chatter auto-reply pipeline:
  * 1. Pre-filtering incoming messages (noise, bot, command, cooldown, allowed channels).
- * 2. Assembling recent dialogue turns (2~3 messages) for Gemini Decision 1 participation evaluation.
+ * 2. Assembling recent dialogue turns (up to 15 messages) with structural framing and reply chaining for Gemini Decision 1 participation evaluation.
  * 3. Triggering channel typing feedback when the decision model confirms participation.
  * 4. Assembling recent conversation history (10~20 messages) for Gemini dialogue generation.
  * 5. Sending generated reply to the Discord channel and refreshing cooldown.
@@ -49,6 +49,7 @@ open class ChatterService(
             historyMessageCount = historyMessageCount,
         ),
     val traceRecorder: AiTraceRecorder = NoOpAiTraceRecorder,
+    val inFlightTracker: BoundedChannelInFlightTracker = BoundedChannelInFlightTracker(),
 ) {
     private val logger = LoggerFactory.getLogger(ChatterService::class.java)
 
@@ -80,65 +81,72 @@ open class ChatterService(
         val selfId = runCatching { message.kord.selfId }.getOrNull()
         val isDirectMention = filter.isDirectBotMention(message, selfId)
 
-        // 1. Pre-checks filter: filter.shouldEvaluate(message, isDirectMention = isDirectMention)
-        if (!filter.shouldEvaluate(message, isDirectMention = isDirectMention)) {
+        // 1. Pre-checks filter: filter.shouldEvaluate(message, isDirectMention = isDirectMention, kordSelfId = selfId)
+        if (!filter.shouldEvaluate(message, isDirectMention = isDirectMention, kordSelfId = selfId)) {
             logger.debug("ChatterNoiseFilter rejected message {}", message.id)
             return false
         }
 
-        // Pre-filter ambient messages before fetching channel history
-        if (!isDirectMention && !filter.isEligibleForDecisionEvaluation(message)) {
+        val channelId = message.channelId
+        if (isDirectMention) {
+            inFlightTracker.acquire(channelId)
+        } else if (!inFlightTracker.tryAcquire(channelId)) {
             logger.debug(
-                "Ambient message {} does not meet decision evaluation criteria; skipping decision call",
+                "Skipping ambient message {} in channel {}: ChatterService run already in flight",
                 message.id,
+                channelId,
             )
             return false
         }
 
-        val session =
-            traceRecorder.startSession(
-                pipeline = AiTracePipeline.CHATTER,
-                trigger = if (isDirectMention) AiTraceTrigger.MENTION else AiTraceTrigger.AMBIENT,
-                discord =
-                    AiTraceDiscordContext(
-                        guildId =
-                            runCatching {
-                                message.data.guildId.value
-                                    ?.toString()
-                            }.getOrNull(),
-                        channelId = message.channelId.toString(),
-                        messageId = message.id.toString(),
-                        authorId =
-                            runCatching { message.author?.id?.toString() }.getOrNull()
-                                ?: runCatching {
-                                    message.data.author.id
-                                        .toString()
-                                }.getOrNull(),
-                        reactingUserId = null,
-                        isDirectMention = isDirectMention,
-                    ),
-            )
-        runCatching { session.registerSecret(decisionClient.config.apiKey) }
-        runCatching { session.registerSecret(chatterGenerator.config.apiKey) }
-
         return try {
-            withAiTraceSession(session) {
-                processEvaluatedMessage(
-                    message = message,
-                    selfId = selfId,
-                    isDirectMention = isDirectMention,
-                    session = session,
+            val session =
+                traceRecorder.startSession(
+                    pipeline = AiTracePipeline.CHATTER,
+                    trigger = if (isDirectMention) AiTraceTrigger.MENTION else AiTraceTrigger.AMBIENT,
+                    discord =
+                        AiTraceDiscordContext(
+                            guildId =
+                                runCatching {
+                                    message.data.guildId.value
+                                        ?.toString()
+                                }.getOrNull(),
+                            channelId = channelId.toString(),
+                            messageId = message.id.toString(),
+                            authorId =
+                                runCatching { message.author?.id?.toString() }.getOrNull()
+                                    ?: runCatching {
+                                        message.data.author.id
+                                            .toString()
+                                    }.getOrNull(),
+                            reactingUserId = null,
+                            isDirectMention = isDirectMention,
+                        ),
                 )
+            runCatching { session.registerSecret(decisionClient.config.apiKey) }
+            runCatching { session.registerSecret(chatterGenerator.config.apiKey) }
+
+            try {
+                withAiTraceSession(session) {
+                    processEvaluatedMessage(
+                        message = message,
+                        selfId = selfId,
+                        isDirectMention = isDirectMention,
+                        session = session,
+                    )
+                }
+            } catch (e: Exception) {
+                logger.error("Unexpected error in ChatterService.processMessage: {}", e.message, e)
+                session.fail(
+                    AiTraceFailureCategory.UNEXPECTED_ERROR,
+                    "Unexpected error in ChatterService.processMessage: ${e.message}",
+                )
+                false
+            } finally {
+                session.finish()
             }
-        } catch (e: Exception) {
-            logger.error("Unexpected error in ChatterService.processMessage: {}", e.message, e)
-            session.fail(
-                AiTraceFailureCategory.UNEXPECTED_ERROR,
-                "Unexpected error in ChatterService.processMessage: ${e.message}",
-            )
-            false
         } finally {
-            session.finish()
+            inFlightTracker.release(channelId)
         }
     }
 
@@ -151,7 +159,7 @@ open class ChatterService(
         // 2. Gathers recent messages from channel slice to construct state / history
         val previousMessages =
             try {
-                historyFetcher(message, historyMessageCount)
+                historyFetcher(message, maxOf(decisionMessageCount, historyMessageCount))
             } catch (e: Exception) {
                 logger.warn("Failed to fetch channel history for message {}: {}", message.id, e.message)
                 emptyList()
@@ -303,7 +311,7 @@ open class ChatterService(
     }
 
     companion object {
-        const val DEFAULT_DECISION_MESSAGE_COUNT = 3
+        const val DEFAULT_DECISION_MESSAGE_COUNT = 15
         const val DEFAULT_HISTORY_MESSAGE_COUNT = 15
     }
 }

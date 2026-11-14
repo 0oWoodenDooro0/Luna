@@ -52,6 +52,9 @@ class ChatterPlugin(
     var cooldownCache: BoundedChannelCooldownCache? = null
         internal set
 
+    var inFlightTracker: BoundedChannelInFlightTracker? = null
+        internal set
+
     var contextCollector: ChatterContextCollector? = null
         internal set
 
@@ -101,7 +104,7 @@ class ChatterPlugin(
                 ?: context.config<Long>("chatter.cooldownSeconds")
                 ?: context.config<Int>("chatter.cooldownSeconds")?.toLong()
                 ?: context.config<String>("chatter.cooldownSeconds")?.toLongOrNull()
-                ?: 30L
+                ?: 5L
         val cooldownDurationMs = cooldownSeconds * 1000L
 
         val youtubeApiKey =
@@ -121,7 +124,10 @@ class ChatterPlugin(
 
         val client =
             decisionClientFactory?.invoke(decisionConfig)
-                ?: GeminiDecisionClient(config = decisionConfig, traceRecorder = traceRecorder)
+                ?: GeminiDecisionClient(
+                    config = decisionConfig,
+                    traceRecorder = traceRecorder,
+                )
         this.decisionClient = client
 
         val chatterConfig = ChatterConfig.fromPluginContext(context)
@@ -132,6 +138,9 @@ class ChatterPlugin(
 
         val cooldown = BoundedChannelCooldownCache(defaultCooldownDurationMs = cooldownDurationMs)
         this.cooldownCache = cooldown
+
+        val tracker = BoundedChannelInFlightTracker()
+        this.inFlightTracker = tracker
 
         val noiseFilter =
             ChatterNoiseFilter(
@@ -146,6 +155,7 @@ class ChatterPlugin(
         val collector =
             ChatterContextCollector(
                 noiseFilter = noiseFilter,
+                decisionMessageCount = decisionConfig.decisionMessageCount,
                 maxImages = imagesLimit,
                 peekResolver = peekResolver,
             )
@@ -157,8 +167,10 @@ class ChatterPlugin(
                 decisionClient = client,
                 chatterGenerator = generator,
                 cooldownCache = cooldown,
+                decisionMessageCount = decisionConfig.decisionMessageCount,
                 contextCollector = collector,
                 traceRecorder = traceRecorder,
+                inFlightTracker = tracker,
             )
         val finalService = serviceFactory?.invoke(chatterService) ?: chatterService
         this.service = finalService
