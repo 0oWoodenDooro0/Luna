@@ -8,7 +8,6 @@ import luna.core.LunaWebhookRegistry
 import luna.core.SummaryMessageRegistry
 import luna.core.SummaryRegistry
 import luna.core.WebhookRegistry
-import luna.core.ai.ChatImageAttachmentExtractor
 
 enum class RejectionReason {
     CHATTER_DISABLED,
@@ -135,22 +134,23 @@ open class ChatterNoiseFilter(
             )
         }
 
-        // 7. Check empty / whitespace-only messages without media attachments (CODING_STANDARDS.md §3)
+        // 7. Check empty / whitespace-only messages without media attachments or embeds (CODING_STANDARDS.md §3)
         val hasAttachments = runCatching { message.attachments.isNotEmpty() }.getOrDefault(false)
-        if (message.content.isBlank() && !hasAttachments && !directMention) {
+        val hasEmbeds = runCatching { message.embeds.isNotEmpty() }.getOrDefault(false)
+        if (message.content.isBlank() && !hasAttachments && !hasEmbeds && !directMention) {
             return ChatterFilterResult.Rejected(
                 RejectionReason.EMPTY_MESSAGE,
-                "Message content is blank or empty without attachments",
+                "Message content is blank or empty without attachments or embeds",
             )
         }
 
         val finalContent =
-            resolveCleanedContent(
-                rawContent = message.content,
-                botSelfId = resolvedSelfId,
-                hasAttachments = hasAttachments,
-                isDirectMention = directMention,
-            ) ?: message.content
+            when {
+                message.content.isNotBlank() -> message.content
+                hasAttachments -> "[Attachment]"
+                hasEmbeds -> "[Embed]"
+                else -> message.content
+            }
 
         val speakerName = extractSpeakerName(message)
 
@@ -180,63 +180,12 @@ open class ChatterNoiseFilter(
         message: Message,
         kordSelfId: Snowflake? = null,
     ): Boolean {
-        val resolvedSelfId = kordSelfId ?: runCatching { message.kord.selfId }.getOrNull()
-        if (resolvedSelfId != null && runCatching { message.mentionedUserIds.contains(resolvedSelfId) }.getOrDefault(false)) {
+        val resolvedSelfId = kordSelfId ?: runCatching { message.kord.selfId }.getOrNull() ?: return false
+        if (runCatching { message.mentionedUserIds.contains(resolvedSelfId) }.getOrDefault(false)) {
             return true
         }
-        if (resolvedSelfId != null) {
-            val content = message.content
-            if (content.contains("<@$resolvedSelfId>") || content.contains("<@!$resolvedSelfId>")) {
-                return true
-            }
-        }
-        val refAuthorId = runCatching { message.referencedMessage?.author?.id }.getOrNull()
-        if (resolvedSelfId != null && refAuthorId == resolvedSelfId) {
-            return true
-        }
-        if (LUNA_MENTION_REGEX.containsMatchIn(message.content)) {
-            return true
-        }
-        return false
-    }
-
-    fun isEligibleForDecisionEvaluation(message: Message): Boolean {
-        if (ChatImageAttachmentExtractor.extractFromMessage(message).isNotEmpty()) {
-            return true
-        }
-        if (URL_REGEX.containsMatchIn(message.content)) {
-            return true
-        }
-        return isEligibleForDecisionEvaluation(message.content)
-    }
-
-    fun isEligibleForDecisionEvaluation(content: String): Boolean {
-        val trimmed = content.trim()
-        if (trimmed.isBlank()) return false
-        if (trimmed.contains("luna", ignoreCase = true) || trimmed.contains("露娜")) {
-            return true
-        }
-        if (trimmed.contains('?') || trimmed.contains('？')) {
-            return true
-        }
-        if (URL_REGEX.containsMatchIn(trimmed)) {
-            return true
-        }
-        return trimmed.length >= MIN_DECISION_CONTENT_LENGTH
-    }
-
-    fun stripLunaMentions(
-        content: String,
-        botSelfId: Snowflake? = null,
-    ): String {
-        var result = content
-        if (botSelfId != null) {
-            val botIdStr = botSelfId.toString()
-            result = result.replace(Regex("""<@!?$botIdStr>"""), "")
-        }
-        result = result.replace(LUNA_MENTION_REGEX, "")
-        result = result.replace(MULTIPLE_SPACES_REGEX, " ")
-        return result.lines().joinToString("\n") { it.trim() }.trim()
+        val content = message.content
+        return content.contains("<@$resolvedSelfId>") || content.contains("<@!$resolvedSelfId>")
     }
 
     fun isContextMessage(
@@ -286,32 +235,18 @@ open class ChatterNoiseFilter(
                 ?: runCatching { message.data.author.id }.getOrNull()
         val isLunaBot = resolvedSelfId != null && authorId == resolvedSelfId
         val hasAttachments = runCatching { message.attachments.isNotEmpty() }.getOrDefault(false)
+        val hasEmbeds = runCatching { message.embeds.isNotEmpty() }.getOrDefault(false)
 
         val content =
-            resolveCleanedContent(
-                rawContent = message.content,
-                botSelfId = resolvedSelfId,
-                hasAttachments = hasAttachments,
-            ) ?: return null
+            when {
+                message.content.isNotBlank() -> message.content
+                hasAttachments -> "[Attachment]"
+                hasEmbeds -> "[Embed]"
+                else -> return null
+            }
 
         val speaker = if (isLunaBot) "Luna" else extractSpeakerName(message)
         return ChatMessage(speaker, content)
-    }
-
-    fun resolveCleanedContent(
-        rawContent: String,
-        botSelfId: Snowflake? = null,
-        hasAttachments: Boolean = false,
-        isDirectMention: Boolean = false,
-    ): String? {
-        val stripped = stripLunaMentions(rawContent, botSelfId)
-        return when {
-            stripped.isNotBlank() -> stripped
-            isDirectMention -> CALLOUT_GREETING
-            hasAttachments -> "[Attachment]"
-            rawContent.isNotBlank() -> CALLOUT_GREETING
-            else -> null
-        }
     }
 
     fun filterHistory(
@@ -354,11 +289,7 @@ open class ChatterNoiseFilter(
     }
 
     companion object {
-        const val MIN_DECISION_CONTENT_LENGTH = 5
         val DEFAULT_BOT_PREFIXES = setOf("!", "~", "?")
-        const val CALLOUT_GREETING = "你好"
         val URL_REGEX = Regex("""https?://[^\s<>"']+""")
-        private val LUNA_MENTION_REGEX = Regex("""(?i)(?<!\w)@luna\b""")
-        private val MULTIPLE_SPACES_REGEX = Regex("""[ \t]+""")
     }
 }

@@ -295,6 +295,25 @@ class ChatterNoiseFilterTest {
         }
 
     @Test
+    fun `preserves blank embed only message in evaluate and conversational context`() =
+        runTest {
+            val embed = mockk<dev.kord.core.entity.Embed>()
+            val message = createMockMessage(channelId = 401L, username = "Charlie", content = "   ")
+            every { message.embeds } returns listOf(embed)
+
+            val allowedResult = filter.evaluate(message)
+            assertIs<ChatterFilterResult.Allowed>(allowedResult)
+            assertEquals("Charlie", allowedResult.speakerName)
+            assertEquals("[Embed]", allowedResult.content)
+            assertTrue(filter.shouldProcess(message))
+
+            val chatMessage = filter.toChatMessageOrNull(message)
+            assertNotNull(chatMessage)
+            assertEquals("Charlie", chatMessage.author)
+            assertEquals("[Embed]", chatMessage.content)
+        }
+
+    @Test
     fun `allows chatter triggers after cooldown duration expires`() =
         runTest {
             val channelId = Snowflake(402L)
@@ -385,8 +404,9 @@ class ChatterNoiseFilterTest {
         }
 
     @Test
-    fun `isDirectBotMention detects user mentions, string mentions, reply references, and text prefix`() {
+    fun `isDirectBotMention returns true only when kordSelfId is resolved and message explicitly at-mentions the bot`() {
         val botSelfId = Snowflake(9999L)
+        val otherUserId = Snowflake(1234L)
 
         // 1. MentionedUserIds contains bot self ID
         val msg1 = createMockMessage(content = "hey bot", mentionedUserIds = setOf(botSelfId))
@@ -398,104 +418,58 @@ class ChatterNoiseFilterTest {
         val msg3 = createMockMessage(content = "hello <@!9999> how are you")
         assertTrue(filter.isDirectBotMention(msg3, botSelfId))
 
-        // 3. Replied-to message author matches bot self ID
+        // 3. Returns false when kordSelfId is null (and message.kord is unavailable), even with @Luna or <@9999>
+        val msgWithRawTag = createMockMessage(content = "<@9999> hello", mentionedUserIds = setOf(botSelfId))
+        assertFalse(filter.isDirectBotMention(msgWithRawTag, null))
+        val msgWithTextLuna = createMockMessage(content = "@Luna what is the weather today?")
+        assertFalse(filter.isDirectBotMention(msgWithTextLuna, null))
+
+        // 4. Plain-text @luna / @Luna does not bypass Participation Decision even when selfId is resolved
+        val msgPlainLuna = createMockMessage(content = "Hey @luna, tell me a joke")
+        assertFalse(filter.isDirectBotMention(msgPlainLuna, botSelfId))
+        val msgUpperLuna = createMockMessage(content = "@Luna what do you think?")
+        assertFalse(filter.isDirectBotMention(msgUpperLuna, botSelfId))
+
+        // 5. Discord reply to Luna does not bypass Participation Decision
         val lunaMsg = createMockMessage(id = 888L, isBot = true)
         val userAuthor = mockk<User>()
         every { userAuthor.id } returns botSelfId
         every { lunaMsg.author } returns userAuthor
-        val msg4 = createMockMessage(content = "I agree with your point", referencedMessage = lunaMsg)
-        assertTrue(filter.isDirectBotMention(msg4, botSelfId))
+        val msgReplyToLuna = createMockMessage(content = "I agree with your point", referencedMessage = lunaMsg)
+        assertFalse(filter.isDirectBotMention(msgReplyToLuna, botSelfId))
 
-        // 4. Content starts with or contains @Luna
-        val msg5 = createMockMessage(content = "@Luna what is the weather today?")
-        assertTrue(filter.isDirectBotMention(msg5, null))
-        val msg6 = createMockMessage(content = "Hey @luna, tell me a joke")
-        assertTrue(filter.isDirectBotMention(msg6, botSelfId))
-
-        // 5. Unrelated message does not match
-        val msg7 = createMockMessage(content = "What is everyone doing tonight?")
-        assertFalse(filter.isDirectBotMention(msg7, botSelfId))
+        // 6. Mentioning another user or unrelated text returns false
+        val msgOtherMention = createMockMessage(content = "<@1234> hello", mentionedUserIds = setOf(otherUserId))
+        assertFalse(filter.isDirectBotMention(msgOtherMention, botSelfId))
+        val msgUnrelated = createMockMessage(content = "What is everyone doing tonight?")
+        assertFalse(filter.isDirectBotMention(msgUnrelated, botSelfId))
     }
 
     @Test
-    fun `isEligibleForDecisionEvaluation validates question marks, luna keyword, and substantive message length`() {
-        // Trivial messages (< 5 chars, no ? or luna) -> false
-        assertFalse(filter.isEligibleForDecisionEvaluation("ok"))
-        assertFalse(filter.isEligibleForDecisionEvaluation("好"))
-        assertFalse(filter.isEligibleForDecisionEvaluation("++"))
-        assertFalse(filter.isEligibleForDecisionEvaluation("111"))
-        assertFalse(filter.isEligibleForDecisionEvaluation("    "))
+    fun `evaluate allows short ambient messages and preserves raw content verbatim`() =
+        runTest {
+            val botSelfId = Snowflake(42L)
+            val shortQuestion = createMockMessage(id = 701L, username = "Alice", content = "?")
+            val shortReaction = createMockMessage(id = 702L, username = "Bob", content = "草")
+            val shortPhrase = createMockMessage(id = 703L, username = "Charlie", content = "真的嗎")
+            val rawSpacingAndMentions =
+                createMockMessage(
+                    id = 704L,
+                    username = "Dave",
+                    content = "  <@42>   @luna   check  this  ",
+                    mentionedUserIds = setOf(botSelfId),
+                )
 
-        // Questions (? or ？) -> true regardless of length
-        assertTrue(filter.isEligibleForDecisionEvaluation("在嗎?"))
-        assertTrue(filter.isEligibleForDecisionEvaluation("吃飽了嗎？"))
+            for (msg in listOf(shortQuestion, shortReaction, shortPhrase)) {
+                val res = filter.evaluate(msg, kordSelfId = botSelfId)
+                assertIs<ChatterFilterResult.Allowed>(res)
+                assertEquals(msg.content, res.content)
+            }
 
-        // Luna keywords -> true regardless of length
-        assertTrue(filter.isEligibleForDecisionEvaluation("luna"))
-        assertTrue(filter.isEligibleForDecisionEvaluation("嗨Luna"))
-        assertTrue(filter.isEligibleForDecisionEvaluation("露娜在嗎"))
-
-        // Substantive messages (>= 5 characters) -> true
-        assertTrue(filter.isEligibleForDecisionEvaluation("今天天氣真好"))
-        assertTrue(filter.isEligibleForDecisionEvaluation("週末大家有什麼安排呢"))
-
-        // HTTP/HTTPS URLs -> true
-        assertTrue(filter.isEligibleForDecisionEvaluation("https://example.com/post"))
-        assertTrue(filter.isEligibleForDecisionEvaluation("http://x.co"))
-    }
-
-    @Test
-    fun `isEligibleForDecisionEvaluation accepts image-only and URL-only messages`() {
-        val validPng = mockk<dev.kord.core.entity.Attachment>()
-        every { validPng.url } returns "https://cdn.discordapp.com/attachments/1/2/meme.png"
-        every { validPng.contentType } returns "image/png"
-        every { validPng.filename } returns "meme.png"
-        every { validPng.size } returns 512 * 1024
-
-        val imageOnlyMsg = createMockMessage(id = 701L, content = "")
-        every { imageOnlyMsg.attachments } returns setOf(validPng)
-        assertTrue(filter.isEligibleForDecisionEvaluation(imageOnlyMsg))
-
-        val urlOnlyMsg = createMockMessage(id = 702L, content = "https://www.youtube.com/watch?v=dQw4w9WgXcQ")
-        assertTrue(filter.isEligibleForDecisionEvaluation(urlOnlyMsg))
-
-        val httpUrlMsg = createMockMessage(id = 703L, content = "http://example.com/news")
-        assertTrue(filter.isEligibleForDecisionEvaluation(httpUrlMsg))
-    }
-
-    @Test
-    fun `isEligibleForDecisionEvaluation rejects blank messages with only oversized or unsupported MIME attachments`() {
-        val tenMbPlusOne = 10 * 1024 * 1024 + 1
-        val oversizedImg = mockk<dev.kord.core.entity.Attachment>()
-        every { oversizedImg.url } returns "https://cdn.discordapp.com/attachments/1/2/huge.jpg"
-        every { oversizedImg.contentType } returns "image/jpeg"
-        every { oversizedImg.filename } returns "huge.jpg"
-        every { oversizedImg.size } returns tenMbPlusOne
-
-        val oversizedOnlyMsg = createMockMessage(id = 704L, content = "   ")
-        every { oversizedOnlyMsg.attachments } returns setOf(oversizedImg)
-        assertFalse(filter.isEligibleForDecisionEvaluation(oversizedOnlyMsg))
-
-        val spoofedAttachment = mockk<dev.kord.core.entity.Attachment>()
-        every { spoofedAttachment.url } returns "https://cdn.discordapp.com/attachments/1/2/fake.png"
-        every { spoofedAttachment.contentType } returns "application/octet-stream"
-        every { spoofedAttachment.filename } returns "fake.png"
-        every { spoofedAttachment.size } returns 2048
-
-        val spoofedOnlyMsg = createMockMessage(id = 705L, content = "")
-        every { spoofedOnlyMsg.attachments } returns setOf(spoofedAttachment)
-        assertFalse(filter.isEligibleForDecisionEvaluation(spoofedOnlyMsg))
-
-        val pdfAttachment = mockk<dev.kord.core.entity.Attachment>()
-        every { pdfAttachment.url } returns "https://cdn.discordapp.com/attachments/1/2/doc.pdf"
-        every { pdfAttachment.contentType } returns "application/pdf"
-        every { pdfAttachment.filename } returns "doc.pdf"
-        every { pdfAttachment.size } returns 1024
-
-        val pdfOnlyMsg = createMockMessage(id = 706L, content = "")
-        every { pdfOnlyMsg.attachments } returns setOf(pdfAttachment)
-        assertFalse(filter.isEligibleForDecisionEvaluation(pdfOnlyMsg))
-    }
+            val rawRes = filter.evaluate(rawSpacingAndMentions, kordSelfId = botSelfId)
+            assertIs<ChatterFilterResult.Allowed>(rawRes)
+            assertEquals("  <@42>   @luna   check  this  ", rawRes.content)
+        }
 
     @Test
     fun `filterContextMessages preserves valid dialogue, attachments, embeds, and Luna chatter while dropping noise`() {
@@ -536,7 +510,7 @@ class ChatterNoiseFilterTest {
     }
 
     @Test
-    fun `toChatMessageOrNull converts Luna bot chatter message to ChatMessage with speaker Luna`() {
+    fun `toChatMessageOrNull converts Luna bot chatter message and preserves raw mentions and spacing`() {
         val botSelfId = Snowflake(42L)
         val chatterMsg =
             createMockMessage(
@@ -551,6 +525,18 @@ class ChatterNoiseFilterTest {
         assertNotNull(chatMessage)
         assertEquals("Luna", chatMessage.author)
         assertEquals("I really enjoyed reading this article!", chatMessage.content)
+
+        val mentionMsg =
+            createMockMessage(
+                id = 502L,
+                username = "Alice",
+                content = "<@!42>  @luna  hello   world",
+                mentionedUserIds = setOf(botSelfId),
+            )
+        val mentionChatMessage = filter.toChatMessageOrNull(mentionMsg, botSelfId)
+        assertNotNull(mentionChatMessage)
+        assertEquals("Alice", mentionChatMessage.author)
+        assertEquals("<@!42>  @luna  hello   world", mentionChatMessage.content)
     }
 
     @Test
@@ -603,54 +589,7 @@ class ChatterNoiseFilterTest {
     }
 
     @Test
-    fun `stripLunaMentions strips raw discord bot mention and nickname mention`() {
-        val botSelfId = Snowflake(42L)
-        val otherUserId = Snowflake(9999L)
-
-        // Raw mention and nickname mention of Luna are stripped
-        assertEquals("", filter.stripLunaMentions("<@42>", botSelfId))
-        assertEquals("", filter.stripLunaMentions("<@!42>", botSelfId))
-
-        // Other users' mentions are preserved intact
-        assertEquals("<@9999>", filter.stripLunaMentions("<@9999>", botSelfId))
-        assertEquals("<@!9999>", filter.stripLunaMentions("<@!9999>", botSelfId))
-
-        // When botSelfId is null, raw mentions are not stripped to avoid affecting other users
-        assertEquals("<@42>", filter.stripLunaMentions("<@42>", null))
-    }
-
-    @Test
-    fun `stripLunaMentions strips text mentions of Luna case-insensitively with word boundary`() {
-        val botSelfId = Snowflake(42L)
-
-        // Case-insensitive triggers
-        assertEquals("", filter.stripLunaMentions("@Luna", botSelfId))
-        assertEquals("", filter.stripLunaMentions("@luna", botSelfId))
-        assertEquals("", filter.stripLunaMentions("@LUNA", botSelfId))
-        assertEquals("", filter.stripLunaMentions("@LuNa", botSelfId))
-
-        // Word boundary protects false positives
-        assertEquals("@Lunar", filter.stripLunaMentions("@Lunar", botSelfId))
-        assertEquals("@lunatic", filter.stripLunaMentions("@lunatic", botSelfId))
-        assertEquals("@luna1", filter.stripLunaMentions("@luna1", botSelfId))
-        assertEquals("user@luna.com", filter.stripLunaMentions("user@luna.com", botSelfId))
-    }
-
-    @Test
-    fun `stripLunaMentions cleans surrounding whitespace left by stripped tags`() {
-        val botSelfId = Snowflake(42L)
-
-        assertEquals("今天天氣如何", filter.stripLunaMentions("@Luna 今天天氣如何", botSelfId))
-        assertEquals("今天天氣如何", filter.stripLunaMentions("<@42> 今天天氣如何", botSelfId))
-        assertEquals("今天天氣如何", filter.stripLunaMentions("<@!42> 今天天氣如何", botSelfId))
-        assertEquals("今天天氣如何", filter.stripLunaMentions("今天天氣如何 @Luna", botSelfId))
-        assertEquals("Hello world", filter.stripLunaMentions("Hello <@42> world", botSelfId))
-        assertEquals("", filter.stripLunaMentions("   @Luna   ", botSelfId))
-        assertEquals("", filter.stripLunaMentions("<@42>   @luna", botSelfId))
-    }
-
-    @Test
-    fun `evaluate does not reject direct mention message as empty when content is pure mention`() =
+    fun `evaluate preserves raw mention tags verbatim without injecting synthetic greeting`() =
         runTest {
             val botSelfId = Snowflake(42L)
 
@@ -658,25 +597,24 @@ class ChatterNoiseFilterTest {
             val rawMentionMsg = createMockMessage(id = 632L, username = "Dave", content = "<@42>")
             val emptyDirectMentionMsg = createMockMessage(id = 633L, username = "Dave", content = "")
 
-            // @Luna should be allowed and content cleansed to greeting fallback
-            val res1 = filter.evaluate(atLunaMsg, isDirectMention = true, kordSelfId = botSelfId)
+            // @Luna is preserved verbatim
+            val res1 = filter.evaluate(atLunaMsg, isDirectMention = false, kordSelfId = botSelfId)
             assertIs<ChatterFilterResult.Allowed>(res1)
             assertEquals("Dave", res1.speakerName)
-            assertEquals(ChatterNoiseFilter.CALLOUT_GREETING, res1.content)
-            assertTrue(filter.shouldProcess(atLunaMsg, isDirectMention = true, kordSelfId = botSelfId))
+            assertEquals("@Luna", res1.content)
 
-            // <@42> should be allowed with greeting fallback
+            // <@42> is preserved verbatim without stripping or substituting a greeting
             val res2 = filter.evaluate(rawMentionMsg, isDirectMention = true, kordSelfId = botSelfId)
             assertIs<ChatterFilterResult.Allowed>(res2)
             assertEquals("Dave", res2.speakerName)
-            assertEquals(ChatterNoiseFilter.CALLOUT_GREETING, res2.content)
+            assertEquals("<@42>", res2.content)
 
-            // Direct mention with empty text (e.g. mention-only interaction) allowed with greeting fallback
+            // Direct mention with empty text is preserved without injecting synthetic greeting
             val res3 = filter.evaluate(emptyDirectMentionMsg, isDirectMention = true, kordSelfId = botSelfId)
             assertIs<ChatterFilterResult.Allowed>(res3)
-            assertEquals(ChatterNoiseFilter.CALLOUT_GREETING, res3.content)
+            assertEquals("", res3.content)
 
-            // Pure empty message without direct mention flag remains rejected
+            // Pure empty message without attachments, embeds, or direct mention remains rejected
             val res4 = filter.evaluate(emptyDirectMentionMsg, isDirectMention = false, kordSelfId = botSelfId)
             assertIs<ChatterFilterResult.Rejected>(res4)
             assertEquals(RejectionReason.EMPTY_MESSAGE, res4.reason)
