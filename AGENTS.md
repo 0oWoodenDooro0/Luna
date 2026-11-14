@@ -53,7 +53,7 @@ Inspect library APIs and dependencies directly via their `build.gradle.kts` decl
 
 ## Verification
 
-- **Subagents & Inner development loop (strictly targeted tests)**: Subagents and developers iterating on code must run only narrow targeted tests with `--console=plain -q` to keep output compact. Keep large test files (`>500` lines) modularized by concern and locate symbols with `rg -n` + targeted line ranges instead of reading whole suites. Never run full monorepo `./gradlew test` during ticket implementation or TDD cycles:
+- **Subagents & Inner development loop (strictly targeted tests)**: Subagents and developers iterating on code must run only narrow targeted tests with `--console=plain -q` to keep output compact, and locate symbols with `rg -n` + targeted line ranges instead of reading whole suites. Never run full monorepo `./gradlew test` during ticket implementation or TDD cycles:
   ```bash
   ./gradlew test --tests "luna.mcp.*" --console=plain -q
   ./gradlew :mcp-server:test --tests "luna.mcp.server.*" --console=plain -q
@@ -61,5 +61,5 @@ Inspect library APIs and dependencies directly via their `build.gradle.kts` decl
   ./gradlew :mcp-server:test --console=plain -q
   ./gradlew :libs:socialpeek:test --console=plain -q
   ```
-- **Pre-Review / Pre-commit check (full suite & formatting)**: Run `./gradlew formatKotlin` before `./gradlew lintKotlin test --console=plain -q` (or `./gradlew check --console=plain -q`) across all modules only after completing an implementation slice or addressing all review findings, before dispatching the Review Gate or creating a PR. Pre-commit hooks in `.githooks/` run lint and tests automatically.
+- **Pre-Review / Pre-commit & Pre-push checks**: Run `./gradlew formatKotlin` before `./gradlew check --console=plain -q` across all modules after completing an implementation slice or addressing review findings, before dispatching the Review Gate or creating a PR. `.githooks/pre-commit` runs `lintKotlin` and `CodingStandardsTest` on every commit; `.githooks/pre-push` runs full `./gradlew check` on push.
 - **CI parity (Docker build)**: Run `docker build -t luna:ci-test .` strictly as the final pre-PR/pre-merge verification step to ensure parity with CI (`.github/workflows/ci.yml`). Banned from inner-loop iteration.

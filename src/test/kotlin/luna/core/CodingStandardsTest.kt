@@ -75,14 +75,18 @@ class CodingStandardsTest {
 
     @Test
     fun `integration tests must not use brittle assertEquals on formatted input content`() {
-        val summarizerTests = File(projectRoot, "src/test/kotlin/luna/summarizer")
-        assertTrue(summarizerTests.exists(), "src/test/kotlin/luna/summarizer directory must exist")
+        val serviceTests =
+            findKotlinSourceRoots("test")
+                .flatMap { root ->
+                    root.walkTopDown().filter { it.isFile && it.name.endsWith("ServiceTest.kt") }.toList()
+                }
+        assertTrue(serviceTests.isNotEmpty(), "At least one *ServiceTest.kt file must exist")
 
         val violations = mutableListOf<String>()
         val brittleAssertRegex =
             Regex("""assertEquals\s*\([^,]+,\s*(?:capturedInput|capturedInitialInput|input)\.content\s*\)""")
 
-        summarizerTests.walkTopDown().filter { it.extension == "kt" }.forEach { file ->
+        serviceTests.forEach { file ->
             file.useLines { lines ->
                 lines.forEachIndexed { index, line ->
                     if (brittleAssertRegex.containsMatchIn(line)) {
