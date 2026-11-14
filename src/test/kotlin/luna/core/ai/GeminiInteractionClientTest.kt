@@ -43,6 +43,23 @@ class GeminiInteractionClientTest {
             }
         }
 
+    private fun agenticVideoRequest(
+        model: String,
+        videoUri: String,
+        promptText: String,
+    ): GeminiInteractionRequest =
+        GeminiInteractionRequest(
+            model = model,
+            input =
+                GeminiInteractionClient.buildMultimodalInputs(
+                    promptText = promptText,
+                    videoUri = videoUri,
+                    videoMimeType = "video/mp4",
+                    videoProcessingMode = VideoProcessingMode.AGENTIC,
+                ),
+            background = true,
+        )
+
     @Test
     fun `submits agentic video interaction and polls until completion returning sanitized output`() =
         runTest {
@@ -93,15 +110,19 @@ class GeminiInteractionClientTest {
                 )
 
             val result =
-                client.runAgenticVideo(
+                client.interact(
                     baseUrl = "https://generativelanguage.googleapis.com/v1beta/",
                     apiKey = "test-api-key",
-                    model = "models/gemini-3.5-flash-lite",
-                    videoUri = "https://www.youtube.com/watch?v=testVideo",
-                    promptText = "Summarize this video",
+                    request =
+                        agenticVideoRequest(
+                            model = "models/gemini-3.5-flash-lite",
+                            videoUri = "https://www.youtube.com/watch?v=testVideo",
+                            promptText = "Summarize this video",
+                        ),
+                    traceContext = InteractionTraceContext(stage = AiAttemptStage.AGENTIC_VIDEO),
                 )
 
-            assertIs<GeminiInteractionResult.Success>(result)
+            assertIs<InteractionExecutionResult.Success>(result)
             assertEquals("Agentic video result", result.text)
             assertEquals(2, pollCount)
 
@@ -147,15 +168,18 @@ class GeminiInteractionClientTest {
 
             val client = GeminiInteractionClient(httpClient = createClient(mockEngine), pollingDelayMs = 1L)
             val result =
-                client.runAgenticVideo(
+                client.interact(
                     baseUrl = "https://generativelanguage.googleapis.com",
                     apiKey = "test-key",
-                    model = "gemini-3.5-flash-lite",
-                    videoUri = "https://www.youtube.com/watch?v=steps",
-                    promptText = "Prompt",
+                    request =
+                        agenticVideoRequest(
+                            model = "gemini-3.5-flash-lite",
+                            videoUri = "https://www.youtube.com/watch?v=steps",
+                            promptText = "Prompt",
+                        ),
                 )
 
-            assertIs<GeminiInteractionResult.Success>(result)
+            assertIs<InteractionExecutionResult.Success>(result)
             assertEquals("Extracted step output", result.text)
         }
 
@@ -173,14 +197,17 @@ class GeminiInteractionClientTest {
 
             val submitClient = GeminiInteractionClient(httpClient = createClient(submit429Engine), pollingDelayMs = 1L)
             val submitResult =
-                submitClient.runAgenticVideo(
+                submitClient.interact(
                     baseUrl = "https://generativelanguage.googleapis.com",
                     apiKey = "test-key",
-                    model = "gemini-3.5-flash-lite",
-                    videoUri = "https://www.youtube.com/watch?v=v1",
-                    promptText = "Prompt",
+                    request =
+                        agenticVideoRequest(
+                            model = "gemini-3.5-flash-lite",
+                            videoUri = "https://www.youtube.com/watch?v=v1",
+                            promptText = "Prompt",
+                        ),
                 )
-            assertIs<GeminiInteractionResult.Error.RateLimitExceeded>(submitResult)
+            assertIs<InteractionExecutionResult.Error.RateLimitExceeded>(submitResult)
             assertEquals(45L, submitResult.retryAfterSeconds)
 
             val poll429Engine =
@@ -202,14 +229,17 @@ class GeminiInteractionClientTest {
 
             val pollClient = GeminiInteractionClient(httpClient = createClient(poll429Engine), pollingDelayMs = 1L)
             val pollResult =
-                pollClient.runAgenticVideo(
+                pollClient.interact(
                     baseUrl = "https://generativelanguage.googleapis.com",
                     apiKey = "test-key",
-                    model = "gemini-3.5-flash-lite",
-                    videoUri = "https://www.youtube.com/watch?v=v2",
-                    promptText = "Prompt",
+                    request =
+                        agenticVideoRequest(
+                            model = "gemini-3.5-flash-lite",
+                            videoUri = "https://www.youtube.com/watch?v=v2",
+                            promptText = "Prompt",
+                        ),
                 )
-            assertIs<GeminiInteractionResult.Error.RateLimitExceeded>(pollResult)
+            assertIs<InteractionExecutionResult.Error.RateLimitExceeded>(pollResult)
             assertEquals(12L, pollResult.retryAfterSeconds)
         }
 
@@ -227,14 +257,17 @@ class GeminiInteractionClientTest {
 
             val submitClient = GeminiInteractionClient(httpClient = createClient(submitErrorEngine), pollingDelayMs = 1L)
             val submitResult =
-                submitClient.runAgenticVideo(
+                submitClient.interact(
                     baseUrl = "https://generativelanguage.googleapis.com",
                     apiKey = "test-key",
-                    model = "gemini-3.5-flash-lite",
-                    videoUri = "https://www.youtube.com/watch?v=v1",
-                    promptText = "Prompt",
+                    request =
+                        agenticVideoRequest(
+                            model = "gemini-3.5-flash-lite",
+                            videoUri = "https://www.youtube.com/watch?v=v1",
+                            promptText = "Prompt",
+                        ),
                 )
-            assertIs<GeminiInteractionResult.Error.ApiError>(submitResult)
+            assertIs<InteractionExecutionResult.Error.ApiError>(submitResult)
             assertEquals(400, submitResult.statusCode)
 
             val pollErrorEngine =
@@ -255,14 +288,17 @@ class GeminiInteractionClientTest {
 
             val pollClient = GeminiInteractionClient(httpClient = createClient(pollErrorEngine), pollingDelayMs = 1L)
             val pollResult =
-                pollClient.runAgenticVideo(
+                pollClient.interact(
                     baseUrl = "https://generativelanguage.googleapis.com",
                     apiKey = "test-key",
-                    model = "gemini-3.5-flash-lite",
-                    videoUri = "https://www.youtube.com/watch?v=v2",
-                    promptText = "Prompt",
+                    request =
+                        agenticVideoRequest(
+                            model = "gemini-3.5-flash-lite",
+                            videoUri = "https://www.youtube.com/watch?v=v2",
+                            promptText = "Prompt",
+                        ),
                 )
-            assertIs<GeminiInteractionResult.Error.ApiError>(pollResult)
+            assertIs<InteractionExecutionResult.Error.ApiError>(pollResult)
             assertEquals(500, pollResult.statusCode)
         }
 
@@ -275,14 +311,17 @@ class GeminiInteractionClientTest {
                 }
             val timeoutClient = GeminiInteractionClient(httpClient = createClient(timeoutExceptionEngine), pollingDelayMs = 1L)
             val exceptionResult =
-                timeoutClient.runAgenticVideo(
+                timeoutClient.interact(
                     baseUrl = "https://generativelanguage.googleapis.com",
                     apiKey = "test-key",
-                    model = "gemini-3.5-flash-lite",
-                    videoUri = "https://www.youtube.com/watch?v=v1",
-                    promptText = "Prompt",
+                    request =
+                        agenticVideoRequest(
+                            model = "gemini-3.5-flash-lite",
+                            videoUri = "https://www.youtube.com/watch?v=v1",
+                            promptText = "Prompt",
+                        ),
                 )
-            assertIs<GeminiInteractionResult.Error.Timeout>(exceptionResult)
+            assertIs<InteractionExecutionResult.Error.Timeout>(exceptionResult)
 
             val stuckEngine =
                 MockEngine { request ->
@@ -307,14 +346,17 @@ class GeminiInteractionClientTest {
                     maxPollingAttempts = 2,
                 )
             val exhaustedResult =
-                stuckClient.runAgenticVideo(
+                stuckClient.interact(
                     baseUrl = "https://generativelanguage.googleapis.com",
                     apiKey = "test-key",
-                    model = "gemini-3.5-flash-lite",
-                    videoUri = "https://www.youtube.com/watch?v=v2",
-                    promptText = "Prompt",
+                    request =
+                        agenticVideoRequest(
+                            model = "gemini-3.5-flash-lite",
+                            videoUri = "https://www.youtube.com/watch?v=v2",
+                            promptText = "Prompt",
+                        ),
                 )
-            assertIs<GeminiInteractionResult.Error.Timeout>(exhaustedResult)
+            assertIs<InteractionExecutionResult.Error.Timeout>(exhaustedResult)
             assertTrue(exhaustedResult.message.contains("2 attempts"))
         }
 
@@ -340,15 +382,18 @@ class GeminiInteractionClientTest {
 
             val client = GeminiInteractionClient(httpClient = createClient(blankEngine), pollingDelayMs = 1L)
             val result =
-                client.runAgenticVideo(
+                client.interact(
                     baseUrl = "https://generativelanguage.googleapis.com",
                     apiKey = "test-key",
-                    model = "gemini-3.5-flash-lite",
-                    videoUri = "https://www.youtube.com/watch?v=empty",
-                    promptText = "Prompt",
+                    request =
+                        agenticVideoRequest(
+                            model = "gemini-3.5-flash-lite",
+                            videoUri = "https://www.youtube.com/watch?v=empty",
+                            promptText = "Prompt",
+                        ),
                 )
 
-            assertIs<GeminiInteractionResult.Error.EmptyOutput>(result)
+            assertIs<InteractionExecutionResult.Error.EmptyOutput>(result)
             assertTrue(result.message.contains("empty or sanitized to blank", ignoreCase = true))
         }
 
@@ -373,14 +418,17 @@ class GeminiInteractionClientTest {
                 }
             val failClient = GeminiInteractionClient(httpClient = createClient(failedEngine), pollingDelayMs = 1L)
             val failedResult =
-                failClient.runAgenticVideo(
+                failClient.interact(
                     baseUrl = "https://generativelanguage.googleapis.com",
                     apiKey = "test-key",
-                    model = "gemini-3.5-flash-lite",
-                    videoUri = "https://www.youtube.com/watch?v=fail",
-                    promptText = "Prompt",
+                    request =
+                        agenticVideoRequest(
+                            model = "gemini-3.5-flash-lite",
+                            videoUri = "https://www.youtube.com/watch?v=fail",
+                            promptText = "Prompt",
+                        ),
                 )
-            assertIs<GeminiInteractionResult.Error.Generic>(failedResult)
+            assertIs<InteractionExecutionResult.Error.Generic>(failedResult)
             assertEquals("Video inaccessible", failedResult.message)
 
             val noIdEngine =
@@ -393,38 +441,49 @@ class GeminiInteractionClientTest {
                 }
             val noIdClient = GeminiInteractionClient(httpClient = createClient(noIdEngine), pollingDelayMs = 1L)
             val noIdResult =
-                noIdClient.runAgenticVideo(
+                noIdClient.interact(
                     baseUrl = "https://generativelanguage.googleapis.com",
                     apiKey = "test-key",
-                    model = "gemini-3.5-flash-lite",
-                    videoUri = "https://www.youtube.com/watch?v=noid",
-                    promptText = "Prompt",
+                    request =
+                        agenticVideoRequest(
+                            model = "gemini-3.5-flash-lite",
+                            videoUri = "https://www.youtube.com/watch?v=noid",
+                            promptText = "Prompt",
+                        ),
                 )
-            assertIs<GeminiInteractionResult.Error.Generic>(noIdResult)
+            assertIs<InteractionExecutionResult.Error.Generic>(noIdResult)
 
             val blankKeyResult =
-                noIdClient.runAgenticVideo(
+                noIdClient.interact(
                     baseUrl = "https://generativelanguage.googleapis.com",
                     apiKey = "   ",
-                    model = "gemini-3.5-flash-lite",
-                    videoUri = "https://www.youtube.com/watch?v=noid",
-                    promptText = "Prompt",
+                    request =
+                        agenticVideoRequest(
+                            model = "gemini-3.5-flash-lite",
+                            videoUri = "https://www.youtube.com/watch?v=noid",
+                            promptText = "Prompt",
+                        ),
                 )
-            assertIs<GeminiInteractionResult.Error.Generic>(blankKeyResult)
+            assertIs<InteractionExecutionResult.Error.Generic>(blankKeyResult)
+            assertEquals(AiTraceFailureCategory.NOT_CONFIGURED, blankKeyResult.failureCategory)
 
-            val blankVideoResult =
-                noIdClient.runAgenticVideo(
+            val blankInputResult =
+                noIdClient.interact(
                     baseUrl = "https://generativelanguage.googleapis.com",
                     apiKey = "test-key",
-                    model = "gemini-3.5-flash-lite",
-                    videoUri = " ",
-                    promptText = "Prompt",
+                    request =
+                        agenticVideoRequest(
+                            model = "gemini-3.5-flash-lite",
+                            videoUri = " ",
+                            promptText = " ",
+                        ),
                 )
-            assertIs<GeminiInteractionResult.Error.Generic>(blankVideoResult)
+            assertIs<InteractionExecutionResult.Error.Generic>(blankInputResult)
+            assertEquals(AiTraceFailureCategory.CONTEXT_ERROR, blankInputResult.failureCategory)
         }
 
     @Test
-    fun `runAgenticVideo omits mime_type for YouTube video URIs and sends no Api-Revision header`() =
+    fun `agentic video interact omits mime_type for YouTube video URIs and sends no Api-Revision header`() =
         runTest {
             var recordedPostBody: String? = null
             var hasApiRevision = false
@@ -452,15 +511,18 @@ class GeminiInteractionClientTest {
 
             val client = GeminiInteractionClient(httpClient = createClient(engine), pollingDelayMs = 1L)
             val result =
-                client.runAgenticVideo(
+                client.interact(
                     baseUrl = "https://generativelanguage.googleapis.com",
                     apiKey = "test-key",
-                    model = "gemini-3.5-flash-lite",
-                    videoUri = "https://youtu.be/dQw4w9WgXcQ",
-                    promptText = "Summarize",
+                    request =
+                        agenticVideoRequest(
+                            model = "gemini-3.5-flash-lite",
+                            videoUri = "https://youtu.be/dQw4w9WgXcQ",
+                            promptText = "Summarize",
+                        ),
                 )
 
-            assertIs<GeminiInteractionResult.Success>(result)
+            assertIs<InteractionExecutionResult.Success>(result)
             assertFalse(hasApiRevision, "Must never send removed Api-Revision header")
             val bodyJson = Json.parseToJsonElement(assertNotNull(recordedPostBody)) as JsonObject
             val inputs = bodyJson["input"] as JsonArray
@@ -534,17 +596,32 @@ class GeminiInteractionClientTest {
                 client.interact(
                     baseUrl = "https://generativelanguage.googleapis.com",
                     apiKey = "test-key",
-                    model = "gemini-3.5-flash-lite",
-                    systemInstruction = "System prompt",
-                    promptText = "User prompt",
-                    videoUri = "https://www.youtube.com/watch?v=sync123",
-                    videoProcessingMode = VideoProcessingMode.STATIC,
-                    imageAttachments = listOf(ChatImageAttachment(url = "https://cdn.discordapp.com/1.png", mimeType = "image/png")),
-                    webUrlCount = 1,
-                    inputUrls = listOf("https://example.com/article"),
-                    tools = listOf(GeminiInteractionTools.URL_CONTEXT, GeminiInteractionTools.GOOGLE_SEARCH),
-                    maxOutputTokens = 1024,
-                    background = false,
+                    request =
+                        GeminiInteractionRequest(
+                            model = "gemini-3.5-flash-lite",
+                            systemInstruction = "System prompt",
+                            input =
+                                GeminiInteractionClient.buildMultimodalInputs(
+                                    promptText = "User prompt",
+                                    imageAttachments =
+                                        listOf(
+                                            ChatImageAttachment(
+                                                url = "https://cdn.discordapp.com/1.png",
+                                                mimeType = "image/png",
+                                            ),
+                                        ),
+                                    videoUri = "https://www.youtube.com/watch?v=sync123",
+                                    videoProcessingMode = VideoProcessingMode.STATIC,
+                                ),
+                            tools = listOf(GeminiInteractionTools.URL_CONTEXT, GeminiInteractionTools.GOOGLE_SEARCH),
+                            generationConfig = GeminiInteractionGenerationConfig(maxOutputTokens = 1024),
+                            background = false,
+                        ),
+                    traceContext =
+                        InteractionTraceContext(
+                            webUrlCount = 1,
+                            inputUrls = listOf("https://example.com/article"),
+                        ),
                 )
 
             assertEquals(1, requestCount)
@@ -629,12 +706,15 @@ class GeminiInteractionClientTest {
                 client.interact(
                     baseUrl = "https://generativelanguage.googleapis.com",
                     apiKey = "test-key",
-                    model = "gemini-3.5-flash-lite",
-                    systemInstruction = "Sys",
-                    promptText = "Check earlier messages",
-                    tools = tools,
-                    maxOutputTokens = 1024,
-                    background = false,
+                    request =
+                        GeminiInteractionRequest(
+                            model = "gemini-3.5-flash-lite",
+                            systemInstruction = "Sys",
+                            input = listOf(GeminiInteractionInput.text("Check earlier messages")),
+                            tools = tools,
+                            generationConfig = GeminiInteractionGenerationConfig(maxOutputTokens = 1024),
+                            background = false,
+                        ),
                 )
 
             assertIs<InteractionExecutionResult.FunctionCall>(firstResult)
@@ -716,9 +796,13 @@ class GeminiInteractionClientTest {
                     client.interact(
                         baseUrl = "https://generativelanguage.googleapis.com",
                         apiKey = "test-key",
-                        model = "gemini-3.5-flash-lite",
-                        promptText = "Summarize links",
-                        tools = listOf(GeminiInteractionTools.URL_CONTEXT),
+                        request =
+                            GeminiInteractionRequest(
+                                model = "gemini-3.5-flash-lite",
+                                input = listOf(GeminiInteractionInput.text("Summarize links")),
+                                tools = listOf(GeminiInteractionTools.URL_CONTEXT),
+                                background = false,
+                            ),
                     )
 
                 assertIs<InteractionExecutionResult.Success>(result)
@@ -755,9 +839,13 @@ class GeminiInteractionClientTest {
                 client.interact(
                     baseUrl = "https://generativelanguage.googleapis.com",
                     apiKey = "test-key",
-                    model = "gemini-3.5-flash-lite",
-                    promptText = "Hello",
-                    tools = listOf(GeminiInteractionTools.URL_CONTEXT, GeminiInteractionTools.GOOGLE_SEARCH),
+                    request =
+                        GeminiInteractionRequest(
+                            model = "gemini-3.5-flash-lite",
+                            input = listOf(GeminiInteractionInput.text("Hello")),
+                            tools = listOf(GeminiInteractionTools.URL_CONTEXT, GeminiInteractionTools.GOOGLE_SEARCH),
+                            background = false,
+                        ),
                 )
 
             assertIs<InteractionExecutionResult.Error.ApiError>(result)
@@ -808,12 +896,18 @@ class GeminiInteractionClientTest {
                 client.interact(
                     baseUrl = "https://generativelanguage.googleapis.com",
                     apiKey = "test-key",
-                    model = "gemini-3.5-flash-lite",
-                    promptText = "Describe this clip",
-                    videoUri = "https://cdn.example.com/media/clip.mp4",
-                    videoMimeType = "video/mp4",
-                    videoProcessingMode = VideoProcessingMode.AGENTIC,
-                    background = true,
+                    request =
+                        GeminiInteractionRequest(
+                            model = "gemini-3.5-flash-lite",
+                            input =
+                                GeminiInteractionClient.buildMultimodalInputs(
+                                    promptText = "Describe this clip",
+                                    videoUri = "https://cdn.example.com/media/clip.mp4",
+                                    videoMimeType = "video/mp4",
+                                    videoProcessingMode = VideoProcessingMode.AGENTIC,
+                                ),
+                            background = true,
+                        ),
                 )
 
             assertIs<InteractionExecutionResult.Success>(result)
@@ -844,8 +938,12 @@ class GeminiInteractionClientTest {
                 safetyClient.interact(
                     baseUrl = "https://generativelanguage.googleapis.com",
                     apiKey = "test-key",
-                    model = "gemini-3.5-flash-lite",
-                    promptText = "Unsafe prompt",
+                    request =
+                        GeminiInteractionRequest(
+                            model = "gemini-3.5-flash-lite",
+                            input = listOf(GeminiInteractionInput.text("Unsafe prompt")),
+                            background = false,
+                        ),
                 )
             assertIs<InteractionExecutionResult.Error.SafetyBlock>(safetyResult)
             assertEquals(AiTraceFailureCategory.SAFETY_BLOCK, safetyResult.failureCategory)
@@ -863,8 +961,12 @@ class GeminiInteractionClientTest {
                 parseClient.interact(
                     baseUrl = "https://generativelanguage.googleapis.com",
                     apiKey = "test-key",
-                    model = "gemini-3.5-flash-lite",
-                    promptText = "Hello",
+                    request =
+                        GeminiInteractionRequest(
+                            model = "gemini-3.5-flash-lite",
+                            input = listOf(GeminiInteractionInput.text("Hello")),
+                            background = false,
+                        ),
                 )
             assertIs<InteractionExecutionResult.Error.Generic>(parseResult)
             assertEquals(AiTraceFailureCategory.PARSE_ERROR, parseResult.failureCategory)

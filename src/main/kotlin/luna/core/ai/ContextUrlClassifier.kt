@@ -225,6 +225,12 @@ object ContextUrlClassifier {
         return ContextUrlCategory.WEB
     }
 
+    fun isYouTubeUrl(url: String): Boolean {
+        val cleaned = trimTrailingPunctuation(url.trim())
+        val parsed = parseValidHttpUrl(cleaned) ?: return false
+        return isYouTubeHost(parsed.host.lowercase())
+    }
+
     private fun isYouTubeHost(host: String): Boolean =
         host == "youtube.com" ||
             host.endsWith(".youtube.com") ||
@@ -252,6 +258,21 @@ object ContextUrlClassifier {
         val query = parsed.encodedQuery
         val queryPart = if (query.isNotEmpty()) "?$query" else ""
         return "$scheme://$host$portPart$path$queryPart"
+    }
+
+    /**
+     * Canonicalizes [rawUrl] for cross-scheme citation comparison (`http` -> `https`),
+     * falling back to trimmed lowercase for non-HTTP strings.
+     */
+    fun normalizeUrlForComparison(rawUrl: String): String {
+        val trimmed = rawUrl.trim()
+        if (trimmed.isEmpty()) return ""
+        val normalized = normalizeUrl(trimmed) ?: return trimmed.lowercase().trimEnd('/')
+        return if (normalized.startsWith("http://")) {
+            "https://" + normalized.removePrefix("http://")
+        } else {
+            normalized
+        }
     }
 
     private fun trimTrailingPunctuation(raw: String): String {

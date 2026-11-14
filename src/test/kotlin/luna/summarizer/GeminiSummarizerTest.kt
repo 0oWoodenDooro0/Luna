@@ -688,7 +688,7 @@ class GeminiSummarizerTest {
     @Test
     fun `logs error on non-success url_context_result while preserving valid generated summary`() =
         runTest {
-            val logger = LoggerFactory.getLogger(GeminiSummarizer::class.java) as Logger
+            val logger = LoggerFactory.getLogger(luna.core.ai.GeminiInteractionClient::class.java) as Logger
             val listAppender = ListAppender<ILoggingEvent>()
             listAppender.start()
             logger.addAppender(listAppender)

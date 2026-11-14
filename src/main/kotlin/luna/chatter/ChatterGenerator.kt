@@ -16,6 +16,7 @@ import luna.core.ai.AiTraceTrigger
 import luna.core.ai.ContextUrlClassifier
 import luna.core.ai.GeminiInteractionClient
 import luna.core.ai.InteractionExecutionResult
+import luna.core.ai.InteractionTraceContext
 import luna.core.ai.NoOpAiTraceRecorder
 import luna.core.ai.VideoProcessingMode
 import luna.core.ai.withActiveOrStandaloneSession
@@ -139,43 +140,35 @@ open class ChatterGenerator(
             }.distinct()
         val trigger = if (effectiveInput.isDirectMention) AiTraceTrigger.MENTION else AiTraceTrigger.AMBIENT
 
+        val request =
+            ChatterPromptBuilder.buildInteractionRequest(
+                input = effectiveInput,
+                model = config.cleanModel,
+                tools = tools,
+                videoProcessingMode = videoProcessingMode,
+                background = background,
+            )
+
         val result =
             interactionClient.interact(
                 baseUrl = config.cleanBaseUrl,
                 apiKey = config.apiKey,
-                model = config.cleanModel,
-                promptText = ChatterPromptBuilder.buildUserPrompt(effectiveInput),
-                systemInstruction = ChatterPromptBuilder.buildSystemInstruction(),
-                imageAttachments = effectiveInput.imageAttachments,
-                videoUri = effectiveVideoUri,
-                videoMimeType = null,
-                videoProcessingMode = videoProcessingMode,
-                videoDurationSeconds = duration,
-                webUrlCount = effectiveInput.webUrls.size,
-                inputUrls = inputUrls,
-                tools = tools,
-                maxOutputTokens = ChatterPromptBuilder.MAX_OUTPUT_TOKENS,
-                background = background,
-                stage = stage,
-                variant = null,
-                transcriptLength = effectiveInput.transcript.length,
-                pipeline = AiTracePipeline.CHATTER,
-                trigger = trigger,
+                request = request,
+                traceContext =
+                    InteractionTraceContext(
+                        webUrlCount = effectiveInput.webUrls.size,
+                        inputUrls = inputUrls,
+                        videoDurationSeconds = duration,
+                        transcriptLength = effectiveInput.transcript.length,
+                        stage = stage,
+                        variant = null,
+                        pipeline = AiTracePipeline.CHATTER,
+                        trigger = trigger,
+                    ),
             )
 
         return when (result) {
             is InteractionExecutionResult.Success -> {
-                for (entry in result.urlContextResults) {
-                    if (!entry.isSuccess) {
-                        logger.error(
-                            "ChatterGenerator url_context_result non-success (interactionId={}): retrieved_url={}, status={}",
-                            result.interactionId ?: "unknown",
-                            entry.retrievedUrl,
-                            entry.status,
-                        )
-                    }
-                }
-
                 val sanitized =
                     ChatterPromptBuilder.sanitizeResponse(
                         result.text,

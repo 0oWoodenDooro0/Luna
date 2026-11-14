@@ -135,7 +135,7 @@ object ChatterPromptBuilder {
             )
 
         return GeminiInteractionRequest(
-            model = model,
+            model = model.trim().removePrefix("models/"),
             input = inputs,
             systemInstruction = buildSystemInstruction(),
             tools = tools.takeIf { it.isNotEmpty() },

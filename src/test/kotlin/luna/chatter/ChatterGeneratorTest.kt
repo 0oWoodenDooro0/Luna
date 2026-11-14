@@ -992,7 +992,7 @@ class ChatterGeneratorTest {
     @Test
     fun `logs error on unsafe url_context_result while preserving valid sanitized model reply`() =
         runTest {
-            val logger = LoggerFactory.getLogger(ChatterGenerator::class.java) as Logger
+            val logger = LoggerFactory.getLogger(luna.core.ai.GeminiInteractionClient::class.java) as Logger
             val listAppender = ListAppender<ILoggingEvent>()
             listAppender.start()
             logger.addAppender(listAppender)

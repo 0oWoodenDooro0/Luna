@@ -1322,7 +1322,7 @@ class SummaryAiTraceTest {
         @TempDir tempDir: Path,
     ) = runTest {
         val (recorder, traceFile) = createRecorder(tempDir)
-        val logger = LoggerFactory.getLogger(GeminiSummarizer::class.java) as Logger
+        val logger = LoggerFactory.getLogger(luna.core.ai.GeminiInteractionClient::class.java) as Logger
         val listAppender = ListAppender<ILoggingEvent>()
         listAppender.start()
         logger.addAppender(listAppender)

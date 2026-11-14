@@ -761,4 +761,68 @@ class GeminiSummarizerLookbackTest {
                 listAppender.stop()
             }
         }
+
+    @Test
+    fun `rejects fetch_earlier_messages tool call when call_id is missing without invoking lookbackProvider`() =
+        runTest {
+            val logger = LoggerFactory.getLogger(GeminiSummarizer::class.java) as Logger
+            val listAppender = ListAppender<ILoggingEvent>()
+            listAppender.start()
+            logger.addAppender(listAppender)
+
+            try {
+                var requestCount = 0
+                var providerInvoked = false
+                val malformedToolCallResponse =
+                    """
+                    {
+                      "id": "int-missing-call-id",
+                      "status": "requires_action",
+                      "steps": [
+                        {
+                          "type": "function_call",
+                          "name": "fetch_earlier_messages",
+                          "arguments": { "reason": "Need earlier context" }
+                        }
+                      ]
+                    }
+                    """.trimIndent()
+
+                val mockEngine =
+                    MockEngine {
+                        requestCount++
+                        respond(
+                            content = malformedToolCallResponse,
+                            status = HttpStatusCode.OK,
+                            headers = headersOf(HttpHeaders.ContentType, "application/json"),
+                        )
+                    }
+
+                val summarizer =
+                    GeminiSummarizer(
+                        config = GeminiConfig(apiKey = "test-key"),
+                        httpClient = createTestClient(mockEngine),
+                    )
+
+                val input = SummaryInput(content = "Target conversation")
+                val result =
+                    summarizer.summarize(input) { _ ->
+                        providerInvoked = true
+                        "Should never be fetched"
+                    }
+
+                assertFalse(providerInvoked, "lookbackProvider must not run when call_id is missing")
+                assertEquals(1, requestCount, "Must fail closed after round 1 without continuation")
+                assertIs<SummaryResult.Error.Generic>(result)
+                assertEquals(AiTraceFailureCategory.PARSE_ERROR, classifySummaryError(result))
+                assertTrue(
+                    listAppender.list.any {
+                        it.level == Level.ERROR && it.formattedMessage.contains("call_id")
+                    },
+                )
+            } finally {
+                logger.detachAppender(listAppender)
+                listAppender.stop()
+            }
+        }
 }

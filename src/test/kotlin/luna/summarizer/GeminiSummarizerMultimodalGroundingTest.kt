@@ -473,7 +473,7 @@ class GeminiSummarizerMultimodalGroundingTest {
     @Test
     fun `summarize preserves valid model_output when url_context_result contains unsafe status logs error and excludes retrieved URLs`() =
         runTest {
-            val logger = LoggerFactory.getLogger(GeminiSummarizer::class.java) as Logger
+            val logger = LoggerFactory.getLogger(luna.core.ai.GeminiInteractionClient::class.java) as Logger
             val listAppender = ListAppender<ILoggingEvent>()
             listAppender.start()
             logger.addAppender(listAppender)

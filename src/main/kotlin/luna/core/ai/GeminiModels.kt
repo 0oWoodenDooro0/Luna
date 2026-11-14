@@ -12,7 +12,6 @@ import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonObject
-import java.net.URI
 
 /**
  * Supported video processing modes for Gemini multimodal video understanding.
@@ -313,17 +312,7 @@ data class GeminiApiErrorDetails(
  * Returns `true` when [uri] points to a YouTube host (`youtube.com`, subdomains, or `youtu.be`),
  * for which the Gemini Interactions API requires omitting `mime_type`.
  */
-fun isYouTubeUri(uri: String): Boolean {
-    val trimmed = uri.trim()
-    if (trimmed.isEmpty()) return false
-    val host =
-        runCatching { URI(trimmed).host?.lowercase() }.getOrNull()
-            ?: return false
-    return host == "youtube.com" ||
-        host.endsWith(".youtube.com") ||
-        host == "youtu.be" ||
-        host.endsWith(".youtu.be")
-}
+fun isYouTubeUri(uri: String): Boolean = ContextUrlClassifier.isYouTubeUrl(uri)
 
 @Serializable
 data class GeminiInteractionTool(
@@ -763,21 +752,4 @@ data class GeminiInteractionResponse(
  * lowercasing host, removing default ports (`:80`, `:443`), trimming trailing slashes on path,
  * preserving query parameters, and stripping fragments.
  */
-fun normalizeUrlForComparison(rawUrl: String): String {
-    val trimmed = rawUrl.trim()
-    if (trimmed.isEmpty()) return ""
-    val parsed = runCatching { URI(trimmed) }.getOrNull() ?: return trimmed.lowercase().trimEnd('/')
-    val rawHost = parsed.host?.lowercase() ?: return trimmed.lowercase().trimEnd('/')
-    val rawScheme = parsed.scheme?.lowercase() ?: "https"
-    val normalizedScheme = if (rawScheme == "http" || rawScheme == "https") "https" else rawScheme
-    val port = parsed.port
-    val portSuffix =
-        if (port == -1 || (normalizedScheme == "https" && (port == 80 || port == 443))) {
-            ""
-        } else {
-            ":$port"
-        }
-    val normalizedPath = (parsed.rawPath ?: "").trimEnd('/')
-    val querySuffix = parsed.rawQuery?.takeIf { it.isNotEmpty() }?.let { "?$it" } ?: ""
-    return "$normalizedScheme://$rawHost$portSuffix$normalizedPath$querySuffix"
-}
+fun normalizeUrlForComparison(rawUrl: String): String = ContextUrlClassifier.normalizeUrlForComparison(rawUrl)

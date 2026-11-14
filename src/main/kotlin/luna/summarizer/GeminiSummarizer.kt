@@ -23,6 +23,7 @@ import luna.core.ai.GeminiInteractionTool
 import luna.core.ai.GeminiInteractionTools
 import luna.core.ai.GeminiTools
 import luna.core.ai.InteractionExecutionResult
+import luna.core.ai.InteractionTraceContext
 import luna.core.ai.NoOpAiTraceRecorder
 import luna.core.ai.VideoProcessingMode
 import luna.core.ai.withActiveOrStandaloneSession
@@ -244,60 +245,59 @@ open class GeminiSummarizer(
     }
 
     private suspend fun summarizeAgentic(input: SummaryInput): SummaryResult {
-        val systemInstruction = GeminiPromptBuilder.buildSystemInstruction(input)
-        val userPrompt = GeminiPromptBuilder.buildUserPrompt(input)
         val tools = buildTools(input, includeLookback = false)
         logger.info("Executing agentic video summary via Interactions API (uri={})", input.videoUri)
-
-        val result =
-            interactionClient.interact(
-                baseUrl = config.baseUrl,
-                apiKey = config.apiKey,
-                model = config.model,
-                promptText = userPrompt,
-                systemInstruction = systemInstruction,
-                imageAttachments = input.imageAttachments,
-                videoUri = input.videoUri,
-                videoMimeType = null,
-                videoProcessingMode = VideoProcessingMode.AGENTIC,
-                videoDurationSeconds = input.videoDurationSeconds,
-                webUrlCount = input.webUrls.size,
-                inputUrls = collectInputUrls(input),
-                tools = tools,
-                maxOutputTokens = 1024,
-                background = true,
-                stage = AiAttemptStage.AGENTIC_VIDEO,
-                variant = null,
-            )
-        return mapInteractionResult(result, input, tools)
+        return executeInteraction(
+            input = input,
+            tools = tools,
+            background = true,
+            stage = AiAttemptStage.AGENTIC_VIDEO,
+            variant = null,
+        )
     }
 
     private suspend fun runSyncInteraction(
         input: SummaryInput,
         tools: List<GeminiInteractionTool>,
         variant: String,
+    ): SummaryResult =
+        executeInteraction(
+            input = input,
+            tools = tools,
+            background = false,
+            stage = AiAttemptStage.SUMMARY_GENERATE,
+            variant = variant,
+        )
+
+    private suspend fun executeInteraction(
+        input: SummaryInput,
+        tools: List<GeminiInteractionTool>,
+        background: Boolean,
+        stage: AiAttemptStage,
+        variant: String?,
     ): SummaryResult {
-        val systemInstruction = GeminiPromptBuilder.buildSystemInstruction(input)
-        val userPrompt = GeminiPromptBuilder.buildUserPrompt(input)
+        val request =
+            GeminiPromptBuilder.buildRequest(
+                input = input,
+                model = config.model,
+                tools = tools,
+                background = background,
+            )
         val result =
             interactionClient.interact(
                 baseUrl = config.baseUrl,
                 apiKey = config.apiKey,
-                model = config.model,
-                promptText = userPrompt,
-                systemInstruction = systemInstruction,
-                imageAttachments = input.imageAttachments,
-                videoUri = input.videoUri,
-                videoMimeType = null,
-                videoProcessingMode = GeminiPromptBuilder.resolveProcessingMode(input.videoDurationSeconds),
-                videoDurationSeconds = input.videoDurationSeconds,
-                webUrlCount = input.webUrls.size,
-                inputUrls = collectInputUrls(input),
-                tools = tools,
-                maxOutputTokens = 1024,
-                background = false,
-                stage = AiAttemptStage.SUMMARY_GENERATE,
-                variant = variant,
+                request = request,
+                traceContext =
+                    InteractionTraceContext(
+                        webUrlCount = input.webUrls.size,
+                        inputUrls = collectInputUrls(input),
+                        videoDurationSeconds = input.videoDurationSeconds,
+                        stage = stage,
+                        variant = variant,
+                        pipeline = AiTracePipeline.SUMMARY,
+                        trigger = AiTraceTrigger.REACTION,
+                    ),
             )
         return mapInteractionResult(result, input, tools)
     }
@@ -309,16 +309,6 @@ open class GeminiSummarizer(
     ): SummaryResult =
         when (result) {
             is InteractionExecutionResult.Success -> {
-                for (entry in result.urlContextResults) {
-                    if (!entry.isSuccess) {
-                        logger.error(
-                            "Gemini url_context retrieval reported non-success status (interactionId={}, retrieved_url={}, status={})",
-                            result.interactionId,
-                            entry.retrievedUrl,
-                            entry.status,
-                        )
-                    }
-                }
                 SummaryResult.Success(
                     text = result.text,
                     citations = result.citations,
@@ -392,6 +382,13 @@ open class GeminiSummarizer(
                 failureCategory = AiTraceFailureCategory.PARSE_ERROR,
             )
         }
+        if (functionCall.id.isBlank()) {
+            logger.error("Gemini tool call '{}' missing required 'call_id'", functionCall.name)
+            return SummaryResult.Error.Generic(
+                message = "Malformed tool call: missing call_id for ${functionCall.name}",
+                failureCategory = AiTraceFailureCategory.PARSE_ERROR,
+            )
+        }
 
         val declaredToolNames =
             tools
@@ -434,14 +431,20 @@ open class GeminiSummarizer(
                     tools = tools,
                     maxOutputTokens = 1024,
                     background = false,
-                    inputUrls = collectInputUrls(input),
-                    webUrlCount = input.webUrls.size,
-                    imageCount = input.imageAttachments.size,
-                    hasVideo = !input.videoUri.isNullOrBlank(),
-                    videoDurationSeconds = input.videoDurationSeconds,
-                    transcriptLength = input.content.length + toolOutput.length,
-                    stage = AiAttemptStage.SUMMARY_TOOL_CONTINUATION,
-                    variant = functionCall.name,
+                    traceContext =
+                        InteractionTraceContext(
+                            inputUrls = collectInputUrls(input),
+                            webUrlCount = input.webUrls.size,
+                            imageCount = input.imageAttachments.size,
+                            hasImages = input.imageAttachments.isNotEmpty(),
+                            hasVideo = !input.videoUri.isNullOrBlank(),
+                            videoDurationSeconds = input.videoDurationSeconds,
+                            transcriptLength = input.content.length + toolOutput.length,
+                            stage = AiAttemptStage.SUMMARY_TOOL_CONTINUATION,
+                            variant = functionCall.name,
+                            pipeline = AiTracePipeline.SUMMARY,
+                            trigger = AiTraceTrigger.REACTION,
+                        ),
                 )
             mapInteractionResult(contResult, input, tools)
         }

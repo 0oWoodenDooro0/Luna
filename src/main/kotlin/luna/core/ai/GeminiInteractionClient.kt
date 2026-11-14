@@ -19,42 +19,21 @@ import org.slf4j.LoggerFactory
 import java.net.SocketTimeoutException
 
 /**
- * Result returned by [GeminiInteractionClient.runAgenticVideo] for background Agentic Video Understanding executions.
+ * Execution and AI-trace metadata supplied alongside a [GeminiInteractionRequest].
  */
-sealed class GeminiInteractionResult {
-    data class Success(
-        val text: String,
-    ) : GeminiInteractionResult()
-
-    sealed class Error(
-        open val message: String,
-        open val cause: Throwable? = null,
-    ) : GeminiInteractionResult() {
-        data class RateLimitExceeded(
-            override val message: String = "Gemini API rate limit exceeded (HTTP 429)",
-            val retryAfterSeconds: Long? = null,
-        ) : Error(message)
-
-        data class Timeout(
-            override val message: String = "Gemini API request timed out",
-            override val cause: Throwable? = null,
-        ) : Error(message, cause)
-
-        data class ApiError(
-            val statusCode: Int,
-            override val message: String,
-        ) : Error(message)
-
-        data class EmptyOutput(
-            override val message: String = "Gemini interaction output is empty or sanitized to blank",
-        ) : Error(message)
-
-        data class Generic(
-            override val message: String,
-            override val cause: Throwable? = null,
-        ) : Error(message, cause)
-    }
-}
+data class InteractionTraceContext(
+    val webUrlCount: Int = 0,
+    val inputUrls: List<String> = emptyList(),
+    val hasImages: Boolean? = null,
+    val imageCount: Int? = null,
+    val hasVideo: Boolean? = null,
+    val videoDurationSeconds: Long? = null,
+    val transcriptLength: Int? = null,
+    val stage: AiAttemptStage? = null,
+    val variant: String? = null,
+    val pipeline: AiTracePipeline = AiTracePipeline.SUMMARY,
+    val trigger: AiTraceTrigger = AiTraceTrigger.REACTION,
+)
 
 /**
  * Rich result returned by [GeminiInteractionClient.interact] and [GeminiInteractionClient.continueInteraction]
@@ -142,128 +121,36 @@ class GeminiInteractionClient(
         var filteredCitations: List<GroundingCitation> = emptyList()
     }
 
-    suspend fun runAgenticVideo(
-        baseUrl: String,
-        apiKey: String,
-        model: String,
-        videoUri: String,
-        promptText: String,
-        videoDurationSeconds: Long? = null,
-    ): GeminiInteractionResult {
-        if (videoUri.isBlank() && apiKey.isNotBlank()) {
-            // Preserve legacy pre-HTTP blank videoUri check even when promptText is non-blank
-            return when (
-                val res =
-                    interactInternal(
-                        baseUrl = baseUrl,
-                        apiKey = apiKey,
-                        model = model,
-                        inputs = emptyList(),
-                        validationError = "Video URI cannot be blank",
-                        hasImages = false,
-                        imageCount = 0,
-                        hasVideo = false,
-                        videoDurationSeconds = videoDurationSeconds,
-                        webUrlCount = 0,
-                        inputUrls = emptyList(),
-                        systemInstruction = null,
-                        tools = emptyList(),
-                        maxOutputTokens = null,
-                        background = true,
-                        previousInteractionId = null,
-                        stage = AiAttemptStage.AGENTIC_VIDEO,
-                        variant = null,
-                        transcriptLength = promptText.length,
-                        pipeline = AiTracePipeline.SUMMARY,
-                        trigger = AiTraceTrigger.REACTION,
-                    )
-            ) {
-                is InteractionExecutionResult.Success -> GeminiInteractionResult.Success(res.text)
-                is InteractionExecutionResult.Error -> res.toLegacyError()
-                is InteractionExecutionResult.FunctionCall -> GeminiInteractionResult.Error.Generic("Unexpected function_call")
-            }
-        }
-
-        val outcome =
-            interact(
-                baseUrl = baseUrl,
-                apiKey = apiKey,
-                model = model,
-                promptText = promptText,
-                videoUri = videoUri,
-                videoMimeType = "video/mp4",
-                videoProcessingMode = VideoProcessingMode.AGENTIC,
-                videoDurationSeconds = videoDurationSeconds,
-                background = true,
-                stage = AiAttemptStage.AGENTIC_VIDEO,
-            )
-        return when (outcome) {
-            is InteractionExecutionResult.Success -> GeminiInteractionResult.Success(outcome.text)
-            is InteractionExecutionResult.Error -> outcome.toLegacyError()
-            is InteractionExecutionResult.FunctionCall -> GeminiInteractionResult.Error.Generic("Unexpected function_call in agentic video")
-        }
-    }
-
     suspend fun interact(
         baseUrl: String,
         apiKey: String,
-        model: String,
-        promptText: String,
-        systemInstruction: String? = null,
-        imageAttachments: List<ChatImageAttachment> = emptyList(),
-        videoUri: String? = null,
-        videoMimeType: String? = null,
-        videoProcessingMode: VideoProcessingMode = VideoProcessingMode.STATIC,
-        videoDurationSeconds: Long? = null,
-        webUrlCount: Int = 0,
-        inputUrls: List<String> = emptyList(),
-        tools: List<GeminiInteractionTool> = emptyList(),
-        maxOutputTokens: Int? = null,
-        background: Boolean = false,
-        previousInteractionId: String? = null,
-        stage: AiAttemptStage = if (background) AiAttemptStage.AGENTIC_VIDEO else AiAttemptStage.SUMMARY_GENERATE,
-        variant: String? = null,
-        transcriptLength: Int = promptText.length,
-        pipeline: AiTracePipeline = AiTracePipeline.SUMMARY,
-        trigger: AiTraceTrigger = AiTraceTrigger.REACTION,
+        request: GeminiInteractionRequest,
+        traceContext: InteractionTraceContext = InteractionTraceContext(),
     ): InteractionExecutionResult {
-        val cleanVideoUri = videoUri?.trim()?.takeIf { it.isNotBlank() }
-        val inputs =
-            buildMultimodalInputs(
-                promptText = promptText,
-                imageAttachments = imageAttachments,
-                videoUri = cleanVideoUri,
-                videoMimeType = videoMimeType,
-                videoProcessingMode = videoProcessingMode,
-            )
         val validationError =
-            if (inputs.isEmpty()) {
-                "Interaction input cannot be blank"
-            } else {
-                null
+            when {
+                request.previousInteractionId != null && request.previousInteractionId.isBlank() -> {
+                    "previous_interaction_id cannot be blank"
+                }
+
+                request.input.isEmpty() -> {
+                    if (request.previousInteractionId != null) {
+                        "functionResults cannot be empty"
+                    } else {
+                        "Interaction input cannot be blank"
+                    }
+                }
+
+                else -> {
+                    null
+                }
             }
         return interactInternal(
             baseUrl = baseUrl,
             apiKey = apiKey,
-            model = model,
-            inputs = inputs,
+            request = request,
+            traceContext = traceContext,
             validationError = validationError,
-            hasImages = imageAttachments.isNotEmpty(),
-            imageCount = imageAttachments.size,
-            hasVideo = cleanVideoUri != null,
-            videoDurationSeconds = videoDurationSeconds,
-            webUrlCount = webUrlCount,
-            inputUrls = inputUrls,
-            systemInstruction = systemInstruction,
-            tools = tools,
-            maxOutputTokens = maxOutputTokens,
-            background = background,
-            previousInteractionId = previousInteractionId,
-            stage = stage,
-            variant = variant,
-            transcriptLength = transcriptLength,
-            pipeline = pipeline,
-            trigger = trigger,
         )
     }
 
@@ -277,16 +164,8 @@ class GeminiInteractionClient(
         tools: List<GeminiInteractionTool> = emptyList(),
         maxOutputTokens: Int? = null,
         background: Boolean = false,
-        inputUrls: List<String> = emptyList(),
-        webUrlCount: Int = 0,
-        imageCount: Int = 0,
-        hasVideo: Boolean = false,
-        videoDurationSeconds: Long? = null,
-        transcriptLength: Int = 0,
-        stage: AiAttemptStage = AiAttemptStage.SUMMARY_TOOL_CONTINUATION,
-        variant: String? = null,
-        pipeline: AiTracePipeline = AiTracePipeline.SUMMARY,
-        trigger: AiTraceTrigger = AiTraceTrigger.REACTION,
+        traceContext: InteractionTraceContext =
+            InteractionTraceContext(stage = AiAttemptStage.SUMMARY_TOOL_CONTINUATION),
     ): InteractionExecutionResult {
         val validationError =
             when {
@@ -294,57 +173,41 @@ class GeminiInteractionClient(
                 functionResults.isEmpty() -> "functionResults cannot be empty"
                 else -> null
             }
+        val request =
+            GeminiInteractionRequest(
+                model = model,
+                systemInstruction = systemInstruction,
+                input = functionResults,
+                tools = tools.takeIf { it.isNotEmpty() },
+                generationConfig = maxOutputTokens?.let { GeminiInteractionGenerationConfig(maxOutputTokens = it) },
+                background = background,
+                previousInteractionId = previousInteractionId,
+            )
+        val effectiveTraceContext =
+            if (traceContext.stage == null) {
+                traceContext.copy(stage = AiAttemptStage.SUMMARY_TOOL_CONTINUATION)
+            } else {
+                traceContext
+            }
         return interactInternal(
             baseUrl = baseUrl,
             apiKey = apiKey,
-            model = model,
-            inputs = functionResults,
+            request = request,
+            traceContext = effectiveTraceContext,
             validationError = validationError,
-            hasImages = imageCount > 0,
-            imageCount = imageCount,
-            hasVideo = hasVideo,
-            videoDurationSeconds = videoDurationSeconds,
-            webUrlCount = webUrlCount,
-            inputUrls = inputUrls,
-            systemInstruction = systemInstruction,
-            tools = tools,
-            maxOutputTokens = maxOutputTokens,
-            background = background,
-            previousInteractionId = previousInteractionId,
-            stage = stage,
-            variant = variant,
-            transcriptLength = transcriptLength,
-            pipeline = pipeline,
-            trigger = trigger,
         )
     }
 
     private suspend fun interactInternal(
         baseUrl: String,
         apiKey: String,
-        model: String,
-        inputs: List<GeminiInteractionInput>,
+        request: GeminiInteractionRequest,
+        traceContext: InteractionTraceContext,
         validationError: String?,
-        hasImages: Boolean,
-        imageCount: Int,
-        hasVideo: Boolean,
-        videoDurationSeconds: Long?,
-        webUrlCount: Int,
-        inputUrls: List<String>,
-        systemInstruction: String?,
-        tools: List<GeminiInteractionTool>,
-        maxOutputTokens: Int?,
-        background: Boolean,
-        previousInteractionId: String?,
-        stage: AiAttemptStage,
-        variant: String?,
-        transcriptLength: Int,
-        pipeline: AiTracePipeline,
-        trigger: AiTraceTrigger,
     ): InteractionExecutionResult =
         traceRecorder.withActiveOrStandaloneSession(
-            pipeline = pipeline,
-            trigger = trigger,
+            pipeline = traceContext.pipeline,
+            trigger = traceContext.trigger,
             discord =
                 AiTraceDiscordContext(
                     channelId = "standalone",
@@ -363,23 +226,9 @@ class GeminiInteractionClient(
                 executeInteraction(
                     baseUrl = baseUrl,
                     apiKey = apiKey,
-                    model = model,
-                    inputs = inputs,
+                    request = request,
+                    traceContext = traceContext,
                     validationError = validationError,
-                    hasImages = hasImages,
-                    imageCount = imageCount,
-                    hasVideo = hasVideo,
-                    videoDurationSeconds = videoDurationSeconds,
-                    webUrlCount = webUrlCount,
-                    inputUrls = inputUrls,
-                    systemInstruction = systemInstruction,
-                    tools = tools,
-                    maxOutputTokens = maxOutputTokens,
-                    background = background,
-                    previousInteractionId = previousInteractionId,
-                    stage = stage,
-                    variant = variant,
-                    transcriptLength = transcriptLength,
                     session = session,
                 )
             if (isStandalone && session != null) {
@@ -407,28 +256,14 @@ class GeminiInteractionClient(
     private suspend fun executeInteraction(
         baseUrl: String,
         apiKey: String,
-        model: String,
-        inputs: List<GeminiInteractionInput>,
+        request: GeminiInteractionRequest,
+        traceContext: InteractionTraceContext,
         validationError: String?,
-        hasImages: Boolean,
-        imageCount: Int,
-        hasVideo: Boolean,
-        videoDurationSeconds: Long?,
-        webUrlCount: Int,
-        inputUrls: List<String>,
-        systemInstruction: String?,
-        tools: List<GeminiInteractionTool>,
-        maxOutputTokens: Int?,
-        background: Boolean,
-        previousInteractionId: String?,
-        stage: AiAttemptStage,
-        variant: String?,
-        transcriptLength: Int,
         session: AiTraceSession?,
     ): InteractionExecutionResult {
         val startNano = System.nanoTime()
         val cleanBaseUrl = baseUrl.trim().trimEnd('/').removeSuffix("/v1beta")
-        val cleanModel = model.trim().removePrefix("models/")
+        val cleanModel = request.model.trim().removePrefix("models/")
         val rawEndpoint =
             if (apiKey.isBlank()) {
                 "$cleanBaseUrl/v1beta/interactions"
@@ -436,22 +271,38 @@ class GeminiInteractionClient(
                 "$cleanBaseUrl/v1beta/interactions?key=$apiKey"
             }
         val sanitizedEndpoint = AiTraceRedactor.sanitizeEndpoint(rawEndpoint)
-        val generationConfig =
-            maxOutputTokens?.let { GeminiInteractionGenerationConfig(maxOutputTokens = it) }
         val requestPayload =
-            GeminiInteractionRequest(
+            request.copy(
                 model = cleanModel,
-                systemInstruction = systemInstruction?.takeIf { it.isNotBlank() },
-                input = inputs,
-                tools = tools.takeIf { it.isNotEmpty() },
-                generationConfig = generationConfig,
-                background = background,
-                previousInteractionId = previousInteractionId?.takeIf { it.isNotBlank() },
+                systemInstruction = request.systemInstruction?.takeIf { it.isNotBlank() },
+                tools = request.tools?.takeIf { it.isNotEmpty() },
+                previousInteractionId = request.previousInteractionId?.takeIf { it.isNotBlank() },
             )
+        val effectiveTools = requestPayload.tools.orEmpty()
         val enabledToolNames =
-            tools.map { tool ->
+            effectiveTools.map { tool ->
                 tool.name?.takeIf { it.isNotBlank() && tool.type == GeminiInteractionTool.TYPE_FUNCTION } ?: tool.type
             }
+        val imageCount =
+            traceContext.imageCount
+                ?: requestPayload.input.count { it.type == GeminiInteractionInput.TYPE_IMAGE }
+        val hasImages = traceContext.hasImages ?: (imageCount > 0)
+        val hasVideo =
+            traceContext.hasVideo
+                ?: requestPayload.input.any { it.type == GeminiInteractionInput.TYPE_VIDEO }
+        val transcriptLength =
+            traceContext.transcriptLength
+                ?: requestPayload.input
+                    .filter { it.type == GeminiInteractionInput.TYPE_TEXT }
+                    .sumOf { it.text?.length ?: 0 }
+        val resolvedStage =
+            traceContext.stage
+                ?: when {
+                    requestPayload.previousInteractionId != null -> AiAttemptStage.SUMMARY_TOOL_CONTINUATION
+                    requestPayload.background -> AiAttemptStage.AGENTIC_VIDEO
+                    else -> AiAttemptStage.SUMMARY_GENERATE
+                }
+
         val attemptRequest =
             if (session?.isEnabled == true) {
                 AiAttemptRequest(
@@ -462,9 +313,9 @@ class GeminiInteractionClient(
                     hasImages = hasImages,
                     imageCount = imageCount,
                     hasVideo = hasVideo,
-                    videoDurationSeconds = videoDurationSeconds,
+                    videoDurationSeconds = traceContext.videoDurationSeconds,
                     transcriptLength = transcriptLength,
-                    webUrlCount = webUrlCount,
+                    webUrlCount = traceContext.webUrlCount,
                     enabledTools = enabledToolNames,
                 )
             } else {
@@ -526,8 +377,8 @@ class GeminiInteractionClient(
                             interaction = interaction,
                             cleanBaseUrl = cleanBaseUrl,
                             apiKey = apiKey,
-                            background = background,
-                            inputUrls = inputUrls,
+                            background = requestPayload.background,
+                            inputUrls = traceContext.inputUrls,
                             traceState = traceState,
                             localRedactor = localRedactor,
                         )
@@ -576,8 +427,8 @@ class GeminiInteractionClient(
                 }
             val rawError = (result as? InteractionExecutionResult.Error)?.message
             session.recordAttempt(
-                stage = stage,
-                variant = variant,
+                stage = resolvedStage,
+                variant = traceContext.variant,
                 model = cleanModel,
                 endpoint = sanitizedEndpoint,
                 latencyMs = latencyMs,
@@ -586,7 +437,7 @@ class GeminiInteractionClient(
                 responseRaw = traceState.responseRaw,
                 finishReason = traceState.finishReason,
                 usageMetadata = traceState.usageMetadata,
-                pollingAttempts = if (background) traceState.pollingAttempts else null,
+                pollingAttempts = if (requestPayload.background) traceState.pollingAttempts else null,
                 parsedOutcome = parsedOutcome,
                 errorMessage = localRedactor.redactString(rawError),
                 urlContextResults = traceState.urlContextResults,
@@ -828,45 +679,6 @@ class GeminiInteractionClient(
             usageMetadata = response.usage,
         )
     }
-
-    private fun InteractionExecutionResult.Error.toLegacyError(): GeminiInteractionResult.Error =
-        when (this) {
-            is InteractionExecutionResult.Error.RateLimitExceeded -> {
-                GeminiInteractionResult.Error.RateLimitExceeded(
-                    message = message,
-                    retryAfterSeconds = retryAfterSeconds,
-                )
-            }
-
-            is InteractionExecutionResult.Error.Timeout -> {
-                GeminiInteractionResult.Error.Timeout(
-                    message = message,
-                    cause = cause,
-                )
-            }
-
-            is InteractionExecutionResult.Error.ApiError -> {
-                GeminiInteractionResult.Error.ApiError(
-                    statusCode = statusCode,
-                    message = message,
-                )
-            }
-
-            is InteractionExecutionResult.Error.EmptyOutput -> {
-                GeminiInteractionResult.Error.EmptyOutput(message = message)
-            }
-
-            is InteractionExecutionResult.Error.SafetyBlock -> {
-                GeminiInteractionResult.Error.Generic(message = message)
-            }
-
-            is InteractionExecutionResult.Error.Generic -> {
-                GeminiInteractionResult.Error.Generic(
-                    message = message,
-                    cause = cause,
-                )
-            }
-        }
 
     companion object {
         const val DEFAULT_POLLING_DELAY_MS = 2000L
