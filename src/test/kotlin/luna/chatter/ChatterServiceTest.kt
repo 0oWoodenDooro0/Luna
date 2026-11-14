@@ -258,7 +258,7 @@ class ChatterServiceTest {
                 )
             assertFalse(service.processMessage(replyToLuna))
             coVerify(exactly = 1) {
-                decisionClient.decide(match { it.contains("[Bob]: Sounds good") }, any())
+                decisionClient.decide(match { it.contains("[Bob 回覆 Luna「Earlier bot reply」]: Sounds good") }, any())
             }
 
             // 3. Unresolved selfId (null) does not bypass decision even with <@9999>
@@ -598,5 +598,169 @@ class ChatterServiceTest {
             assertSame(defaultPlugin.contextCollector, defaultPlugin.service?.contextCollector)
             assertTrue(defaultPlugin.chatterGenerator?.config?.searchGroundingEnabled ?: false)
             defaultPlugin.shutdown()
+        }
+
+    @Test
+    fun `default decision message count is 15 and service fetches max of decisionMessageCount and historyMessageCount`() =
+        runTest {
+            assertEquals(15, ChatterContextCollector.DEFAULT_DECISION_MESSAGE_COUNT)
+            assertEquals(15, ChatterService.DEFAULT_DECISION_MESSAGE_COUNT)
+
+            val fetchedLimits = mutableListOf<Int>()
+            val priorMessages =
+                (1L..20L).map { idx ->
+                    createMockMessage(
+                        id = idx,
+                        channelId = 700L,
+                        username = "User$idx",
+                        content = "Turn $idx",
+                    )
+                }
+            val triggeringMsg =
+                createMockMessage(
+                    id = 21L,
+                    channelId = 700L,
+                    username = "TriggerUser",
+                    content = "Latest turn",
+                )
+
+            coEvery { decisionClient.decide(any(), any()) } returns ParticipationDecision(shouldParticipate = false, noul = 0.2)
+
+            // Case 1: decisionMessageCount > historyMessageCount (20 > 10) -> fetches 20
+            val largeDecisionCollector =
+                ChatterContextCollector(
+                    noiseFilter = filter,
+                    decisionMessageCount = 20,
+                    historyMessageCount = 10,
+                    peekResolver = { null },
+                )
+            val largeDecisionService =
+                ChatterService(
+                    filter = filter,
+                    decisionClient = decisionClient,
+                    chatterGenerator = chatterGenerator,
+                    cooldownCache = cooldownCache,
+                    decisionMessageCount = 20,
+                    historyMessageCount = 10,
+                    historyFetcher = { _, limit ->
+                        fetchedLimits.add(limit)
+                        priorMessages.takeLast(limit)
+                    },
+                    contextCollector = largeDecisionCollector,
+                )
+
+            assertFalse(largeDecisionService.processMessage(triggeringMsg))
+            assertEquals(listOf(20), fetchedLimits)
+            coVerify(exactly = 1) {
+                decisionClient.decide(
+                    match { transcript ->
+                        !transcript.contains("Turn 1\n") &&
+                            transcript.contains("[User2]: Turn 2") &&
+                            transcript.contains("[User20]: Turn 20") &&
+                            transcript.contains("[TriggerUser]: Latest turn")
+                    },
+                    any(),
+                )
+            }
+
+            // Case 2: historyMessageCount > decisionMessageCount (15 > 5) -> fetches 15
+            fetchedLimits.clear()
+            val smallDecisionCollector =
+                ChatterContextCollector(
+                    noiseFilter = filter,
+                    decisionMessageCount = 5,
+                    historyMessageCount = 15,
+                    peekResolver = { null },
+                )
+            val smallDecisionService =
+                ChatterService(
+                    filter = filter,
+                    decisionClient = decisionClient,
+                    chatterGenerator = chatterGenerator,
+                    cooldownCache = cooldownCache,
+                    decisionMessageCount = 5,
+                    historyMessageCount = 15,
+                    historyFetcher = { _, limit ->
+                        fetchedLimits.add(limit)
+                        priorMessages.takeLast(limit)
+                    },
+                    contextCollector = smallDecisionCollector,
+                )
+
+            assertFalse(smallDecisionService.processMessage(triggeringMsg))
+            assertEquals(listOf(15), fetchedLimits)
+        }
+
+    @Test
+    fun `ChatterService forwards framed decision context with external reply chaining and unframed enriched reply context`() =
+        runTest {
+            val botSelfId = Snowflake(9999L)
+            val externalTarget = createMockMessage(id = 801L, username = "ExtUser", content = "Original topic question")
+            val prior1 = createMockMessage(id = 810L, username = "Alice", content = "Earlier message")
+            val triggerMsg =
+                createMockMessage(
+                    id = 811L,
+                    channelId = 710L,
+                    username = "Bob",
+                    content = "Check https://example.com/article",
+                    selfId = botSelfId,
+                    referencedMessage = externalTarget,
+                )
+
+            val peekPost =
+                PeekPost(
+                    platform = Platform.GENERIC,
+                    id = "art-1",
+                    originalUrl = "https://example.com/article",
+                    cleanUrl = "https://example.com/article",
+                    author = Author(username = "Writer"),
+                    title = "Article Title",
+                    content = "Article summary body",
+                )
+            val realCollector =
+                ChatterContextCollector(
+                    noiseFilter = filter,
+                    peekResolver = { peekPost },
+                )
+            val pipelineService =
+                ChatterService(
+                    filter = filter,
+                    decisionClient = decisionClient,
+                    chatterGenerator = chatterGenerator,
+                    cooldownCache = cooldownCache,
+                    historyFetcher = { _, _ -> listOf(prior1) },
+                    contextCollector = realCollector,
+                )
+
+            coEvery { decisionClient.decide(any(), any()) } returns ParticipationDecision(shouldParticipate = true, noul = 0.9)
+            coEvery { chatterGenerator.generateReply(any<ChatterInput>()) } returns "Nice article"
+
+            assertTrue(pipelineService.processMessage(triggerMsg))
+
+            coVerify(exactly = 1) {
+                decisionClient.decide(
+                    match { transcript ->
+                        transcript.contains("[Bot Identity: Luna | Discord Mention: <@9999>]") &&
+                            transcript.contains("[Recent Context]") &&
+                            transcript.contains("[Alice]: Earlier message") &&
+                            transcript.contains("[Latest Message]") &&
+                            transcript.contains("[Bob 回覆 ExtUser「Original topic question」]: Check https://example.com/article") &&
+                            !transcript.contains("Article Title")
+                    },
+                    any(),
+                )
+            }
+            coVerify(exactly = 1) {
+                chatterGenerator.generateReply(
+                    match<ChatterInput> { input ->
+                        !input.transcript.contains("[Bot Identity:") &&
+                            !input.transcript.contains("[Recent Context]") &&
+                            !input.transcript.contains("[Latest Message]") &&
+                            input.transcript.contains("[Alice]: Earlier message") &&
+                            input.transcript.contains("[Bob 回覆 ExtUser「Original topic question」]: Check https://example.com/article") &&
+                            input.transcript.contains("Article Title")
+                    },
+                )
+            }
         }
 }

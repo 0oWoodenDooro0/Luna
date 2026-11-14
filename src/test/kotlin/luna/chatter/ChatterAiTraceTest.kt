@@ -1144,7 +1144,7 @@ class ChatterAiTraceTest {
         run {
             val failingDecisionCollector =
                 object : ChatterContextCollector() {
-                    override fun collectDecisionContext(
+                    override suspend fun collectDecisionContext(
                         messages: List<Message>,
                         kordSelfId: Snowflake?,
                     ): ChatterDecisionContext = throw IllegalStateException("Decision context boom")
