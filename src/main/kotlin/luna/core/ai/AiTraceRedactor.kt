@@ -103,24 +103,37 @@ class AiTraceRedactor(
             endpoint = redactString(attempt.endpoint),
             request =
                 attempt.request?.let { req ->
-                    req.copy(payload = redactJsonElement(req.payload))
+                    req.copy(
+                        payload = redactJsonElement(req.payload),
+                        enabledTools = req.enabledTools.map { redactString(it) ?: it },
+                    )
                 },
             responseRaw = redactString(attempt.responseRaw),
             errorMessage = redactString(attempt.errorMessage),
+            urlContextResults =
+                attempt.urlContextResults.map { entry ->
+                    entry.copy(
+                        retrievedUrl = redactString(entry.retrievedUrl) ?: entry.retrievedUrl,
+                        status = redactString(entry.status) ?: entry.status,
+                    )
+                },
+            googleSearchQueries = attempt.googleSearchQueries.map { redactString(it) ?: it },
+            rawCitations = attempt.rawCitations.map(::redactCitation),
+            filteredCitations = attempt.filteredCitations.map(::redactCitation),
         )
 
     fun redactTrace(trace: AiTraceRecord): AiTraceRecord =
         trace.copy(
             finalOutput = redactString(trace.finalOutput),
             errorSummary = redactString(trace.errorSummary),
-            citations =
-                trace.citations.map { citation ->
-                    citation.copy(
-                        title = redactString(citation.title) ?: citation.title,
-                        url = redactString(citation.url) ?: citation.url,
-                    )
-                },
+            citations = trace.citations.map(::redactCitation),
             attempts = trace.attempts.map { redactAttempt(it) },
+        )
+
+    private fun redactCitation(citation: GroundingCitation): GroundingCitation =
+        citation.copy(
+            title = redactString(citation.title) ?: citation.title,
+            url = redactString(citation.url) ?: citation.url,
         )
 
     companion object {
