@@ -317,6 +317,77 @@ class CodingStandardsTest {
         )
     }
 
+    @Test
+    fun `first-party plugins must not import sibling plugin packages`() {
+        val metaInfService = File(projectRoot, "src/main/resources/META-INF/services/luna.plugin.LunaPlugin")
+        assertTrue(metaInfService.exists(), "META-INF/services/luna.plugin.LunaPlugin must exist")
+
+        val pluginPackages =
+            metaInfService
+                .readLines()
+                .map { it.trim() }
+                .filter { it.isNotEmpty() && !it.startsWith("#") }
+                .mapNotNull { fqcn ->
+                    val parts = fqcn.split(".")
+                    if (parts.size >= 3 && parts[0] == "luna") parts[1] else null
+                }.toSet()
+        assertTrue(pluginPackages.isNotEmpty(), "At least one first-party plugin must be registered")
+
+        // Packages owned by :libs:* subprojects (e.g. :libs:mcp-data -> luna.mcp.data) are shared libraries, not plugin internals.
+        val sharedLibraryPrefixes =
+            File(projectRoot, "libs")
+                .takeIf { it.exists() }
+                ?.walkTopDown()
+                ?.filter { it.isFile && it.extension == "kt" }
+                ?.mapNotNull { file ->
+                    file
+                        .useLines { lines ->
+                            lines.firstOrNull { it.trim().startsWith("package ") }
+                        }?.trim()
+                        ?.removePrefix("package ")
+                        ?.trim()
+                }?.toSet()
+                ?: emptySet()
+
+        val importRegex = Regex("""^import\s+luna\.([a-zA-Z0-9_]+)""")
+        val violations = mutableListOf<String>()
+
+        val appRoots = listOf(File(projectRoot, "src/main/kotlin"), File(projectRoot, "src/test/kotlin")).filter { it.exists() }
+        appRoots.forEach { root ->
+            pluginPackages.forEach { ownerPlugin ->
+                val pluginDir = File(root, "luna/$ownerPlugin")
+                if (!pluginDir.exists()) return@forEach
+
+                pluginDir.walkTopDown().filter { it.extension == "kt" }.forEach { file ->
+                    file.useLines { lines ->
+                        lines.forEachIndexed { index, line ->
+                            val trimmed = line.trim()
+                            val match = importRegex.find(trimmed) ?: return@forEachIndexed
+                            val importedPkg = match.groupValues[1]
+                            val importedPath = trimmed.removePrefix("import ").trim()
+                            val isSharedLibImport =
+                                sharedLibraryPrefixes.any { prefix ->
+                                    importedPath == prefix || importedPath.startsWith("$prefix.")
+                                }
+                            if (importedPkg in pluginPackages && importedPkg != ownerPlugin && !isSharedLibImport) {
+                                violations.add(
+                                    "${file.relativeTo(projectRoot)}:${index + 1}: " +
+                                        "Plugin '$ownerPlugin' must not import sibling plugin '$importedPkg' ($trimmed). " +
+                                        "Extract shared logic into 'luna.core' instead.",
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        assertTrue(
+            violations.isEmpty(),
+            "Found cross-plugin coupling violations:\n" + violations.joinToString("\n"),
+        )
+    }
+
     private fun findKotlinSourceRoots(parentDirName: String): List<File> =
         projectRoot
             .walkTopDown()
