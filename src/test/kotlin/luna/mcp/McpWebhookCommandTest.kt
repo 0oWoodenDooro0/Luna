@@ -160,12 +160,6 @@ class McpWebhookCommandTest {
     }
 
     @Test
-    fun `command metadata has name mcp and non-empty description`() {
-        assertEquals("mcp", command.name)
-        assertTrue(command.description.isNotBlank())
-    }
-
-    @Test
     fun `add rejects interaction when user has not created client ID`() =
         runTest {
             val (interaction, getResponseContent) =

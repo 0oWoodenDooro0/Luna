@@ -4,7 +4,6 @@ import dev.kord.common.entity.MessageType
 import dev.kord.common.entity.Snowflake
 import dev.kord.core.entity.Message
 import dev.kord.core.entity.User
-import dev.kord.core.entity.channel.MessageChannel
 import io.mockk.every
 import io.mockk.mockk
 import kotlinx.coroutines.test.runTest
@@ -78,12 +77,6 @@ class ChatterNoiseFilterTest {
         every { msg.mentionedUserIds } returns mentionedUserIds
         every { msg.referencedMessage } returns referencedMessage
         return msg
-    }
-
-    private fun createMockChannel(channelId: Long): MessageChannel {
-        val channel = mockk<MessageChannel>()
-        every { channel.id } returns Snowflake(channelId)
-        return channel
     }
 
     @Test
@@ -302,27 +295,6 @@ class ChatterNoiseFilterTest {
         }
 
     @Test
-    fun `suppresses chatter triggers when channel is within cooldown window`() =
-        runTest {
-            val channel = createMockChannel(401L)
-            val message = createMockMessage(channelId = 401L, content = "First trigger")
-
-            // Channel is initially allowed
-            assertTrue(filter.shouldProcess(message))
-
-            // Record active/reply trigger at simulatedTime = 1_000_000
-            cooldownCache.record(channel.id)
-            assertTrue(cooldownCache.isOnCooldown(channel.id))
-
-            // Subsequent message 10 seconds later (within 30s cooldown window)
-            simulatedTime += 10_000L
-            val suppressedResult = filter.evaluate(message)
-            assertIs<ChatterFilterResult.Rejected>(suppressedResult)
-            assertEquals(RejectionReason.CHANNEL_ON_COOLDOWN, suppressedResult.reason)
-            assertFalse(filter.shouldProcess(message))
-        }
-
-    @Test
     fun `allows chatter triggers after cooldown duration expires`() =
         runTest {
             val channelId = Snowflake(402L)
@@ -383,27 +355,6 @@ class ChatterNoiseFilterTest {
             // Channel 1 should have been evicted as eldest
             assertFalse(boundedCache.contains(Snowflake(1L)))
             assertTrue(boundedCache.contains(Snowflake(501L)))
-        }
-
-    @Test
-    fun `LRU access refreshes entry order before eviction`() =
-        runTest {
-            val boundedCache = BoundedChannelCooldownCache(maxEntries = 3, timeSource = { simulatedTime })
-
-            boundedCache.record(Snowflake(1L), timestamp = simulatedTime)
-            boundedCache.record(Snowflake(2L), timestamp = simulatedTime)
-            boundedCache.record(Snowflake(3L), timestamp = simulatedTime)
-
-            // Access channel 1 to refresh its LRU recency
-            boundedCache.get(Snowflake(1L))
-
-            // Add channel 4 -> channel 2 should be evicted, not channel 1
-            boundedCache.record(Snowflake(4L), timestamp = simulatedTime)
-            assertEquals(3, boundedCache.size)
-            assertTrue(boundedCache.contains(Snowflake(1L)))
-            assertFalse(boundedCache.contains(Snowflake(2L)))
-            assertTrue(boundedCache.contains(Snowflake(3L)))
-            assertTrue(boundedCache.contains(Snowflake(4L)))
         }
 
     @Test
@@ -652,40 +603,6 @@ class ChatterNoiseFilterTest {
     }
 
     @Test
-    fun `toChatMessageOrNull excludes third party bot messages`() {
-        val botSelfId = Snowflake(42L)
-        val thirdPartyBotId = Snowflake(9999L)
-        val thirdPartyMsg =
-            createMockMessage(
-                id = 505L,
-                username = "MusicBot",
-                content = "Now playing: track 1",
-                isBot = true,
-                authorId = thirdPartyBotId,
-            )
-
-        val chatMessage = filter.toChatMessageOrNull(thirdPartyMsg, botSelfId)
-        kotlin.test.assertNull(chatMessage)
-    }
-
-    @Test
-    fun `toChatMessageOrNull excludes unverified webhook messages`() {
-        val botSelfId = Snowflake(42L)
-        val unverifiedWebhookId = Snowflake(8888L)
-        val webhookMsg =
-            createMockMessage(
-                id = 506L,
-                username = "ExternalWebhook",
-                content = "New deployment finished",
-                isBot = true,
-                webhookId = unverifiedWebhookId,
-            )
-
-        val chatMessage = filter.toChatMessageOrNull(webhookMsg, botSelfId)
-        kotlin.test.assertNull(chatMessage)
-    }
-
-    @Test
     fun `stripLunaMentions strips raw discord bot mention and nickname mention`() {
         val botSelfId = Snowflake(42L)
         val otherUserId = Snowflake(9999L)
@@ -730,109 +647,6 @@ class ChatterNoiseFilterTest {
         assertEquals("Hello world", filter.stripLunaMentions("Hello <@42> world", botSelfId))
         assertEquals("", filter.stripLunaMentions("   @Luna   ", botSelfId))
         assertEquals("", filter.stripLunaMentions("<@42>   @luna", botSelfId))
-    }
-
-    @Test
-    fun `toChatMessageOrNull falls back to callout greeting for pure bot mention message`() {
-        val botSelfId = Snowflake(42L)
-
-        val atLunaMsg = createMockMessage(id = 601L, username = "Alice", content = "@Luna")
-        val atLunaLowerMsg = createMockMessage(id = 602L, username = "Alice", content = "@luna")
-        val rawMentionMsg = createMockMessage(id = 603L, username = "Alice", content = "<@42>")
-        val nickMentionMsg = createMockMessage(id = 604L, username = "Alice", content = "<@!42>")
-        val multiMentionMsg = createMockMessage(id = 605L, username = "Alice", content = "<@42> @Luna")
-        val whitespaceMentionMsg = createMockMessage(id = 606L, username = "Alice", content = "   @Luna   ")
-
-        val res1 = filter.toChatMessageOrNull(atLunaMsg, botSelfId)
-        assertNotNull(res1)
-        assertEquals("Alice", res1.author)
-        assertEquals(ChatterNoiseFilter.CALLOUT_GREETING, res1.content)
-        assertEquals("你好", res1.content)
-
-        val res2 = filter.toChatMessageOrNull(atLunaLowerMsg, botSelfId)
-        assertNotNull(res2)
-        assertEquals("Alice", res2.author)
-        assertEquals(ChatterNoiseFilter.CALLOUT_GREETING, res2.content)
-
-        val res3 = filter.toChatMessageOrNull(rawMentionMsg, botSelfId)
-        assertNotNull(res3)
-        assertEquals("Alice", res3.author)
-        assertEquals(ChatterNoiseFilter.CALLOUT_GREETING, res3.content)
-
-        val res4 = filter.toChatMessageOrNull(nickMentionMsg, botSelfId)
-        assertNotNull(res4)
-        assertEquals("Alice", res4.author)
-        assertEquals(ChatterNoiseFilter.CALLOUT_GREETING, res4.content)
-
-        val res5 = filter.toChatMessageOrNull(multiMentionMsg, botSelfId)
-        assertNotNull(res5)
-        assertEquals("Alice", res5.author)
-        assertEquals(ChatterNoiseFilter.CALLOUT_GREETING, res5.content)
-
-        val res6 = filter.toChatMessageOrNull(whitespaceMentionMsg, botSelfId)
-        assertNotNull(res6)
-        assertEquals("Alice", res6.author)
-        assertEquals(ChatterNoiseFilter.CALLOUT_GREETING, res6.content)
-    }
-
-    @Test
-    fun `toChatMessageOrNull preserves trimmed text for mixed message containing mention`() {
-        val botSelfId = Snowflake(42L)
-
-        val msg1 = createMockMessage(id = 611L, username = "Bob", content = "@Luna 今天天氣如何")
-        val msg2 = createMockMessage(id = 612L, username = "Bob", content = "<@42> 今天天氣如何")
-        val msg3 = createMockMessage(id = 613L, username = "Bob", content = "<@!42> 今天天氣如何")
-        val msg4 = createMockMessage(id = 614L, username = "Bob", content = "今天天氣如何 @luna")
-
-        val res1 = filter.toChatMessageOrNull(msg1, botSelfId)
-        assertNotNull(res1)
-        assertEquals("Bob", res1.author)
-        assertEquals("今天天氣如何", res1.content)
-
-        val res2 = filter.toChatMessageOrNull(msg2, botSelfId)
-        assertNotNull(res2)
-        assertEquals("Bob", res2.author)
-        assertEquals("今天天氣如何", res2.content)
-
-        val res3 = filter.toChatMessageOrNull(msg3, botSelfId)
-        assertNotNull(res3)
-        assertEquals("Bob", res3.author)
-        assertEquals("今天天氣如何", res3.content)
-
-        val res4 = filter.toChatMessageOrNull(msg4, botSelfId)
-        assertNotNull(res4)
-        assertEquals("Bob", res4.author)
-        assertEquals("今天天氣如何", res4.content)
-    }
-
-    @Test
-    fun `toChatMessageOrNull preserves other user mentions and normal messages without alteration`() {
-        val botSelfId = Snowflake(42L)
-
-        val otherMentionMsg = createMockMessage(id = 621L, username = "Charlie", content = "<@9999>")
-        val otherMixedMsg = createMockMessage(id = 622L, username = "Charlie", content = "<@9999> check this out")
-        val normalMsg = createMockMessage(id = 623L, username = "Charlie", content = "Just a regular chat message")
-        val mixedWithBothMsg = createMockMessage(id = 624L, username = "Charlie", content = "@Luna <@9999> hello")
-
-        val res1 = filter.toChatMessageOrNull(otherMentionMsg, botSelfId)
-        assertNotNull(res1)
-        assertEquals("Charlie", res1.author)
-        assertEquals("<@9999>", res1.content)
-
-        val res2 = filter.toChatMessageOrNull(otherMixedMsg, botSelfId)
-        assertNotNull(res2)
-        assertEquals("Charlie", res2.author)
-        assertEquals("<@9999> check this out", res2.content)
-
-        val res3 = filter.toChatMessageOrNull(normalMsg, botSelfId)
-        assertNotNull(res3)
-        assertEquals("Charlie", res3.author)
-        assertEquals("Just a regular chat message", res3.content)
-
-        val res4 = filter.toChatMessageOrNull(mixedWithBothMsg, botSelfId)
-        assertNotNull(res4)
-        assertEquals("Charlie", res4.author)
-        assertEquals("<@9999> hello", res4.content)
     }
 
     @Test

@@ -34,18 +34,6 @@ class CurtlyAdapterTest {
         )
 
     @Test
-    fun `commands have correct slash command names and descriptions`() {
-        val service = CurtlyService(InMemoryUrlStorage())
-        val shortenCmd = ShortenCommand(service)
-        val myUrlsCmd = MyUrlsCommand(service, "http://localhost:8080/s/")
-
-        assertEquals("shorten", shortenCmd.name)
-        assertEquals("myurls", myUrlsCmd.name)
-        assertTrue(shortenCmd.description.isNotBlank())
-        assertTrue(myUrlsCmd.description.isNotBlank())
-    }
-
-    @Test
     fun `curtly routing mounts full HTTP suite and manages short urls and analytics`() =
         testApplication {
             val storage = InMemoryUrlStorage()

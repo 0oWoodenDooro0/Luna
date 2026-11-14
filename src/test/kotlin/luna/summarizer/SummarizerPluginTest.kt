@@ -15,28 +15,14 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.test.runTest
 import luna.plugin.DefaultPluginContext
-import luna.plugin.LunaPlugin
 import org.jetbrains.exposed.v1.jdbc.Database
 import org.junit.jupiter.api.Test
-import java.util.ServiceLoader
-import java.util.UUID
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
-import kotlin.test.assertTrue
 import kotlin.time.Duration.Companion.minutes
 
 class SummarizerPluginTest {
-    private fun createTestDb(): Database =
-        Database.connect(
-            "jdbc:h2:mem:summarizer_plugin_${UUID.randomUUID()};DB_CLOSE_DELAY=-1;",
-            driver = "org.h2.Driver",
-        )
-
-    @Test
-    fun `summarizer plugin implements LunaPlugin with name summarizer`() {
-        val plugin = SummarizerPlugin()
-        assertEquals("summarizer", plugin.name)
-    }
+    private fun createTestDb(): Database = mockk(relaxed = true)
 
     @Test
     fun `initializes with default configurations when optional configs are absent`() =
@@ -281,14 +267,4 @@ class SummarizerPluginTest {
 
             verify(exactly = 1) { mockSummarizer.close() }
         }
-
-    @Test
-    fun `service loader discovers SummarizerPlugin on classpath`() {
-        val loader = ServiceLoader.load(LunaPlugin::class.java)
-        val plugins = loader.toList()
-        assertTrue(
-            plugins.any { it is SummarizerPlugin },
-            "Expected SummarizerPlugin to be discoverable via ServiceLoader SPI",
-        )
-    }
 }

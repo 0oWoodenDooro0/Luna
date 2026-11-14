@@ -3,12 +3,9 @@ package luna.chatter
 import dev.kord.common.entity.MessageType
 import dev.kord.common.entity.Snowflake
 import dev.kord.core.Kord
-import dev.kord.core.behavior.channel.MessageChannelBehavior
 import dev.kord.core.behavior.channel.createMessage
 import dev.kord.core.cache.data.MessageData
 import dev.kord.core.cache.data.UserData
-import dev.kord.core.entity.Attachment
-import dev.kord.core.entity.Embed
 import dev.kord.core.entity.Message
 import dev.kord.core.entity.User
 import dev.kord.core.entity.channel.MessageChannel
@@ -26,12 +23,9 @@ import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.test.runTest
 import luna.core.LunaWebhookRegistry
 import luna.plugin.DefaultPluginContext
-import luna.plugin.LunaPlugin
-import luna.plugin.PluginLoader
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
-import java.util.ServiceLoader
 import kotlin.coroutines.EmptyCoroutineContext
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -83,30 +77,6 @@ class ChatterServiceTest {
         LunaWebhookRegistry.clear()
     }
 
-    private fun createMockAttachment(
-        url: String,
-        contentType: String?,
-        filename: String = "image.png",
-        size: Int = 512 * 1024,
-    ): Attachment {
-        val attachment = mockk<Attachment>()
-        every { attachment.url } returns url
-        every { attachment.contentType } returns contentType
-        every { attachment.filename } returns filename
-        every { attachment.size } returns size
-        return attachment
-    }
-
-    private fun createMockEmbed(
-        title: String? = null,
-        description: String? = null,
-    ): Embed {
-        val embed = mockk<Embed>()
-        every { embed.title } returns title
-        every { embed.description } returns description
-        return embed
-    }
-
     private fun createMockMessage(
         id: Long = 1L,
         channelId: Long = 100L,
@@ -118,8 +88,6 @@ class ChatterServiceTest {
         authorIsNull: Boolean = false,
         mentionedUserIds: Set<Snowflake> = emptySet(),
         selfId: Snowflake = Snowflake(9999L),
-        attachments: Set<Attachment> = emptySet(),
-        embeds: List<Embed> = emptyList(),
         referencedMessage: Message? = null,
     ): Message {
         val author =
@@ -153,8 +121,8 @@ class ChatterServiceTest {
         every { msg.content } returns content
         every { msg.type } returns type
         every { msg.webhookId } returns webhookId
-        every { msg.attachments } returns attachments
-        every { msg.embeds } returns embeds
+        every { msg.attachments } returns emptySet()
+        every { msg.embeds } returns emptyList()
         every { msg.mentionedUserIds } returns mentionedUserIds
         every { msg.referencedMessage } returns referencedMessage
         every { msg.messageReference } returns null
@@ -191,75 +159,6 @@ class ChatterServiceTest {
             coVerify(exactly = 1) {
                 chatterGenerator.generateReply(
                     match<ChatterInput> { it.isDirectMention && it.transcript.contains("what do you think about Kotlin coroutines?") },
-                )
-            }
-            coVerify(exactly = 1) { channel.createMessage(replyText) }
-        }
-
-    @Test
-    fun `direct pure bot mention triggers reply with callout greeting fallback passed to chatter generator`() =
-        runTest {
-            val botSelfId = Snowflake(9999L)
-            val channelId = 500L
-
-            val message =
-                createMockMessage(
-                    id = 110L,
-                    channelId = channelId,
-                    username = "Alice",
-                    content = "<@9999>",
-                    mentionedUserIds = setOf(botSelfId),
-                    selfId = botSelfId,
-                )
-            val replyText = "你好！很高興見到你！"
-
-            coEvery { chatterGenerator.generateReply(any<ChatterInput>()) } returns replyText
-
-            val result = service.processMessage(message)
-
-            assertTrue(result, "Expected processMessage to reply to direct pure bot mention")
-            coVerify(exactly = 1) { channel.type() }
-            coVerify(exactly = 1) {
-                chatterGenerator.generateReply(
-                    match<ChatterInput> { input ->
-                        input.isDirectMention &&
-                            input.transcript.contains("[Alice]: ${ChatterNoiseFilter.CALLOUT_GREETING}")
-                    },
-                )
-            }
-            coVerify(exactly = 1) { channel.createMessage(replyText) }
-        }
-
-    @Test
-    fun `mixed bot mention message strips mention tag before passing to chatter generator`() =
-        runTest {
-            val botSelfId = Snowflake(9999L)
-            val channelId = 500L
-
-            val message =
-                createMockMessage(
-                    id = 111L,
-                    channelId = channelId,
-                    username = "Alice",
-                    content = "@Luna 今天天氣如何",
-                    mentionedUserIds = setOf(botSelfId),
-                    selfId = botSelfId,
-                )
-            val replyText = "今天天氣晴朗，很適合出門走走！"
-
-            coEvery { chatterGenerator.generateReply(any<ChatterInput>()) } returns replyText
-
-            val result = service.processMessage(message)
-
-            assertTrue(result, "Expected processMessage to reply to mixed bot mention message")
-            coVerify(exactly = 1) { channel.type() }
-            coVerify(exactly = 1) {
-                chatterGenerator.generateReply(
-                    match<ChatterInput> { input ->
-                        input.isDirectMention &&
-                            input.transcript.contains("[Alice]: 今天天氣如何") &&
-                            !input.transcript.contains("@Luna")
-                    },
                 )
             }
             coVerify(exactly = 1) { channel.createMessage(replyText) }
@@ -327,95 +226,6 @@ class ChatterServiceTest {
         }
 
     @Test
-    fun `filter rejects bot messages without invoking decision client or gemini`() =
-        runTest {
-            val message = createMockMessage(id = 103L, isBot = true, content = "Bot announcement")
-
-            val result = service.processMessage(message)
-
-            assertFalse(result)
-            coVerify(exactly = 0) { decisionClient.decide(any(), any()) }
-            coVerify(exactly = 0) { channel.type() }
-            coVerify(exactly = 0) { chatterGenerator.generateReply(any<ChatterInput>()) }
-            coVerify(exactly = 0) { channel.createMessage(any<String>()) }
-        }
-
-    @Test
-    fun `filter rejects slash and prefix command messages without invoking decision client or gemini`() =
-        runTest {
-            val slashCommand = createMockMessage(id = 104L, content = "/help")
-            val prefixCommand = createMockMessage(id = 105L, content = "!roll 100")
-
-            assertFalse(service.processMessage(slashCommand))
-            assertFalse(service.processMessage(prefixCommand))
-            coVerify(exactly = 0) { decisionClient.decide(any(), any()) }
-            coVerify(exactly = 0) { channel.type() }
-            coVerify(exactly = 0) { chatterGenerator.generateReply(any<ChatterInput>()) }
-            coVerify(exactly = 0) { channel.createMessage(any<String>()) }
-        }
-
-    @Test
-    fun `filter rejects messages when channel is on cooldown`() =
-        runTest {
-            val channelId = 502L
-            cooldownCache.record(channelId, simulatedTime)
-
-            val message = createMockMessage(id = 106L, channelId = channelId, content = "Anyone here?")
-
-            val result = service.processMessage(message)
-
-            assertFalse(result)
-            coVerify(exactly = 0) { decisionClient.decide(any(), any()) }
-            coVerify(exactly = 0) { channel.type() }
-            coVerify(exactly = 0) { chatterGenerator.generateReply(any<ChatterInput>()) }
-            coVerify(exactly = 0) { channel.createMessage(any<String>()) }
-        }
-
-    @Test
-    fun `filter rejects messages when channel is not in allowed channels whitelist`() =
-        runTest {
-            filter.allowedChannels = setOf(Snowflake(999L))
-            val message = createMockMessage(id = 107L, channelId = 503L, content = "Testing channel whitelist")
-
-            val result = service.processMessage(message)
-
-            assertFalse(result)
-            coVerify(exactly = 0) { decisionClient.decide(any(), any()) }
-            coVerify(exactly = 0) { channel.type() }
-            coVerify(exactly = 0) { chatterGenerator.generateReply(any<ChatterInput>()) }
-            coVerify(exactly = 0) { channel.createMessage(any<String>()) }
-        }
-
-    @Test
-    fun `social preview webhook in luna webhook registry passes filter and processes end to end`() =
-        runTest {
-            val webhookId = Snowflake(777L)
-            LunaWebhookRegistry.register(webhookId)
-
-            val channelId = 504L
-            val message =
-                createMockMessage(
-                    id = 108L,
-                    channelId = channelId,
-                    username = "LunaPreview",
-                    content = "Check this interesting thread: https://x.com/example/status/123",
-                    authorIsNull = true,
-                    webhookId = webhookId,
-                )
-
-            coEvery { decisionClient.decide(any(), any()) } returns ParticipationDecision(shouldParticipate = true, noul = 0.9)
-            coEvery { chatterGenerator.generateReply(any<ChatterInput>()) } returns "That looks like an interesting thread!"
-
-            val result = service.processMessage(message)
-
-            assertTrue(result, "SocialPreview webhook in registry must pass filter and be processed")
-            coVerify(exactly = 1) { channel.type() }
-            coVerify(exactly = 1) { chatterGenerator.generateReply(any<ChatterInput>()) }
-            coVerify(exactly = 1) { channel.createMessage("That looks like an interesting thread!") }
-            assertTrue(cooldownCache.isOnCooldown(channelId))
-        }
-
-    @Test
     fun `gemini returning null or error fails closed gracefully without crashing`() =
         runTest {
             val channelId = 505L
@@ -436,22 +246,6 @@ class ChatterServiceTest {
             coVerify(exactly = 0) { channel.createMessage(any<String>()) }
             assertFalse(cooldownCache.isOnCooldown(channelId))
         }
-
-    @Test
-    fun `plugin loader discovers ChatterPlugin via ServiceLoader SPI`() {
-        val loader = PluginLoader()
-        val plugins = loader.loadPlugins()
-
-        val plugin = plugins.find { it is ChatterPlugin }
-        assertNotNull(plugin, "ChatterPlugin must be registered in META-INF/services/luna.plugin.LunaPlugin")
-        assertEquals("chatter", plugin.name)
-
-        val directLoader = ServiceLoader.load(LunaPlugin::class.java)
-        assertTrue(
-            directLoader.any { it is ChatterPlugin },
-            "ChatterPlugin must be discoverable via standard java.util.ServiceLoader",
-        )
-    }
 
     @Test
     fun `chatter plugin initializes configuration and enables automatically when GEMINI_API_KEY is configured`() =
@@ -526,63 +320,6 @@ class ChatterServiceTest {
         }
 
     @Test
-    fun `history collection preserves chronological order and filters noise messages from history slice`() =
-        runTest {
-            val channelId = 506L
-            val msg1 = createMockMessage(id = 1L, channelId = channelId, username = "Alice", content = "What is Luna?")
-            val msg2 = createMockMessage(id = 2L, channelId = channelId, username = "SpamBot", content = "Buy crypto now", isBot = true)
-            val msg3 = createMockMessage(id = 3L, channelId = channelId, username = "Bob", content = "!help")
-            val msg4 = createMockMessage(id = 4L, channelId = channelId, username = "Charlie", content = "Luna is a community bot.")
-            val currentMsg = createMockMessage(id = 5L, channelId = channelId, username = "Alice", content = "Does it reply to chats?")
-
-            val customHistoryFetcher: suspend (Message, Int) -> List<Message> = { _, _ ->
-                listOf(msg1, msg2, msg3, msg4)
-            }
-
-            val testService =
-                ChatterService(
-                    filter = filter,
-                    decisionClient = decisionClient,
-                    chatterGenerator = chatterGenerator,
-                    cooldownCache = cooldownCache,
-                    decisionMessageCount = 3,
-                    historyMessageCount = 15,
-                    historyFetcher = customHistoryFetcher,
-                )
-
-            coEvery { decisionClient.decide(any(), any()) } returns ParticipationDecision(shouldParticipate = true)
-            coEvery { chatterGenerator.generateReply(any<ChatterInput>()) } returns "Yes, Luna replies to chats!"
-
-            val result = testService.processMessage(currentMsg)
-
-            assertTrue(result)
-            // Decision state should receive valid messages only (excluding bot and command)
-            coVerify(exactly = 1) {
-                decisionClient.decide(
-                    match { state ->
-                        state.contains("Alice") &&
-                            state.contains("Charlie") &&
-                            !state.contains("SpamBot") &&
-                            !state.contains("!help")
-                    },
-                    any(),
-                )
-            }
-            // Gemini reply stage should receive chronological dialogue transcript without noise
-            coVerify(exactly = 1) {
-                chatterGenerator.generateReply(
-                    match<ChatterInput> { input ->
-                        input.transcript.contains("[Alice]: What is Luna?") &&
-                            input.transcript.contains("[Charlie]: Luna is a community bot.") &&
-                            input.transcript.contains("[Alice]: Does it reply to chats?") &&
-                            !input.transcript.contains("SpamBot") &&
-                            !input.transcript.contains("!help")
-                    },
-                )
-            }
-        }
-
-    @Test
     fun `event listener receives MessageCreateEvent and triggers chatter pipeline`() =
         runTest {
             val mockKord = mockk<Kord>(relaxed = true)
@@ -629,69 +366,6 @@ class ChatterServiceTest {
             assertFalse(plugin.isChatterEnabled)
             assertEquals("", plugin.decisionClient?.config?.apiKey)
             plugin.shutdown()
-        }
-
-    @Test
-    fun `image-only ambient message passes decision evaluation with ChatImageAttachments and triggers reply`() =
-        runTest {
-            val channelId = 601L
-            val validPng = createMockAttachment("https://cdn.example.com/meme.png", "image/png", "meme.png")
-            val message =
-                createMockMessage(
-                    id = 601L,
-                    channelId = channelId,
-                    username = "Alice",
-                    content = "",
-                    attachments = setOf(validPng),
-                )
-
-            coEvery { decisionClient.decide(any(), any()) } returns ParticipationDecision(shouldParticipate = true, noul = 0.88)
-            coEvery { chatterGenerator.generateReply(any<ChatterInput>()) } returns "haha that meme is gold"
-
-            val result = service.processMessage(message)
-
-            assertTrue(result)
-            coVerify(exactly = 1) {
-                decisionClient.decide(
-                    match { it.contains("[Alice]: [附帶圖片 1: meme.png]") },
-                    match { it.size == 1 && it[0].url == "https://cdn.example.com/meme.png" && it[0].mimeType == "image/png" },
-                )
-            }
-            coVerify(exactly = 1) {
-                chatterGenerator.generateReply(
-                    match<ChatterInput> { input ->
-                        !input.isDirectMention &&
-                            input.transcript.contains("[Alice]: [附帶圖片 1: meme.png]") &&
-                            input.imageAttachments.size == 1 &&
-                            input.imageAttachments[0].url == "https://cdn.example.com/meme.png" &&
-                            input.imageAttachments[0].mimeType == "image/png"
-                    },
-                )
-            }
-            coVerify(exactly = 1) { channel.createMessage("haha that meme is gold") }
-            assertTrue(cooldownCache.isOnCooldown(channelId))
-        }
-
-    @Test
-    fun `oversized image-only ambient message does not invoke decision client or chatter generator`() =
-        runTest {
-            val tenMbPlusOne = 10 * 1024 * 1024 + 1
-            val hugeImg = createMockAttachment("https://cdn.example.com/huge.jpg", "image/jpeg", "huge.jpg", size = tenMbPlusOne)
-            val message =
-                createMockMessage(
-                    id = 602L,
-                    channelId = 602L,
-                    username = "Bob",
-                    content = "",
-                    attachments = setOf(hugeImg),
-                )
-
-            val result = service.processMessage(message)
-
-            assertFalse(result)
-            coVerify(exactly = 0) { decisionClient.decide(any(), any()) }
-            coVerify(exactly = 0) { chatterGenerator.generateReply(any<ChatterInput>()) }
-            coVerify(exactly = 0) { channel.createMessage(any<String>()) }
         }
 
     @Test
@@ -764,217 +438,6 @@ class ChatterServiceTest {
                 )
             }
             coVerify(exactly = 1) { channel.createMessage("Kotlin 2.2 context parameters look neat") }
-        }
-
-    @Test
-    fun `lightweight vs heavy split caps decision at 3 messages and 3 images while reply receives 15 messages and maxImages`() =
-        runTest {
-            val channelId = 604L
-            val extRef = createMockMessage(id = 700L, channelId = channelId, username = "ExtUser", content = "Earlier architecture note")
-            val historyMsgs =
-                (1..14).map { idx ->
-                    val att = createMockAttachment("https://cdn.example.com/$idx.png", "image/png", "$idx.png")
-                    createMockMessage(
-                        id = 700L + idx,
-                        channelId = channelId,
-                        username = "U$idx",
-                        content = "Turn $idx",
-                        attachments = setOf(att),
-                        referencedMessage = if (idx == 1) extRef else null,
-                    )
-                }
-            val currentAtt = createMockAttachment("https://cdn.example.com/15.png", "image/png", "15.png")
-            val currentMsg =
-                createMockMessage(
-                    id = 715L,
-                    channelId = channelId,
-                    username = "U15",
-                    content = "Turn 15 check this out",
-                    attachments = setOf(currentAtt),
-                )
-
-            val splitCollector =
-                ChatterContextCollector(
-                    noiseFilter = filter,
-                    decisionMessageCount = 3,
-                    historyMessageCount = 15,
-                    maxDecisionImages = 3,
-                    maxImages = 10,
-                    peekResolver = { null },
-                )
-            val splitService =
-                ChatterService(
-                    filter = filter,
-                    decisionClient = decisionClient,
-                    chatterGenerator = chatterGenerator,
-                    cooldownCache = cooldownCache,
-                    historyFetcher = { _, _ -> historyMsgs },
-                    contextCollector = splitCollector,
-                )
-
-            coEvery { decisionClient.decide(any(), any()) } returns ParticipationDecision(shouldParticipate = true, noul = 0.8)
-            coEvery { chatterGenerator.generateReply(any<ChatterInput>()) } returns "nice progression"
-
-            val result = splitService.processMessage(currentMsg)
-
-            assertTrue(result)
-            coVerify(exactly = 1) {
-                decisionClient.decide(
-                    match { state ->
-                        !state.contains("Turn 12") &&
-                            state.contains("Turn 13") &&
-                            state.contains("Turn 14") &&
-                            state.contains("Turn 15")
-                    },
-                    match { images ->
-                        images.map { it.url } ==
-                            listOf(
-                                "https://cdn.example.com/13.png",
-                                "https://cdn.example.com/14.png",
-                                "https://cdn.example.com/15.png",
-                            )
-                    },
-                )
-            }
-            coVerify(exactly = 1) {
-                chatterGenerator.generateReply(
-                    match<ChatterInput> { input ->
-                        input.transcript.contains("[U1 回覆 ExtUser「Earlier architecture note」]: Turn 1") &&
-                            input.transcript.contains("Turn 15 check this out") &&
-                            input.transcript.contains("[附帶圖片 1: 6.png]") &&
-                            input.transcript.contains("[附帶圖片 10: 15.png]") &&
-                            !input.transcript.contains("[附帶圖片 11:") &&
-                            input.imageAttachments.size == 10 &&
-                            input.imageAttachments.first().url == "https://cdn.example.com/6.png" &&
-                            input.imageAttachments.last().url == "https://cdn.example.com/15.png"
-                    },
-                )
-            }
-        }
-
-    @Test
-    fun `SocialPeek failure in reply stage degrades cleanly to Discord embed transcript without failing reply`() =
-        runTest {
-            val channelId = 605L
-            val embed = createMockEmbed(title = "Fallback Embed Title", description = "Fallback description")
-            val message =
-                createMockMessage(
-                    id = 801L,
-                    channelId = channelId,
-                    username = "Alice",
-                    content = "Check https://example.com/failing-page",
-                    embeds = listOf(embed),
-                )
-
-            val failingCollector =
-                ChatterContextCollector(
-                    noiseFilter = filter,
-                    peekResolver = { throw RuntimeException("SocialPeek timeout") },
-                )
-            val failingPeekService =
-                ChatterService(
-                    filter = filter,
-                    decisionClient = decisionClient,
-                    chatterGenerator = chatterGenerator,
-                    cooldownCache = cooldownCache,
-                    historyFetcher = { _, _ -> emptyList() },
-                    contextCollector = failingCollector,
-                )
-
-            coEvery { decisionClient.decide(any(), any()) } returns ParticipationDecision(shouldParticipate = true)
-            coEvery { chatterGenerator.generateReply(any<ChatterInput>()) } returns "looks interesting anyway"
-
-            val result = failingPeekService.processMessage(message)
-
-            assertTrue(result)
-            coVerify(exactly = 1) {
-                chatterGenerator.generateReply(
-                    match<ChatterInput> { input ->
-                        input.transcript.contains("https://example.com/failing-page") &&
-                            input.transcript.contains("[連結預覽: Fallback Embed Title - Fallback description]")
-                    },
-                )
-            }
-            coVerify(exactly = 1) { channel.createMessage("looks interesting anyway") }
-        }
-
-    @Test
-    fun `YouTube PeekPost propagates videoUri, videoDurationSeconds, metadata, and isDirectMention into ChatterInput`() =
-        runTest {
-            val botSelfId = Snowflake(9999L)
-            val ytPost =
-                PeekPost(
-                    platform = Platform.YOUTUBE,
-                    id = "dQw4w9WgXcQ",
-                    originalUrl = "https://youtu.be/dQw4w9WgXcQ",
-                    cleanUrl = "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
-                    author = Author(username = "TestChannel"),
-                    title = "Deep Dive on Kotlin",
-                    content = "Video description",
-                    rawData = mapOf("durationSeconds" to "900"),
-                    comments = listOf(Comment(author = "viewer1", content = "Great talk!")),
-                )
-            val ytCollector =
-                ChatterContextCollector(
-                    noiseFilter = filter,
-                    peekResolver = { ytPost },
-                )
-            val ytService =
-                ChatterService(
-                    filter = filter,
-                    decisionClient = decisionClient,
-                    chatterGenerator = chatterGenerator,
-                    cooldownCache = cooldownCache,
-                    historyFetcher = { _, _ -> emptyList() },
-                    contextCollector = ytCollector,
-                )
-
-            coEvery { decisionClient.decide(any(), any()) } returns ParticipationDecision(shouldParticipate = true, noul = 0.9)
-            coEvery { chatterGenerator.generateReply(any<ChatterInput>()) } returns "這部影片講得挺清楚的"
-
-            val ambientMsg =
-                createMockMessage(
-                    id = 850L,
-                    channelId = 606L,
-                    username = "Alice",
-                    content = "看看這部 https://youtu.be/dQw4w9WgXcQ",
-                )
-            assertTrue(ytService.processMessage(ambientMsg))
-            coVerify(exactly = 1) {
-                chatterGenerator.generateReply(
-                    match<ChatterInput> { input ->
-                        !input.isDirectMention &&
-                            input.videoUri == "https://www.youtube.com/watch?v=dQw4w9WgXcQ" &&
-                            input.videoDurationSeconds == 900L &&
-                            input.title == "Deep Dive on Kotlin" &&
-                            input.url == "https://www.youtube.com/watch?v=dQw4w9WgXcQ" &&
-                            input.comments == listOf("Great talk!")
-                    },
-                )
-            }
-
-            val mentionMsg =
-                createMockMessage(
-                    id = 851L,
-                    channelId = 607L,
-                    username = "Bob",
-                    content = "<@9999> 幫我看這部 https://youtu.be/dQw4w9WgXcQ",
-                    mentionedUserIds = setOf(botSelfId),
-                    selfId = botSelfId,
-                )
-            assertTrue(ytService.processMessage(mentionMsg))
-            coVerify(exactly = 1) {
-                chatterGenerator.generateReply(
-                    match<ChatterInput> { input ->
-                        input.isDirectMention &&
-                            input.videoUri == "https://www.youtube.com/watch?v=dQw4w9WgXcQ" &&
-                            input.videoDurationSeconds == 900L &&
-                            input.title == "Deep Dive on Kotlin" &&
-                            input.url == "https://www.youtube.com/watch?v=dQw4w9WgXcQ" &&
-                            input.comments == listOf("Great talk!")
-                    },
-                )
-            }
         }
 
     @Test

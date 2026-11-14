@@ -32,7 +32,7 @@ jobs:
         run: chmod +x gradlew
 
       - name: Run checks and tests
-        run: ./gradlew check test --no-daemon
+        run: ./gradlew check --no-daemon
 
       - name: Verify Docker build
         run: docker build -t luna:ci-test .

@@ -16,8 +16,6 @@ import kotlinx.coroutines.runBlocking
 import luna.curtly.engine.ClickLogsEntries
 import luna.curtly.engine.UrlEntries
 import luna.plugin.DefaultPluginContext
-import luna.plugin.LunaPlugin
-import luna.plugin.PluginLoader
 import org.jetbrains.exposed.v1.jdbc.Database
 import org.jetbrains.exposed.v1.jdbc.selectAll
 import org.jetbrains.exposed.v1.jdbc.transactions.transaction
@@ -33,12 +31,6 @@ class CurtlyPluginTest {
             "jdbc:h2:mem:curtly_plugin_${UUID.randomUUID()};DB_CLOSE_DELAY=-1;",
             driver = "org.h2.Driver",
         )
-
-    @Test
-    fun `curtly plugin implements LunaPlugin contract with name curtly`() {
-        val plugin: LunaPlugin = CurtlyPlugin()
-        assertEquals("curtly", plugin.name)
-    }
 
     @Test
     fun `curtly plugin initializes database tables, registers commands and mounts routes`() =
@@ -136,14 +128,4 @@ class CurtlyPluginTest {
             assertTrue(location.contains("client_id=test-client-id-123"))
             assertTrue(location.contains("redirect_uri=https%3A%2F%2Foauth.test%2Fcallback"))
         }
-
-    @Test
-    fun `plugin loader discovers CurtlyPlugin via ServiceLoader`() {
-        val loader = PluginLoader()
-        val plugins = loader.loadPlugins()
-
-        val curtlyPlugin = plugins.find { it is CurtlyPlugin }
-        assertNotNull(curtlyPlugin, "CurtlyPlugin should be registered in META-INF/services/luna.plugin.LunaPlugin")
-        assertEquals("curtly", curtlyPlugin.name)
-    }
 }

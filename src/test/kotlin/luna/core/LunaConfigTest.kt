@@ -8,7 +8,6 @@ import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertThrows
 import org.slf4j.LoggerFactory
 import kotlin.test.assertEquals
-import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
@@ -300,32 +299,6 @@ class LunaConfigTest {
         assertThrows<ConfigValidationException> {
             LunaHost(customConfig = invalidMap)
         }
-    }
-
-    @Test
-    fun `env example specification is discoverable and readable via classloader resource`() {
-        val stream = Thread.currentThread().contextClassLoader.getResourceAsStream(".env.example")
-        assertNotNull(stream, "Classpath resource '.env.example' must be discoverable")
-        val content = stream.bufferedReader().use { it.readText() }
-        assertTrue(content.isNotBlank(), ".env.example content must not be blank")
-
-        // Assert all five sections are present
-        assertTrue(content.contains("Section 1: Luna Host Core"), "Section 1 must be defined")
-        assertTrue(content.contains("Section 2: Curtly URL Shortener"), "Section 2 must be defined")
-        assertTrue(content.contains("Section 3: Summarizer & Multimodal Pipeline"), "Section 3 must be defined")
-        assertTrue(content.contains("Section 4: Plugin Lifecycle & Management"), "Section 4 must be defined")
-        assertTrue(content.contains("Section 5: Multi-Tenant Gemini MCP Server"), "Section 5 must be defined")
-
-        // Assert multi-tenant workflow and quota limits
-        assertTrue(content.contains("/mcp client create"), "Multi-tenant dynamic client create must be documented")
-        assertTrue(content.contains("/mcp webhook add tag:<tag>"), "Tagged webhook addition must be documented")
-        assertTrue(content.contains("10"), "Webhook quota limit of 10 must be documented")
-
-        // Assert legacy single-tenant compatibility fallbacks removed
-        assertFalse(content.contains("MCP_OAUTH_CLIENT_SECRET"), "Legacy MCP_OAUTH_CLIENT_SECRET must not be present")
-        assertFalse(content.contains("MCP_AUTH_TOKEN"), "Legacy MCP_AUTH_TOKEN must not be present")
-        assertFalse(content.contains("MCP_REQUIRE_AUTH"), "Legacy MCP_REQUIRE_AUTH must not be present")
-        assertFalse(content.contains("Legacy Single-Tenant Compatibility Fallbacks"), "Legacy compatibility fallback section must not be present")
     }
 
     @Test

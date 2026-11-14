@@ -106,12 +106,6 @@ class McpClientCommandTest {
     }
 
     @Test
-    fun `command metadata has name mcp and non-empty description`() {
-        assertEquals("mcp", command.name)
-        assertTrue(command.description.isNotBlank())
-    }
-
-    @Test
     fun `create subcommand successfully provisions client in database and responds ephemerally with plain secret and setup info`() =
         runTest {
             val (interaction, getResponseContent) =

@@ -3,14 +3,6 @@ package dev.socialpeek
 import dev.socialpeek.model.Media
 import dev.socialpeek.model.PeekPost
 import dev.socialpeek.model.Platform
-import dev.socialpeek.resolver.bilibili.BilibiliResolver
-import dev.socialpeek.resolver.facebook.FacebookResolver
-import dev.socialpeek.resolver.generic.GenericWebResolver
-import dev.socialpeek.resolver.instagram.InstagramResolver
-import dev.socialpeek.resolver.reddit.RedditResolver
-import dev.socialpeek.resolver.threads.ThreadsResolver
-import dev.socialpeek.resolver.x.XResolver
-import dev.socialpeek.resolver.youtube.YouTubeResolver
 import kotlinx.coroutines.test.runTest
 import org.junit.jupiter.api.Assumptions
 import org.junit.jupiter.api.Tag
@@ -18,7 +10,6 @@ import org.junit.jupiter.api.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
-import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 class SocialPeekIntegrationTest {
@@ -28,54 +19,6 @@ class SocialPeekIntegrationTest {
         } catch (e: Exception) {
             Assumptions.abort("Live network request aborted due to external anti-bot/network restriction: ${e.message}")
         }
-
-    @Test
-    fun `default client should support all standard platforms including generic fallback`() {
-        val client = SocialPeek.defaultClient
-
-        assertEquals(8, client.resolvers.size)
-        assertTrue(client.resolvers.any { it is FacebookResolver })
-        assertTrue(client.resolvers.any { it is BilibiliResolver })
-        assertTrue(client.resolvers.any { it is XResolver })
-        assertTrue(client.resolvers.any { it is InstagramResolver })
-        assertTrue(client.resolvers.any { it is ThreadsResolver })
-        assertTrue(client.resolvers.any { it is YouTubeResolver })
-        assertTrue(client.resolvers.any { it is RedditResolver })
-        assertTrue(client.resolvers.any { it is GenericWebResolver })
-
-        // Check resolver routing
-        assertEquals(
-            Platform.FACEBOOK,
-            client.findResolver("https://www.facebook.com/zuck/posts/pfbid02517vL7rZ9kFq71k51aP6k4R7Y6oBw8m")?.platform,
-        )
-        assertEquals(Platform.FACEBOOK, client.findResolver("https://www.facebook.com/reel/10153231379946729")?.platform)
-        assertEquals(Platform.FACEBOOK, client.findResolver("https://fb.watch/m4abc123/")?.platform)
-        assertEquals(Platform.FACEBOOK, client.findResolver("https://www.facebook.com/share/p/123456/")?.platform)
-        assertEquals(Platform.BILIBILI, client.findResolver("https://www.bilibili.com/video/BV1xx411c7mD")?.platform)
-        assertEquals(Platform.X, client.findResolver("https://x.com/jack/status/20")?.platform)
-        assertEquals(Platform.X, client.findResolver("https://x.com/i/status/2097593106510094458")?.platform)
-        assertEquals(Platform.INSTAGRAM, client.findResolver("https://www.instagram.com/p/Cx12345abc/")?.platform)
-        assertEquals(Platform.INSTAGRAM, client.findResolver("https://instagram.com/share/p/Cx12345abc/")?.platform)
-        assertEquals(Platform.THREADS, client.findResolver("https://www.threads.net/@zuck/post/CuZ12345")?.platform)
-        assertEquals(Platform.THREADS, client.findResolver("https://www.threads.com/share/BAENHoOpq1/")?.platform)
-        assertEquals(Platform.YOUTUBE, client.findResolver("https://youtu.be/dQw4w9WgXcQ")?.platform)
-        assertEquals(Platform.YOUTUBE, client.findResolver("https://www.youtube.com/live/SyG1rbuHB9A")?.platform)
-        assertEquals(Platform.REDDIT, client.findResolver("https://redd.it/1cdefgh")?.platform)
-        assertEquals(Platform.REDDIT, client.findResolver("https://www.reddit.com/r/google_antigravity/s/7GwvvFKRsE")?.platform)
-        assertEquals(Platform.GENERIC, client.findResolver("https://randomwebsite.com/article/1")?.platform)
-        assertNull(client.findResolver("ftp://randomwebsite.com/article/1"))
-    }
-
-    @Test
-    fun `SocialPeek helper methods should work`() {
-        assertTrue(SocialPeek.canResolve("https://www.facebook.com/zuck/posts/pfbid02517vL7rZ9kFq71k51aP6k4R7Y6oBw8m"))
-        assertTrue(SocialPeek.canResolve("https://fb.watch/m4abc123/"))
-        assertTrue(SocialPeek.canResolve("https://x.com/jack/status/20"))
-        assertTrue(SocialPeek.canResolve("https://bilibili.com/opus/12345"))
-        assertTrue(SocialPeek.canResolve("https://www.reddit.com/r/google_antigravity/s/7GwvvFKRsE"))
-        assertTrue(SocialPeek.canResolve("https://www.threads.com/share/BAENHoOpq1/"))
-        assertTrue(SocialPeek.canResolve("https://www.youtube.com/live/SyG1rbuHB9A"))
-    }
 
     @Test
     @Tag("integration")

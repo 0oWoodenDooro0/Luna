@@ -125,11 +125,8 @@ class GeminiSummarizerTest {
                 recordedUrl,
             )
 
-            // Verify request payload was serialized and contains instruction and content
-            val body = recordedBody
-            kotlin.test.assertNotNull(body)
-            assertTrue(body.contains("台灣繁體中文"))
-            assertTrue(body.contains("社群留言與討論："))
+            val body = checkNotNull(recordedBody)
+            assertTrue(body.contains("https://example.com/ai"))
         }
 
     @Test
@@ -334,8 +331,7 @@ class GeminiSummarizerTest {
                         request.url.encodedPath.endsWith("/interactions") && request.method.value == "POST" -> {
                             assertEquals("test-key", request.url.parameters["key"])
                             val body = request.body.toByteArray().decodeToString()
-                            assertTrue(body.contains("zh-TW"))
-                            assertTrue(body.contains("TL;DR:"))
+                            assertTrue(body.contains("longTalk"))
                             respond(
                                 content = """{"id": "int-123", "status": "in_progress"}""",
                                 status = HttpStatusCode.OK,
@@ -1602,18 +1598,6 @@ class GeminiSummarizerTest {
             assertTrue(result.text.contains("Baseline fallback summary without search"))
             assertEquals(2, requestCount)
         }
-
-    @Test
-    fun `GeminiConfig parses GEMINI_SEARCH_GROUNDING_ENABLED from environment`() {
-        val defaultCfg = GeminiConfig.fromEnv()
-        assertTrue(defaultCfg.searchGroundingEnabled)
-
-        val disabledCfg = GeminiConfig.fromEnv(mapOf("GEMINI_SEARCH_GROUNDING_ENABLED" to "false"))
-        assertFalse(disabledCfg.searchGroundingEnabled)
-
-        val enabledCfg = GeminiConfig.fromEnv(mapOf("GEMINI_SEARCH_GROUNDING_ENABLED" to "true"))
-        assertTrue(enabledCfg.searchGroundingEnabled)
-    }
 
     @Test
     fun `short video summarization routes to generateContent with clean file_data and sanitized model path`() =

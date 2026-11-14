@@ -6,6 +6,7 @@ import dev.kord.core.entity.Attachment
 import dev.kord.core.entity.Message
 import dev.kord.core.entity.User
 import dev.socialpeek.model.Author
+import dev.socialpeek.model.Comment
 import dev.socialpeek.model.PeekPost
 import dev.socialpeek.model.Platform
 import io.mockk.every
@@ -52,11 +53,20 @@ class ConversationSliceCollectorTest {
         type: MessageType = MessageType.Default,
         referencedMessage: Message? = null,
         authorId: Snowflake? = null,
+        webhookId: Snowflake? = null,
+        embeds: List<dev.kord.core.entity.Embed> = emptyList(),
+        authorIsNull: Boolean = false,
     ): Message {
-        val author = mockk<User>()
-        every { author.username } returns username
-        every { author.isBot } returns isBot
-        every { author.id } returns (authorId ?: Snowflake(id))
+        val author =
+            if (authorIsNull) {
+                null
+            } else {
+                mockk<User>().also {
+                    every { it.username } returns username
+                    every { it.isBot } returns isBot
+                    every { it.id } returns (authorId ?: Snowflake(id))
+                }
+            }
 
         val message = mockk<Message>()
         every { message.id } returns Snowflake(id)
@@ -66,9 +76,10 @@ class ConversationSliceCollectorTest {
         every { message.attachments } returns attachments
         every { message.type } returns type
         every { message.stickers } returns emptyList()
-        every { message.embeds } returns emptyList()
+        every { message.embeds } returns embeds
+        every { message.webhookId } returns webhookId
         every { message.data.author.username } returns username
-        every { message.data.webhookId.value } returns null
+        every { message.data.webhookId.value } returns webhookId
         every { message.referencedMessage } returns referencedMessage
         every { message.messageReference } returns null
         return message
@@ -828,5 +839,151 @@ class ConversationSliceCollectorTest {
             assertFalse(content.contains("TL;DR: Historic summary prior to reboot"))
             assertTrue(content.contains("[Bob]: Active topic"))
             assertTrue(content.contains("[Charlie]: Target msg"))
+        }
+
+    @Test
+    fun `collectSlice falls back to data author username when message author is null`() =
+        runTest {
+            val lunaWebhookId = Snowflake(777L)
+            val embed = SummaryTestFixtures.createMockEmbed(title = "Sample Clean Post", description = "Extracted article body")
+            val targetMsg =
+                createMockMessage(
+                    id = 8001L,
+                    username = "MasqueradedAlice",
+                    content = "Cleaned post link https://example.com/post",
+                    isBot = true,
+                    webhookId = lunaWebhookId,
+                    embeds = listOf(embed),
+                    authorIsNull = true,
+                )
+
+            val collector =
+                ConversationSliceCollector(
+                    peekResolver = { null },
+                    noiseFilter = DialogueNoiseFilter(isLunaWebhook = { it == lunaWebhookId }),
+                    historyFetcher = { _, _ -> emptyList() },
+                )
+
+            val slice = collector.collectSlice(targetMsg)
+            assertNotNull(slice)
+            assertTrue(slice.summaryInput.content.contains("[MasqueradedAlice]: Cleaned post link https://example.com/post"))
+        }
+
+    @Test
+    fun `collectSlice formats Discord embeds with title, description, or attachments`() =
+        runTest {
+            val baseTime = Instant.parse("2026-11-06T12:00:00Z")
+            val lunaWebhookId = Snowflake(777L)
+            val img = createMockAttachment("https://cdn.example.com/chart.png", "image/png", "chart.png")
+
+            val both =
+                createMockMessage(
+                    id = 8201L,
+                    username = "MasqueradedAlice",
+                    content = "Update",
+                    isBot = true,
+                    webhookId = lunaWebhookId,
+                    timestamp = baseTime,
+                    attachments = setOf(img),
+                    embeds = listOf(SummaryTestFixtures.createMockEmbed(title = "Preview Title", description = "Preview Desc")),
+                )
+            val onlyTitle =
+                createMockMessage(
+                    id = 8202L,
+                    username = "Bob",
+                    content = "Msg 1",
+                    timestamp = baseTime + 1.minutes,
+                    embeds = listOf(SummaryTestFixtures.createMockEmbed(title = "Only Title", description = null)),
+                )
+            val onlyDesc =
+                createMockMessage(
+                    id = 8203L,
+                    username = "Charlie",
+                    content = "Msg 2",
+                    timestamp = baseTime + 2.minutes,
+                    embeds = listOf(SummaryTestFixtures.createMockEmbed(title = "", description = "Only Description")),
+                )
+            val targetMsg =
+                createMockMessage(
+                    id = 8204L,
+                    username = "Dave",
+                    content = "Target",
+                    timestamp = baseTime + 3.minutes,
+                )
+
+            val collector =
+                ConversationSliceCollector(
+                    historyFetcher = { _, _ -> listOf(both, onlyTitle, onlyDesc) },
+                    peekResolver = { null },
+                    noiseFilter = DialogueNoiseFilter(isLunaWebhook = { it == lunaWebhookId }),
+                )
+
+            val slice = collector.collectSlice(targetMsg)
+            assertNotNull(slice)
+            val content = slice.summaryInput.content
+            assertTrue(content.contains("[MasqueradedAlice]: Update [連結預覽: Preview Title - Preview Desc] [附帶圖片 1: chart.png]"))
+            assertTrue(content.contains("[Bob]: Msg 1 [連結預覽: Only Title]"))
+            assertTrue(content.contains("[Charlie]: Msg 2 [連結預覽: Only Description]"))
+        }
+
+    @Test
+    fun `collectSlice falls back to single target message when historyFetcher throws`() =
+        runTest {
+            val targetMsg = createMockMessage(9001L, "Charlie", "Target message content")
+            val collector =
+                ConversationSliceCollector(
+                    historyFetcher = { _, _ -> throw RuntimeException("Discord API 403 Forbidden") },
+                    peekResolver = { null },
+                )
+
+            val slice = collector.collectSlice(targetMsg)
+            assertNotNull(slice)
+            assertTrue(slice.summaryInput.content.contains("Target message content"))
+        }
+
+    @Test
+    fun `collectSlice resolves most recent URL via peekResolver and degrades cleanly when unresolved`() =
+        runTest {
+            val baseTime = Instant.parse("2026-11-06T12:00:00Z")
+            val msg1 = createMockMessage(9101L, "Alice", "Old link: https://example.com/first", timestamp = baseTime)
+            val msg2 = createMockMessage(9102L, "Bob", "New link: https://example.com/second", timestamp = baseTime + 1.minutes)
+            val targetMsg = createMockMessage(9103L, "Charlie", "Thoughts?", timestamp = baseTime + 2.minutes)
+
+            var resolvedUrl: String? = null
+            val enrichedSlice =
+                ConversationSliceCollector(
+                    historyFetcher = { _, _ -> listOf(msg1, msg2) },
+                    peekResolver = { url ->
+                        resolvedUrl = url
+                        PeekPost(
+                            platform = Platform.GENERIC,
+                            id = "second-1",
+                            originalUrl = url,
+                            author = Author(username = "bob"),
+                            title = "Second Link Title",
+                            content = "Resolved article body.",
+                            comments = listOf(Comment(author = "reader1", content = "Clear explanation")),
+                        )
+                    },
+                ).collectSlice(targetMsg)
+
+            assertNotNull(enrichedSlice)
+            assertEquals("https://example.com/second", resolvedUrl)
+            assertEquals("https://example.com/second", enrichedSlice.summaryInput.url)
+            assertEquals("Second Link Title", enrichedSlice.summaryInput.title)
+            assertEquals(listOf("Clear explanation"), enrichedSlice.summaryInput.comments)
+            assertTrue(enrichedSlice.summaryInput.content.contains("Resolved article body."))
+
+            val fallbackSlice =
+                ConversationSliceCollector(
+                    historyFetcher = { _, _ -> listOf(msg2) },
+                    peekResolver = { null },
+                ).collectSlice(targetMsg)
+
+            assertNotNull(fallbackSlice)
+            assertEquals("https://example.com/second", fallbackSlice.summaryInput.url)
+            assertNull(fallbackSlice.summaryInput.title)
+            assertEquals(emptyList(), fallbackSlice.summaryInput.comments)
+            assertTrue(fallbackSlice.summaryInput.content.contains("[Bob]: New link: https://example.com/second"))
         }
 }

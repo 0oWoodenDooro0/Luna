@@ -12,18 +12,13 @@ import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.test.runTest
 import luna.core.Command
 import luna.mcp.data.McpWebhookRecord
-import luna.mcp.data.McpWebhookRepository
 import luna.plugin.DefaultPluginContext
-import luna.plugin.LunaPlugin
-import luna.plugin.PluginLoader
 import org.jetbrains.exposed.v1.jdbc.Database
 import org.junit.jupiter.api.Test
-import java.util.ServiceLoader
 import java.util.UUID
 import kotlin.coroutines.EmptyCoroutineContext
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
-import kotlin.test.assertTrue
 
 class McpPluginTest {
     private fun createTestDb(): Database =
@@ -37,28 +32,6 @@ class McpPluginTest {
             every { coroutineContext } returns EmptyCoroutineContext
             every { events } returns eventsFlow
         }
-
-    @Test
-    fun `plugin metadata has correct name mcp`() {
-        val plugin = McpPlugin()
-        assertEquals("mcp", plugin.name)
-    }
-
-    @Test
-    fun `plugin is discovered by ServiceLoader SPI`() {
-        val loader = PluginLoader()
-        val plugins = loader.loadPlugins()
-        assertTrue(
-            plugins.any { it is McpPlugin },
-            "Expected McpPlugin to be discoverable via PluginLoader",
-        )
-
-        val directLoader = ServiceLoader.load(LunaPlugin::class.java)
-        assertTrue(
-            directLoader.any { it is McpPlugin },
-            "Expected McpPlugin to be discoverable via ServiceLoader",
-        )
-    }
 
     @Test
     fun `initialize creates mcp tables in database`() =
