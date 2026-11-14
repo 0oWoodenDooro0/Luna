@@ -107,12 +107,12 @@ class ChatterContextCollectorTest {
     }
 
     @Test
-    fun `collectDecisionContext keeps only last 3 filtered messages with embeds, image markers, and stripped mentions`() =
+    fun `collectDecisionContext keeps only last 3 filtered messages with embeds, image markers, and raw unstripped text`() =
         runTest {
             val botSelfId = Snowflake(9999L)
             val msg1 = createMockMessage(id = 1L, username = "Alice", content = "Earlier oldest message")
             val botNoise = createMockMessage(id = 2L, username = "MusicBot", content = "Now playing", isBot = true)
-            val msg2 = createMockMessage(id = 3L, username = "Bob", content = "Second newest valid")
+            val msg2 = createMockMessage(id = 3L, username = "Bob", content = "<@9999>  second  newest  valid")
             val embed = createMockEmbed(title = "Release Notes", description = "v2.0 highlights")
             val msg3 =
                 createMockMessage(
@@ -146,18 +146,57 @@ class ChatterContextCollectorTest {
 
             assertFalse(result.transcript.contains("Earlier oldest message"))
             assertFalse(result.transcript.contains("MusicBot"))
-            assertTrue(result.transcript.contains("[Bob]: Second newest valid"))
+            assertTrue(result.transcript.contains("[Bob]: <@9999>  second  newest  valid"))
             assertTrue(
                 result.transcript.contains(
                     "[Charlie]: Check https://example.com/release [連結預覽: Release Notes - v2.0 highlights]",
                 ),
             )
-            assertTrue(result.transcript.contains("[Dave]: look at this [附帶圖片 1: cat.png]"))
-            assertFalse(result.transcript.contains("@Luna"))
+            assertTrue(result.transcript.contains("[Dave]: @Luna look at this [附帶圖片 1: cat.png]"))
 
             assertEquals(1, result.images.size)
             assertEquals("https://cdn.example.com/cat.png", result.images.first().url)
             assertEquals("image/png", result.images.first().mimeType)
+        }
+
+    @Test
+    fun `collectDecisionContext preserves pure bot mention verbatim and falls back to Embed only when embed lacks preview text`() =
+        runTest {
+            val botSelfId = Snowflake(9999L)
+            val pureMention = createMockMessage(id = 6L, username = "Alice", content = "<@!9999>")
+            val embedWithPreview =
+                createMockMessage(
+                    id = 7L,
+                    username = "Bob",
+                    content = "",
+                    embeds = listOf(createMockEmbed(title = "Preview Title", description = null)),
+                )
+            val embedWithoutPreview =
+                createMockMessage(
+                    id = 8L,
+                    username = "Charlie",
+                    content = "   ",
+                    embeds = listOf(createMockEmbed(title = null, description = "   ")),
+                )
+
+            val collector =
+                ChatterContextCollector(
+                    noiseFilter = filter,
+                    decisionMessageCount = 3,
+                    peekResolver = { null },
+                )
+
+            val result =
+                collector.collectDecisionContext(
+                    messages = listOf(pureMention, embedWithPreview, embedWithoutPreview),
+                    kordSelfId = botSelfId,
+                )
+
+            assertTrue(result.transcript.contains("[Alice]: <@!9999>"))
+            assertFalse(result.transcript.contains("你好"))
+            assertTrue(result.transcript.contains("[Bob]: [連結預覽: Preview Title]"))
+            assertFalse(result.transcript.contains("[Bob]: [Embed]"))
+            assertTrue(result.transcript.contains("[Charlie]: [Embed]"))
         }
 
     @Test

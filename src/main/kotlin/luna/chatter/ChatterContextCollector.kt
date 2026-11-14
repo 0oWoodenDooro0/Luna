@@ -320,13 +320,13 @@ open class ChatterContextCollector(
                     ""
                 }
 
-            val strippedText = noiseFilter.stripLunaMentions(msg.content, kordSelfId)
+            val rawText = msg.content.takeIf { it.isNotBlank() }
             val hasAttachments = runCatching { msg.attachments.isNotEmpty() }.getOrDefault(false)
-            val isDirectMention = noiseFilter.isDirectBotMention(msg, kordSelfId)
+            val hasEmbeds = runCatching { msg.embeds.isNotEmpty() }.getOrDefault(false)
 
             val parts =
                 listOfNotNull(
-                    strippedText.takeIf { it.isNotEmpty() },
+                    rawText,
                     embedText.takeIf { it.isNotEmpty() },
                     markersText.takeIf { it.isNotEmpty() },
                 )
@@ -334,13 +334,12 @@ open class ChatterContextCollector(
             val body =
                 when {
                     parts.isNotEmpty() -> parts.joinToString(" ")
-                    isDirectMention -> ChatterNoiseFilter.CALLOUT_GREETING
                     hasAttachments -> "[Attachment]"
-                    msg.content.isNotBlank() -> ChatterNoiseFilter.CALLOUT_GREETING
+                    hasEmbeds -> "[Embed]"
                     else -> ""
                 }
 
-            "[$author]: $body".trimEnd()
+            if (body.isEmpty()) "[$author]:" else "[$author]: $body"
         }
     }
 

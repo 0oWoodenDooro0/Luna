@@ -87,8 +87,9 @@ class ChatterServiceTest {
         type: MessageType = MessageType.Default,
         authorIsNull: Boolean = false,
         mentionedUserIds: Set<Snowflake> = emptySet(),
-        selfId: Snowflake = Snowflake(9999L),
+        selfId: Snowflake? = Snowflake(9999L),
         referencedMessage: Message? = null,
+        embeds: List<dev.kord.core.entity.Embed> = emptyList(),
     ): Message {
         val author =
             if (authorIsNull) {
@@ -112,7 +113,11 @@ class ChatterServiceTest {
 
         val msg = mockk<Message>()
         val mockKord = mockk<Kord>(relaxed = true)
-        every { mockKord.selfId } returns selfId
+        if (selfId != null) {
+            every { mockKord.selfId } returns selfId
+        } else {
+            every { mockKord.selfId } throws IllegalStateException("selfId unavailable")
+        }
         every { msg.kord } returns mockKord
         every { msg.id } returns Snowflake(id)
         every { msg.channelId } returns Snowflake(channelId)
@@ -122,7 +127,7 @@ class ChatterServiceTest {
         every { msg.type } returns type
         every { msg.webhookId } returns webhookId
         every { msg.attachments } returns emptySet()
-        every { msg.embeds } returns emptyList()
+        every { msg.embeds } returns embeds
         every { msg.mentionedUserIds } returns mentionedUserIds
         every { msg.referencedMessage } returns referencedMessage
         every { msg.messageReference } returns null
@@ -158,28 +163,134 @@ class ChatterServiceTest {
             coVerify(exactly = 1) { channel.type() }
             coVerify(exactly = 1) {
                 chatterGenerator.generateReply(
-                    match<ChatterInput> { it.isDirectMention && it.transcript.contains("what do you think about Kotlin coroutines?") },
+                    match<ChatterInput> {
+                        it.isDirectMention &&
+                            it.transcript.contains("<@9999> what do you think about Kotlin coroutines?")
+                    },
                 )
             }
             coVerify(exactly = 1) { channel.createMessage(replyText) }
         }
 
     @Test
-    fun `trivial ambient message without bot mention, question, or substantive content does not call decision client`() =
+    fun `short ambient messages enter participation decision instead of being pre-filtered`() =
         runTest {
             val channelId = 500L
+            coEvery { decisionClient.decide(any(), any()) } returns ParticipationDecision(shouldParticipate = false, noul = 0.2)
+
+            for ((idx, shortText) in listOf("?", "草", "真的嗎", "ok").withIndex()) {
+                val msg =
+                    createMockMessage(
+                        id = 102L + idx,
+                        channelId = channelId,
+                        username = "Bob",
+                        content = shortText,
+                    )
+                val result = service.processMessage(msg)
+                assertFalse(result)
+                coVerify(exactly = 1) {
+                    decisionClient.decide(match { it.contains("[Bob]: $shortText") }, any())
+                }
+            }
+        }
+
+    @Test
+    fun `embed-only message enters participation decision`() =
+        runTest {
+            val embed = mockk<dev.kord.core.entity.Embed>()
+            every { embed.title } returns null
+            every { embed.description } returns null
             val message =
                 createMockMessage(
-                    id = 102L,
-                    channelId = channelId,
-                    username = "Bob",
-                    content = "ok",
-                    mentionedUserIds = emptySet(),
+                    id = 120L,
+                    channelId = 500L,
+                    username = "Charlie",
+                    content = "",
+                    embeds = listOf(embed),
                 )
+            coEvery { decisionClient.decide(any(), any()) } returns ParticipationDecision(shouldParticipate = false, noul = 0.3)
 
             val result = service.processMessage(message)
 
-            assertFalse(result, "Trivial ambient message should not trigger chatter reply")
+            assertFalse(result)
+            coVerify(exactly = 1) {
+                decisionClient.decide(match { it.contains("[Charlie]: [Embed]") }, any())
+            }
+        }
+
+    @Test
+    fun `plain-text luna mention, reply to luna, and unresolved selfId route through participation decision with raw text`() =
+        runTest {
+            val botSelfId = Snowflake(9999L)
+            coEvery { decisionClient.decide(any(), any()) } returns ParticipationDecision(shouldParticipate = false, noul = 0.4)
+
+            // 1. Plain-text @luna
+            val plainLunaMsg =
+                createMockMessage(
+                    id = 130L,
+                    channelId = 500L,
+                    username = "Alice",
+                    content = "Hey @luna what's up?",
+                    selfId = botSelfId,
+                )
+            assertFalse(service.processMessage(plainLunaMsg))
+            coVerify(exactly = 1) {
+                decisionClient.decide(match { it.contains("[Alice]: Hey @luna what's up?") }, any())
+            }
+
+            // 2. Discord reply to Luna
+            val lunaMsg = mockk<Message>(relaxed = true)
+            val lunaAuthor = mockk<User>(relaxed = true)
+            every { lunaAuthor.id } returns botSelfId
+            every { lunaAuthor.username } returns "Luna"
+            every { lunaMsg.id } returns Snowflake(129L)
+            every { lunaMsg.author } returns lunaAuthor
+            every { lunaMsg.content } returns "Earlier bot reply"
+
+            val replyToLuna =
+                createMockMessage(
+                    id = 131L,
+                    channelId = 500L,
+                    username = "Bob",
+                    content = "Sounds good",
+                    selfId = botSelfId,
+                    referencedMessage = lunaMsg,
+                )
+            assertFalse(service.processMessage(replyToLuna))
+            coVerify(exactly = 1) {
+                decisionClient.decide(match { it.contains("[Bob]: Sounds good") }, any())
+            }
+
+            // 3. Unresolved selfId (null) does not bypass decision even with <@9999>
+            val unresolvedSelfIdMsg =
+                createMockMessage(
+                    id = 132L,
+                    channelId = 500L,
+                    username = "Dave",
+                    content = "<@9999> hello",
+                    mentionedUserIds = setOf(botSelfId),
+                    selfId = null,
+                )
+            assertFalse(service.processMessage(unresolvedSelfIdMsg))
+            coVerify(exactly = 1) {
+                decisionClient.decide(match { it.contains("[Dave]: <@9999> hello") }, any())
+            }
+        }
+
+    @Test
+    fun `structural noise rejections do not invoke participation decision`() =
+        runTest {
+            val cmdMsg = createMockMessage(id = 140L, content = "/help")
+            val prefixCmdMsg = createMockMessage(id = 141L, content = "!ping")
+            val systemMsg = createMockMessage(id = 142L, content = "Pinned", type = MessageType.ChannelPinnedMessage)
+            val botMsg = createMockMessage(id = 143L, content = "Bot msg", isBot = true)
+            val webhookMsg = createMockMessage(id = 144L, content = "Webhook msg", isBot = true, webhookId = Snowflake(8888L))
+            val blankMsg = createMockMessage(id = 145L, content = "   ")
+
+            for (msg in listOf(cmdMsg, prefixCmdMsg, systemMsg, botMsg, webhookMsg, blankMsg)) {
+                assertFalse(service.processMessage(msg))
+            }
+
             coVerify(exactly = 0) { decisionClient.decide(any(), any()) }
         }
 

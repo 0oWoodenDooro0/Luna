@@ -80,18 +80,9 @@ open class ChatterService(
         val selfId = runCatching { message.kord.selfId }.getOrNull()
         val isDirectMention = filter.isDirectBotMention(message, selfId)
 
-        // 1. Pre-checks filter: filter.shouldEvaluate(message, isDirectMention = isDirectMention)
-        if (!filter.shouldEvaluate(message, isDirectMention = isDirectMention)) {
+        // 1. Pre-checks filter: filter.shouldEvaluate(message, isDirectMention = isDirectMention, kordSelfId = selfId)
+        if (!filter.shouldEvaluate(message, isDirectMention = isDirectMention, kordSelfId = selfId)) {
             logger.debug("ChatterNoiseFilter rejected message {}", message.id)
-            return false
-        }
-
-        // Pre-filter ambient messages before fetching channel history
-        if (!isDirectMention && !filter.isEligibleForDecisionEvaluation(message)) {
-            logger.debug(
-                "Ambient message {} does not meet decision evaluation criteria; skipping decision call",
-                message.id,
-            )
             return false
         }
 
