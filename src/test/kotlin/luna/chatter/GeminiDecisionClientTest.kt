@@ -21,6 +21,7 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import luna.core.ai.ChatImageAttachment
 import luna.plugin.DefaultPluginContext
+import luna.plugin.PluginContext
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -804,4 +805,34 @@ class GeminiDecisionClientTest {
             assertEquals("Only reply when Luna is asked about Rust or Kotlin.", capturedInstructions[0])
             assertEquals(GeminiDecisionClient.DEFAULT_INSTRUCTIONS, capturedInstructions[1])
         }
+
+    @Test
+    fun `fromPluginContext resolves Long Int and String fallback chain on strict PluginContext`() {
+        val rawMap: Map<String, Any?> =
+            mapOf(
+                "chatter.decision.timeoutSeconds" to 25,
+                "chatter.decisionMessageCount" to " 40 ",
+                "chatter.decisionThreshold" to " 0.82 ",
+            )
+        val strictContext =
+            object : PluginContext {
+                override val kord: dev.kord.core.Kord = mockk(relaxed = true)
+                override val routing: io.ktor.server.routing.Routing = mockk(relaxed = true)
+                override val database: org.jetbrains.exposed.v1.jdbc.Database = mockk(relaxed = true)
+
+                @Suppress("UNCHECKED_CAST")
+                override fun <T> config(
+                    key: String,
+                    clazz: Class<T>,
+                ): T? {
+                    val value = rawMap[key] ?: return null
+                    return if (clazz.isInstance(value)) value as T else null
+                }
+            }
+
+        val config = ChatterDecisionConfig.fromPluginContext(strictContext)
+        assertEquals(25_000L, config.timeoutMillis)
+        assertEquals(40, config.decisionMessageCount)
+        assertEquals(0.82, config.threshold)
+    }
 }

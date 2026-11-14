@@ -135,9 +135,8 @@ open class ChatterNoiseFilter(
         }
 
         // 7. Check empty / whitespace-only messages without media attachments or embeds (CODING_STANDARDS.md §3)
-        val hasAttachments = runCatching { message.attachments.isNotEmpty() }.getOrDefault(false)
-        val hasEmbeds = runCatching { message.embeds.isNotEmpty() }.getOrDefault(false)
-        if (message.content.isBlank() && !hasAttachments && !hasEmbeds && !directMention) {
+        val placeholder = resolveBlankMessagePlaceholder(message)
+        if (message.content.isBlank() && placeholder == null && !directMention) {
             return ChatterFilterResult.Rejected(
                 RejectionReason.EMPTY_MESSAGE,
                 "Message content is blank or empty without attachments or embeds",
@@ -145,11 +144,10 @@ open class ChatterNoiseFilter(
         }
 
         val finalContent =
-            when {
-                message.content.isNotBlank() -> message.content
-                hasAttachments -> "[Attachment]"
-                hasEmbeds -> "[Embed]"
-                else -> message.content
+            if (message.content.isNotBlank()) {
+                message.content
+            } else {
+                placeholder ?: message.content
             }
 
         val speakerName = extractSpeakerName(message)
@@ -213,9 +211,9 @@ open class ChatterNoiseFilter(
             }
         }
 
-        val hasAttachments = runCatching { message.attachments.isNotEmpty() }.getOrDefault(false)
-        val hasEmbeds = runCatching { message.embeds.isNotEmpty() }.getOrDefault(false)
-        return message.content.isNotBlank() || hasAttachments || hasEmbeds || isDirectBotMention(message, resolvedSelfId)
+        return message.content.isNotBlank() ||
+            resolveBlankMessagePlaceholder(message) != null ||
+            isDirectBotMention(message, resolvedSelfId)
     }
 
     fun filterContextMessages(
@@ -234,15 +232,12 @@ open class ChatterNoiseFilter(
             runCatching { message.author?.id }.getOrNull()
                 ?: runCatching { message.data.author.id }.getOrNull()
         val isLunaBot = resolvedSelfId != null && authorId == resolvedSelfId
-        val hasAttachments = runCatching { message.attachments.isNotEmpty() }.getOrDefault(false)
-        val hasEmbeds = runCatching { message.embeds.isNotEmpty() }.getOrDefault(false)
 
         val content =
-            when {
-                message.content.isNotBlank() -> message.content
-                hasAttachments -> "[Attachment]"
-                hasEmbeds -> "[Embed]"
-                else -> return null
+            if (message.content.isNotBlank()) {
+                message.content
+            } else {
+                resolveBlankMessagePlaceholder(message) ?: return null
             }
 
         val speaker = if (isLunaBot) "Luna" else extractSpeakerName(message)
@@ -291,5 +286,15 @@ open class ChatterNoiseFilter(
     companion object {
         val DEFAULT_BOT_PREFIXES = setOf("!", "~", "?")
         val URL_REGEX = Regex("""https?://[^\s<>"']+""")
+        const val ATTACHMENT_PLACEHOLDER = "[Attachment]"
+        const val EMBED_PLACEHOLDER = "[Embed]"
+
+        fun resolveBlankMessagePlaceholder(message: Message): String? {
+            val hasAttachments = runCatching { message.attachments.isNotEmpty() }.getOrDefault(false)
+            if (hasAttachments) return ATTACHMENT_PLACEHOLDER
+            val hasEmbeds = runCatching { message.embeds.isNotEmpty() }.getOrDefault(false)
+            if (hasEmbeds) return EMBED_PLACEHOLDER
+            return null
+        }
     }
 }

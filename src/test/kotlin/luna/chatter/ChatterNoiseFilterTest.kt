@@ -621,4 +621,22 @@ class ChatterNoiseFilterTest {
             assertIs<ChatterFilterResult.Rejected>(res4)
             assertEquals(RejectionReason.EMPTY_MESSAGE, res4.reason)
         }
+
+    @Test
+    fun `resolveBlankMessagePlaceholder prefers attachment over embed and returns null when empty`() {
+        val attachment = mockk<dev.kord.core.entity.Attachment>()
+        val embed = mockk<dev.kord.core.entity.Embed>()
+
+        val bothMsg = createMockMessage(content = "")
+        every { bothMsg.attachments } returns setOf(attachment)
+        every { bothMsg.embeds } returns listOf(embed)
+        assertEquals("[Attachment]", ChatterNoiseFilter.resolveBlankMessagePlaceholder(bothMsg))
+
+        val embedOnlyMsg = createMockMessage(content = "")
+        every { embedOnlyMsg.embeds } returns listOf(embed)
+        assertEquals("[Embed]", ChatterNoiseFilter.resolveBlankMessagePlaceholder(embedOnlyMsg))
+
+        val emptyMsg = createMockMessage(content = "")
+        assertEquals(null, ChatterNoiseFilter.resolveBlankMessagePlaceholder(emptyMsg))
+    }
 }

@@ -373,8 +373,6 @@ open class ChatterContextCollector(
                 }
 
             val rawText = msg.content.takeIf { it.isNotBlank() }
-            val hasAttachments = runCatching { msg.attachments.isNotEmpty() }.getOrDefault(false)
-            val hasEmbeds = runCatching { msg.embeds.isNotEmpty() }.getOrDefault(false)
 
             val parts =
                 listOfNotNull(
@@ -384,11 +382,10 @@ open class ChatterContextCollector(
                 )
 
             val body =
-                when {
-                    parts.isNotEmpty() -> parts.joinToString(" ")
-                    hasAttachments -> "[Attachment]"
-                    hasEmbeds -> "[Embed]"
-                    else -> ""
+                if (parts.isNotEmpty()) {
+                    parts.joinToString(" ")
+                } else {
+                    ChatterNoiseFilter.resolveBlankMessagePlaceholder(msg).orEmpty()
                 }
 
             if (body.isEmpty()) "[$author]:" else "[$author]: $body"

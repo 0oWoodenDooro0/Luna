@@ -45,6 +45,15 @@ data class ChatterDecisionConfig(
         const val MIN_DECISION_MESSAGE_COUNT = 1
         const val MAX_DECISION_MESSAGE_COUNT = 100
 
+        private fun normalizeModel(raw: String?): String = raw?.trim()?.ifBlank { null }?.removePrefix("models/") ?: DEFAULT_MODEL
+
+        private fun normalizeBaseUrl(raw: String?): String =
+            raw
+                ?.trim()
+                ?.ifBlank { null }
+                ?.trimEnd('/')
+                ?.removeSuffix("/v1beta") ?: DEFAULT_BASE_URL
+
         private fun normalizeThreshold(raw: Double?): Double =
             if (raw == null || raw.isNaN() || raw.isInfinite()) {
                 DEFAULT_THRESHOLD
@@ -63,173 +72,160 @@ data class ChatterDecisionConfig(
                 raw.coerceIn(MIN_DECISION_MESSAGE_COUNT.toLong(), MAX_DECISION_MESSAGE_COUNT.toLong()).toInt()
             }
 
-        private fun readLongConfig(value: Any?): Long? =
-            when (value) {
-                is Number -> value.toLong()
-                is String -> value.trim().toLongOrNull()
-                else -> null
+        private fun readStringConfig(
+            config: Map<String, Any?>,
+            vararg keys: String,
+        ): String? = keys.firstNotNullOfOrNull { key -> (config[key] as? String)?.trim()?.ifBlank { null } }
+
+        private fun readDoubleConfig(
+            config: Map<String, Any?>,
+            vararg keys: String,
+        ): Double? =
+            keys.firstNotNullOfOrNull { key ->
+                when (val value = config[key]) {
+                    is Number -> value.toDouble()
+                    is String -> value.trim().toDoubleOrNull()
+                    else -> null
+                }
             }
 
-        fun fromEnv(env: Map<String, String> = System.getenv()): ChatterDecisionConfig {
-            val key = env["GEMINI_API_KEY"]?.trim().orEmpty()
-
-            val rawModel = env["CHATTER_DECISION_MODEL"]?.trim()?.ifBlank { null }
-            val model = if (!rawModel.isNullOrBlank()) rawModel.removePrefix("models/") else DEFAULT_MODEL
-
-            val rawBaseUrl = env["GEMINI_BASE_URL"]?.trim()
-            val baseUrl =
-                if (!rawBaseUrl.isNullOrBlank()) {
-                    rawBaseUrl.trimEnd('/').removeSuffix("/v1beta")
-                } else {
-                    DEFAULT_BASE_URL
+        private fun readLongConfig(
+            config: Map<String, Any?>,
+            vararg keys: String,
+        ): Long? =
+            keys.firstNotNullOfOrNull { key ->
+                when (val value = config[key]) {
+                    is Number -> value.toLong()
+                    is String -> value.trim().toLongOrNull()
+                    else -> null
                 }
+            }
 
-            val threshold = normalizeThreshold(env["CHATTER_DECISION_THRESHOLD"]?.trim()?.toDoubleOrNull())
-            val timeoutSeconds = env["CHATTER_DECISION_TIMEOUT_SECONDS"]?.trim()?.toLongOrNull()
-            val instructions = normalizeInstructions(env["CHATTER_DECISION_INSTRUCTIONS"])
-            val decisionMessageCount =
-                normalizeDecisionMessageCount(env["CHATTER_DECISION_MESSAGE_COUNT"]?.trim()?.toLongOrNull())
+        private fun readStringConfig(
+            context: PluginContext,
+            vararg keys: String,
+        ): String? = keys.firstNotNullOfOrNull { key -> context.config<String>(key)?.trim()?.ifBlank { null } }
 
-            return ChatterDecisionConfig(
-                apiKey = key,
-                model = model,
-                baseUrl = baseUrl,
-                threshold = threshold,
-                timeoutMillis = normalizeTimeoutMillis(timeoutSeconds),
-                instructions = instructions,
-                decisionMessageCount = decisionMessageCount,
+        private fun readDoubleConfig(
+            context: PluginContext,
+            vararg keys: String,
+        ): Double? =
+            keys.firstNotNullOfOrNull { key ->
+                context.config<Double>(key)
+                    ?: context.config<String>(key)?.trim()?.toDoubleOrNull()
+            }
+
+        private fun readLongConfig(
+            context: PluginContext,
+            vararg keys: String,
+        ): Long? =
+            keys.firstNotNullOfOrNull { key ->
+                context.config<Long>(key)
+                    ?: context.config<Int>(key)?.toLong()
+                    ?: context.config<String>(key)?.trim()?.toLongOrNull()
+            }
+
+        fun fromEnv(env: Map<String, String> = System.getenv()): ChatterDecisionConfig =
+            ChatterDecisionConfig(
+                apiKey = env["GEMINI_API_KEY"]?.trim().orEmpty(),
+                model = normalizeModel(env["CHATTER_DECISION_MODEL"]),
+                baseUrl = normalizeBaseUrl(env["GEMINI_BASE_URL"]),
+                threshold = normalizeThreshold(env["CHATTER_DECISION_THRESHOLD"]?.trim()?.toDoubleOrNull()),
+                timeoutMillis = normalizeTimeoutMillis(env["CHATTER_DECISION_TIMEOUT_SECONDS"]?.trim()?.toLongOrNull()),
+                instructions = normalizeInstructions(env["CHATTER_DECISION_INSTRUCTIONS"]),
+                decisionMessageCount = normalizeDecisionMessageCount(env["CHATTER_DECISION_MESSAGE_COUNT"]?.trim()?.toLongOrNull()),
             )
-        }
 
-        fun fromConfig(config: Map<String, Any?>): ChatterDecisionConfig {
-            val key =
-                (config["GEMINI_API_KEY"] as? String)?.trim()?.ifBlank { null }
-                    ?: (config["gemini.apiKey"] as? String)?.trim()?.ifBlank { null }
-                    ?: (config["chatter.apiKey"] as? String)?.trim()?.ifBlank { null }
-                    ?: ""
-
-            val rawModel =
-                (config["CHATTER_DECISION_MODEL"] as? String)?.trim()?.ifBlank { null }
-                    ?: (config["chatter.decision.model"] as? String)?.trim()?.ifBlank { null }
-                    ?: (config["chatter.decisionModel"] as? String)?.trim()?.ifBlank { null }
-            val model = if (!rawModel.isNullOrBlank()) rawModel.removePrefix("models/") else DEFAULT_MODEL
-
-            val rawBaseUrl =
-                (config["GEMINI_BASE_URL"] as? String)?.trim()?.ifBlank { null }
-                    ?: (config["gemini.baseUrl"] as? String)?.trim()?.ifBlank { null }
-                    ?: (config["chatter.baseUrl"] as? String)?.trim()?.ifBlank { null }
-            val baseUrl =
-                if (!rawBaseUrl.isNullOrBlank()) {
-                    rawBaseUrl.trimEnd('/').removeSuffix("/v1beta")
-                } else {
-                    DEFAULT_BASE_URL
-                }
-
-            val rawThreshold =
-                (config["CHATTER_DECISION_THRESHOLD"] as? Number)?.toDouble()
-                    ?: (config["CHATTER_DECISION_THRESHOLD"] as? String)?.trim()?.toDoubleOrNull()
-                    ?: (config["chatter.decision.threshold"] as? Number)?.toDouble()
-                    ?: (config["chatter.decision.threshold"] as? String)?.trim()?.toDoubleOrNull()
-                    ?: (config["chatter.decisionThreshold"] as? Number)?.toDouble()
-                    ?: (config["chatter.decisionThreshold"] as? String)?.trim()?.toDoubleOrNull()
-
-            val timeoutSeconds =
-                (config["CHATTER_DECISION_TIMEOUT_SECONDS"] as? Number)?.toLong()
-                    ?: (config["CHATTER_DECISION_TIMEOUT_SECONDS"] as? String)?.trim()?.toLongOrNull()
-                    ?: (config["chatter.decision.timeoutSeconds"] as? Number)?.toLong()
-                    ?: (config["chatter.decision.timeoutSeconds"] as? String)?.trim()?.toLongOrNull()
-                    ?: (config["chatter.decisionTimeoutSeconds"] as? Number)?.toLong()
-                    ?: (config["chatter.decisionTimeoutSeconds"] as? String)?.trim()?.toLongOrNull()
-
-            val rawInstructions =
-                (config["CHATTER_DECISION_INSTRUCTIONS"] as? String)?.trim()?.ifBlank { null }
-                    ?: (config["chatter.decision.instructions"] as? String)?.trim()?.ifBlank { null }
-                    ?: (config["chatter.decisionInstructions"] as? String)?.trim()?.ifBlank { null }
-
-            val rawDecisionMessageCount =
-                readLongConfig(config["CHATTER_DECISION_MESSAGE_COUNT"])
-                    ?: readLongConfig(config["chatter.decision.messageCount"])
-                    ?: readLongConfig(config["chatter.decisionMessageCount"])
-
-            return ChatterDecisionConfig(
-                apiKey = key,
-                model = model,
-                baseUrl = baseUrl,
-                threshold = normalizeThreshold(rawThreshold),
-                timeoutMillis = normalizeTimeoutMillis(timeoutSeconds),
-                instructions = normalizeInstructions(rawInstructions),
-                decisionMessageCount = normalizeDecisionMessageCount(rawDecisionMessageCount),
+        fun fromConfig(config: Map<String, Any?>): ChatterDecisionConfig =
+            ChatterDecisionConfig(
+                apiKey = readStringConfig(config, "GEMINI_API_KEY", "gemini.apiKey", "chatter.apiKey").orEmpty(),
+                model =
+                    normalizeModel(
+                        readStringConfig(config, "CHATTER_DECISION_MODEL", "chatter.decision.model", "chatter.decisionModel"),
+                    ),
+                baseUrl = normalizeBaseUrl(readStringConfig(config, "GEMINI_BASE_URL", "gemini.baseUrl", "chatter.baseUrl")),
+                threshold =
+                    normalizeThreshold(
+                        readDoubleConfig(
+                            config,
+                            "CHATTER_DECISION_THRESHOLD",
+                            "chatter.decision.threshold",
+                            "chatter.decisionThreshold",
+                        ),
+                    ),
+                timeoutMillis =
+                    normalizeTimeoutMillis(
+                        readLongConfig(
+                            config,
+                            "CHATTER_DECISION_TIMEOUT_SECONDS",
+                            "chatter.decision.timeoutSeconds",
+                            "chatter.decisionTimeoutSeconds",
+                        ),
+                    ),
+                instructions =
+                    normalizeInstructions(
+                        readStringConfig(
+                            config,
+                            "CHATTER_DECISION_INSTRUCTIONS",
+                            "chatter.decision.instructions",
+                            "chatter.decisionInstructions",
+                        ),
+                    ),
+                decisionMessageCount =
+                    normalizeDecisionMessageCount(
+                        readLongConfig(
+                            config,
+                            "CHATTER_DECISION_MESSAGE_COUNT",
+                            "chatter.decision.messageCount",
+                            "chatter.decisionMessageCount",
+                        ),
+                    ),
             )
-        }
 
-        fun fromPluginContext(context: PluginContext): ChatterDecisionConfig {
-            val key =
-                context.config<String>("GEMINI_API_KEY")?.trim()?.ifBlank { null }
-                    ?: context.config<String>("gemini.apiKey")?.trim()?.ifBlank { null }
-                    ?: context.config<String>("chatter.apiKey")?.trim()?.ifBlank { null }
-                    ?: ""
-
-            val rawModel =
-                context.config<String>("CHATTER_DECISION_MODEL")?.trim()?.ifBlank { null }
-                    ?: context.config<String>("chatter.decision.model")?.trim()?.ifBlank { null }
-                    ?: context.config<String>("chatter.decisionModel")?.trim()?.ifBlank { null }
-            val model = if (!rawModel.isNullOrBlank()) rawModel.removePrefix("models/") else DEFAULT_MODEL
-
-            val rawBaseUrl =
-                context.config<String>("GEMINI_BASE_URL")?.trim()?.ifBlank { null }
-                    ?: context.config<String>("gemini.baseUrl")?.trim()?.ifBlank { null }
-                    ?: context.config<String>("chatter.baseUrl")?.trim()?.ifBlank { null }
-            val baseUrl =
-                if (!rawBaseUrl.isNullOrBlank()) {
-                    rawBaseUrl.trimEnd('/').removeSuffix("/v1beta")
-                } else {
-                    DEFAULT_BASE_URL
-                }
-
-            val rawThreshold =
-                context.config<Double>("CHATTER_DECISION_THRESHOLD")
-                    ?: context.config<String>("CHATTER_DECISION_THRESHOLD")?.trim()?.toDoubleOrNull()
-                    ?: context.config<Double>("chatter.decision.threshold")
-                    ?: context.config<String>("chatter.decision.threshold")?.trim()?.toDoubleOrNull()
-                    ?: context.config<Double>("chatter.decisionThreshold")
-                    ?: context.config<String>("chatter.decisionThreshold")?.trim()?.toDoubleOrNull()
-
-            val timeoutSeconds =
-                context.config<Long>("CHATTER_DECISION_TIMEOUT_SECONDS")
-                    ?: context.config<Int>("CHATTER_DECISION_TIMEOUT_SECONDS")?.toLong()
-                    ?: context.config<String>("CHATTER_DECISION_TIMEOUT_SECONDS")?.trim()?.toLongOrNull()
-                    ?: context.config<Long>("chatter.decision.timeoutSeconds")
-                    ?: context.config<Int>("chatter.decision.timeoutSeconds")?.toLong()
-                    ?: context.config<String>("chatter.decision.timeoutSeconds")?.trim()?.toLongOrNull()
-                    ?: context.config<Long>("chatter.decisionTimeoutSeconds")
-                    ?: context.config<Int>("chatter.decisionTimeoutSeconds")?.toLong()
-                    ?: context.config<String>("chatter.decisionTimeoutSeconds")?.trim()?.toLongOrNull()
-
-            val rawInstructions =
-                context.config<String>("CHATTER_DECISION_INSTRUCTIONS")?.trim()?.ifBlank { null }
-                    ?: context.config<String>("chatter.decision.instructions")?.trim()?.ifBlank { null }
-                    ?: context.config<String>("chatter.decisionInstructions")?.trim()?.ifBlank { null }
-
-            val rawDecisionMessageCount =
-                context.config<Long>("CHATTER_DECISION_MESSAGE_COUNT")
-                    ?: context.config<Int>("CHATTER_DECISION_MESSAGE_COUNT")?.toLong()
-                    ?: context.config<String>("CHATTER_DECISION_MESSAGE_COUNT")?.trim()?.toLongOrNull()
-                    ?: context.config<Long>("chatter.decision.messageCount")
-                    ?: context.config<Int>("chatter.decision.messageCount")?.toLong()
-                    ?: context.config<String>("chatter.decision.messageCount")?.trim()?.toLongOrNull()
-                    ?: context.config<Long>("chatter.decisionMessageCount")
-                    ?: context.config<Int>("chatter.decisionMessageCount")?.toLong()
-                    ?: context.config<String>("chatter.decisionMessageCount")?.trim()?.toLongOrNull()
-
-            return ChatterDecisionConfig(
-                apiKey = key,
-                model = model,
-                baseUrl = baseUrl,
-                threshold = normalizeThreshold(rawThreshold),
-                timeoutMillis = normalizeTimeoutMillis(timeoutSeconds),
-                instructions = normalizeInstructions(rawInstructions),
-                decisionMessageCount = normalizeDecisionMessageCount(rawDecisionMessageCount),
+        fun fromPluginContext(context: PluginContext): ChatterDecisionConfig =
+            ChatterDecisionConfig(
+                apiKey = readStringConfig(context, "GEMINI_API_KEY", "gemini.apiKey", "chatter.apiKey").orEmpty(),
+                model =
+                    normalizeModel(
+                        readStringConfig(context, "CHATTER_DECISION_MODEL", "chatter.decision.model", "chatter.decisionModel"),
+                    ),
+                baseUrl = normalizeBaseUrl(readStringConfig(context, "GEMINI_BASE_URL", "gemini.baseUrl", "chatter.baseUrl")),
+                threshold =
+                    normalizeThreshold(
+                        readDoubleConfig(
+                            context,
+                            "CHATTER_DECISION_THRESHOLD",
+                            "chatter.decision.threshold",
+                            "chatter.decisionThreshold",
+                        ),
+                    ),
+                timeoutMillis =
+                    normalizeTimeoutMillis(
+                        readLongConfig(
+                            context,
+                            "CHATTER_DECISION_TIMEOUT_SECONDS",
+                            "chatter.decision.timeoutSeconds",
+                            "chatter.decisionTimeoutSeconds",
+                        ),
+                    ),
+                instructions =
+                    normalizeInstructions(
+                        readStringConfig(
+                            context,
+                            "CHATTER_DECISION_INSTRUCTIONS",
+                            "chatter.decision.instructions",
+                            "chatter.decisionInstructions",
+                        ),
+                    ),
+                decisionMessageCount =
+                    normalizeDecisionMessageCount(
+                        readLongConfig(
+                            context,
+                            "CHATTER_DECISION_MESSAGE_COUNT",
+                            "chatter.decision.messageCount",
+                            "chatter.decisionMessageCount",
+                        ),
+                    ),
             )
-        }
     }
 }
