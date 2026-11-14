@@ -64,21 +64,22 @@ class GeminiSummarizerTest {
         runTest {
             var recordedUrl: String? = null
             var recordedBody: String? = null
+            var hasApiRevision = false
 
             val responseJson =
                 """
                 {
-                  "candidates": [
+                  "id": "int-success-1",
+                  "status": "completed",
+                  "steps": [
                     {
-                      "content": {
-                        "role": "model",
-                        "parts": [
-                          {
-                            "text": "TL;DR:\n這是一段繁體中文摘要。\n\n重點摘要:\n• 重點一\n• 重點二\n• 重點三"
-                          }
-                        ]
-                      },
-                      "finishReason": "STOP"
+                      "type": "model_output",
+                      "content": [
+                        {
+                          "type": "text",
+                          "text": "TL;DR:\n這是一段繁體中文摘要。\n\n重點摘要:\n• 重點一\n• 重點二\n• 重點三"
+                        }
+                      ]
                     }
                   ]
                 }
@@ -86,6 +87,9 @@ class GeminiSummarizerTest {
 
             val mockEngine =
                 MockEngine { request ->
+                    if (request.headers.contains("Api-Revision")) {
+                        hasApiRevision = true
+                    }
                     recordedUrl = request.url.toString()
                     recordedBody = request.body.toByteArray().decodeToString()
 
@@ -119,33 +123,35 @@ class GeminiSummarizerTest {
                 result.text,
             )
 
-            // Verify URL contains model and API key query param
+            assertFalse(hasApiRevision, "Must never send removed Api-Revision header")
             assertEquals(
-                "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=secret-gemini-key",
+                "https://generativelanguage.googleapis.com/v1beta/interactions?key=secret-gemini-key",
                 recordedUrl,
             )
 
             val body = checkNotNull(recordedBody)
+            assertTrue(body.contains("\"model\":\"gemini-1.5-flash\""))
+            assertTrue(body.contains("\"background\":false"))
             assertTrue(body.contains("https://example.com/ai"))
         }
 
     @Test
-    fun `strips rogue emojis from Gemini candidate response text defensively`() =
+    fun `strips rogue emojis from Gemini interaction response text defensively`() =
         runTest {
             val responseWithEmojis =
                 """
                 {
-                  "candidates": [
+                  "id": "int-emoji-1",
+                  "status": "completed",
+                  "steps": [
                     {
-                      "content": {
-                        "role": "model",
-                        "parts": [
-                          {
-                            "text": "TL;DR:\n🚀 台灣團隊研發出新技術 👍！\n\n重點摘要:\n• 💡 重點一\n• ⚡ 重點二"
-                          }
-                        ]
-                      },
-                      "finishReason": "STOP"
+                      "type": "model_output",
+                      "content": [
+                        {
+                          "type": "text",
+                          "text": "TL;DR:\n🚀 台灣團隊研發出新技術 👍！\n\n重點摘要:\n• 💡 重點一\n• ⚡ 重點二"
+                        }
+                      ]
                     }
                   ]
                 }
@@ -265,14 +271,15 @@ class GeminiSummarizerTest {
         }
 
     @Test
-    fun `handles safety blocked prompt feedback and returns Generic error`() =
+    fun `handles safety blocked finish_reason and returns Generic error`() =
         runTest {
             val blockedResponse =
                 """
                 {
-                  "promptFeedback": {
-                    "blockReason": "SAFETY"
-                  }
+                  "id": "int-safety-1",
+                  "status": "completed",
+                  "finish_reason": "SAFETY",
+                  "steps": []
                 }
                 """.trimIndent()
 
@@ -297,9 +304,9 @@ class GeminiSummarizerTest {
         }
 
     @Test
-    fun `handles empty candidates in OK response and returns Generic error`() =
+    fun `handles empty steps in OK response and returns Generic error`() =
         runTest {
-            val emptyResponse = """{"candidates": []}"""
+            val emptyResponse = """{"id": "int-empty-1", "status": "completed", "steps": []}"""
 
             val mockEngine =
                 MockEngine {
@@ -318,7 +325,7 @@ class GeminiSummarizerTest {
 
             val result = summarizer.summarize("測試內容")
             assertIs<SummaryResult.Error.Generic>(result)
-            assertTrue(result.message.contains("candidates", ignoreCase = true))
+            assertTrue(result.message.contains("empty", ignoreCase = true))
         }
 
     @Test
@@ -429,13 +436,14 @@ class GeminiSummarizerTest {
             val responseJson =
                 """
                 {
-                    "candidates": [
+                    "id": "int-emoji-only-static",
+                    "status": "completed",
+                    "steps": [
                         {
-                            "content": {
-                                "parts": [
-                                    { "text": "  📝👍🎉  " }
-                                ]
-                            }
+                            "type": "model_output",
+                            "content": [
+                                { "type": "text", "text": "  📝👍🎉  " }
+                            ]
                         }
                     ]
                 }
@@ -561,5 +569,57 @@ class GeminiSummarizerTest {
             assertIs<SummaryResult.Success>(result)
             assertTrue(result.text.contains("TL;DR: Extract from steps succeeded"))
             assertTrue(result.text.contains("核心重點:"))
+        }
+
+    @Test
+    fun `enables url_context only when urlContextEnabled is true and webUrls is non-empty`() =
+        runTest {
+            val recordedPayloads = mutableListOf<String>()
+            val mockEngine =
+                MockEngine { request ->
+                    recordedPayloads.add(request.body.toByteArray().decodeToString())
+                    respond(
+                        content =
+                            """{"id": "int-uc", "status": "completed", """ +
+                                """"steps": [{"type": "model_output", "content": [{"type": "text", "text": "TL;DR: Done"}]}]}""",
+                        status = HttpStatusCode.OK,
+                        headers = headersOf(HttpHeaders.ContentType, "application/json"),
+                    )
+                }
+
+            // 1. urlContextEnabled = true & webUrls non-empty -> includes url_context + google_search
+            val enabledSummarizer =
+                GeminiSummarizer(
+                    config = GeminiConfig(apiKey = "test-key", searchGroundingEnabled = true, urlContextEnabled = true),
+                    httpClient = createTestClient(mockEngine),
+                )
+            enabledSummarizer.summarize(
+                SummaryInput(
+                    content = "Read https://kotlinlang.org/docs",
+                    webUrls = listOf("https://kotlinlang.org/docs"),
+                ),
+            )
+            assertTrue(recordedPayloads[0].contains("\"type\":\"url_context\""))
+            assertTrue(recordedPayloads[0].contains("\"type\":\"google_search\""))
+
+            // 2. urlContextEnabled = true & webUrls empty -> omits url_context
+            enabledSummarizer.summarize(SummaryInput(content = "No web URLs"))
+            assertFalse(recordedPayloads[1].contains("\"type\":\"url_context\""))
+            assertTrue(recordedPayloads[1].contains("\"type\":\"google_search\""))
+
+            // 3. urlContextEnabled = false & webUrls non-empty -> omits url_context
+            val disabledSummarizer =
+                GeminiSummarizer(
+                    config = GeminiConfig(apiKey = "test-key", searchGroundingEnabled = true, urlContextEnabled = false),
+                    httpClient = createTestClient(mockEngine),
+                )
+            disabledSummarizer.summarize(
+                SummaryInput(
+                    content = "Read https://kotlinlang.org/docs",
+                    webUrls = listOf("https://kotlinlang.org/docs"),
+                ),
+            )
+            assertFalse(recordedPayloads[2].contains("\"type\":\"url_context\""))
+            assertTrue(recordedPayloads[2].contains("\"type\":\"google_search\""))
         }
 }

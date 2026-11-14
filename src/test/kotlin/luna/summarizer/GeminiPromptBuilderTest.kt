@@ -70,7 +70,7 @@ class GeminiPromptBuilderTest {
     }
 
     @Test
-    fun `buildRequest creates valid serializable payload for Gemini REST API`() {
+    fun `buildRequest creates valid serializable payload for Gemini Interactions API`() {
         val input =
             SummaryInput(
                 content = "測試內容",
@@ -78,16 +78,16 @@ class GeminiPromptBuilderTest {
             )
         val request = GeminiPromptBuilder.buildRequest(input)
 
-        assertEquals("user", request.contents.first().role)
-        assertEquals(1, request.contents.size)
+        assertEquals(1, request.input.size)
+        assertEquals("text", request.input.first().type)
         assertNotNull(request.systemInstruction)
-        assertEquals(0.2, request.generationConfig?.temperature)
+        assertEquals(1024, request.generationConfig?.maxOutputTokens)
 
         val serialized = json.encodeToString(request)
-        assertContains(serialized, "\"contents\"")
-        assertContains(serialized, "\"systemInstruction\"")
-        assertContains(serialized, "\"generationConfig\"")
-        assertContains(serialized, "\"temperature\":0.2")
+        assertContains(serialized, "\"input\"")
+        assertContains(serialized, "\"system_instruction\"")
+        assertContains(serialized, "\"generation_config\"")
+        assertContains(serialized, "\"max_output_tokens\":1024")
     }
 
     @Test
@@ -100,7 +100,7 @@ class GeminiPromptBuilderTest {
     }
 
     @Test
-    fun `buildRequest includes video file data part adhering to REST schema without invalid processing field`() {
+    fun `buildRequest includes video input block for Interactions API omitting mime_type for YouTube`() {
         val input =
             SummaryInput(
                 title = "Short YouTube Clip",
@@ -111,13 +111,13 @@ class GeminiPromptBuilderTest {
             )
         val request = GeminiPromptBuilder.buildRequest(input)
 
-        val parts = request.contents.first().parts
+        val parts = request.input
         assertEquals(2, parts.size)
         val videoPart = parts[0]
-        val fileData = videoPart.fileData
-        assertNotNull(fileData)
-        assertEquals("https://www.youtube.com/watch?v=short123", fileData.fileUri)
-        assertNull(fileData.mimeType)
+        assertEquals("video", videoPart.type)
+        assertEquals("https://www.youtube.com/watch?v=short123", videoPart.uri)
+        assertNull(videoPart.mimeType)
+        assertEquals("static", videoPart.processing)
 
         val textPart = parts[1]
         val text = textPart.text
@@ -127,8 +127,8 @@ class GeminiPromptBuilderTest {
         assertContains(text, "1. Great explanation!")
 
         val serialized = json.encodeToString(request)
-        assertContains(serialized, "\"file_uri\":\"https://www.youtube.com/watch?v=short123\"")
-        assertFalse(serialized.contains("\"processing\""), "file_data must not contain 'processing' field")
+        assertContains(serialized, "\"uri\":\"https://www.youtube.com/watch?v=short123\"")
+        assertFalse(serialized.contains("\"mime_type\""), "YouTube video block must omit mime_type")
     }
 
     @Test
@@ -201,7 +201,7 @@ class GeminiPromptBuilderTest {
     }
 
     @Test
-    fun `buildRequest includes fileData parts for chat image attachments with direct HTTPS URI and MIME type`() {
+    fun `buildRequest includes image input blocks for chat image attachments with direct HTTPS URI and MIME type`() {
         val image1 =
             ChatImageAttachment(
                 url = "https://cdn.discordapp.com/attachments/123/456/screenshot.png",
@@ -221,26 +221,27 @@ class GeminiPromptBuilderTest {
             )
         val request = GeminiPromptBuilder.buildRequest(input)
 
-        val userParts = request.contents.first().parts
-        assertEquals(3, userParts.size) // 2 image fileData parts + 1 text part
+        val userParts = request.input
+        assertEquals(3, userParts.size) // 2 image blocks + 1 text block
 
-        val part1 = userParts[0].fileData
-        assertNotNull(part1)
-        assertEquals("https://cdn.discordapp.com/attachments/123/456/screenshot.png", part1.fileUri)
+        val part1 = userParts[0]
+        assertEquals("image", part1.type)
+        assertEquals("https://cdn.discordapp.com/attachments/123/456/screenshot.png", part1.uri)
         assertEquals("image/png", part1.mimeType)
 
-        val part2 = userParts[1].fileData
-        assertNotNull(part2)
-        assertEquals("https://cdn.discordapp.com/attachments/123/789/diagram.jpeg", part2.fileUri)
+        val part2 = userParts[1]
+        assertEquals("image", part2.type)
+        assertEquals("https://cdn.discordapp.com/attachments/123/789/diagram.jpeg", part2.uri)
         assertEquals("image/jpeg", part2.mimeType)
 
-        val textPart = userParts[2].text
-        assertNotNull(textPart)
-        assertContains(textPart, "Please analyze these architecture diagrams")
-        assertContains(textPart, "Visual Focus Prompting")
+        val textPart = userParts[2]
+        val text = textPart.text
+        assertNotNull(text)
+        assertContains(text, "Please analyze these architecture diagrams")
+        assertContains(text, "Visual Focus Prompting")
 
         val serialized = json.encodeToString(request)
-        assertContains(serialized, "\"file_uri\":\"https://cdn.discordapp.com/attachments/123/456/screenshot.png\"")
+        assertContains(serialized, "\"uri\":\"https://cdn.discordapp.com/attachments/123/456/screenshot.png\"")
         assertContains(serialized, "\"mime_type\":\"image/png\"")
     }
 
@@ -338,7 +339,7 @@ class GeminiPromptBuilderTest {
     }
 
     @Test
-    fun `buildRequest includes both video fileData and chat image fileData parts when both are present`() {
+    fun `buildRequest includes both video and chat image input blocks in multimodal order when both are present`() {
         val img1 =
             ChatImageAttachment(
                 url = "https://cdn.discordapp.com/attachments/10/20/diag1.png",
@@ -361,42 +362,39 @@ class GeminiPromptBuilderTest {
             )
         val request = GeminiPromptBuilder.buildRequest(input)
 
-        val parts = request.contents.first().parts
-        // 1 video part + 2 image parts + 1 text prompt part = 4 parts
+        val parts = request.input
+        // 1 video block + 2 image blocks + 1 text block = 4 blocks
         assertEquals(4, parts.size)
 
-        val videoPart = parts[0].fileData
-        assertNotNull(videoPart)
-        assertEquals("https://www.youtube.com/watch?v=fullStackDemo", videoPart.fileUri)
+        val videoPart = parts[0]
+        assertEquals("video", videoPart.type)
+        assertEquals("https://www.youtube.com/watch?v=fullStackDemo", videoPart.uri)
         assertNull(videoPart.mimeType)
 
-        val imagePart1 = parts[1].fileData
-        assertNotNull(imagePart1)
-        assertEquals("https://cdn.discordapp.com/attachments/10/20/diag1.png", imagePart1.fileUri)
+        val imagePart1 = parts[1]
+        assertEquals("image", imagePart1.type)
+        assertEquals("https://cdn.discordapp.com/attachments/10/20/diag1.png", imagePart1.uri)
         assertEquals("image/png", imagePart1.mimeType)
 
-        val imagePart2 = parts[2].fileData
-        assertNotNull(imagePart2)
-        assertEquals("https://cdn.discordapp.com/attachments/10/30/diag2.jpeg", imagePart2.fileUri)
+        val imagePart2 = parts[2]
+        assertEquals("image", imagePart2.type)
+        assertEquals("https://cdn.discordapp.com/attachments/10/30/diag2.jpeg", imagePart2.uri)
         assertEquals("image/jpeg", imagePart2.mimeType)
 
-        val textPart = parts[3].text
-        assertNotNull(textPart)
-        assertContains(textPart, "Combined Multimodal Analysis")
-        assertContains(textPart, "Visual Focus Prompting")
+        val textPart = parts[3]
+        val text = textPart.text
+        assertNotNull(text)
+        assertContains(text, "Combined Multimodal Analysis")
+        assertContains(text, "Visual Focus Prompting")
 
-        val sysText =
-            request.systemInstruction
-                ?.parts
-                ?.firstOrNull()
-                ?.text
+        val sysText = request.systemInstruction
         assertNotNull(sysText)
         assertEquals(GeminiPromptBuilder.VIDEO_AND_IMAGE_SYSTEM_INSTRUCTION, sysText)
 
         val serialized = json.encodeToString(request)
-        assertContains(serialized, "\"file_uri\":\"https://www.youtube.com/watch?v=fullStackDemo\"")
-        assertContains(serialized, "\"file_uri\":\"https://cdn.discordapp.com/attachments/10/20/diag1.png\"")
-        assertContains(serialized, "\"file_uri\":\"https://cdn.discordapp.com/attachments/10/30/diag2.jpeg\"")
+        assertContains(serialized, "\"uri\":\"https://www.youtube.com/watch?v=fullStackDemo\"")
+        assertContains(serialized, "\"uri\":\"https://cdn.discordapp.com/attachments/10/20/diag1.png\"")
+        assertContains(serialized, "\"uri\":\"https://cdn.discordapp.com/attachments/10/30/diag2.jpeg\"")
     }
 
     @Test
@@ -539,5 +537,24 @@ class GeminiPromptBuilderTest {
                 listOf(GroundingCitation(title = "No URL", url = "")),
             ),
         )
+    }
+
+    @Test
+    fun `buildUserPrompt injects url_context guidance when webUrls is non-empty and omits when empty`() {
+        val withWebUrls =
+            SummaryInput(
+                content = "[alice]: Read https://kotlinlang.org/docs",
+                webUrls = listOf("https://kotlinlang.org/docs"),
+            )
+        val promptWithUrls = GeminiPromptBuilder.buildUserPrompt(withWebUrls)
+        assertContains(promptWithUrls, "url_context")
+        assertContains(promptWithUrls, "1 個公開網頁連結")
+
+        val withoutWebUrls =
+            SummaryInput(
+                content = "[alice]: Plain chat message",
+            )
+        val promptWithoutUrls = GeminiPromptBuilder.buildUserPrompt(withoutWebUrls)
+        assertFalse(promptWithoutUrls.contains("url_context"))
     }
 }

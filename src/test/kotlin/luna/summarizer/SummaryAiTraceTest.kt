@@ -94,28 +94,33 @@ class SummaryAiTraceTest {
         val responseJson =
             """
             {
-              "candidates": [
+              "id": "int-happy-1",
+              "status": "completed",
+              "finish_reason": "STOP",
+              "usage": {
+                "input_tokens": 140,
+                "output_tokens": 42,
+                "total_tokens": 182
+              },
+              "steps": [
                 {
-                  "content": {
-                    "role": "model",
-                    "parts": [
-                      { "text": "TL;DR:\n🚀 Kotlin K2 編譯器顯著提升建置速度。\n\n核心重點:\n• 編譯效能提升\n• 支援跨平台" }
-                    ]
-                  },
-                  "finishReason": "STOP",
-                  "groundingMetadata": {
-                    "webSearchQueries": ["Kotlin K2 compiler"],
-                    "groundingChunks": [
-                      { "web": { "uri": "https://kotlinlang.org/k2", "title": "Kotlin K2" } }
-                    ]
-                  }
+                  "type": "google_search_call",
+                  "id": "gs-1",
+                  "arguments": { "queries": ["Kotlin K2 compiler"] }
+                },
+                {
+                  "type": "model_output",
+                  "content": [
+                    {
+                      "type": "text",
+                      "text": "TL;DR:\n🚀 Kotlin K2 編譯器顯著提升建置速度。\n\n核心重點:\n• 編譯效能提升\n• 支援跨平台",
+                      "annotations": [
+                        { "type": "url_citation", "url": "https://kotlinlang.org/k2", "title": "Kotlin K2" }
+                      ]
+                    }
+                  ]
                 }
-              ],
-              "usageMetadata": {
-                "promptTokenCount": 140,
-                "candidatesTokenCount": 42,
-                "totalTokenCount": 182
-              }
+              ]
             }
             """.trimIndent()
 
@@ -210,7 +215,7 @@ class SummaryAiTraceTest {
             assertEquals(AiAttemptStage.SUMMARY_GENERATE, attempt.stage)
             assertEquals("gemini-3.5-flash-lite", attempt.model)
             assertEquals(
-                "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent",
+                "https://generativelanguage.googleapis.com/v1beta/interactions?key=******",
                 attempt.endpoint,
             )
             assertEquals(200, attempt.httpStatus)
@@ -219,6 +224,7 @@ class SummaryAiTraceTest {
             assertEquals(140, attempt.usageMetadata?.promptTokenCount)
             assertEquals(42, attempt.usageMetadata?.candidatesTokenCount)
             assertEquals(182, attempt.usageMetadata?.totalTokenCount)
+            assertEquals(listOf("Kotlin K2 compiler"), attempt.googleSearchQueries)
             assertEquals(AiAttemptOutcome.SUCCESS, attempt.parsedOutcome)
             assertNull(attempt.errorMessage)
             assertEquals(responseJson, attempt.responseRaw)
@@ -262,41 +268,33 @@ class SummaryAiTraceTest {
         val toolCallResponse =
             """
             {
-              "candidates": [
+              "id": "int-lb-turn-1",
+              "status": "requires_action",
+              "usage": { "input_tokens": 80, "output_tokens": 15, "total_tokens": 95 },
+              "steps": [
                 {
-                  "content": {
-                    "role": "model",
-                    "parts": [
-                      {
-                        "functionCall": {
-                          "name": "fetch_earlier_messages",
-                          "args": { "reason": "Need earlier context" }
-                        }
-                      }
-                    ]
-                  },
-                  "finishReason": "STOP"
+                  "type": "function_call",
+                  "id": "call-1",
+                  "name": "fetch_earlier_messages",
+                  "arguments": { "reason": "Need earlier context" }
                 }
-              ],
-              "usageMetadata": { "promptTokenCount": 80, "candidatesTokenCount": 15, "totalTokenCount": 95 }
+              ]
             }
             """.trimIndent()
 
         val finalResponse =
             """
             {
-              "candidates": [
+              "id": "int-lb-turn-2",
+              "status": "completed",
+              "finish_reason": "STOP",
+              "usage": { "input_tokens": 160, "output_tokens": 30, "total_tokens": 190 },
+              "steps": [
                 {
-                  "content": {
-                    "role": "model",
-                    "parts": [
-                      { "text": "TL;DR:\n完整對話脈絡摘要。" }
-                    ]
-                  },
-                  "finishReason": "STOP"
+                  "type": "model_output",
+                  "content": [{ "type": "text", "text": "TL;DR:\n完整對話脈絡摘要。" }]
                 }
-              ],
-              "usageMetadata": { "promptTokenCount": 160, "candidatesTokenCount": 30, "totalTokenCount": 190 }
+              ]
             }
             """.trimIndent()
 
@@ -353,12 +351,61 @@ class SummaryAiTraceTest {
                 ?.payload
                 ?.toString()
                 .orEmpty()
-        assertTrue(continuationPayload.contains("functionResponse"))
+        assertTrue(continuationPayload.contains("function_result"))
+        assertTrue(continuationPayload.contains("int-lb-turn-1"))
         assertTrue(continuationPayload.contains("Earlier history context"))
     }
 
     @Test
-    fun `search grounding failure falls back to no-search and records DEGRADED_SUCCESS`(
+    fun `search grounding and url_context HTTP error fails fast without retry and records FAILED`(
+        @TempDir tempDir: Path,
+    ) = runTest {
+        val (recorder, traceFile) = createRecorder(tempDir)
+        var callIndex = 0
+
+        val mockEngine =
+            MockEngine {
+                callIndex++
+                respond(
+                    content = """{"error": {"code": 400, "message": "google_search tool rejected"}}""",
+                    status = HttpStatusCode.BadRequest,
+                    headers = headersOf(HttpHeaders.ContentType, "application/json"),
+                )
+            }
+
+        val summarizer =
+            GeminiSummarizer(
+                config = GeminiConfig(apiKey = "secret-gemini-api-key", searchGroundingEnabled = true, urlContextEnabled = true),
+                httpClient = createTestClient(mockEngine),
+                traceRecorder = recorder,
+            )
+
+        val result =
+            summarizer.summarize(
+                SummaryInput(
+                    content = "Topic https://example.com/doc",
+                    webUrls = listOf("https://example.com/doc"),
+                ),
+            )
+        recorder.flushAndClose()
+
+        assertTrue(result is SummaryResult.Error.ApiError)
+        assertEquals(1, callIndex)
+        val traces = readTraces(traceFile)
+        assertEquals(1, traces.size)
+        val trace = traces.first()
+
+        assertEquals(AiTraceOutcome.FAILED, trace.outcome)
+        assertFalse(trace.degraded)
+        assertEquals(luna.core.ai.AiTraceFailureCategory.HTTP_ERROR, trace.failureCategory)
+        assertEquals(1, trace.attemptCount)
+        assertEquals(listOf("SUMMARY_GENERATE:url_context+grounded"), trace.fallbackPath)
+        assertEquals(AiAttemptOutcome.ERROR, trace.attempts[0].parsedOutcome)
+        assertEquals(400, trace.attempts[0].httpStatus)
+    }
+
+    @Test
+    fun `multimodal fallback strips Chat Image Attachment blocks and records DEGRADED_SUCCESS`(
         @TempDir tempDir: Path,
     ) = runTest {
         val (recorder, traceFile) = createRecorder(tempDir)
@@ -369,74 +416,15 @@ class SummaryAiTraceTest {
                 callIndex++
                 if (callIndex == 1) {
                     respond(
-                        content = """{"error": {"code": 400, "message": "googleSearch not supported"}}""",
-                        status = HttpStatusCode.BadRequest,
-                        headers = headersOf(HttpHeaders.ContentType, "application/json"),
-                    )
-                } else {
-                    val fallbackJson =
-                        """
-                        {
-                          "candidates": [
-                            {
-                              "content": { "parts": [{ "text": "TL;DR:\nFallback summary without search." }] },
-                              "finishReason": "STOP"
-                            }
-                          ]
-                        }
-                        """.trimIndent()
-                    respond(
-                        content = fallbackJson,
-                        status = HttpStatusCode.OK,
-                        headers = headersOf(HttpHeaders.ContentType, "application/json"),
-                    )
-                }
-            }
-
-        val summarizer =
-            GeminiSummarizer(
-                config = GeminiConfig(apiKey = "secret-gemini-api-key", searchGroundingEnabled = true),
-                httpClient = createTestClient(mockEngine),
-                traceRecorder = recorder,
-            )
-
-        val result = summarizer.summarize(SummaryInput(content = "Topic requiring fallback"))
-        recorder.flushAndClose()
-
-        assertTrue(result is SummaryResult.Success)
-        val traces = readTraces(traceFile)
-        assertEquals(1, traces.size)
-        val trace = traces.first()
-
-        assertEquals(AiTraceOutcome.DEGRADED_SUCCESS, trace.outcome)
-        assertTrue(trace.degraded)
-        assertEquals(2, trace.attemptCount)
-        assertEquals(listOf("SUMMARY_GENERATE:grounded", "SUMMARY_GENERATE:no-search"), trace.fallbackPath)
-        assertEquals(AiAttemptOutcome.ERROR, trace.attempts[0].parsedOutcome)
-        assertEquals(400, trace.attempts[0].httpStatus)
-        assertEquals(AiAttemptOutcome.SUCCESS, trace.attempts[1].parsedOutcome)
-        assertEquals(200, trace.attempts[1].httpStatus)
-    }
-
-    @Test
-    fun `multimodal fallback strips Chat Image Attachment file_data after search fallback fails and records DEGRADED_SUCCESS`(
-        @TempDir tempDir: Path,
-    ) = runTest {
-        val (recorder, traceFile) = createRecorder(tempDir)
-        var callIndex = 0
-
-        val mockEngine =
-            MockEngine {
-                callIndex++
-                if (callIndex <= 2) {
-                    respond(
-                        content = """{"error": {"code": 400, "message": "Unable to fetch image or tool"}}""",
+                        content = """{"error": {"code": 400, "message": "Unable to fetch image"}}""",
                         status = HttpStatusCode.BadRequest,
                         headers = headersOf(HttpHeaders.ContentType, "application/json"),
                     )
                 } else {
                     respond(
-                        content = """{"candidates": [{"content": {"parts": [{"text": "TL;DR:\nText-only summary."}]}, "finishReason": "STOP"}]}""",
+                        content =
+                            """{"id": "int-text-only", "status": "completed", "finish_reason": "STOP", """ +
+                                """"steps": [{"type": "model_output", "content": [{"type": "text", "text": "TL;DR:\nText-only summary."}]}]}""",
                         status = HttpStatusCode.OK,
                         headers = headersOf(HttpHeaders.ContentType, "application/json"),
                     )
@@ -469,27 +457,18 @@ class SummaryAiTraceTest {
 
         assertEquals(AiTraceOutcome.DEGRADED_SUCCESS, trace.outcome)
         assertTrue(trace.degraded)
-        assertEquals(3, trace.attemptCount)
+        assertEquals(2, trace.attemptCount)
         assertEquals(
-            listOf("SUMMARY_GENERATE:grounded", "SUMMARY_GENERATE:no-search", "SUMMARY_GENERATE:no-images"),
+            listOf("SUMMARY_GENERATE:grounded", "SUMMARY_GENERATE:no-images"),
             trace.fallbackPath,
         )
 
         assertEquals(true, trace.attempts[0].request?.hasImages)
         assertEquals(2, trace.attempts[0].request?.imageCount)
-        assertEquals(true, trace.attempts[1].request?.hasImages)
-        assertEquals(2, trace.attempts[1].request?.imageCount)
-        assertEquals(false, trace.attempts[2].request?.hasImages)
-        assertEquals(0, trace.attempts[2].request?.imageCount)
+        assertEquals(false, trace.attempts[1].request?.hasImages)
+        assertEquals(0, trace.attempts[1].request?.imageCount)
         assertFalse(
-            trace.attempts[2]
-                .request
-                ?.payload
-                ?.toString()
-                ?.contains("file_uri") == true,
-        )
-        assertFalse(
-            trace.attempts[2]
+            trace.attempts[1]
                 .request
                 ?.payload
                 ?.toString()
@@ -507,15 +486,10 @@ class SummaryAiTraceTest {
         val toolCallResponse =
             """
             {
-              "candidates": [
-                {
-                  "content": {
-                    "role": "model",
-                    "parts": [
-                      { "functionCall": { "name": "fetch_earlier_messages", "args": { "reason": "More context" } } }
-                    ]
-                  }
-                }
+              "id": "int-tc-1",
+              "status": "requires_action",
+              "steps": [
+                { "type": "function_call", "id": "call-tc", "name": "fetch_earlier_messages", "arguments": { "reason": "More context" } }
               ]
             }
             """.trimIndent()
@@ -542,7 +516,9 @@ class SummaryAiTraceTest {
 
                     else -> {
                         respond(
-                            content = """{"candidates": [{"content": {"parts": [{"text": "TL;DR:\nBaseline fallback summary."}]}}]}""",
+                            content =
+                                """{"id": "int-tc-base", "status": "completed", """ +
+                                    """"steps": [{"type": "model_output", "content": [{"type": "text", "text": "TL;DR:\nBaseline fallback summary."}]}]}""",
                             status = HttpStatusCode.OK,
                             headers = headersOf(HttpHeaders.ContentType, "application/json"),
                         )
@@ -591,7 +567,9 @@ class SummaryAiTraceTest {
         val mockEngine =
             MockEngine {
                 respond(
-                    content = """{"candidates": [{"content": {"parts": [{"text": "TL;DR:\nSummary."}]}}]}""",
+                    content =
+                        """{"id": "int-ignored", "status": "completed", """ +
+                            """"steps": [{"type": "model_output", "content": [{"type": "text", "text": "TL;DR:\nSummary."}]}]}""",
                     status = HttpStatusCode.OK,
                     headers = headersOf(HttpHeaders.ContentType, "application/json"),
                 )
@@ -794,7 +772,7 @@ class SummaryAiTraceTest {
 
                     4 -> {
                         respond(
-                            content = """{"promptFeedback": {"blockReason": "SAFETY"}}""",
+                            content = """{"id": "int-safety", "status": "completed", "finish_reason": "SAFETY", "steps": []}""",
                             status = HttpStatusCode.OK,
                             headers = headersOf(HttpHeaders.ContentType, "application/json"),
                         )
@@ -802,7 +780,9 @@ class SummaryAiTraceTest {
 
                     5 -> {
                         respond(
-                            content = """{"candidates": [{"content": {"parts": [{"text": "📝🎉"}]}, "finishReason": "STOP"}]}""",
+                            content =
+                                """{"id": "int-empty", "status": "completed", "finish_reason": "STOP", """ +
+                                    """"steps": [{"type": "model_output", "content": [{"type": "text", "text": "📝🎉"}]}]}""",
                             status = HttpStatusCode.OK,
                             headers = headersOf(HttpHeaders.ContentType, "application/json"),
                         )
@@ -854,7 +834,7 @@ class SummaryAiTraceTest {
         // 4. Safety block
         assertEquals(AiTraceOutcome.FAILED, traces[3].outcome)
         assertEquals(luna.core.ai.AiTraceFailureCategory.SAFETY_BLOCK, traces[3].failureCategory)
-        assertEquals("SAFETY", traces[3].attempts.first().blockReason)
+        assertEquals("SAFETY", traces[3].attempts.first().finishReason)
 
         // 5. Empty / emoji-only output
         assertEquals(AiTraceOutcome.FAILED, traces[4].outcome)
@@ -878,20 +858,14 @@ class SummaryAiTraceTest {
         val toolCallResponse =
             """
             {
-              "candidates": [
+              "id": "int-e2e-1",
+              "status": "requires_action",
+              "steps": [
                 {
-                  "content": {
-                    "role": "model",
-                    "parts": [
-                      {
-                        "functionCall": {
-                          "name": "fetch_earlier_messages",
-                          "args": { "reason": "Need earlier context" }
-                        }
-                      }
-                    ]
-                  },
-                  "finishReason": "STOP"
+                  "type": "function_call",
+                  "id": "call-e2e",
+                  "name": "fetch_earlier_messages",
+                  "arguments": { "reason": "Need earlier context" }
                 }
               ]
             }
@@ -900,27 +874,26 @@ class SummaryAiTraceTest {
         val finalSummaryResponse =
             """
             {
-              "candidates": [
+              "id": "int-e2e-2",
+              "status": "completed",
+              "finish_reason": "STOP",
+              "usage": { "input_tokens": 210, "output_tokens": 25, "total_tokens": 235 },
+              "steps": [
                 {
-                  "content": {
-                    "role": "model",
-                    "parts": [
-                      { "text": "TL;DR:\n整合歷史脈絡後的摘要。" }
-                    ]
-                  },
-                  "finishReason": "STOP"
+                  "type": "model_output",
+                  "content": [{ "type": "text", "text": "TL;DR:\n整合歷史脈絡後的摘要。" }]
                 }
-              ],
-              "usageMetadata": { "promptTokenCount": 210, "candidatesTokenCount": 25, "totalTokenCount": 235 }
+              ]
             }
             """.trimIndent()
 
         val safetyBlockedResponse =
             """
             {
-              "promptFeedback": {
-                "blockReason": "SAFETY"
-              }
+              "id": "int-e2e-safe",
+              "status": "completed",
+              "finish_reason": "SAFETY",
+              "steps": []
             }
             """.trimIndent()
 
@@ -985,7 +958,7 @@ class SummaryAiTraceTest {
         service.handleReaction(SummaryTestFixtures.createMockReactionEvent(targetMessage = targetMsg1))
         assertEquals("整合歷史脈絡後的摘要。".let { "TL;DR:\n$it" }, lastReply)
 
-        // 2. Safety block via SummaryService (note: tool-enabled attempt blocks -> baseline attempt also blocks)
+        // 2. Safety block via SummaryService
         service.handleReaction(SummaryTestFixtures.createMockReactionEvent(targetMessage = targetMsg2))
         assertNull(service.getStatus(targetMsg2.id))
 
@@ -1007,7 +980,7 @@ class SummaryAiTraceTest {
         assertEquals("9103", blockedTrace.discord.messageId)
         assertEquals(AiTraceOutcome.FAILED, blockedTrace.outcome)
         assertEquals(luna.core.ai.AiTraceFailureCategory.SAFETY_BLOCK, blockedTrace.failureCategory)
-        assertEquals("SAFETY", blockedTrace.attempts.last().blockReason)
+        assertEquals("SAFETY", blockedTrace.attempts.last().finishReason)
     }
 
     @Test
@@ -1194,5 +1167,126 @@ class SummaryAiTraceTest {
                 .request
                 ?.videoDurationSeconds,
         )
+    }
+
+    @Test
+    fun `SummaryService end-to-end web URL summary records webUrlCount urlContextResults googleSearchQueries and filtered citations`(
+        @TempDir tempDir: Path,
+    ) = runTest {
+        val apiKey = "secret-web-url-trace-key"
+        val (recorder, traceFile) = createRecorder(tempDir, apiKey)
+
+        val responseJson =
+            """
+            {
+              "id": "int-web-e2e",
+              "status": "completed",
+              "finish_reason": "STOP",
+              "usage": { "input_tokens": 320, "output_tokens": 70, "total_tokens": 390 },
+              "steps": [
+                {
+                  "type": "url_context_result",
+                  "call_id": "uc-1",
+                  "result": [
+                    { "retrieved_url": "https://kotlinlang.org/docs/k2.html", "status": "success" }
+                  ]
+                },
+                {
+                  "type": "google_search_call",
+                  "id": "gs-1",
+                  "arguments": { "queries": ["Kotlin K2 release notes"] }
+                },
+                {
+                  "type": "model_output",
+                  "content": [
+                    {
+                      "type": "text",
+                      "text": "TL;DR:\nK2 編譯器文章重點已讀取完成。",
+                      "annotations": [
+                        { "type": "url_citation", "url": "https://kotlinlang.org/docs/k2.html/", "title": "Original Doc" },
+                        { "type": "url_citation", "url": "https://blog.jetbrains.com/kotlin/k2", "title": "JetBrains K2 Blog" }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+            """.trimIndent()
+
+        val mockEngine =
+            MockEngine {
+                respond(
+                    content = responseJson,
+                    status = HttpStatusCode.OK,
+                    headers = headersOf(HttpHeaders.ContentType, "application/json"),
+                )
+            }
+
+        val summarizer =
+            GeminiSummarizer(
+                config =
+                    GeminiConfig(
+                        apiKey = apiKey,
+                        model = "gemini-3.5-flash-lite",
+                        searchGroundingEnabled = true,
+                        urlContextEnabled = true,
+                    ),
+                httpClient = createTestClient(mockEngine),
+                traceRecorder = recorder,
+            )
+
+        var peekCalled = false
+        val collector =
+            ConversationSliceCollector(
+                historyFetcher = { _, _ -> emptyList() },
+                forwardFetcher = { _, _ -> emptyList() },
+                peekResolver = {
+                    peekCalled = true
+                    null
+                },
+            )
+
+        var sentReply: String? = null
+        val service =
+            SummaryService(
+                summarizer = summarizer,
+                collector = collector,
+                replySender = { _, text -> sentReply = text },
+                traceRecorder = recorder,
+            )
+
+        val targetMsg =
+            SummaryTestFixtures.createMockMessage(
+                id = 9301L,
+                username = "alice",
+                content = "Please check https://kotlinlang.org/docs/k2.html",
+            )
+        service.handleReaction(SummaryTestFixtures.createMockReactionEvent(targetMessage = targetMsg))
+        recorder.flushAndClose()
+
+        assertFalse(peekCalled)
+        assertNotNull(sentReply)
+        assertTrue(sentReply!!.contains("K2 編譯器文章重點已讀取完成"))
+        assertTrue(sentReply!!.contains("[JetBrains K2 Blog](<https://blog.jetbrains.com/kotlin/k2>)"))
+        assertFalse(sentReply!!.contains("[Original Doc]"))
+
+        val trace = readTraces(traceFile).single()
+        assertEquals(AiTraceOutcome.SUCCESS, trace.outcome)
+        assertEquals(listOf("SUMMARY_GENERATE:url_context+grounded+lookback"), trace.fallbackPath)
+        assertEquals(1, trace.citations.size)
+        assertEquals("https://blog.jetbrains.com/kotlin/k2", trace.citations.single().url)
+
+        val attempt = trace.attempts.single()
+        assertEquals(1, attempt.request?.webUrlCount)
+        assertEquals(
+            listOf("url_context", "google_search", "fetch_earlier_messages"),
+            attempt.request?.enabledTools,
+        )
+        assertEquals(1, attempt.urlContextResults.size)
+        assertEquals("https://kotlinlang.org/docs/k2.html", attempt.urlContextResults.single().retrievedUrl)
+        assertEquals(listOf("Kotlin K2 release notes"), attempt.googleSearchQueries)
+        assertEquals(2, attempt.rawCitations.size)
+        assertEquals(1, attempt.filteredCitations.size)
+        assertEquals("https://blog.jetbrains.com/kotlin/k2", attempt.filteredCitations.single().url)
     }
 }

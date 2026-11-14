@@ -8,6 +8,7 @@ import dev.socialpeek.model.Platform
 import kotlinx.coroutines.flow.toList
 import luna.core.ai.ChatImageAttachment
 import luna.core.ai.ChatImageAttachmentExtractor
+import luna.core.ai.ContextUrlClassifier
 import org.slf4j.LoggerFactory
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.minutes
@@ -95,7 +96,6 @@ open class ConversationSliceCollector(
             (precedingMessages + message + subsequentMessages)
                 .distinctBy { it.id }
                 .sortedBy { it.id.value }
-        val primaryUrl = allMessages.asReversed().firstNotNullOfOrNull { msg -> URL_REGEX.find(msg.content)?.value }
 
         val imagesMap =
             ChatImageAttachmentExtractor.selectChronologicalImages(
@@ -105,6 +105,15 @@ open class ConversationSliceCollector(
                 prioritizedMessageId = message.id,
             )
         val sliceImageAttachments = imagesMap.values.flatten()
+
+        val classifiedUrls =
+            ContextUrlClassifier.classify(
+                messages = allMessages.map { it.content },
+                capturedAttachmentUrls = sliceImageAttachments.map { it.url },
+            )
+        val peekCandidates = (classifiedUrls.socialUrls + classifiedUrls.youtubeUrls).toSet()
+        val peekTargetUrl = classifiedUrls.allOriginalUrls.asReversed().firstOrNull { it in peekCandidates }
+        val primaryUrl = peekTargetUrl ?: classifiedUrls.webUrls.lastOrNull()
 
         val replyReferencesByMessage = resolveExternalReplyReferences(allMessages)
 
@@ -130,11 +139,11 @@ open class ConversationSliceCollector(
                 }
             }
 
-        if (primaryUrl != null) {
+        if (peekTargetUrl != null) {
             val post =
-                runCatching { peekResolver(primaryUrl) }
+                runCatching { peekResolver(peekTargetUrl) }
                     .onFailure { e ->
-                        logger.warn("Failed to resolve URL $primaryUrl via peekResolver, falling back to message context", e)
+                        logger.warn("Failed to resolve URL $peekTargetUrl via peekResolver, falling back to message context", e)
                     }.getOrNull()
 
             if (post != null) {
@@ -142,7 +151,7 @@ open class ConversationSliceCollector(
                 if (post.platform == Platform.YOUTUBE && durationSeconds != null && durationSeconds > 7200L) {
                     return PreparedConversationSlice(
                         summaryInput = SummaryInput(content = ""),
-                        primaryUrl = primaryUrl,
+                        primaryUrl = peekTargetUrl,
                         durationExceeded = true,
                     )
                 }
@@ -150,7 +159,7 @@ open class ConversationSliceCollector(
                 val postContent = post.content.ifBlank { "" }.trim()
                 val combinedContent =
                     if (allMessages.size == 1 && sliceImageAttachments.isEmpty()) {
-                        val commentary = message.content.replace(primaryUrl, "").trim()
+                        val commentary = message.content.replace(peekTargetUrl, "").trim()
                         if (commentary.isNotBlank() && postContent.isNotBlank()) {
                             "使用者附註: $commentary\n\n內容:\n$postContent"
                         } else {
@@ -170,16 +179,18 @@ open class ConversationSliceCollector(
                             content = combinedContent,
                             title = post.title,
                             comments = post.comments.map { it.content },
-                            url = primaryUrl,
-                            videoUri = if (post.platform == Platform.YOUTUBE) (post.cleanUrl.ifBlank { primaryUrl }) else null,
+                            url = peekTargetUrl,
+                            webUrls = classifiedUrls.webUrls,
+                            originalUrls = classifiedUrls.allOriginalUrls,
+                            videoUri = if (post.platform == Platform.YOUTUBE) (post.cleanUrl.ifBlank { peekTargetUrl }) else null,
                             videoDurationSeconds = durationSeconds,
                             imageAttachments = sliceImageAttachments,
                         ),
-                    primaryUrl = primaryUrl,
+                    primaryUrl = peekTargetUrl,
                     durationExceeded = false,
                 )
             } else {
-                logger.debug("No post resolved for primary URL {}, summarizing message context directly", primaryUrl)
+                logger.debug("No post resolved for SocialPeek URL {}, summarizing message context directly", peekTargetUrl)
             }
         }
 
@@ -223,6 +234,8 @@ open class ConversationSliceCollector(
                 SummaryInput(
                     content = formattedContent,
                     url = primaryUrl,
+                    webUrls = classifiedUrls.webUrls,
+                    originalUrls = classifiedUrls.allOriginalUrls,
                     imageAttachments = sliceImageAttachments,
                 ),
             primaryUrl = primaryUrl,
@@ -594,7 +607,5 @@ open class ConversationSliceCollector(
                 ?.toIntOrNull()
                 ?.takeIf { it > 0 }
                 ?: DEFAULT_MAX_IMAGES
-
-        val URL_REGEX = Regex("""https?://[^\s<>"']+""")
     }
 }
