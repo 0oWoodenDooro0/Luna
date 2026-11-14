@@ -557,4 +557,251 @@ class GeminiDecisionClientTest {
             assertFalse(configuredClient.shouldParticipate("   "))
             assertFalse(requestExecuted)
         }
+
+    @Test
+    fun `default decision instructions use Luna only, frame latest message against recent context, and balance engagement with restraint`() =
+        runTest {
+            var capturedInstructions: String? = null
+            val mockEngine =
+                MockEngine { request ->
+                    val bodyJson = json.parseToJsonElement(request.body.toByteArray().decodeToString()).jsonObject
+                    capturedInstructions =
+                        bodyJson["questions"]
+                            ?.jsonObject
+                            ?.get("should_participate")
+                            ?.jsonObject
+                            ?.get("instructions")
+                            ?.jsonPrimitive
+                            ?.content
+                    respond(
+                        content = """{"answers":{"should_participate":{"type":"noul","noul":0.8,"confidence":0.8}}}""",
+                        status = HttpStatusCode.OK,
+                        headers = headersOf(HttpHeaders.ContentType, "application/json"),
+                    )
+                }
+
+            val client =
+                GeminiDecisionClient(
+                    config = ChatterDecisionConfig(apiKey = "valid-key"),
+                    httpClient = createTestClient(mockEngine),
+                )
+
+            assertTrue(client.shouldParticipate("[Bot Identity: Luna]\n\n[Latest Message]\n[Alice]: Luna thoughts?"))
+            val sent = assertNotNull(capturedInstructions)
+            assertFalse(sent.contains("露娜"), "Decision instructions must never use 露娜")
+            assertTrue(sent.contains("Luna"))
+            assertTrue(sent.contains("[Latest Message]"))
+            assertTrue(sent.contains("[Recent Context]"))
+            assertTrue(sent.contains("[Bot Identity]"))
+            assertTrue(sent.contains("1-on-1"))
+            assertTrue(sent.contains("bot command"))
+            assertTrue(sent.contains("system notice"))
+            assertTrue(sent.contains("ok") && sent.contains("lol"))
+        }
+
+    @Test
+    fun `loads decision instructions and bounded message count from env with negative boundaries and clamping`() {
+        val defaultConfig = ChatterDecisionConfig.fromEnv(emptyMap())
+        assertEquals(0.7, defaultConfig.threshold)
+        assertEquals(15, defaultConfig.decisionMessageCount)
+        assertEquals(GeminiDecisionClient.DEFAULT_INSTRUCTIONS, defaultConfig.instructions)
+
+        val customConfig =
+            ChatterDecisionConfig.fromEnv(
+                mapOf(
+                    "CHATTER_DECISION_INSTRUCTIONS" to "  Evaluate strictly for Luna tech Q&A  ",
+                    "CHATTER_DECISION_MESSAGE_COUNT" to "42",
+                ),
+            )
+        assertEquals("Evaluate strictly for Luna tech Q&A", customConfig.instructions)
+        assertEquals(42, customConfig.decisionMessageCount)
+        assertEquals(0.7, customConfig.threshold)
+
+        // Boundary min and max
+        assertEquals(1, ChatterDecisionConfig.fromEnv(mapOf("CHATTER_DECISION_MESSAGE_COUNT" to "1")).decisionMessageCount)
+        assertEquals(100, ChatterDecisionConfig.fromEnv(mapOf("CHATTER_DECISION_MESSAGE_COUNT" to "100")).decisionMessageCount)
+
+        // Clamped > 100
+        assertEquals(100, ChatterDecisionConfig.fromEnv(mapOf("CHATTER_DECISION_MESSAGE_COUNT" to "150")).decisionMessageCount)
+        assertEquals(100, ChatterDecisionConfig.fromEnv(mapOf("CHATTER_DECISION_MESSAGE_COUNT" to "9999999999")).decisionMessageCount)
+
+        // Negative boundaries: blank, invalid, zero, negative fallback to 15; blank instructions fallback to default
+        val negativeBoundaries =
+            listOf(
+                mapOf("CHATTER_DECISION_INSTRUCTIONS" to "   ", "CHATTER_DECISION_MESSAGE_COUNT" to ""),
+                mapOf("CHATTER_DECISION_MESSAGE_COUNT" to "   "),
+                mapOf("CHATTER_DECISION_MESSAGE_COUNT" to "abc"),
+                mapOf("CHATTER_DECISION_MESSAGE_COUNT" to "0"),
+                mapOf("CHATTER_DECISION_MESSAGE_COUNT" to "-5"),
+            )
+        negativeBoundaries.forEach { env ->
+            val cfg = ChatterDecisionConfig.fromEnv(env)
+            assertEquals(GeminiDecisionClient.DEFAULT_INSTRUCTIONS, cfg.instructions)
+            assertEquals(15, cfg.decisionMessageCount)
+        }
+    }
+
+    @Test
+    fun `loads decision instructions and message count across fromConfig and fromPluginContext with precedence`() {
+        // fromConfig precedence: ENV > dotted > camelCase
+        val fromConfigEnvWins =
+            ChatterDecisionConfig.fromConfig(
+                mapOf(
+                    "CHATTER_DECISION_INSTRUCTIONS" to "env-wins",
+                    "chatter.decision.instructions" to "dotted",
+                    "chatter.decisionInstructions" to "camel",
+                    "CHATTER_DECISION_MESSAGE_COUNT" to 25,
+                    "chatter.decision.messageCount" to 10,
+                    "chatter.decisionMessageCount" to 5,
+                ),
+            )
+        assertEquals("env-wins", fromConfigEnvWins.instructions)
+        assertEquals(25, fromConfigEnvWins.decisionMessageCount)
+
+        val fromConfigDottedWins =
+            ChatterDecisionConfig.fromConfig(
+                mapOf(
+                    "CHATTER_DECISION_INSTRUCTIONS" to "   ",
+                    "chatter.decision.instructions" to "dotted-wins",
+                    "chatter.decisionInstructions" to "camel",
+                    "chatter.decision.messageCount" to "30",
+                    "chatter.decisionMessageCount" to 5,
+                ),
+            )
+        assertEquals("dotted-wins", fromConfigDottedWins.instructions)
+        assertEquals(30, fromConfigDottedWins.decisionMessageCount)
+
+        val fromConfigCamel =
+            ChatterDecisionConfig.fromConfig(
+                mapOf(
+                    "chatter.decisionInstructions" to "camel-wins",
+                    "chatter.decisionMessageCount" to 150L,
+                ),
+            )
+        assertEquals("camel-wins", fromConfigCamel.instructions)
+        assertEquals(100, fromConfigCamel.decisionMessageCount)
+
+        val fromConfigInvalid =
+            ChatterDecisionConfig.fromConfig(
+                mapOf(
+                    "CHATTER_DECISION_MESSAGE_COUNT" to -2,
+                ),
+            )
+        assertEquals(15, fromConfigInvalid.decisionMessageCount)
+
+        // fromPluginContext variants & precedence
+        val ctxPrimary =
+            DefaultPluginContext(
+                kord = mockk(relaxed = true),
+                routing = mockk(relaxed = true),
+                database = mockk(relaxed = true),
+                configMap =
+                    mapOf(
+                        "CHATTER_DECISION_INSTRUCTIONS" to "ctx-env-instructions",
+                        "chatter.decision.instructions" to "ctx-dotted-instructions",
+                        "CHATTER_DECISION_MESSAGE_COUNT" to "18",
+                        "chatter.decision.messageCount" to 9,
+                    ),
+            )
+        val cfgPrimary = ChatterDecisionConfig.fromPluginContext(ctxPrimary)
+        assertEquals("ctx-env-instructions", cfgPrimary.instructions)
+        assertEquals(18, cfgPrimary.decisionMessageCount)
+
+        val ctxDotted =
+            DefaultPluginContext(
+                kord = mockk(relaxed = true),
+                routing = mockk(relaxed = true),
+                database = mockk(relaxed = true),
+                configMap =
+                    mapOf(
+                        "chatter.decision.instructions" to "ctx-dotted-instructions",
+                        "chatter.decisionInstructions" to "ctx-camel-instructions",
+                        "chatter.decision.messageCount" to 22,
+                        "chatter.decisionMessageCount" to 8,
+                    ),
+            )
+        val cfgDotted = ChatterDecisionConfig.fromPluginContext(ctxDotted)
+        assertEquals("ctx-dotted-instructions", cfgDotted.instructions)
+        assertEquals(22, cfgDotted.decisionMessageCount)
+
+        val ctxCamel =
+            DefaultPluginContext(
+                kord = mockk(relaxed = true),
+                routing = mockk(relaxed = true),
+                database = mockk(relaxed = true),
+                configMap =
+                    mapOf(
+                        "chatter.decisionInstructions" to "ctx-camel-instructions",
+                        "chatter.decisionMessageCount" to 200,
+                    ),
+            )
+        val cfgCamel = ChatterDecisionConfig.fromPluginContext(ctxCamel)
+        assertEquals("ctx-camel-instructions", cfgCamel.instructions)
+        assertEquals(100, cfgCamel.decisionMessageCount)
+
+        val ctxNegative =
+            DefaultPluginContext(
+                kord = mockk(relaxed = true),
+                routing = mockk(relaxed = true),
+                database = mockk(relaxed = true),
+                configMap =
+                    mapOf(
+                        "CHATTER_DECISION_INSTRUCTIONS" to "   ",
+                        "CHATTER_DECISION_MESSAGE_COUNT" to 0,
+                    ),
+            )
+        val cfgNegative = ChatterDecisionConfig.fromPluginContext(ctxNegative)
+        assertEquals(GeminiDecisionClient.DEFAULT_INSTRUCTIONS, cfgNegative.instructions)
+        assertEquals(15, cfgNegative.decisionMessageCount)
+    }
+
+    @Test
+    fun `GeminiDecisionClient transmits configured CHATTER_DECISION_INSTRUCTIONS override in POST v1beta decisions`() =
+        runTest {
+            val capturedInstructions = mutableListOf<String?>()
+            val mockEngine =
+                MockEngine { request ->
+                    val bodyJson = json.parseToJsonElement(request.body.toByteArray().decodeToString()).jsonObject
+                    capturedInstructions.add(
+                        bodyJson["questions"]
+                            ?.jsonObject
+                            ?.get("should_participate")
+                            ?.jsonObject
+                            ?.get("instructions")
+                            ?.jsonPrimitive
+                            ?.content,
+                    )
+                    respond(
+                        content = """{"answers":{"should_participate":{"type":"noul","noul":0.85,"confidence":0.85}}}""",
+                        status = HttpStatusCode.OK,
+                        headers = headersOf(HttpHeaders.ContentType, "application/json"),
+                    )
+                }
+
+            val customConfig =
+                ChatterDecisionConfig.fromEnv(
+                    mapOf(
+                        "GEMINI_API_KEY" to "valid-key",
+                        "CHATTER_DECISION_INSTRUCTIONS" to "Only reply when Luna is asked about Rust or Kotlin.",
+                    ),
+                )
+            val customClient =
+                GeminiDecisionClient(
+                    config = customConfig,
+                    httpClient = createTestClient(mockEngine),
+                )
+            assertTrue(customClient.shouldParticipate("[Bot Identity: Luna]\n\n[Latest Message]\n[Alice]: Kotlin question"))
+
+            // Blank instructions on direct config construction safely fall back to DEFAULT_INSTRUCTIONS
+            val blankConfigClient =
+                GeminiDecisionClient(
+                    config = ChatterDecisionConfig(apiKey = "valid-key", instructions = "   "),
+                    httpClient = createTestClient(mockEngine),
+                )
+            assertTrue(blankConfigClient.shouldParticipate("[Bot Identity: Luna]\n\n[Latest Message]\n[Bob]: Hello"))
+
+            assertEquals(2, capturedInstructions.size)
+            assertEquals("Only reply when Luna is asked about Rust or Kotlin.", capturedInstructions[0])
+            assertEquals(GeminiDecisionClient.DEFAULT_INSTRUCTIONS, capturedInstructions[1])
+        }
 }

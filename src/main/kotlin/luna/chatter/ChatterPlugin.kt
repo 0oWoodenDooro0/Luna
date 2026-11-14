@@ -124,7 +124,11 @@ class ChatterPlugin(
 
         val client =
             decisionClientFactory?.invoke(decisionConfig)
-                ?: GeminiDecisionClient(config = decisionConfig, traceRecorder = traceRecorder)
+                ?: GeminiDecisionClient(
+                    config = decisionConfig,
+                    defaultInstructions = decisionConfig.instructions,
+                    traceRecorder = traceRecorder,
+                )
         this.decisionClient = client
 
         val chatterConfig = ChatterConfig.fromPluginContext(context)
@@ -152,6 +156,7 @@ class ChatterPlugin(
         val collector =
             ChatterContextCollector(
                 noiseFilter = noiseFilter,
+                decisionMessageCount = decisionConfig.decisionMessageCount,
                 maxImages = imagesLimit,
                 peekResolver = peekResolver,
             )
@@ -163,6 +168,7 @@ class ChatterPlugin(
                 decisionClient = client,
                 chatterGenerator = generator,
                 cooldownCache = cooldown,
+                decisionMessageCount = decisionConfig.decisionMessageCount,
                 contextCollector = collector,
                 traceRecorder = traceRecorder,
                 inFlightTracker = tracker,

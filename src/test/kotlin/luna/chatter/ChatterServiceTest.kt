@@ -414,6 +414,56 @@ class ChatterServiceTest {
         }
 
     @Test
+    fun `chatter plugin wires CHATTER_DECISION_INSTRUCTIONS and CHATTER_DECISION_MESSAGE_COUNT to decisionClient, contextCollector, and service`() =
+        runTest {
+            val mockKord = mockk<Kord>(relaxed = true)
+            val eventsFlow = MutableSharedFlow<Event>()
+            every { mockKord.coroutineContext } returns EmptyCoroutineContext
+            every { mockKord.events } returns eventsFlow
+
+            val customContext =
+                DefaultPluginContext(
+                    kord = mockKord,
+                    routing = mockk(relaxed = true),
+                    database = mockk(relaxed = true),
+                    configMap =
+                        mapOf(
+                            "GEMINI_API_KEY" to "gemini-secret-key-456",
+                            "CHATTER_DECISION_INSTRUCTIONS" to "Custom plugin decision instructions for Luna",
+                            "CHATTER_DECISION_MESSAGE_COUNT" to 32,
+                        ),
+                )
+
+            val customPlugin = ChatterPlugin()
+            customPlugin.initialize(customContext)
+
+            assertEquals("Custom plugin decision instructions for Luna", customPlugin.decisionClient?.config?.instructions)
+            assertEquals("Custom plugin decision instructions for Luna", customPlugin.decisionClient?.defaultInstructions)
+            assertEquals(32, customPlugin.decisionClient?.config?.decisionMessageCount)
+            assertEquals(32, customPlugin.contextCollector?.decisionMessageCount)
+            assertEquals(32, customPlugin.service?.decisionMessageCount)
+            customPlugin.shutdown()
+
+            val defaultContext =
+                DefaultPluginContext(
+                    kord = mockKord,
+                    routing = mockk(relaxed = true),
+                    database = mockk(relaxed = true),
+                    configMap = mapOf("GEMINI_API_KEY" to "gemini-secret-key-456"),
+                )
+
+            val defaultPlugin = ChatterPlugin()
+            defaultPlugin.initialize(defaultContext)
+
+            assertEquals(GeminiDecisionClient.DEFAULT_INSTRUCTIONS, defaultPlugin.decisionClient?.config?.instructions)
+            assertEquals(GeminiDecisionClient.DEFAULT_INSTRUCTIONS, defaultPlugin.decisionClient?.defaultInstructions)
+            assertEquals(15, defaultPlugin.decisionClient?.config?.decisionMessageCount)
+            assertEquals(15, defaultPlugin.contextCollector?.decisionMessageCount)
+            assertEquals(15, defaultPlugin.service?.decisionMessageCount)
+            defaultPlugin.shutdown()
+        }
+
+    @Test
     fun `chatter plugin remains disabled when CHATTER_ENABLED is false even with GEMINI_API_KEY configured`() =
         runTest {
             val mockKord = mockk<Kord>(relaxed = true)
