@@ -1,7 +1,9 @@
 package luna.core.ai
 
+import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.JsonNames
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
@@ -205,11 +207,26 @@ data class GeminiGenerationConfig(
     val topP: Double? = null,
 )
 
+@OptIn(ExperimentalSerializationApi::class)
+@Serializable
+data class GeminiUsageMetadata(
+    @JsonNames("prompt_token_count")
+    val promptTokenCount: Int? = null,
+    @JsonNames("candidates_token_count")
+    val candidatesTokenCount: Int? = null,
+    @JsonNames("total_token_count")
+    val totalTokenCount: Int? = null,
+)
+
+@OptIn(ExperimentalSerializationApi::class)
 @Serializable
 data class GeminiGenerateContentResponse(
     val candidates: List<GeminiCandidate>? = null,
+    @JsonNames("prompt_feedback")
     val promptFeedback: GeminiPromptFeedback? = null,
     val error: GeminiApiErrorDetails? = null,
+    @JsonNames("usage_metadata")
+    val usageMetadata: GeminiUsageMetadata? = null,
 )
 
 @Serializable
@@ -245,9 +262,11 @@ data class GeminiGroundingWebSource(
     val title: String? = null,
 )
 
+@OptIn(ExperimentalSerializationApi::class)
 @Serializable
 data class GeminiCandidate(
     val content: GeminiContent? = null,
+    @JsonNames("finish_reason")
     val finishReason: String? = null,
     val groundingMetadata: GeminiGroundingMetadata? = null,
     @SerialName("grounding_metadata")
@@ -257,8 +276,10 @@ data class GeminiCandidate(
         get() = groundingMetadata ?: groundingMetadataSnake
 }
 
+@OptIn(ExperimentalSerializationApi::class)
 @Serializable
 data class GeminiPromptFeedback(
+    @JsonNames("block_reason")
     val blockReason: String? = null,
 )
 

@@ -133,4 +133,31 @@ class ConfigTest {
         assertNotNull(foundFromRoot)
         assertEquals(envFile.canonicalPath, foundFromRoot.canonicalPath)
     }
+
+    @Test
+    fun `EnvSchemaAuditor recognizes AI_TRACE keys and ai trace aliases`() {
+        val fallbackKeys = EnvSchemaAuditor.defaultFallbackSchema().map { it.name }.toSet()
+        assertTrue(fallbackKeys.contains("AI_TRACE_ENABLED"))
+        assertTrue(fallbackKeys.contains("AI_TRACE_DIR"))
+        assertTrue(fallbackKeys.contains("AI_TRACE_MAX_DAYS"))
+        assertTrue(fallbackKeys.contains("AI_TRACE_MAX_TOTAL_MB"))
+
+        assertTrue(EnvSchemaAuditor.isRecognizedKey("AI_TRACE_ENABLED", fallbackKeys))
+        assertTrue(EnvSchemaAuditor.isRecognizedKey("ai.trace.enabled", fallbackKeys))
+        assertTrue(EnvSchemaAuditor.isRecognizedKey("ai.trace.dir", fallbackKeys))
+        assertTrue(EnvSchemaAuditor.isRecognizedKey("ai.trace.maxDays", fallbackKeys))
+        assertTrue(EnvSchemaAuditor.isRecognizedKey("ai.trace.maxTotalMb", fallbackKeys))
+
+        val aliasConfig =
+            mapOf(
+                "ai.trace.enabled" to "false",
+                "ai.trace.dir" to "/tmp/traces",
+                "ai.trace.maxDays" to "7",
+                "ai.trace.maxTotalMb" to "64",
+            )
+        assertEquals("false", EnvSchemaAuditor.resolveVariableValue("AI_TRACE_ENABLED", aliasConfig))
+        assertEquals("/tmp/traces", EnvSchemaAuditor.resolveVariableValue("AI_TRACE_DIR", aliasConfig))
+        assertEquals("7", EnvSchemaAuditor.resolveVariableValue("AI_TRACE_MAX_DAYS", aliasConfig))
+        assertEquals("64", EnvSchemaAuditor.resolveVariableValue("AI_TRACE_MAX_TOTAL_MB", aliasConfig))
+    }
 }

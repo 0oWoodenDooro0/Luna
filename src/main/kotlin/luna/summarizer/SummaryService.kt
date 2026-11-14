@@ -11,7 +11,14 @@ import dev.kord.rest.builder.message.allowedMentions
 import luna.core.JsonLogger
 import luna.core.SummaryMessageRegistry
 import luna.core.SummaryRegistry
+import luna.core.ai.AiTraceDiscordContext
+import luna.core.ai.AiTraceFailureCategory
+import luna.core.ai.AiTracePipeline
+import luna.core.ai.AiTraceRecorder
+import luna.core.ai.AiTraceTrigger
 import luna.core.ai.EmojiSanitizer
+import luna.core.ai.NoOpAiTraceRecorder
+import luna.core.ai.withAiTraceSession
 import org.slf4j.LoggerFactory
 import java.util.Collections
 import java.util.LinkedHashMap
@@ -68,6 +75,7 @@ class SummaryService(
     val replySender: suspend (message: Message, content: String) -> Unit = { message, content ->
         defaultReplySender(message, content, summaryRegistry)
     },
+    val traceRecorder: AiTraceRecorder = NoOpAiTraceRecorder,
 ) {
     fun buildReply(
         message: Message,
@@ -154,109 +162,164 @@ class SummaryService(
             return
         }
 
-        val message =
-            try {
-                event.getMessageOrNull()
-            } catch (e: Exception) {
-                logger.warn("Failed to retrieve message {}: {}", event.messageId, e.message)
-                statusCache.remove(event.messageId)
-                return
-            }
-
-        if (message == null) {
-            logger.warn("Message {} was null or deleted", event.messageId)
-            statusCache.remove(event.messageId)
-            return
-        }
-
-        val slice =
-            try {
-                collector.collectSlice(message)
-            } catch (e: Exception) {
-                logger.warn("Error collecting conversation slice for message {}: {}", event.messageId, e.message)
-                statusCache.remove(event.messageId)
-                return
-            }
-
-        if (slice == null) {
-            statusCache.remove(event.messageId)
-            return
-        }
-
-        if (slice.durationExceeded) {
-            statusCache[event.messageId] = SummaryStatus.DONE
-            replySender(message, YOUTUBE_DURATION_EXCEEDED_MESSAGE)
-            return
-        }
+        val session =
+            traceRecorder.startSession(
+                pipeline = AiTracePipeline.SUMMARY,
+                trigger = AiTraceTrigger.REACTION,
+                discord =
+                    AiTraceDiscordContext(
+                        guildId = runCatching { event.guildId?.toString() }.getOrNull(),
+                        channelId = runCatching { event.channelId.toString() }.getOrNull() ?: "",
+                        messageId = runCatching { event.messageId.toString() }.getOrNull() ?: "",
+                        authorId = runCatching { event.messageAuthorId?.toString() }.getOrNull(),
+                        reactingUserId = runCatching { event.userId.toString() }.getOrNull(),
+                        isDirectMention = false,
+                    ),
+            )
 
         try {
-            logger.info("Executing Gemini summarization for message {}", event.messageId)
-            val result = summarizer.summarize(slice.summaryInput, slice.lookbackProvider)
+            withAiTraceSession(session) {
+                val message =
+                    try {
+                        event.getMessageOrNull()
+                    } catch (e: Exception) {
+                        logger.warn("Failed to retrieve message {}: {}", event.messageId, e.message)
+                        statusCache.remove(event.messageId)
+                        session.fail(
+                            failureCategory = AiTraceFailureCategory.CONTEXT_ERROR,
+                            errorSummary = "Failed to retrieve message ${event.messageId}: ${e.message}",
+                        )
+                        return@withAiTraceSession
+                    }
 
-            when (result) {
-                is SummaryResult.Success -> {
-                    statusCache[event.messageId] = SummaryStatus.DONE
-                    val sanitized = EmojiSanitizer.stripEmojis(result.text).trim()
-                    val citationsText = GeminiPromptBuilder.formatGroundingCitations(result.citations)
-                    val combinedText =
-                        when {
-                            sanitized.isNotBlank() && citationsText.isNotBlank() -> "$sanitized\n\n$citationsText"
-                            sanitized.isNotBlank() -> sanitized
-                            citationsText.isNotBlank() -> citationsText
-                            else -> ""
-                        }
-                    val textToSend =
-                        truncateForDiscord(combinedText).takeIf { it.isNotBlank() }
-                            ?: FALLBACK_EMPTY_SUMMARY_MESSAGE
-                    replySender(message, textToSend)
-                    JsonLogger.log(
-                        layer = "SUMMARY",
-                        component = "SummaryService",
-                        operation = "summarize",
-                        data =
-                            mapOf(
-                                "messageId" to event.messageId.toString(),
-                                "hasUrl" to (slice.primaryUrl != null),
-                                "url" to (slice.primaryUrl ?: ""),
-                                "summaryLength" to textToSend.length,
-                                "citationCount" to result.citations.size,
-                            ),
+                if (message == null) {
+                    logger.warn("Message {} was null or deleted", event.messageId)
+                    statusCache.remove(event.messageId)
+                    session.fail(
+                        failureCategory = AiTraceFailureCategory.CONTEXT_ERROR,
+                        errorSummary = "Message ${event.messageId} was null or deleted",
                     )
+                    return@withAiTraceSession
                 }
 
-                is SummaryResult.Error -> {
-                    // Evict from cache on transient errors to allow retry
+                val slice =
+                    try {
+                        collector.collectSlice(message)
+                    } catch (e: Exception) {
+                        logger.warn("Error collecting conversation slice for message {}: {}", event.messageId, e.message)
+                        statusCache.remove(event.messageId)
+                        session.fail(
+                            failureCategory = AiTraceFailureCategory.CONTEXT_ERROR,
+                            errorSummary = "Error collecting conversation slice for message ${event.messageId}: ${e.message}",
+                        )
+                        return@withAiTraceSession
+                    }
+
+                if (slice == null) {
                     statusCache.remove(event.messageId)
-                    logger.warn("Summarization failed for message {}: {}", event.messageId, result.message)
+                    session.skip(reason = "Message filtered as noise or bot message")
+                    return@withAiTraceSession
+                }
+
+                if (slice.durationExceeded) {
+                    statusCache[event.messageId] = SummaryStatus.DONE
+                    replySender(message, YOUTUBE_DURATION_EXCEEDED_MESSAGE)
+                    session.fail(
+                        failureCategory = AiTraceFailureCategory.DURATION_EXCEEDED,
+                        errorSummary =
+                            "YOUTUBE_DURATION_EXCEEDED: Video duration exceeds 2-hour limit (${slice.primaryUrl ?: ""})",
+                    )
+                    return@withAiTraceSession
+                }
+
+                try {
+                    logger.info("Executing Gemini summarization for message {}", event.messageId)
+                    val result = summarizer.summarize(slice.summaryInput, slice.lookbackProvider)
+
+                    when (result) {
+                        is SummaryResult.Success -> {
+                            statusCache[event.messageId] = SummaryStatus.DONE
+                            val sanitized = EmojiSanitizer.stripEmojis(result.text).trim()
+                            val citationsText = GeminiPromptBuilder.formatGroundingCitations(result.citations)
+                            val combinedText =
+                                when {
+                                    sanitized.isNotBlank() && citationsText.isNotBlank() -> "$sanitized\n\n$citationsText"
+                                    sanitized.isNotBlank() -> sanitized
+                                    citationsText.isNotBlank() -> citationsText
+                                    else -> ""
+                                }
+                            val textToSend =
+                                truncateForDiscord(combinedText).takeIf { it.isNotBlank() }
+                                    ?: FALLBACK_EMPTY_SUMMARY_MESSAGE
+                            replySender(message, textToSend)
+                            session.complete(
+                                finalOutput = textToSend,
+                                citations = result.citations,
+                            )
+                            JsonLogger.log(
+                                layer = "SUMMARY",
+                                component = "SummaryService",
+                                operation = "summarize",
+                                data =
+                                    mapOf(
+                                        "messageId" to event.messageId.toString(),
+                                        "hasUrl" to (slice.primaryUrl != null),
+                                        "url" to (slice.primaryUrl ?: ""),
+                                        "summaryLength" to textToSend.length,
+                                        "citationCount" to result.citations.size,
+                                    ),
+                            )
+                        }
+
+                        is SummaryResult.Error -> {
+                            // Evict from cache on transient errors to allow retry
+                            statusCache.remove(event.messageId)
+                            logger.warn("Summarization failed for message {}: {}", event.messageId, result.message)
+                            session.fail(
+                                failureCategory = classifySummaryError(result),
+                                errorSummary = result.message,
+                            )
+                            JsonLogger.error(
+                                layer = "SUMMARY",
+                                component = "SummaryService",
+                                operation = "summarize",
+                                data =
+                                    mapOf(
+                                        "messageId" to event.messageId.toString(),
+                                        "error" to result.message,
+                                    ),
+                                errorMessage = result.message,
+                            )
+                        }
+
+                        is SummaryResult.ToolCall -> {
+                            // Unhandled tool call in standard reaction pipeline
+                            statusCache.remove(event.messageId)
+                            logger.warn("Unhandled tool call received for message {}: {}", event.messageId, result.name)
+                            session.fail(
+                                failureCategory = AiTraceFailureCategory.UNEXPECTED_ERROR,
+                                errorSummary = "Unhandled tool call received: ${result.name}",
+                            )
+                        }
+                    }
+                } catch (e: Exception) {
+                    statusCache.remove(event.messageId)
+                    logger.error("Unexpected error in summary pipeline for message {}", event.messageId, e)
+                    session.fail(
+                        failureCategory = classifySummaryException(e),
+                        errorSummary = e.message ?: e::class.simpleName ?: "Unexpected error",
+                    )
                     JsonLogger.error(
                         layer = "SUMMARY",
                         component = "SummaryService",
                         operation = "summarize",
-                        data =
-                            mapOf(
-                                "messageId" to event.messageId.toString(),
-                                "error" to result.message,
-                            ),
-                        errorMessage = result.message,
+                        data = mapOf("messageId" to event.messageId.toString()),
+                        errorMessage = e.message,
                     )
                 }
-
-                is SummaryResult.ToolCall -> {
-                    // Unhandled tool call in standard reaction pipeline
-                    statusCache.remove(event.messageId)
-                    logger.warn("Unhandled tool call received for message {}: {}", event.messageId, result.name)
-                }
             }
-        } catch (e: Exception) {
-            statusCache.remove(event.messageId)
-            logger.error("Unexpected error in summary pipeline for message {}", event.messageId, e)
-            JsonLogger.error(
-                layer = "SUMMARY",
-                component = "SummaryService",
-                operation = "summarize",
-                data = mapOf("messageId" to event.messageId.toString()),
-                errorMessage = e.message,
-            )
+        } finally {
+            session.finish()
         }
     }
 

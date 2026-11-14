@@ -117,11 +117,17 @@ class ChatterPlugin(
                 ?: ChatterContextCollector.DEFAULT_MAX_IMAGES
         this.maxImages = imagesLimit
 
-        val client = decisionClientFactory?.invoke(decisionConfig) ?: GeminiDecisionClient(config = decisionConfig)
+        val traceRecorder = context.aiTraceRecorder
+
+        val client =
+            decisionClientFactory?.invoke(decisionConfig)
+                ?: GeminiDecisionClient(config = decisionConfig, traceRecorder = traceRecorder)
         this.decisionClient = client
 
         val chatterConfig = ChatterConfig.fromPluginContext(context)
-        val generator = generatorFactory?.invoke(chatterConfig) ?: ChatterGenerator(config = chatterConfig)
+        val generator =
+            generatorFactory?.invoke(chatterConfig)
+                ?: ChatterGenerator(config = chatterConfig, traceRecorder = traceRecorder)
         this.chatterGenerator = generator
 
         val cooldown = BoundedChannelCooldownCache(defaultCooldownDurationMs = cooldownDurationMs)
@@ -152,6 +158,7 @@ class ChatterPlugin(
                 chatterGenerator = generator,
                 cooldownCache = cooldown,
                 contextCollector = collector,
+                traceRecorder = traceRecorder,
             )
         val finalService = serviceFactory?.invoke(chatterService) ?: chatterService
         this.service = finalService

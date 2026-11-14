@@ -131,3 +131,11 @@ _Avoid_: Laya System 1, participation scorer, AI gatekeeper
 **Tiered Video Latency Policy**:
 The Chatter video comprehension rule that uses static video understanding for short videos (<= 5 minutes) everywhere, while reserving slower Agentic Video Understanding (> 5 minutes) for direct mentions and falling back to creator metadata and audience feedback in ambient chats.
 _Avoid_: Video timeout guard, ambient video skip
+
+**AI Trace**:
+The complete diagnostic record of a single Discord-triggered AI workflow execution across either the Summary Pipeline or Chatter Pipeline, capturing the trigger context, ordered AI Attempts, degradation path, and final outcome.
+_Avoid_: AI log, LLM dump, debug log
+
+**AI Attempt**:
+A single upstream AI API request-and-response exchange executed within an AI Trace, including initial calls, fallback retries, tool continuations, and interaction polling cycles.
+_Avoid_: API hit, retry log, model call record

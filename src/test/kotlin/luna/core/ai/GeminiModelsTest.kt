@@ -70,4 +70,66 @@ class GeminiModelsTest {
             )
         assertEquals("Direct output", responseWithoutSteps.extractOutputText())
     }
+
+    @Test
+    fun `parses usageMetadata and finishReason from camelCase Gemini response`() {
+        val rawJson =
+            """
+            {
+              "candidates": [
+                {
+                  "content": {
+                    "role": "model",
+                    "parts": [{"text": "Hello"}]
+                  },
+                  "finishReason": "STOP"
+                }
+              ],
+              "promptFeedback": {
+                "blockReason": "SAFETY"
+              },
+              "usageMetadata": {
+                "promptTokenCount": 120,
+                "candidatesTokenCount": 45,
+                "totalTokenCount": 165
+              }
+            }
+            """.trimIndent()
+
+        val parsed = json.decodeFromString<GeminiGenerateContentResponse>(rawJson)
+        assertEquals("STOP", parsed.candidates?.firstOrNull()?.finishReason)
+        assertEquals("SAFETY", parsed.promptFeedback?.blockReason)
+        assertEquals(GeminiUsageMetadata(promptTokenCount = 120, candidatesTokenCount = 45, totalTokenCount = 165), parsed.usageMetadata)
+    }
+
+    @Test
+    fun `parses usage_metadata and finish_reason from snake_case Gemini response`() {
+        val rawJson =
+            """
+            {
+              "candidates": [
+                {
+                  "content": {
+                    "role": "model",
+                    "parts": [{"text": "Hello"}]
+                  },
+                  "finish_reason": "MAX_TOKENS"
+                }
+              ],
+              "prompt_feedback": {
+                "block_reason": "OTHER"
+              },
+              "usage_metadata": {
+                "prompt_token_count": 300,
+                "candidates_token_count": 200,
+                "total_token_count": 500
+              }
+            }
+            """.trimIndent()
+
+        val parsed = json.decodeFromString<GeminiGenerateContentResponse>(rawJson)
+        assertEquals("MAX_TOKENS", parsed.candidates?.firstOrNull()?.finishReason)
+        assertEquals("OTHER", parsed.promptFeedback?.blockReason)
+        assertEquals(GeminiUsageMetadata(promptTokenCount = 300, candidatesTokenCount = 200, totalTokenCount = 500), parsed.usageMetadata)
+    }
 }

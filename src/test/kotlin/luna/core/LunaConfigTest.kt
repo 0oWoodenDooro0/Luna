@@ -473,4 +473,68 @@ class LunaConfigTest {
         assertEquals("******", result.activeConfig["YOUTUBE_API_KEY"], "YOUTUBE_API_KEY must be masked")
         assertEquals("******", result.activeConfig["SESSION_SECRET"], "SESSION_SECRET must be masked")
     }
+
+    @Test
+    fun `AiTraceConfig resolves defaults and overrides from map without secret masking`() {
+        val defaults =
+            luna.core.ai.AiTraceConfig
+                .fromMap(emptyMap())
+        assertEquals(true, defaults.enabled)
+        assertEquals("data/logs/ai", defaults.dir)
+        assertEquals(14, defaults.maxDays)
+        assertEquals(200, defaults.maxTotalMb)
+
+        val configured =
+            luna.core.ai.AiTraceConfig.fromMap(
+                mapOf(
+                    "AI_TRACE_ENABLED" to "false",
+                    "AI_TRACE_DIR" to "/var/log/luna-ai",
+                    "AI_TRACE_MAX_DAYS" to "7",
+                    "AI_TRACE_MAX_TOTAL_MB" to "50",
+                ),
+            )
+        assertEquals(false, configured.enabled)
+        assertEquals("/var/log/luna-ai", configured.dir)
+        assertEquals(7, configured.maxDays)
+        assertEquals(50, configured.maxTotalMb)
+
+        // Negative boundary: non-positive numbers fall back to defaults
+        val invalidBounds =
+            luna.core.ai.AiTraceConfig.fromMap(
+                mapOf(
+                    "AI_TRACE_MAX_DAYS" to "0",
+                    "AI_TRACE_MAX_TOTAL_MB" to "-10",
+                ),
+            )
+        assertEquals(14, invalidBounds.maxDays)
+        assertEquals(200, invalidBounds.maxTotalMb)
+
+        val snakeAliases =
+            luna.core.ai.AiTraceConfig.fromMap(
+                mapOf(
+                    "ai.trace.enabled" to false,
+                    "ai.trace.dir" to "/tmp/ai-map-snake",
+                    "ai.trace.max_days" to 10,
+                    "ai.trace.max_total_mb" to 80,
+                ),
+            )
+        assertEquals(false, snakeAliases.enabled)
+        assertEquals("/tmp/ai-map-snake", snakeAliases.dir)
+        assertEquals(10, snakeAliases.maxDays)
+        assertEquals(80, snakeAliases.maxTotalMb)
+
+        // Verify drift audit recognizes AI_TRACE_* and ai.trace.* and does not mask them
+        val audit =
+            ConfigLoader.auditDrift(
+                validBaseMap().apply {
+                    put("AI_TRACE_ENABLED", "true")
+                    put("AI_TRACE_DIR", "data/logs/ai")
+                    put("AI_TRACE_MAX_DAYS", "14")
+                    put("AI_TRACE_MAX_TOTAL_MB", "200")
+                    put("ai.trace.enabled", "true")
+                },
+            )
+        assertTrue(audit.unknownKeys.isEmpty(), "AI_TRACE_* and ai.trace.* must be recognized, got unknown=${audit.unknownKeys}")
+        assertEquals("data/logs/ai", audit.activeConfig["AI_TRACE_DIR"])
+    }
 }
