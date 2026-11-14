@@ -49,6 +49,7 @@ open class ChatterService(
             historyMessageCount = historyMessageCount,
         ),
     val traceRecorder: AiTraceRecorder = NoOpAiTraceRecorder,
+    val inFlightTracker: BoundedChannelInFlightTracker = BoundedChannelInFlightTracker(),
 ) {
     private val logger = LoggerFactory.getLogger(ChatterService::class.java)
 
@@ -86,50 +87,66 @@ open class ChatterService(
             return false
         }
 
-        val session =
-            traceRecorder.startSession(
-                pipeline = AiTracePipeline.CHATTER,
-                trigger = if (isDirectMention) AiTraceTrigger.MENTION else AiTraceTrigger.AMBIENT,
-                discord =
-                    AiTraceDiscordContext(
-                        guildId =
-                            runCatching {
-                                message.data.guildId.value
-                                    ?.toString()
-                            }.getOrNull(),
-                        channelId = message.channelId.toString(),
-                        messageId = message.id.toString(),
-                        authorId =
-                            runCatching { message.author?.id?.toString() }.getOrNull()
-                                ?: runCatching {
-                                    message.data.author.id
-                                        .toString()
-                                }.getOrNull(),
-                        reactingUserId = null,
-                        isDirectMention = isDirectMention,
-                    ),
+        val channelId = message.channelId
+        if (isDirectMention) {
+            inFlightTracker.acquire(channelId)
+        } else if (!inFlightTracker.tryAcquire(channelId)) {
+            logger.debug(
+                "Skipping ambient message {} in channel {}: ChatterService run already in flight",
+                message.id,
+                channelId,
             )
-        runCatching { session.registerSecret(decisionClient.config.apiKey) }
-        runCatching { session.registerSecret(chatterGenerator.config.apiKey) }
+            return false
+        }
 
         return try {
-            withAiTraceSession(session) {
-                processEvaluatedMessage(
-                    message = message,
-                    selfId = selfId,
-                    isDirectMention = isDirectMention,
-                    session = session,
+            val session =
+                traceRecorder.startSession(
+                    pipeline = AiTracePipeline.CHATTER,
+                    trigger = if (isDirectMention) AiTraceTrigger.MENTION else AiTraceTrigger.AMBIENT,
+                    discord =
+                        AiTraceDiscordContext(
+                            guildId =
+                                runCatching {
+                                    message.data.guildId.value
+                                        ?.toString()
+                                }.getOrNull(),
+                            channelId = channelId.toString(),
+                            messageId = message.id.toString(),
+                            authorId =
+                                runCatching { message.author?.id?.toString() }.getOrNull()
+                                    ?: runCatching {
+                                        message.data.author.id
+                                            .toString()
+                                    }.getOrNull(),
+                            reactingUserId = null,
+                            isDirectMention = isDirectMention,
+                        ),
                 )
+            runCatching { session.registerSecret(decisionClient.config.apiKey) }
+            runCatching { session.registerSecret(chatterGenerator.config.apiKey) }
+
+            try {
+                withAiTraceSession(session) {
+                    processEvaluatedMessage(
+                        message = message,
+                        selfId = selfId,
+                        isDirectMention = isDirectMention,
+                        session = session,
+                    )
+                }
+            } catch (e: Exception) {
+                logger.error("Unexpected error in ChatterService.processMessage: {}", e.message, e)
+                session.fail(
+                    AiTraceFailureCategory.UNEXPECTED_ERROR,
+                    "Unexpected error in ChatterService.processMessage: ${e.message}",
+                )
+                false
+            } finally {
+                session.finish()
             }
-        } catch (e: Exception) {
-            logger.error("Unexpected error in ChatterService.processMessage: {}", e.message, e)
-            session.fail(
-                AiTraceFailureCategory.UNEXPECTED_ERROR,
-                "Unexpected error in ChatterService.processMessage: ${e.message}",
-            )
-            false
         } finally {
-            session.finish()
+            inFlightTracker.release(channelId)
         }
     }
 
