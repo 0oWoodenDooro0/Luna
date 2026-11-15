@@ -71,6 +71,18 @@ object UrlSanitizer {
                     "unique_k",
                     "trackid",
                     "track_id",
+                    "buvid",
+                    "from_spmid",
+                    "plat_id",
+                    "share_from",
+                    "spmid",
+                    "timestamp",
+                    "up_id",
+                    "csource",
+                    "bbid",
+                    "share_times",
+                    "ts",
+                    "-arouter",
                 ),
             Platform.YOUTUBE to
                 setOf(
@@ -97,7 +109,7 @@ object UrlSanitizer {
         mapOf(
             Platform.FACEBOOK to setOf("fbid", "story_fbid", "v", "id", "comment_id", "set"),
             Platform.INSTAGRAM to setOf("img_index"),
-            Platform.BILIBILI to setOf("p", "t"),
+            Platform.BILIBILI to setOf("p", "t", "sid", "type"),
             Platform.YOUTUBE to setOf("v", "t", "list", "index"),
             Platform.REDDIT to setOf("context"),
         )
@@ -164,6 +176,7 @@ object UrlSanitizer {
             "instagram.com" -> builder.host = "www.instagram.com"
             "threads.net" -> builder.host = "www.threads.net"
             "bilibili.com" -> builder.host = "www.bilibili.com"
+            "m.bilibili.com" -> builder.host = "www.bilibili.com"
             "reddit.com" -> builder.host = "www.reddit.com"
             "youtube.com" -> builder.host = "www.youtube.com"
         }
@@ -173,37 +186,42 @@ object UrlSanitizer {
             builder.port = 0
         }
 
-        // Platform-specific path canonicalization
-        if (detectedPlatform == Platform.REDDIT) {
-            val postMatch = REDDIT_POST_PATH_REGEX.find(builder.encodedPath)
-            if (postMatch != null) {
-                val sub = postMatch.groupValues[1]
-                val id = postMatch.groupValues[2]
-                builder.encodedPath = "/r/$sub/comments/$id/"
-            } else {
-                val shortMatch = REDDIT_SHORT_PATH_REGEX.find(builder.encodedPath)
-                if (shortMatch != null) {
-                    val id = shortMatch.groupValues[1]
-                    builder.encodedPath = "/comments/$id/"
+        val handledByBilibiliRoutePolicy =
+            detectedPlatform == Platform.BILIBILI && BilibiliUrlPolicy.sanitizeIfSupportedRoute(builder)
+
+        if (!handledByBilibiliRoutePolicy) {
+            // Platform-specific path canonicalization
+            if (detectedPlatform == Platform.REDDIT) {
+                val postMatch = REDDIT_POST_PATH_REGEX.find(builder.encodedPath)
+                if (postMatch != null) {
+                    val sub = postMatch.groupValues[1]
+                    val id = postMatch.groupValues[2]
+                    builder.encodedPath = "/r/$sub/comments/$id/"
+                } else {
+                    val shortMatch = REDDIT_SHORT_PATH_REGEX.find(builder.encodedPath)
+                    if (shortMatch != null) {
+                        val id = shortMatch.groupValues[1]
+                        builder.encodedPath = "/comments/$id/"
+                    }
+                }
+            } else if (detectedPlatform == Platform.INSTAGRAM) {
+                // Instagram canonical post URLs end with /
+                if (builder.encodedPath.matches(Regex("""^/(?:p|reel|tv)/[^/]+$"""))) {
+                    builder.encodedPath = "${builder.encodedPath}/"
+                }
+            } else if (detectedPlatform == Platform.FACEBOOK) {
+                // Facebook canonical reel/post URLs end with /
+                if (builder.encodedPath.matches(Regex("""^/(?:[^/]+/)?(?:reel|posts)/[^/]+$"""))) {
+                    builder.encodedPath = "${builder.encodedPath}/"
                 }
             }
-        } else if (detectedPlatform == Platform.INSTAGRAM) {
-            // Instagram canonical post URLs end with /
-            if (builder.encodedPath.matches(Regex("""^/(?:p|reel|tv)/[^/]+$"""))) {
-                builder.encodedPath = "${builder.encodedPath}/"
-            }
-        } else if (detectedPlatform == Platform.FACEBOOK) {
-            // Facebook canonical reel/post URLs end with /
-            if (builder.encodedPath.matches(Regex("""^/(?:[^/]+/)?(?:reel|posts)/[^/]+$"""))) {
-                builder.encodedPath = "${builder.encodedPath}/"
-            }
-        }
 
-        // Filter tracking parameters
-        val currentParamNames = builder.parameters.names().toList()
-        val toRemove = currentParamNames.filter { isTrackingParam(it, detectedPlatform) }
-        for (param in toRemove) {
-            builder.parameters.remove(param)
+            // Filter tracking parameters
+            val currentParamNames = builder.parameters.names().toList()
+            val toRemove = currentParamNames.filter { isTrackingParam(it, detectedPlatform) }
+            for (param in toRemove) {
+                builder.parameters.remove(param)
+            }
         }
 
         if (builder.parameters.isEmpty()) {
@@ -234,6 +252,9 @@ object UrlSanitizer {
             }
 
         val detectedPlatform = platform ?: detectPlatformFromHost(parsed.host)
+        if (detectedPlatform == Platform.BILIBILI) {
+            BilibiliUrlPolicy.hasTrackingParamsIfSupportedRoute(parsed)?.let { return it }
+        }
         return parsed.parameters.names().any { isTrackingParam(it, detectedPlatform) }
     }
 

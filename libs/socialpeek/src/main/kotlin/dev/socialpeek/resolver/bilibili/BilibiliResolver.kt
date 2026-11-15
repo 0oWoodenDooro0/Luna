@@ -5,37 +5,23 @@ import dev.socialpeek.exception.PostNotFoundException
 import dev.socialpeek.model.*
 import dev.socialpeek.network.SocialPeekHttpClient
 import dev.socialpeek.resolver.PlatformResolver
+import dev.socialpeek.util.BilibiliTarget
+import dev.socialpeek.util.BilibiliUrlPolicy
 import dev.socialpeek.util.UrlSanitizer
-import io.ktor.http.*
 import kotlinx.serialization.json.*
+import org.slf4j.LoggerFactory
 
 class BilibiliResolver : PlatformResolver {
     override val platform: Platform = Platform.BILIBILI
 
-    private val bvPattern = Regex("""(BV[a-zA-Z0-9]{10})""", RegexOption.IGNORE_CASE)
-    private val avPattern = Regex("""(?:bilibili\.com/video/|b23\.tv/)av([0-9]+)""", RegexOption.IGNORE_CASE)
-    private val opusPattern = Regex("""(?:bilibili\.com/opus/|t\.bilibili\.com/)([0-9]+)""", RegexOption.IGNORE_CASE)
-    private val b23Pattern = Regex("""https?://b23\.tv/[a-zA-Z0-9]+""", RegexOption.IGNORE_CASE)
+    private val apiClient = BilibiliApiClient()
+    private val listResolver = BilibiliListResolver(apiClient)
 
     companion object {
-        val BILIBILI_HEADERS: Map<String, String> =
-            mapOf(
-                HttpHeaders.UserAgent to "SocialPeek/1.0 (https://github.com/0oWoodenDooro0/SocialPeek)",
-                "Referer" to "https://www.bilibili.com/",
-            )
+        private val logger = LoggerFactory.getLogger(BilibiliResolver::class.java)
     }
 
-    private val json =
-        Json {
-            ignoreUnknownKeys = true
-            isLenient = true
-        }
-
-    override fun canResolve(url: String): Boolean =
-        bvPattern.containsMatchIn(url) ||
-            avPattern.containsMatchIn(url) ||
-            opusPattern.containsMatchIn(url) ||
-            b23Pattern.containsMatchIn(url)
+    override fun canResolve(url: String): Boolean = BilibiliUrlPolicy.canResolve(url)
 
     override suspend fun resolve(
         url: String,
@@ -43,47 +29,51 @@ class BilibiliResolver : PlatformResolver {
     ): PeekPost {
         var currentUrl = url
         // Expand b23.tv short link if it doesn't already have a video/opus ID in the path
-        if (b23Pattern.containsMatchIn(url) && !bvPattern.containsMatchIn(url) && !avPattern.containsMatchIn(url) &&
-            !opusPattern.containsMatchIn(url)
-        ) {
+        if (BilibiliUrlPolicy.isExpandableShortLink(url)) {
             currentUrl =
                 try {
-                    client.resolveFinalUrl(url)
+                    client.resolveFinalUrl(url, BilibiliApiClient.BILIBILI_HEADERS)
                 } catch (e: Exception) {
+                    logger.warn("Failed to expand b23.tv short link {}: {}", url, e.message)
                     url
                 }
         }
 
-        val bvMatch = bvPattern.find(currentUrl)
-        val avMatch = avPattern.find(currentUrl)
-        val opusMatch = opusPattern.find(currentUrl)
+        currentUrl = BilibiliUrlPolicy.canonicalizeB23DirectVideoUrl(currentUrl)
 
-        return when {
-            bvMatch != null -> {
+        return when (val target = BilibiliUrlPolicy.matchTarget(currentUrl)) {
+            is BilibiliTarget.Video -> {
                 resolveVideo(
-                    bvid = bvMatch.groupValues[1],
-                    aid = null,
+                    bvid = target.bvid,
+                    aid = target.aid,
                     originalUrl = url,
                     currentUrl = currentUrl,
                     client = client,
                 )
             }
 
-            avMatch != null -> {
-                resolveVideo(
-                    bvid = null,
-                    aid = avMatch.groupValues[1],
+            is BilibiliTarget.Opus -> {
+                resolveOpus(
+                    opusId = target.opusId,
                     originalUrl = url,
                     currentUrl = currentUrl,
                     client = client,
                 )
             }
 
-            opusMatch != null -> {
-                resolveOpus(opusId = opusMatch.groupValues[1], originalUrl = url, currentUrl = currentUrl, client = client)
+            is BilibiliTarget.ListTarget -> {
+                listResolver.resolve(
+                    target = target,
+                    originalUrl = url,
+                    currentUrl = currentUrl,
+                    client = client,
+                )
             }
 
-            else -> {
+            BilibiliTarget.ShortLink, null -> {
+                if (BilibiliUrlPolicy.isShortLink(currentUrl)) {
+                    logger.warn("b23.tv short link did not resolve to a supported Bilibili URL: original={}, resolved={}", url, currentUrl)
+                }
                 throw ParsingException(currentUrl, "Unsupported Bilibili URL format: $currentUrl")
             }
         }
@@ -98,51 +88,23 @@ class BilibiliResolver : PlatformResolver {
     ): PeekPost {
         val queryParam = if (bvid != null) "bvid=$bvid" else "aid=$aid"
         val apiUrl = "https://api.bilibili.com/x/web-interface/view?$queryParam"
-
-        val responseText =
-            try {
-                client.get(apiUrl, BILIBILI_HEADERS)
-            } catch (e: Exception) {
-                throw PostNotFoundException(originalUrl, e.message)
-            }
-
-        val root =
-            try {
-                json.parseToJsonElement(responseText).jsonObject
-            } catch (e: Exception) {
-                throw ParsingException(originalUrl, "Failed to parse Bilibili video API JSON", e)
-            }
-
-        val code = root["code"]?.jsonPrimitive?.intOrNull ?: -1
-        if (code != 0) {
-            val message = root["message"]?.jsonPrimitive?.contentOrNull ?: "Bilibili error code $code"
-            throw PostNotFoundException(originalUrl, message)
-        }
-
-        val data =
-            root["data"]?.jsonObject
-                ?: throw ParsingException(originalUrl, "Missing 'data' field in Bilibili video response")
+        val data = apiClient.getJsonData(apiUrl, originalUrl, "video API", client)
 
         val realBvid = data["bvid"]?.jsonPrimitive?.contentOrNull ?: bvid ?: aid ?: "unknown"
         val title = data["title"]?.jsonPrimitive?.contentOrNull
         val desc = data["desc"]?.jsonPrimitive?.contentOrNull ?: ""
-        val pic = data["pic"]?.jsonPrimitive?.contentOrNull
+        val pic = data["pic"]?.jsonPrimitive?.contentOrNull?.let(BilibiliUrlPolicy::upgradeToHttps)
         val pubdate = data["pubdate"]?.jsonPrimitive?.longOrNull
         val duration = data["duration"]?.jsonPrimitive?.doubleOrNull
 
         val owner = data["owner"]?.jsonObject
-        val mid = owner?.get("mid")?.jsonPrimitive?.contentOrNull ?: "unknown"
-        val ownerName = owner?.get("name")?.jsonPrimitive?.contentOrNull ?: "UP主"
-        val face = owner?.get("face")?.jsonPrimitive?.contentOrNull
-
-        val author =
-            Author(
-                id = mid,
-                username = mid,
-                displayName = ownerName,
-                avatarUrl = face,
-                profileUrl = "https://space.bilibili.com/$mid",
-            )
+        val mid =
+            owner
+                ?.get("mid")
+                ?.jsonPrimitive
+                ?.contentOrNull
+                ?.takeIf { it.isNotBlank() } ?: "unknown"
+        val author = apiClient.extractOwnerAuthor(owner = owner, mid = mid, fallbackName = "UP主")
 
         val stat = data["stat"]?.jsonObject
         val views = stat?.get("view")?.jsonPrimitive?.longOrNull
@@ -151,7 +113,7 @@ class BilibiliResolver : PlatformResolver {
         val reposts = stat?.get("share")?.jsonPrimitive?.longOrNull
         val bookmarks = stat?.get("favorite")?.jsonPrimitive?.longOrNull
 
-        val videoCanonicalUrl = "https://www.bilibili.com/video/$realBvid"
+        val videoCanonicalUrl = "https://www.bilibili.com/video/$realBvid/"
         val mediaList = mutableListOf<Media>()
         if (!pic.isNullOrBlank()) {
             mediaList.add(
@@ -193,27 +155,7 @@ class BilibiliResolver : PlatformResolver {
         client: SocialPeekHttpClient,
     ): PeekPost {
         val apiUrl = "https://api.bilibili.com/x/polymer/web-dynamic/v1/detail?id=$opusId"
-
-        val responseText =
-            try {
-                client.get(apiUrl, BILIBILI_HEADERS)
-            } catch (e: Exception) {
-                throw PostNotFoundException(originalUrl, e.message)
-            }
-
-        val root =
-            try {
-                json.parseToJsonElement(responseText).jsonObject
-            } catch (e: Exception) {
-                throw ParsingException(originalUrl, "Failed to parse Bilibili dynamic API JSON", e)
-            }
-
-        val code = root["code"]?.jsonPrimitive?.intOrNull ?: -1
-        if (code != 0) {
-            val message = root["message"]?.jsonPrimitive?.contentOrNull ?: "Bilibili error code $code"
-            throw PostNotFoundException(originalUrl, message)
-        }
-
+        val root = apiClient.getJsonRoot(apiUrl, originalUrl, "dynamic API", client)
         val item =
             root["data"]?.jsonObject?.get("item")?.jsonObject
                 ?: throw PostNotFoundException(originalUrl, "Dynamic item not found")
@@ -228,14 +170,7 @@ class BilibiliResolver : PlatformResolver {
         val face = authorModule?.get("face")?.jsonPrimitive?.contentOrNull
         val pubTs = authorModule?.get("pub_ts")?.jsonPrimitive?.longOrNull
 
-        val author =
-            Author(
-                id = mid,
-                username = mid,
-                displayName = authorName,
-                avatarUrl = face,
-                profileUrl = "https://space.bilibili.com/$mid",
-            )
+        val author = apiClient.buildAuthor(mid = mid, displayName = authorName, rawAvatarUrl = face)
 
         val descText =
             dynamicModule

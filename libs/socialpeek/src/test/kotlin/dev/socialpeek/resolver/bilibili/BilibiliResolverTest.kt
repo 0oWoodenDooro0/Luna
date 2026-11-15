@@ -18,13 +18,23 @@ class BilibiliResolverTest {
     private val resolver = BilibiliResolver()
 
     @Test
-    fun `canResolve should match bilibili video, opus, and b23-tv URLs`() {
+    fun `canResolve should match bilibili video, opus, b23-tv, and collection or series URLs while rejecting creator space roots and subtabs`() {
         assertTrue(resolver.canResolve("https://www.bilibili.com/video/BV1xx411c7mD"))
         assertTrue(resolver.canResolve("https://www.bilibili.com/video/BV1xx411c7mD/?spm_id_from=333.337"))
         assertTrue(resolver.canResolve("https://www.bilibili.com/opus/123456789012345678"))
         assertTrue(resolver.canResolve("https://t.bilibili.com/123456789012345678"))
         assertTrue(resolver.canResolve("https://b23.tv/BV1xx411c7mD"))
         assertTrue(resolver.canResolve("https://b23.tv/7zYk63w?share_source=copy_web"))
+        assertTrue(resolver.canResolve("https://b23.tv/ab-c_123"))
+        assertTrue(resolver.canResolve("https://space.bilibili.com/12345/channel/collectiondetail?sid=678"))
+        assertTrue(resolver.canResolve("https://SPACE.BILIBILI.COM/12345/CHANNEL/SERIESDETAIL/?sid=678"))
+        assertTrue(resolver.canResolve("https://space.bilibili.com/12345/lists/678"))
+        assertTrue(resolver.canResolve("https://space.bilibili.com/12345/lists/678/?type=season"))
+        assertFalse(resolver.canResolve("https://space.bilibili.com/12345"))
+        assertFalse(resolver.canResolve("https://space.bilibili.com/12345/"))
+        assertFalse(resolver.canResolve("https://space.bilibili.com/12345/video"))
+        assertFalse(resolver.canResolve("https://space.bilibili.com/12345/dynamic"))
+        assertFalse(resolver.canResolve("https://space.bilibili.com/12345/favlist"))
         assertFalse(resolver.canResolve("https://bilibili.com/bangumi/play/ep123"))
         assertFalse(resolver.canResolve("https://youtube.com/watch?v=123"))
     }
@@ -66,6 +76,10 @@ class BilibiliResolverTest {
                     assertTrue(request.url.encodedPath.contains("x/web-interface/view"))
                     assertEquals("BV1xx411c7mD", request.url.parameters["bvid"])
                     assertEquals("https://www.bilibili.com/", request.headers["Referer"])
+                    assertEquals(
+                        "SocialPeek/1.0 (https://github.com/0oWoodenDooro0/SocialPeek)",
+                        request.headers[HttpHeaders.UserAgent],
+                    )
                     jsonResponse(videoMockJson)
                 }
 
@@ -77,12 +91,12 @@ class BilibiliResolverTest {
             assertEquals("這是影片詳細說明文案", post.content)
             assertEquals("9999", post.author.id)
             assertEquals("B站知名UP主", post.author.displayName)
-            assertEquals("https://space.bilibili.com/9999", post.author.profileUrl)
+            assertEquals("https://space.bilibili.com/9999/", post.author.profileUrl)
             assertEquals("https://i0.hdslb.com/bfs/face/avatar.jpg", post.author.avatarUrl)
 
             assertEquals(1, post.media.size)
             val media = post.media.first() as Media.Video
-            assertEquals("https://www.bilibili.com/video/BV1xx411c7mD", media.url)
+            assertEquals("https://www.bilibili.com/video/BV1xx411c7mD/", media.url)
             assertEquals("https://i0.hdslb.com/bfs/archive/cover.jpg", media.previewUrl)
             assertEquals(210.0, media.durationSeconds)
 
@@ -203,6 +217,84 @@ class BilibiliResolverTest {
 
             assertFailsWith<PostNotFoundException> {
                 resolver.resolve("https://www.bilibili.com/video/BV1000000000", client)
+            }
+        }
+
+    @Test
+    fun `resolve should canonicalize b23-tv BV and av links and pass BILIBILI_HEADERS on opaque short link redirect`() =
+        runTest {
+            val videoMockJson =
+                """
+                {
+                    "code": 0,
+                    "data": {
+                        "bvid": "BV1xx411c7mD",
+                        "title": "Canonical test",
+                        "desc": "Desc",
+                        "owner": { "mid": 123, "name": "Author" },
+                        "stat": { "like": 10 }
+                    }
+                }
+                """.trimIndent()
+
+            val bvClient =
+                createMockHttpClient { request ->
+                    assertTrue(request.url.encodedPath.contains("x/web-interface/view"))
+                    jsonResponse(videoMockJson)
+                }
+
+            val bvPost = resolver.resolve("https://b23.tv/BV1xx411c7mD?p=2&share_source=copy_web", bvClient)
+            assertEquals("https://www.bilibili.com/video/BV1xx411c7mD/?p=2", bvPost.cleanUrl)
+
+            val avPost = resolver.resolve("https://b23.tv/av170001?t=30&buvid=xyz", bvClient)
+            assertEquals("https://www.bilibili.com/video/av170001/?t=30", avPost.cleanUrl)
+
+            val shortClient =
+                createMockHttpClient { request ->
+                    if (request.url.host == "b23.tv") {
+                        assertEquals(
+                            "SocialPeek/1.0 (https://github.com/0oWoodenDooro0/SocialPeek)",
+                            request.headers[HttpHeaders.UserAgent],
+                        )
+                        assertEquals("https://www.bilibili.com/", request.headers["Referer"])
+                        respond(
+                            content = "",
+                            status = HttpStatusCode.MovedPermanently,
+                            headers = headersOf(HttpHeaders.Location, "https://m.bilibili.com/opus/999888777?buvid=abc"),
+                        )
+                    } else {
+                        jsonResponse(
+                            """
+                            {
+                                "code": 0,
+                                "data": {
+                                    "item": {
+                                        "modules": {
+                                            "module_author": { "mid": 123, "name": "Author" },
+                                            "module_dynamic": { "desc": { "text": "Opus body" } }
+                                        }
+                                    }
+                                }
+                            }
+                            """.trimIndent(),
+                        )
+                    }
+                }
+
+            val shortOpusPost = resolver.resolve("https://b23.tv/ab-c_123?share_source=app", shortClient)
+            assertEquals("https://www.bilibili.com/opus/999888777/", shortOpusPost.cleanUrl)
+        }
+
+    @Test
+    fun `resolve should throw ParsingException when opaque b23-tv redirect resolution fails`() =
+        runTest {
+            val failingClient =
+                createMockHttpClient {
+                    respondError(HttpStatusCode.InternalServerError)
+                }
+
+            assertFailsWith<dev.socialpeek.exception.ParsingException> {
+                resolver.resolve("https://b23.tv/ab-c_123", failingClient)
             }
         }
 }

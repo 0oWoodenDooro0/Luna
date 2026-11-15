@@ -102,7 +102,7 @@ suspend fun parse() {
 | **X (Twitter)** | `x.com/.../status/...`, `twitter.com/...` | 作者、推文文字、圖片/影片預覽、統計數據 (轉推/點讚)、去追蹤 cleanUrl |
 | **Instagram** | `instagram.com/p/...`, `.../reel/...`, `.../share/p/...` | 圖片 (多圖輪播)、Reel 封面與作者資訊、去追蹤 cleanUrl |
 | **Threads** | `threads.net/@user/post/...`, `threads.com/share/...` | 作者、貼文內容、輪播圖片 (多張)、影片預覽、去追蹤 cleanUrl |
-| **Bilibili** | `bilibili.com/video/BV...`, `.../opus/...`, `b23.tv/...` | 標題、簡介、封面圖、作者名稱、播放/硬幣/彈幕等數據、去追蹤 cleanUrl |
+| **Bilibili** | `bilibili.com/video/BV...`, `.../opus/...`, `t.bilibili.com/...`, `b23.tv/...`, `space.bilibili.com/.../channel/collectiondetail?sid=...`, `.../channel/seriesdetail?sid=...`, `.../lists/{sid}` | 標題、簡介、封面圖、作者名稱、合集/列表摘要、播放/硬幣/彈幕等數據、去追蹤 cleanUrl |
 | **YouTube** | `youtube.com/watch?v=...`, `youtu.be/...`, `.../shorts/...`, `.../live/...` | 標題、作者/頻道名、縮圖、oEmbed 詮釋資料、去追蹤 cleanUrl |
 | **Reddit** | `reddit.com/r/.../comments/...`, `redd.it/...`, `reddit.com/r/.../s/...` (短網址分享) | 標題、內文 (Selftext)、多圖畫廊 (Gallery)、子版 (Subreddit)、看板圖示 (communityIcon)、點讚/留言數、去追蹤 cleanUrl |
 

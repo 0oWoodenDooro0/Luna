@@ -66,6 +66,36 @@ class ContextUrlClassifierTest {
     }
 
     @Test
+    fun `classifies Bilibili collection and series URLs as SOCIAL while routing space root URLs to WEB`() {
+        val messages =
+            listOf(
+                "Collection https://space.bilibili.com/12345/channel/collectiondetail?sid=678",
+                "Series https://space.bilibili.com/12345/channel/seriesdetail/?sid=888",
+                "Lists https://space.bilibili.com/12345/lists/678?type=season",
+                "Space root https://space.bilibili.com/12345/",
+                "Space video tab https://space.bilibili.com/12345/video",
+            )
+
+        val result = ContextUrlClassifier.classify(messages)
+
+        assertEquals(
+            listOf(
+                "https://space.bilibili.com/12345/channel/collectiondetail?sid=678",
+                "https://space.bilibili.com/12345/channel/seriesdetail/?sid=888",
+                "https://space.bilibili.com/12345/lists/678?type=season",
+            ),
+            result.socialUrls,
+        )
+        assertEquals(
+            listOf(
+                "https://space.bilibili.com/12345/",
+                "https://space.bilibili.com/12345/video",
+            ),
+            result.webUrls,
+        )
+    }
+
+    @Test
     fun `classifies YouTube links including music subdomain and excludes them from webUrls and socialUrls`() {
         val transcript =
             """
