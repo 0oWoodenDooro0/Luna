@@ -33,19 +33,9 @@ data class OwnerErrorEvent(
 
 /**
  * Seam for filtering and correlating incoming log events before rate-limiting and DM dispatch.
- *
- * MVP default accepts [ErrorAlertSeverity.ERROR] events; downstream slices extend this
- * with asymmetric first-party/third-party filtering and SLF4J/JsonLogger correlation.
  */
 fun interface ErrorEventFilter {
     fun shouldNotify(event: OwnerErrorEvent): Boolean
-}
-
-/**
- * MVP default [ErrorEventFilter] accepting all [ErrorAlertSeverity.ERROR] events.
- */
-class DefaultErrorEventFilter : ErrorEventFilter {
-    override fun shouldNotify(event: OwnerErrorEvent): Boolean = event.severity == ErrorAlertSeverity.ERROR
 }
 
 /**
@@ -56,13 +46,6 @@ class DefaultErrorEventFilter : ErrorEventFilter {
  */
 fun interface AlertRateLimiter {
     fun acquire(event: OwnerErrorEvent): OwnerErrorEvent?
-}
-
-/**
- * MVP default [AlertRateLimiter] passing every event through without throttling.
- */
-object PassthroughAlertRateLimiter : AlertRateLimiter {
-    override fun acquire(event: OwnerErrorEvent): OwnerErrorEvent = event
 }
 
 /**
@@ -84,7 +67,7 @@ interface StartupAlertBuffer {
 }
 
 /**
- * MVP default [StartupAlertBuffer] treating the gateway as immediately ready.
+ * Ready-state [StartupAlertBuffer] for callers/tests that treat the gateway as immediately ready.
  */
 object ImmediateReadyStartupAlertBuffer : StartupAlertBuffer {
     override val isReady: Boolean = true

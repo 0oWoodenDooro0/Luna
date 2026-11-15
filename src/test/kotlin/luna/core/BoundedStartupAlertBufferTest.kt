@@ -228,7 +228,7 @@ class BoundedStartupAlertBufferTest {
     fun `LunaHost buffers pre-ReadyEvent plugin errors and drains on Kord ReadyEvent without dangling init appender`() =
         kotlinx.coroutines.test.runTest {
             val delivered = java.util.concurrent.CopyOnWriteArrayList<String>()
-            val deliveredLatch = java.util.concurrent.CountDownLatch(1)
+            val deliveredLatch = java.util.concurrent.CountDownLatch(2)
             val eventsFlow =
                 kotlinx.coroutines.flow.MutableSharedFlow<dev.kord.core.event.Event>(extraBufferCapacity = 8)
             val mockKord = io.mockk.mockk<dev.kord.core.Kord>(relaxed = true)
@@ -296,8 +296,9 @@ class BoundedStartupAlertBufferTest {
             }
 
             kotlin.test.assertNull(rootLogger.getAppender(OwnerErrorLogbackAppender.APPENDER_NAME))
-            assertEquals(1, delivered.size)
-            assertTrue(delivered.single().contains("Plugin startup diagnostic before ReadyEvent"))
+            assertEquals(2, delivered.size)
+            assertTrue(delivered[0].contains("[WARN]") && delivered[0].contains("CONFIG_DRIFT"))
+            assertTrue(delivered[1].contains("[ERROR]") && delivered[1].contains("Plugin startup diagnostic before ReadyEvent"))
         }
 
     @Test

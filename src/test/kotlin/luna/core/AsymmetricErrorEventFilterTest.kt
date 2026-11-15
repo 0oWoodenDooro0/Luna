@@ -456,6 +456,7 @@ class AsymmetricErrorEventFilterTest {
                     clock = clock,
                     dmSender = { userId, content -> delivered.add(userId to content) },
                 )
+            notifier.onReady()
 
             val context = LoggerFactory.getILoggerFactory() as LoggerContext
             val appender =
