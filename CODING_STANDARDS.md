@@ -1,12 +1,11 @@
 # Coding Standards
 
-Judgement calls for Luna services and libraries. Enforced by reviewer agents; mechanical checks belong in automated linters and CI.
+Judgement calls for Luna services and libraries. Mechanical checks (singleton cache bounds, JVM-safe test names, 600-line test file cap, `*ServiceTest.kt` `assertEquals` ban, `.env.example` parity, plugin isolation) are enforced deterministically by `CodingStandardsTest` and linters—do not duplicate them here.
 
-## 1. Daemon State & Cache Bounds
+## 1. Daemon State & Transient Failure Eviction
 
-Luna is a long-running Discord bot daemon. Memory leaks and unbounded collections degrade stability over time.
+Luna is a long-running Discord bot daemon; non-singleton event/deduplication stores must still bound memory (LRU capacity or TTL) rather than growing unboundedly.
 
-- **Bounded in-memory caches**: Every state store or deduplication cache keyed by message IDs, user IDs, or transient events must enforce an upper bound or eviction policy (e.g., `BoundedStatusCache`, LRU LinkedHashMap with capacity limit, or TTL expiration). Never use unbounded `ConcurrentHashMap` or bare `MutableMap` collections for event state.
 - **Evict transient failures**: Transient errors from external APIs (HTTP 429 rate limits, network timeouts, 5xx server errors) must not be cached as terminal failure states (`FAILED`). Remove transient errors from the cache immediately so subsequent user actions or retries can succeed. Terminal states (`DONE`) should remain cached to prevent redundant API invocations.
 
 ## 2. Multi-Project Library Boundaries
@@ -29,13 +28,12 @@ Luna is a multi-project Gradle monorepo (`:libs:socialpeek`, `:libs:curtly`, and
 
 - **Decouple parallel vertical slices**: When decomposing pipeline features into parallel agent worktrees (or subagents), vertical slices must not contend on the same monolithic service file. Isolate distinct pipeline stages into independent collaborator components (e.g., `DialogueNoiseFilter`, `ConversationSliceCollector`, `ContextUrlResolver`) or establish explicit interface seams in trunk tickets before scheduling parallel branches.
 - **Collaborator seam extraction**: When extending service pipelines with specialized entity parsing, attachment extraction, media validation, or byte-budget filtering, extract them into dedicated collaborator components with clean companion constants rather than inlining extraction heuristics into service coordinators.
-- **Retire obsolete seams & eliminate Middle Man wrappers**: When deepening a module and extracting collaborator components, do not retain pass-through wrapper methods (Middle Man), vestigial compatibility parameters (`Any? = null`), or duplicate fallback branches on the coordinator solely to preserve legacy test fixtures. Migrate the test surface directly to the new deep module's public interface, and delete obsolete pass-through seams.
+- **Retire obsolete seams & keep test stubs out of `src/main`**: When deepening a module and extracting collaborator components, delete obsolete pass-through wrapper methods (Middle Man), vestigial compatibility parameters (`Any? = null`), and duplicate fallback branches on the coordinator, migrating tests directly to the deep module's public interface. Place test-only seam stubs/fixtures in `src/test`, never in production `src/main` seam files.
 
-## 5. Kotlin Test Naming & Observability
+## 5. Test Boundaries & Observability
 
-- **JVM-safe test identifiers**: While Kotlin allows spaces in backticked test method names, class bytecode strictly forbids JVM-illegal characters: `<`, `>`, `:`, `"`, `/`, `\`, `|`, `?`, `*`. Never use mathematical comparison symbols (e.g., `<= 300` or `> 300`) in test function names; use natural descriptive phrases instead (e.g., `when duration is at most 300 seconds`).
 - **Negative boundary test coverage**: Features enforcing data budgets, payload caps (e.g. 10MB limits), format whitelists (e.g. MIME restrictions), or fallback evictions must include explicit negative/rejection test cases (e.g. discarding oversized media, rejecting non-whitelisted formats with spoofed extensions) rather than only testing the happy path.
-- **Prompt and pipeline assertion decoupling**: Service integration tests (such as `SummaryServiceTest` and `ChatterServiceTest`) must assert service-level coordination, input propagation, and boundary limits rather than asserting exhaustive verbatim substrings of prompt templates or coordinated dialogue slices (`input.content`). Avoid brittle `assertEquals` on formatted message contents in high-level service tests; use pattern matching or substring containment (`assertTrue(content.contains(...))`) so prompt and formatting iterations do not cause cascading test fragility across the codebase. Exact prompt wording, markdown headers, and structural instructions must be tested in isolation within dedicated prompt builder unit tests (e.g., `GeminiPromptBuilderTest`).
-- **Modular test suites by concern**: Split new test concerns into focused files (following `GeminiSummarizerTest` / `GeminiSummarizerLookbackTest`) rather than appending to oversized suites; [`CodingStandardsTest`](src/test/kotlin/luna/core/CodingStandardsTest.kt) enforces the 600-line cap deterministically.
+- **Prompt and pipeline assertion decoupling**: High-level service integration tests must assert coordination, input propagation, and boundary limits (via pattern matching or containment) rather than verbatim prompt templates; test exact prompt wording and markdown headers in isolation within dedicated prompt builder unit tests (e.g., `GeminiPromptBuilderTest`).
+- **Modular test suites by concern**: Split new test concerns into focused files (following `GeminiSummarizerTest` / `GeminiSummarizerLookbackTest`) rather than appending to oversized suites.
 - **Observable fallback degraded states**: Fail-open fallback routines (such as degrading rich Data API video resolution to basic oEmbed, or defaulting URL resolution to channel chat history) must emit descriptive warning or debug logs with the underlying cause, preventing silent failure black holes during operations.
 
