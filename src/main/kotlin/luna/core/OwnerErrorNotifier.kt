@@ -40,7 +40,7 @@ class OwnerErrorNotifier(
     val config: ErrorNotifyConfig,
     secretConfig: Map<String, Any?> = emptyMap(),
     private val eventFilter: ErrorEventFilter = DefaultErrorEventFilter(),
-    private val rateLimiter: AlertRateLimiter = PassthroughAlertRateLimiter,
+    rateLimiter: AlertRateLimiter? = null,
     private val startupBuffer: StartupAlertBuffer = ImmediateReadyStartupAlertBuffer,
     private val queueCapacity: Int = DEFAULT_QUEUE_CAPACITY,
     private val clock: Clock = Clock.systemUTC(),
@@ -49,6 +49,8 @@ class OwnerErrorNotifier(
     private val dmSender: (suspend (Snowflake, String) -> Unit)? = null,
 ) {
     private val internalLogger = LoggerFactory.getLogger(INTERNAL_LOGGER_NAME)
+    private val resolvedRateLimiter: AlertRateLimiter =
+        rateLimiter ?: BoundedAlertRateLimiter(cooldownSeconds = config.cooldownSeconds.toLong(), clock = clock)
     private val closed = AtomicBoolean(false)
     private val kordRef = AtomicReference<Kord?>(null)
     private val channel = Channel<OwnerErrorEvent>(capacity = queueCapacity.coerceAtLeast(1))
@@ -159,7 +161,7 @@ class OwnerErrorNotifier(
     }
 
     private suspend fun dispatchWithRateLimit(event: OwnerErrorEvent) {
-        val allowedEvent = rateLimiter.acquire(event) ?: return
+        val allowedEvent = resolvedRateLimiter.acquire(event) ?: return
         val formatted = formatAlertMessage(allowedEvent)
         dispatchToRecipients(formatted)
     }
