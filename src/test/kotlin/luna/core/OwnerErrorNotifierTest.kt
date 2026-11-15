@@ -289,7 +289,7 @@ class OwnerErrorNotifierTest {
         }
 
     @Test
-    fun `default MVP filter ignores WARN and accepts ERROR`() =
+    fun `default asymmetric filter accepts first-party WARN and rejects third-party WARN while accepting third-party ERROR`() =
         runTest {
             val delivered = CopyOnWriteArrayList<Pair<Snowflake, String>>()
             val notifier =
@@ -298,18 +298,23 @@ class OwnerErrorNotifierTest {
                     clock = fixedClock,
                     dmSender = { userId, content -> delivered.add(userId to content) },
                 )
-            val (logger, appender) = attachTestAppender("luna.core.DefaultFilterTestLogger", notifier)
+            val (firstPartyLogger, firstPartyAppender) = attachTestAppender("luna.core.DefaultFilterTestLogger", notifier)
+            val (thirdPartyLogger, thirdPartyAppender) = attachTestAppender("dev.kord.rest.DefaultFilterTestThirdParty", notifier)
             try {
-                logger.warn("Routine warn ignored by MVP filter")
-                logger.error("Critical error accepted by MVP filter")
+                thirdPartyLogger.warn("Routine third-party warn ignored by default asymmetric filter")
+                firstPartyLogger.warn("First-party degraded warning accepted by default asymmetric filter")
+                thirdPartyLogger.error("Critical third-party error accepted by default asymmetric filter")
             } finally {
-                logger.detachAppender(appender)
-                appender.stop()
+                firstPartyLogger.detachAppender(firstPartyAppender)
+                thirdPartyLogger.detachAppender(thirdPartyAppender)
+                firstPartyAppender.stop()
+                thirdPartyAppender.stop()
                 notifier.flushAndClose()
             }
 
-            assertEquals(1, delivered.size)
-            assertTrue(delivered.single().second.contains("Critical error accepted by MVP filter"))
+            assertEquals(2, delivered.size)
+            assertTrue(delivered.any { it.second.contains("First-party degraded warning accepted") })
+            assertTrue(delivered.any { it.second.contains("Critical third-party error accepted") })
         }
 
     @Test
