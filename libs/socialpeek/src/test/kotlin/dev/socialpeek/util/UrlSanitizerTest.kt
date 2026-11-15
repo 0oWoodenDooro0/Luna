@@ -40,10 +40,10 @@ class UrlSanitizerTest {
 
     @Test
     fun `3 Bilibili functional parameter preservation tests`() {
-        // spm_id_from and vd_source removed, p=3 and t=120 MUST be preserved
+        // spm_id_from and vd_source removed, p=3 and t=120 MUST be preserved, canonical trailing slash added
         val raw = "https://www.bilibili.com/video/BV1xx411c7mD?spm_id_from=333.1007&vd_source=abc&p=3&t=120"
         val clean = UrlSanitizer.clean(raw)
-        assertEquals("https://www.bilibili.com/video/BV1xx411c7mD?p=3&t=120", clean)
+        assertEquals("https://www.bilibili.com/video/BV1xx411c7mD/?p=3&t=120", clean)
 
         assertTrue(UrlSanitizer.hasTrackingParams(raw))
         // When only p and t remain, hasTrackingParams should be false
@@ -57,6 +57,88 @@ class UrlSanitizerTest {
         assertEquals("https://www.bilibili.com/video/BV1CMb46XET4/", clean)
         assertTrue(UrlSanitizer.hasTrackingParams(raw))
         assertFalse(UrlSanitizer.hasTrackingParams(clean))
+    }
+
+    @Test
+    fun `Bilibili supported video routes enforce strict whitelisting, p=1 removal, host normalization, and trailing slash`() {
+        // Redundant p=1 is stripped in clean, NOT flagged as tracking standalone
+        val p1Only = "https://www.bilibili.com/video/BV1xx411c7mD/?p=1"
+        assertFalse(UrlSanitizer.hasTrackingParams(p1Only))
+        assertEquals("https://www.bilibili.com/video/BV1xx411c7mD/", UrlSanitizer.clean(p1Only))
+
+        // p=1 with t=45 keeps only t=45 and is not flagged as tracking
+        val p1AndT = "https://m.bilibili.com/video/BV1xx411c7mD?p=1&t=45"
+        assertFalse(UrlSanitizer.hasTrackingParams(p1AndT))
+        assertEquals("https://www.bilibili.com/video/BV1xx411c7mD/?t=45", UrlSanitizer.clean(p1AndT))
+
+        // Arbitrary unwhitelisted params are stripped and flagged by hasTrackingParams
+        val unknownParam = "https://bilibili.com/video/BV1xx411c7mD?p=1&arbitrary_param=xyz&buvid=abc"
+        assertTrue(UrlSanitizer.hasTrackingParams(unknownParam))
+        val cleanedVideo = UrlSanitizer.clean(unknownParam)
+        assertEquals("https://www.bilibili.com/video/BV1xx411c7mD/", cleanedVideo)
+        assertFalse(UrlSanitizer.hasTrackingParams(cleanedVideo))
+        // Idempotent
+        assertEquals(cleanedVideo, UrlSanitizer.clean(cleanedVideo))
+    }
+
+    @Test
+    fun `Bilibili dynamic and collection or series routes enforce strict whitelisting and trailing slash`() {
+        // Dynamic opus & t.bilibili.com strip all query params
+        val rawOpus = "https://m.bilibili.com/opus/1234567890?t=10&p=2&buvid=xyz"
+        assertTrue(UrlSanitizer.hasTrackingParams(rawOpus))
+        val cleanOpus = UrlSanitizer.clean(rawOpus)
+        assertEquals("https://www.bilibili.com/opus/1234567890/", cleanOpus)
+        assertFalse(UrlSanitizer.hasTrackingParams(cleanOpus))
+
+        val rawDynamic = "https://t.bilibili.com/987654321?arbitrary=1"
+        assertTrue(UrlSanitizer.hasTrackingParams(rawDynamic))
+        val cleanDynamic = UrlSanitizer.clean(rawDynamic)
+        assertEquals("https://t.bilibili.com/987654321/", cleanDynamic)
+        assertFalse(UrlSanitizer.hasTrackingParams(cleanDynamic))
+
+        // Collection/series/lists preserve only sid and type
+        val rawCollection = "https://space.bilibili.com/12345/channel/collectiondetail?sid=678&spm_id_from=333.999&unknown=1"
+        assertTrue(UrlSanitizer.hasTrackingParams(rawCollection))
+        val cleanCollection = UrlSanitizer.clean(rawCollection)
+        assertEquals("https://space.bilibili.com/12345/channel/collectiondetail/?sid=678", cleanCollection)
+        assertFalse(UrlSanitizer.hasTrackingParams(cleanCollection))
+
+        val rawSeries = "https://space.bilibili.com/12345/channel/seriesdetail/?sid=999&from_spmid=abc"
+        assertTrue(UrlSanitizer.hasTrackingParams(rawSeries))
+        val cleanSeries = UrlSanitizer.clean(rawSeries)
+        assertEquals("https://space.bilibili.com/12345/channel/seriesdetail/?sid=999", cleanSeries)
+        assertFalse(UrlSanitizer.hasTrackingParams(cleanSeries))
+
+        val rawLists = "https://space.bilibili.com/12345/lists/678?type=series&buvid=xyz"
+        assertTrue(UrlSanitizer.hasTrackingParams(rawLists))
+        val cleanLists = UrlSanitizer.clean(rawLists)
+        assertEquals("https://space.bilibili.com/12345/lists/678/?type=series", cleanLists)
+        assertFalse(UrlSanitizer.hasTrackingParams(cleanLists))
+    }
+
+    @Test
+    fun `Bilibili unsupported routes retain blacklist plus whitelist without trailing slash rewriting and b23-tv stays offline`() {
+        // Creator profile root: strips tracking params, does NOT add trailing slash
+        val spaceRoot = "https://space.bilibili.com/12345?buvid=abc&spm_id_from=333&keep=1"
+        assertTrue(UrlSanitizer.hasTrackingParams(spaceRoot))
+        assertEquals("https://space.bilibili.com/12345?keep=1", UrlSanitizer.clean(spaceRoot))
+
+        // Bangumi / search / unsupported paths: strips newly added Bilibili blacklist params, preserves sid/type/unknown
+        val bangumi =
+            "https://www.bilibili.com/bangumi/play/ep123" +
+                "?buvid=a&from_spmid=b&plat_id=c&share_from=d&spmid=e&timestamp=1&up_id=2" +
+                "&csource=f&bbid=g&share_times=3&ts=4&-Arouter=5&sid=10&type=season&custom=ok"
+        assertTrue(UrlSanitizer.hasTrackingParams(bangumi))
+        val cleanBangumi = UrlSanitizer.clean(bangumi)
+        assertEquals("https://www.bilibili.com/bangumi/play/ep123?sid=10&type=season&custom=ok", cleanBangumi)
+        assertFalse(UrlSanitizer.hasTrackingParams(cleanBangumi))
+
+        // b23.tv offline cleaning strips tracking params without appending trailing slash
+        val rawB23 = "https://b23.tv/abc-123_XYZ?share_source=copy_web&buvid=xyz&ts=12345&-Arouter=home"
+        assertTrue(UrlSanitizer.hasTrackingParams(rawB23))
+        val cleanB23 = UrlSanitizer.clean(rawB23)
+        assertEquals("https://b23.tv/abc-123_XYZ", cleanB23)
+        assertFalse(UrlSanitizer.hasTrackingParams(cleanB23))
     }
 
     @Test

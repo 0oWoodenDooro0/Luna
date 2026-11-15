@@ -17,6 +17,11 @@ class SocialPreviewServiceTest {
                 "https://en.wikipedia.org/wiki/Kotlin_(programming_language)",
                 "https://blog.google/technology/ai/",
                 "http://localhost:8080/test",
+                "https://space.bilibili.com/12345",
+                "https://space.bilibili.com/12345/",
+                "https://space.bilibili.com/12345/video",
+                "https://space.bilibili.com/12345/dynamic",
+                "https://space.bilibili.com/12345/favlist",
             )
 
         for (url in nonSocialUrls) {
@@ -44,6 +49,10 @@ class SocialPreviewServiceTest {
                 "https://www.instagram.com/p/C-example123/",
                 "https://www.threads.net/@zuck/post/C-example123",
                 "https://www.bilibili.com/video/BV1xx411c7mD",
+                "https://space.bilibili.com/12345/channel/collectiondetail?sid=678",
+                "https://space.bilibili.com/12345/channel/seriesdetail/?sid=888",
+                "https://space.bilibili.com/12345/lists/678",
+                "https://space.bilibili.com/12345/lists/678/?type=series",
                 "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
                 "https://youtu.be/dQw4w9WgXcQ",
             )

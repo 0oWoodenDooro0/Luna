@@ -71,6 +71,18 @@ object UrlSanitizer {
                     "unique_k",
                     "trackid",
                     "track_id",
+                    "buvid",
+                    "from_spmid",
+                    "plat_id",
+                    "share_from",
+                    "spmid",
+                    "timestamp",
+                    "up_id",
+                    "csource",
+                    "bbid",
+                    "share_times",
+                    "ts",
+                    "-arouter",
                 ),
             Platform.YOUTUBE to
                 setOf(
@@ -97,7 +109,7 @@ object UrlSanitizer {
         mapOf(
             Platform.FACEBOOK to setOf("fbid", "story_fbid", "v", "id", "comment_id", "set"),
             Platform.INSTAGRAM to setOf("img_index"),
-            Platform.BILIBILI to setOf("p", "t"),
+            Platform.BILIBILI to setOf("p", "t", "sid", "type"),
             Platform.YOUTUBE to setOf("v", "t", "list", "index"),
             Platform.REDDIT to setOf("context"),
         )
@@ -112,6 +124,21 @@ object UrlSanitizer {
             """^/comments/([a-zA-Z0-9]+)(?:/[^/]+)?/?$""",
             RegexOption.IGNORE_CASE,
         )
+
+    private val BILIBILI_VIDEO_PATH_REGEX =
+        Regex("""^/video/(?:BV[a-zA-Z0-9]+|av[0-9]+)/?$""", RegexOption.IGNORE_CASE)
+    private val BILIBILI_OPUS_PATH_REGEX = Regex("""^/opus/[0-9]+/?$""")
+    private val BILIBILI_DYNAMIC_PATH_REGEX = Regex("""^/[0-9]+/?$""")
+    private val BILIBILI_CHANNEL_DETAIL_PATH_REGEX =
+        Regex("""^/[0-9]+/channel/(?:collectiondetail|seriesdetail)/?$""", RegexOption.IGNORE_CASE)
+    private val BILIBILI_LISTS_PATH_REGEX =
+        Regex("""^/[0-9]+/lists/[0-9]+/?$""", RegexOption.IGNORE_CASE)
+
+    private enum class BilibiliRouteType {
+        VIDEO,
+        DYNAMIC,
+        COLLECTION_OR_SERIES,
+    }
 
     /**
      * 清洗 URL，去除所有通用與特定平台的 tracking/行銷參數。
@@ -164,6 +191,7 @@ object UrlSanitizer {
             "instagram.com" -> builder.host = "www.instagram.com"
             "threads.net" -> builder.host = "www.threads.net"
             "bilibili.com" -> builder.host = "www.bilibili.com"
+            "m.bilibili.com" -> builder.host = "www.bilibili.com"
             "reddit.com" -> builder.host = "www.reddit.com"
             "youtube.com" -> builder.host = "www.youtube.com"
         }
@@ -172,6 +200,13 @@ object UrlSanitizer {
         if (builder.port == builder.protocol.defaultPort) {
             builder.port = 0
         }
+
+        val bilibiliRoute =
+            if (detectedPlatform == Platform.BILIBILI) {
+                detectBilibiliSupportedRoute(builder.host, builder.encodedPath)
+            } else {
+                null
+            }
 
         // Platform-specific path canonicalization
         if (detectedPlatform == Platform.REDDIT) {
@@ -197,11 +232,37 @@ object UrlSanitizer {
             if (builder.encodedPath.matches(Regex("""^/(?:[^/]+/)?(?:reel|posts)/[^/]+$"""))) {
                 builder.encodedPath = "${builder.encodedPath}/"
             }
+        } else if (bilibiliRoute != null && !builder.encodedPath.endsWith("/")) {
+            builder.encodedPath = "${builder.encodedPath}/"
         }
 
         // Filter tracking parameters
         val currentParamNames = builder.parameters.names().toList()
-        val toRemove = currentParamNames.filter { isTrackingParam(it, detectedPlatform) }
+        val toRemove =
+            if (bilibiliRoute != null) {
+                currentParamNames.filter { param ->
+                    val lower = param.lowercase()
+                    when (bilibiliRoute) {
+                        BilibiliRouteType.VIDEO -> {
+                            when (lower) {
+                                "t" -> false
+                                "p" -> builder.parameters.getAll(param)?.all { it == "1" } == true
+                                else -> true
+                            }
+                        }
+
+                        BilibiliRouteType.DYNAMIC -> {
+                            true
+                        }
+
+                        BilibiliRouteType.COLLECTION_OR_SERIES -> {
+                            lower != "sid" && lower != "type"
+                        }
+                    }
+                }
+            } else {
+                currentParamNames.filter { isTrackingParam(it, detectedPlatform) }
+            }
         for (param in toRemove) {
             builder.parameters.remove(param)
         }
@@ -234,7 +295,59 @@ object UrlSanitizer {
             }
 
         val detectedPlatform = platform ?: detectPlatformFromHost(parsed.host)
-        return parsed.parameters.names().any { isTrackingParam(it, detectedPlatform) }
+        val bilibiliRoute =
+            if (detectedPlatform == Platform.BILIBILI) {
+                detectBilibiliSupportedRoute(parsed.host, parsed.encodedPath)
+            } else {
+                null
+            }
+
+        return if (bilibiliRoute != null) {
+            parsed.parameters.names().any { name ->
+                val lower = name.lowercase()
+                when (bilibiliRoute) {
+                    BilibiliRouteType.VIDEO -> lower != "t" && lower != "p"
+                    BilibiliRouteType.DYNAMIC -> true
+                    BilibiliRouteType.COLLECTION_OR_SERIES -> lower != "sid" && lower != "type"
+                }
+            }
+        } else {
+            parsed.parameters.names().any { isTrackingParam(it, detectedPlatform) }
+        }
+    }
+
+    private fun detectBilibiliSupportedRoute(
+        host: String,
+        encodedPath: String,
+    ): BilibiliRouteType? {
+        val h = host.lowercase()
+        return when {
+            h == "www.bilibili.com" || h == "bilibili.com" || h == "m.bilibili.com" -> {
+                when {
+                    BILIBILI_VIDEO_PATH_REGEX.matches(encodedPath) -> BilibiliRouteType.VIDEO
+                    BILIBILI_OPUS_PATH_REGEX.matches(encodedPath) -> BilibiliRouteType.DYNAMIC
+                    else -> null
+                }
+            }
+
+            h == "t.bilibili.com" -> {
+                if (BILIBILI_DYNAMIC_PATH_REGEX.matches(encodedPath)) BilibiliRouteType.DYNAMIC else null
+            }
+
+            h == "space.bilibili.com" -> {
+                if (BILIBILI_CHANNEL_DETAIL_PATH_REGEX.matches(encodedPath) ||
+                    BILIBILI_LISTS_PATH_REGEX.matches(encodedPath)
+                ) {
+                    BilibiliRouteType.COLLECTION_OR_SERIES
+                } else {
+                    null
+                }
+            }
+
+            else -> {
+                null
+            }
+        }
     }
 
     /**
