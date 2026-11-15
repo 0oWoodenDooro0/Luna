@@ -1,6 +1,11 @@
 package luna.core
 
+import ch.qos.logback.classic.Logger
+import ch.qos.logback.classic.LoggerContext
+import dev.kord.common.entity.Snowflake
 import dev.kord.core.Kord
+import dev.kord.core.event.gateway.ReadyEvent
+import dev.kord.core.on
 import dev.kord.gateway.Intent
 import dev.kord.gateway.PrivilegedIntent
 import io.ktor.server.application.install
@@ -11,6 +16,7 @@ import io.ktor.server.netty.NettyApplicationEngine
 import io.ktor.server.routing.routing
 import io.ktor.server.sessions.Sessions
 import io.ktor.server.sessions.cookie
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.runBlocking
 import luna.core.ai.AiTraceConfig
 import luna.core.ai.AiTraceRecorder
@@ -19,6 +25,7 @@ import luna.plugin.DefaultPluginContext
 import luna.plugin.PluginContext
 import luna.plugin.PluginLoader
 import org.jetbrains.exposed.v1.jdbc.Database
+import org.slf4j.LoggerFactory
 import java.io.File
 import java.util.concurrent.TimeUnit
 
@@ -32,11 +39,14 @@ class LunaHost(
     customDatabase: Database? = null,
     val pluginLoader: PluginLoader = PluginLoader(),
     private val kordFactory: ((String) -> Kord)? = null,
+    private val ownerErrorDmSender: (suspend (Snowflake, String) -> Unit)? = null,
 ) {
     val config: Map<String, Any?>
     val coreConfig: LunaCoreConfig
     val aiTraceConfig: AiTraceConfig
     val aiTraceRecorder: AiTraceRecorder
+    val errorNotifyConfig: ErrorNotifyConfig
+    val ownerErrorNotifier: OwnerErrorNotifier
     val database: Database = customDatabase ?: initDatabase()
 
     var server: EmbeddedServer<NettyApplicationEngine, NettyApplicationEngine.Configuration>? = null
@@ -47,6 +57,11 @@ class LunaHost(
 
     var kord: Kord? = null
         private set
+
+    private var ownerErrorAppender: OwnerErrorLogbackAppender? = null
+    private var previousUncaughtExceptionHandler: Thread.UncaughtExceptionHandler? = null
+    private var installedUncaughtExceptionHandler: Thread.UncaughtExceptionHandler? = null
+    private var readyListenerJob: Job? = null
 
     init {
         val loaded = customConfig ?: ConfigLoader.loadConfig()
@@ -67,6 +82,13 @@ class LunaHost(
 
         aiTraceConfig = AiTraceConfig.fromMap(config)
         aiTraceRecorder = JsonlAiTraceRecorder.fromConfig(aiTraceConfig, config)
+        errorNotifyConfig = ErrorNotifyConfig.fromMap(config)
+        ownerErrorNotifier =
+            OwnerErrorNotifier(
+                config = errorNotifyConfig,
+                secretConfig = config,
+                dmSender = ownerErrorDmSender,
+            )
 
         // Startup audit log emitting active configuration with secrets masked
         ConfigLoader.auditLog(config)
@@ -74,6 +96,9 @@ class LunaHost(
 
     @OptIn(PrivilegedIntent::class)
     suspend fun start(loginKord: Boolean = true): PluginContext {
+        attachOwnerErrorAppender()
+        installUncaughtExceptionHandler()
+
         // 1. Initialize Ktor embeddedServer (port, session cookie)
         val serverPort = coreConfig.port
 
@@ -101,6 +126,8 @@ class LunaHost(
                 Kord(token)
             }
         this.kord = kordClient
+        ownerErrorNotifier.bindKord(kordClient)
+        registerReadyListener(kordClient)
 
         // 3. Build DefaultPluginContext providing kord, routing, database, configuration, and AI trace recorder
         val context =
@@ -133,6 +160,11 @@ class LunaHost(
 
     suspend fun shutdown() {
         try {
+            readyListenerJob?.cancel()
+            readyListenerJob = null
+        } catch (_: Exception) {
+        }
+        try {
             pluginLoader.shutdownPlugins()
         } catch (e: Exception) {
             System.err.println("Error during plugin shutdown: ${e.message}")
@@ -142,9 +174,90 @@ class LunaHost(
         } catch (e: Exception) {
             System.err.println("Error during AI trace flush: ${e.message}")
         }
+        detachOwnerErrorAppender()
+        restoreUncaughtExceptionHandler()
+        try {
+            ownerErrorNotifier.bindKord(null)
+            ownerErrorNotifier.flushAndClose()
+        } catch (e: Exception) {
+            System.err.println("Error during OwnerErrorNotifier flush: ${e.message}")
+        }
         try {
             server?.stop(1000, 2000, TimeUnit.MILLISECONDS)
         } catch (_: Exception) {
+        }
+    }
+
+    private fun attachOwnerErrorAppender() {
+        val loggerContext = LoggerFactory.getILoggerFactory() as? LoggerContext ?: return
+        val rootLogger = loggerContext.getLogger(Logger.ROOT_LOGGER_NAME)
+        rootLogger.detachAppender(OwnerErrorLogbackAppender.APPENDER_NAME)
+
+        val appender =
+            OwnerErrorLogbackAppender(ownerErrorNotifier).apply {
+                context = loggerContext
+                name = OwnerErrorLogbackAppender.APPENDER_NAME
+                start()
+            }
+        rootLogger.addAppender(appender)
+        ownerErrorAppender = appender
+    }
+
+    private fun detachOwnerErrorAppender() {
+        val appender = ownerErrorAppender ?: return
+        ownerErrorAppender = null
+        runCatching {
+            val loggerContext = LoggerFactory.getILoggerFactory() as? LoggerContext
+            loggerContext?.getLogger(Logger.ROOT_LOGGER_NAME)?.detachAppender(appender)
+            appender.stop()
+        }
+    }
+
+    private fun installUncaughtExceptionHandler() {
+        if (installedUncaughtExceptionHandler != null) return
+        val uncaughtLogger = LoggerFactory.getLogger("luna.core.UncaughtException")
+        val previous = Thread.getDefaultUncaughtExceptionHandler()
+        val handler =
+            Thread.UncaughtExceptionHandler { thread, throwable ->
+                runCatching {
+                    uncaughtLogger.error(
+                        "Uncaught exception in thread '{}': {}",
+                        thread.name,
+                        throwable.message ?: throwable::class.simpleName ?: "Unknown error",
+                        throwable,
+                    )
+                }
+                if (previous != null && previous !== installedUncaughtExceptionHandler) {
+                    previous.uncaughtException(thread, throwable)
+                }
+            }
+        previousUncaughtExceptionHandler = previous
+        installedUncaughtExceptionHandler = handler
+        Thread.setDefaultUncaughtExceptionHandler(handler)
+    }
+
+    private fun restoreUncaughtExceptionHandler() {
+        val installed = installedUncaughtExceptionHandler ?: return
+        val previous = previousUncaughtExceptionHandler
+        installedUncaughtExceptionHandler = null
+        previousUncaughtExceptionHandler = null
+        if (Thread.getDefaultUncaughtExceptionHandler() === installed) {
+            Thread.setDefaultUncaughtExceptionHandler(previous)
+        }
+    }
+
+    private fun registerReadyListener(kordClient: Kord) {
+        val hasValidContext =
+            runCatching {
+                kordClient.coroutineContext.fold(true) { acc, _ -> acc }
+            }.getOrDefault(false)
+        if (!hasValidContext) return
+
+        runCatching {
+            readyListenerJob =
+                kordClient.on<ReadyEvent> {
+                    ownerErrorNotifier.onReady()
+                }
         }
     }
 
