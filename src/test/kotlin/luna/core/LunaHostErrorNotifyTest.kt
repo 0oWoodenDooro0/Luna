@@ -55,6 +55,7 @@ class LunaHostErrorNotifyTest {
 
             try {
                 host.start(loginKord = false)
+                host.ownerErrorNotifier.onReady()
 
                 assertNotNull(
                     rootLogger.getAppender(OwnerErrorLogbackAppender.APPENDER_NAME),

@@ -41,7 +41,7 @@ class OwnerErrorNotifier(
     secretConfig: Map<String, Any?> = emptyMap(),
     private val eventFilter: ErrorEventFilter = DefaultErrorEventFilter(),
     rateLimiter: AlertRateLimiter? = null,
-    private val startupBuffer: StartupAlertBuffer = ImmediateReadyStartupAlertBuffer,
+    private val startupBuffer: StartupAlertBuffer = BoundedStartupAlertBuffer(),
     private val queueCapacity: Int = DEFAULT_QUEUE_CAPACITY,
     private val clock: Clock = Clock.systemUTC(),
     private val redactor: OwnerErrorRedactor = OwnerErrorRedactor.fromConfig(secretConfig),

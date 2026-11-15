@@ -47,6 +47,7 @@ class OwnerErrorNotifierTest {
             val notifier =
                 OwnerErrorNotifier(
                     config = config,
+                    startupBuffer = ImmediateReadyStartupAlertBuffer,
                     clock = fixedClock,
                     dmSender = { userId, content -> delivered.add(userId to content) },
                 )
@@ -128,6 +129,7 @@ class OwnerErrorNotifierTest {
                 OwnerErrorNotifier(
                     config = ErrorNotifyConfig(recipientUserIds = listOf(Snowflake(123uL)), environment = "staging"),
                     secretConfig = secretConfig,
+                    startupBuffer = ImmediateReadyStartupAlertBuffer,
                     clock = fixedClock,
                     dmSender = { userId, content -> delivered.add(userId to content) },
                 )
@@ -178,6 +180,7 @@ class OwnerErrorNotifierTest {
             val notifier =
                 OwnerErrorNotifier(
                     config = ErrorNotifyConfig(recipientUserIds = listOf(Snowflake(123uL))),
+                    startupBuffer = ImmediateReadyStartupAlertBuffer,
                     clock = fixedClock,
                     dmSender = { userId, content -> delivered.add(userId to content) },
                 )
@@ -295,6 +298,7 @@ class OwnerErrorNotifierTest {
             val notifier =
                 OwnerErrorNotifier(
                     config = ErrorNotifyConfig(recipientUserIds = listOf(Snowflake(42uL))),
+                    startupBuffer = ImmediateReadyStartupAlertBuffer,
                     clock = fixedClock,
                     dmSender = { userId, content -> delivered.add(userId to content) },
                 )
@@ -327,6 +331,7 @@ class OwnerErrorNotifierTest {
             val notifier =
                 OwnerErrorNotifier(
                     config = ErrorNotifyConfig(recipientUserIds = listOf(Snowflake(42uL))),
+                    startupBuffer = ImmediateReadyStartupAlertBuffer,
                     queueCapacity = 1,
                     clock = fixedClock,
                     dmSender = { userId, content ->
@@ -380,6 +385,7 @@ class OwnerErrorNotifierTest {
                         ErrorNotifyConfig(
                             recipientUserIds = listOf(Snowflake(101uL), Snowflake(202uL)),
                         ),
+                    startupBuffer = ImmediateReadyStartupAlertBuffer,
                     clock = fixedClock,
                     dmSender = { userId, _ ->
                         try {
@@ -454,6 +460,7 @@ class OwnerErrorNotifierTest {
             val notifier =
                 OwnerErrorNotifier(
                     config = ErrorNotifyConfig(recipientUserIds = listOf(unreachableId, reachableId)),
+                    startupBuffer = ImmediateReadyStartupAlertBuffer,
                     clock = fixedClock,
                 )
             notifier.bindKord(mockKord)
