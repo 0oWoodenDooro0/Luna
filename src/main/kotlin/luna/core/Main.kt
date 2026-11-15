@@ -65,8 +65,6 @@ class LunaHost(
 
     init {
         val loaded = customConfig ?: ConfigLoader.loadConfig()
-        // Run startup drift audit to fail fast on missing required variables and report drift
-        ConfigLoader.auditDrift(loaded)
         // Fail-fast validation against LunaCoreConfig data model
         coreConfig = LunaCoreConfig.fromMap(loaded)
 
@@ -90,8 +88,20 @@ class LunaHost(
                 dmSender = ownerErrorDmSender,
             )
 
-        // Startup audit log emitting active configuration with secrets masked
-        ConfigLoader.auditLog(config)
+        // Temporarily attach appender during init audit so pre-ReadyEvent [CONFIG_DRIFT] alerts
+        // are captured and buffered without leaving a dangling appender if start() is not called.
+        attachOwnerErrorAppender()
+        try {
+            // Run startup drift audit to fail fast on missing required variables and report drift
+            ConfigLoader.auditDrift(loaded)
+            // Startup audit log emitting active configuration with secrets masked
+            ConfigLoader.auditLog(config)
+        } catch (t: Throwable) {
+            runBlocking { ownerErrorNotifier.flushAndClose() }
+            throw t
+        } finally {
+            detachOwnerErrorAppender()
+        }
     }
 
     @OptIn(PrivilegedIntent::class)
