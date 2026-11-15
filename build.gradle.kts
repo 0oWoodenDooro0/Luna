@@ -1,3 +1,8 @@
+import org.gradle.api.tasks.testing.TestDescriptor
+import org.gradle.api.tasks.testing.TestListener
+import org.gradle.api.tasks.testing.TestResult
+import org.gradle.api.tasks.testing.logging.TestExceptionFormat
+import org.gradle.api.tasks.testing.logging.TestLogEvent
 import java.time.Duration
 
 plugins {
@@ -10,6 +15,44 @@ plugins {
 allprojects {
     tasks.withType<Test> {
         timeout.set(Duration.ofSeconds(60))
+        testLogging {
+            events(TestLogEvent.FAILED)
+            exceptionFormat = TestExceptionFormat.SHORT
+            showExceptions = true
+            showCauses = true
+            showStackTraces = false
+        }
+        addTestListener(
+            object : TestListener {
+                override fun beforeSuite(suite: TestDescriptor) {}
+
+                override fun afterSuite(
+                    suite: TestDescriptor,
+                    result: TestResult,
+                ) {}
+
+                override fun beforeTest(testDescriptor: TestDescriptor) {}
+
+                override fun afterTest(
+                    testDescriptor: TestDescriptor,
+                    result: TestResult,
+                ) {
+                    if (result.resultType == TestResult.ResultType.FAILURE) {
+                        val ex = result.exception
+                        val detail = ex?.let { "${it::class.simpleName}: ${it.message}" }.orEmpty()
+                        val frame = ex?.stackTrace?.firstOrNull { it.className.startsWith("luna.") }
+                        val location = frame?.let { " (${it.fileName}:${it.lineNumber})" }.orEmpty()
+                        logger.error(
+                            "FAILED: {} > {}{} -> {}",
+                            testDescriptor.className,
+                            testDescriptor.displayName,
+                            location,
+                            detail,
+                        )
+                    }
+                }
+            },
+        )
     }
 }
 

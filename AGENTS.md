@@ -13,13 +13,13 @@
 
 - **Issues & specs**: GitHub Issues workflow -> [`docs/agents/issue-tracker.md`](docs/agents/issue-tracker.md); triage labels -> [`docs/agents/triage-labels.md`](docs/agents/triage-labels.md).
 - **Domain & ADRs**: Glossary and architecture decisions -> [`docs/agents/domain.md`](docs/agents/domain.md).
-- **Coding standards**: Judgement calls -> [`CODING_STANDARDS.md`](CODING_STANDARDS.md) (for review, not inner-loop reads); mechanical rules (bounded caches, assertion shapes, JVM-safe test names, test suite size cap, Dockerfile parity, `.env.example` parity, cross-plugin isolation) -> run [`CodingStandardsTest`](src/test/kotlin/luna/core/CodingStandardsTest.kt) rather than reading it end-to-end.
+- **Coding standards**: Reviewers read [`CODING_STANDARDS.md`](CODING_STANDARDS.md). Implementers enforce mechanical rules (bounded caches, assertion shapes, JVM-safe test names, 600-line test cap, Dockerfile/env parity, plugin isolation) by running `./gradlew test --tests "luna.core.CodingStandardsTest" --console=plain -q` — skip reading `CODING_STANDARDS.md` and `CodingStandardsTest.kt`.
 - **Configuration**: Unified env architecture -> [`docs/architecture/configuration.md`](docs/architecture/configuration.md).
 - **AI Trace debugging**: Daily JSONL trace schema & `jq`/`rg` queries -> [`docs/architecture/ai-tracing.md`](docs/architecture/ai-tracing.md).
 - **Dependencies & Kord**: Inspect `build.gradle.kts`, source definitions, or [`docs/kord-recipes.md`](docs/kord-recipes.md) instead of decompiling JARs.
 
 ## Verification
 
-- **Inner loop**: Run only targeted tests with `--console=plain -q` (e.g. `./gradlew test --tests "luna.summarizer.*" --console=plain -q`); locate symbols with `rg -n` and bounded `view_file` ranges.
+- **Inner loop**: Run only targeted tests with `--console=plain -q` (e.g. `./gradlew test --tests "luna.summarizer.*" --console=plain -q`; failed test names and exceptions still print under `-q`); locate symbols with `rg -n` and bounded `view_file` ranges.
 - **Pre-review / pre-PR**: Run `./gradlew formatKotlin && ./gradlew check --console=plain -q` across all modules (`.githooks/pre-commit` runs `lintKotlin` + `CodingStandardsTest`; `.githooks/pre-push` runs `check`).
 - **CI parity**: Run `docker build -t luna:ci-test .` strictly as the final pre-PR/pre-merge check.
