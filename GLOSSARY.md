@@ -139,3 +139,8 @@ _Avoid_: AI log, LLM dump, debug log
 **AI Attempt**:
 A single upstream AI API request-and-response exchange executed within an AI Trace, including initial calls, fallback retries, tool continuations, and interaction polling cycles.
 _Avoid_: API hit, retry log, model call record
+
+**Owner Error Notification**:
+An asynchronous Discord direct message dispatched by Luna Host to configured operator User IDs when a runtime `WARN` or `ERROR` event passes source filtering, secret masking, and deduplication.
+_Avoid_: Error alert DM, crash ping, admin webhook
+
