@@ -346,8 +346,49 @@ class BilibiliCollectionAndSeriesResolverTest {
             }
             assertFalse(seriesCalled)
 
+            assertFalse(resolver.canResolve("https://space.bilibili.com/12345/channel/collectiondetail"))
             assertFailsWith<ParsingException> {
                 resolver.resolve("https://space.bilibili.com/12345/channel/collectiondetail", client)
             }
+        }
+
+    @Test
+    fun `resolve should clamp total summary content to 250 chars when episode titles are very long`() =
+        runTest {
+            val longTitle = "超長影片標題測試內容".repeat(12)
+            val seasonMockJson =
+                """
+                {
+                    "code": 0,
+                    "data": {
+                        "info": {
+                            "id": 678,
+                            "title": "長標題合集",
+                            "cover": "https://i0.hdslb.com/cover.jpg",
+                            "intro": "${"簡介內容".repeat(30)}",
+                            "media_count": 3,
+                            "upper": { "mid": 12345, "name": "UP主" }
+                        },
+                        "medias": [
+                            { "bvid": "BV1aa1111111", "title": "$longTitle" },
+                            { "bvid": "BV1bb2222222", "title": "$longTitle" },
+                            { "bvid": "BV1cc3333333", "title": "$longTitle" }
+                        ]
+                    }
+                }
+                """.trimIndent()
+
+            val client =
+                createMockHttpClient { request ->
+                    if (request.url.encodedPath.contains("x/space/fav/season/list")) {
+                        jsonResponse(seasonMockJson)
+                    } else {
+                        respondError(HttpStatusCode.NotFound)
+                    }
+                }
+
+            val post = resolver.resolve("https://space.bilibili.com/12345/channel/collectiondetail?sid=678", client)
+            assertTrue(post.content.length <= 250)
+            assertTrue(post.content.endsWith("..."))
         }
 }
