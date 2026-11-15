@@ -65,14 +65,3 @@ interface StartupAlertBuffer {
      */
     fun markReadyAndDrain(): List<OwnerErrorEvent>
 }
-
-/**
- * Ready-state [StartupAlertBuffer] for callers/tests that treat the gateway as immediately ready.
- */
-object ImmediateReadyStartupAlertBuffer : StartupAlertBuffer {
-    override val isReady: Boolean = true
-
-    override fun bufferIfNotReady(event: OwnerErrorEvent): Boolean = false
-
-    override fun markReadyAndDrain(): List<OwnerErrorEvent> = emptyList()
-}

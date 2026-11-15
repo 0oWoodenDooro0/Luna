@@ -34,11 +34,19 @@ class AsymmetricErrorEventFilter(
         val channelId: String?,
         val contextIds: Map<String, String>,
         val messageLower: String,
-        val fullMessageLower: String,
         val searchableTextLower: String,
         val exceptionMessageLower: String?,
         val errorDetailLower: String?,
     )
+
+    private enum class DetailMatchKind(
+        val weight: Int,
+    ) {
+        NONE(0),
+        MATCHED(DETAIL_MATCH_WEIGHT),
+        EXACT_CONTAINMENT(DETAIL_EXACT_CONTAINMENT_WEIGHT),
+        CONFLICTING(-1),
+    }
 
     private data class TrackedEmission(
         val id: Long,
@@ -117,70 +125,95 @@ class AsymmetricErrorEventFilter(
         existing: ExtractedSignals,
         incoming: ExtractedSignals,
     ): Int {
-        if (existing.componentKey == null || incoming.componentKey == null) return -1
-        if (existing.componentKey != incoming.componentKey) return -1
-
-        if (existing.traceId != null && incoming.traceId != null && existing.traceId != incoming.traceId) return -1
-        if (existing.guildId != null && incoming.guildId != null && existing.guildId != incoming.guildId) return -1
-        if (existing.channelId != null && incoming.channelId != null && existing.channelId != incoming.channelId) return -1
-
-        for ((key, value) in existing.contextIds) {
-            val otherValue = incoming.contextIds[key]
-            if (otherValue != null && otherValue != value) return -1
-        }
+        if (hasConflictingIdentity(existing, incoming)) return NO_MATCH_SCORE
 
         val slf4j = if (existing.channel == LogChannel.SLF4J) existing else incoming
         val json = if (existing.channel == LogChannel.JSON_LOGGER) existing else incoming
 
-        var score = 0
-        if (slf4j.traceId != null && slf4j.traceId == json.traceId) score += 4
-        if (slf4j.guildId != null && slf4j.guildId == json.guildId) score += 3
-        if (slf4j.channelId != null && slf4j.channelId == json.channelId) score += 3
+        var score = scoreIdentifierEvidence(slf4j, json)
+        val detailMatch = evaluateDetailMatch(slf4j, json)
+        if (detailMatch == DetailMatchKind.CONFLICTING) return NO_MATCH_SCORE
+        score += detailMatch.weight
 
-        for ((key, value) in json.contextIds) {
-            if (slf4j.contextIds[key] == value) {
-                score += 4
-            } else if (value.length >= MIN_TOKEN_MATCH_LENGTH && slf4j.searchableTextLower.contains(value.lowercase())) {
-                score += 3
-            }
-        }
-
-        val jsonDetail = json.errorDetailLower
-        val slf4jExceptionMsg = slf4j.exceptionMessageLower
-        var detailMatched = false
-
-        if (jsonDetail != null && jsonDetail.length >= MIN_DETAIL_MATCH_LENGTH) {
-            if (slf4j.searchableTextLower.contains(jsonDetail)) {
-                score += 5
-                detailMatched = true
-            } else if (slf4jExceptionMsg != null &&
-                slf4jExceptionMsg.length >= MIN_DETAIL_MATCH_LENGTH &&
-                jsonDetail.contains(slf4jExceptionMsg)
-            ) {
-                score += 4
-                detailMatched = true
-            } else if (slf4jExceptionMsg != null && slf4jExceptionMsg.length >= MIN_DETAIL_MATCH_LENGTH) {
-                // Both events explicitly carry different exception/error messages
-                return -1
-            }
-        } else if (slf4jExceptionMsg != null &&
-            slf4jExceptionMsg.length >= MIN_DETAIL_MATCH_LENGTH &&
-            json.fullMessageLower.contains(slf4jExceptionMsg)
+        if (detailMatch == DetailMatchKind.NONE &&
+            json.errorDetailLower != null &&
+            slf4j.messageLower.isNotBlank() &&
+            score <= MAX_INSUFFICIENT_CONTEXT_SCORE
         ) {
-            score += 4
-            detailMatched = true
-        } else if (slf4j.messageLower.length >= MIN_DETAIL_MATCH_LENGTH &&
-            json.fullMessageLower.contains(slf4j.messageLower)
-        ) {
-            score += 4
-            detailMatched = true
-        }
-
-        if (!detailMatched && jsonDetail != null && slf4j.messageLower.isNotBlank() && score <= 4) {
-            return -1
+            return NO_MATCH_SCORE
         }
 
         return score
+    }
+
+    private fun hasConflictingIdentity(
+        existing: ExtractedSignals,
+        incoming: ExtractedSignals,
+    ): Boolean {
+        if (existing.componentKey == null || incoming.componentKey == null) return true
+        if (existing.componentKey != incoming.componentKey) return true
+
+        if (existing.traceId != null && incoming.traceId != null && existing.traceId != incoming.traceId) return true
+        if (existing.guildId != null && incoming.guildId != null && existing.guildId != incoming.guildId) return true
+        if (existing.channelId != null && incoming.channelId != null && existing.channelId != incoming.channelId) return true
+
+        return existing.contextIds.any { (key, value) ->
+            val otherValue = incoming.contextIds[key]
+            otherValue != null && otherValue != value
+        }
+    }
+
+    private fun scoreIdentifierEvidence(
+        slf4j: ExtractedSignals,
+        json: ExtractedSignals,
+    ): Int {
+        var score = 0
+        if (slf4j.traceId != null && slf4j.traceId == json.traceId) score += TRACE_ID_MATCH_WEIGHT
+        if (slf4j.guildId != null && slf4j.guildId == json.guildId) score += DISCORD_SCOPE_MATCH_WEIGHT
+        if (slf4j.channelId != null && slf4j.channelId == json.channelId) score += DISCORD_SCOPE_MATCH_WEIGHT
+
+        for ((key, value) in json.contextIds) {
+            if (slf4j.contextIds[key] == value) {
+                score += CONTEXT_ID_EXACT_WEIGHT
+            } else if (value.length >= MIN_TOKEN_MATCH_LENGTH && slf4j.searchableTextLower.contains(value.lowercase())) {
+                score += CONTEXT_TOKEN_SUBSTRING_WEIGHT
+            }
+        }
+        return score
+    }
+
+    private fun evaluateDetailMatch(
+        slf4j: ExtractedSignals,
+        json: ExtractedSignals,
+    ): DetailMatchKind {
+        val jsonDetail = json.errorDetailLower
+        val slf4jExceptionMsg = slf4j.exceptionMessageLower
+
+        if (jsonDetail != null && jsonDetail.length >= MIN_DETAIL_MATCH_LENGTH) {
+            return when {
+                slf4j.searchableTextLower.contains(jsonDetail) -> DetailMatchKind.EXACT_CONTAINMENT
+
+                slf4jExceptionMsg != null &&
+                    slf4jExceptionMsg.length >= MIN_DETAIL_MATCH_LENGTH &&
+                    jsonDetail.contains(slf4jExceptionMsg) -> DetailMatchKind.MATCHED
+
+                slf4jExceptionMsg != null && slf4jExceptionMsg.length >= MIN_DETAIL_MATCH_LENGTH -> DetailMatchKind.CONFLICTING
+
+                else -> DetailMatchKind.NONE
+            }
+        }
+        if (slf4jExceptionMsg != null &&
+            slf4jExceptionMsg.length >= MIN_DETAIL_MATCH_LENGTH &&
+            json.messageLower.contains(slf4jExceptionMsg)
+        ) {
+            return DetailMatchKind.MATCHED
+        }
+        if (slf4j.messageLower.length >= MIN_DETAIL_MATCH_LENGTH &&
+            json.messageLower.contains(slf4j.messageLower)
+        ) {
+            return DetailMatchKind.MATCHED
+        }
+        return DetailMatchKind.NONE
     }
 
     private fun extractSignals(event: OwnerErrorEvent): ExtractedSignals {
@@ -228,7 +261,6 @@ class AsymmetricErrorEventFilter(
             channelId = event.channelId?.trim()?.ifEmpty { null } ?: contextIds["channelId"],
             contextIds = contextIds,
             messageLower = messageLower,
-            fullMessageLower = messageLower,
             searchableTextLower = searchableTextLower,
             exceptionMessageLower = exceptionMessageLower,
             errorDetailLower = errorDetailLower,
@@ -344,7 +376,15 @@ class AsymmetricErrorEventFilter(
         const val JSON_LOGGER_NAME = "JSON_LOGGER"
         const val UNCAUGHT_EXCEPTION_LOGGER_NAME = "luna.core.UncaughtException"
 
+        private const val NO_MATCH_SCORE = -1
         private const val MIN_CORRELATION_SCORE = 3
+        private const val MAX_INSUFFICIENT_CONTEXT_SCORE = 4
+        private const val TRACE_ID_MATCH_WEIGHT = 4
+        private const val DISCORD_SCOPE_MATCH_WEIGHT = 3
+        private const val CONTEXT_ID_EXACT_WEIGHT = 4
+        private const val CONTEXT_TOKEN_SUBSTRING_WEIGHT = 3
+        private const val DETAIL_MATCH_WEIGHT = 4
+        private const val DETAIL_EXACT_CONTAINMENT_WEIGHT = 5
         private const val MIN_TOKEN_MATCH_LENGTH = 3
         private const val MIN_DETAIL_MATCH_LENGTH = 4
 

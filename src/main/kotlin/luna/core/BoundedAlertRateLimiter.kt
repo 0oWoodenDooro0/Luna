@@ -29,22 +29,6 @@ class BoundedAlertRateLimiter(
     private val clock: Clock = Clock.systemUTC(),
     private val warningLogger: Logger = LoggerFactory.getLogger(OwnerErrorNotifier.INTERNAL_LOGGER_NAME),
 ) : AlertRateLimiter {
-    constructor(
-        cooldownSeconds: Int,
-        maxErrorsPerMinute: Int = DEFAULT_MAX_ERRORS_PER_MINUTE,
-        maxWarnsPerMinute: Int = DEFAULT_MAX_WARNS_PER_MINUTE,
-        maxFingerprints: Int = DEFAULT_MAX_FINGERPRINTS,
-        clock: Clock = Clock.systemUTC(),
-        warningLogger: Logger = LoggerFactory.getLogger(OwnerErrorNotifier.INTERNAL_LOGGER_NAME),
-    ) : this(
-        cooldownSeconds = cooldownSeconds.toLong(),
-        maxErrorsPerMinute = maxErrorsPerMinute,
-        maxWarnsPerMinute = maxWarnsPerMinute,
-        maxFingerprints = maxFingerprints,
-        clock = clock,
-        warningLogger = warningLogger,
-    )
-
     val effectiveCooldownSeconds: Long =
         if (cooldownSeconds > 0L) {
             cooldownSeconds

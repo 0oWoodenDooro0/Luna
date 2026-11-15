@@ -18,6 +18,14 @@ import kotlin.test.assertTrue
 class OwnerErrorNotifierTest {
     private val fixedClock: Clock = Clock.fixed(Instant.parse("2026-11-15T01:02:03Z"), ZoneOffset.UTC)
 
+    private object ImmediateReadyStartupAlertBuffer : StartupAlertBuffer {
+        override val isReady: Boolean = true
+
+        override fun bufferIfNotReady(event: OwnerErrorEvent): Boolean = false
+
+        override fun markReadyAndDrain(): List<OwnerErrorEvent> = emptyList()
+    }
+
     private fun attachTestAppender(
         loggerName: String,
         notifier: OwnerErrorNotifier,
