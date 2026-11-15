@@ -344,6 +344,8 @@ class BoundedAlertRateLimiterTest {
                     dispatcher = dispatcher,
                     dmSender = { userId, content -> delivered.add(userId to content) },
                 )
+            notifier.onReady()
+            testScheduler.advanceUntilIdle()
 
             notifier.submit(event(clock, message = "Upstream failed for message 111222333444555666"))
             testScheduler.advanceUntilIdle()

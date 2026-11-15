@@ -39,7 +39,7 @@ import java.util.concurrent.atomic.AtomicReference
 class OwnerErrorNotifier(
     val config: ErrorNotifyConfig,
     secretConfig: Map<String, Any?> = emptyMap(),
-    private val eventFilter: ErrorEventFilter = DefaultErrorEventFilter(),
+    eventFilter: ErrorEventFilter? = null,
     rateLimiter: AlertRateLimiter? = null,
     private val startupBuffer: StartupAlertBuffer = BoundedStartupAlertBuffer(),
     private val queueCapacity: Int = DEFAULT_QUEUE_CAPACITY,
@@ -48,6 +48,7 @@ class OwnerErrorNotifier(
     dispatcher: CoroutineDispatcher? = null,
     private val dmSender: (suspend (Snowflake, String) -> Unit)? = null,
 ) {
+    private val resolvedEventFilter: ErrorEventFilter = eventFilter ?: AsymmetricErrorEventFilter(clock = clock)
     private val internalLogger = LoggerFactory.getLogger(INTERNAL_LOGGER_NAME)
     private val resolvedRateLimiter: AlertRateLimiter =
         rateLimiter ?: BoundedAlertRateLimiter(cooldownSeconds = config.cooldownSeconds.toLong(), clock = clock)
@@ -95,7 +96,7 @@ class OwnerErrorNotifier(
     fun submit(event: OwnerErrorEvent) {
         if (!config.isEnabled || closed.get()) return
         if (isExcludedLogger(event.loggerName)) return
-        if (!eventFilter.shouldNotify(event)) return
+        if (!resolvedEventFilter.shouldNotify(event)) return
 
         val result = channel.trySend(event)
         if (!result.isSuccess) {
