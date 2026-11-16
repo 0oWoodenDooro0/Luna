@@ -371,17 +371,23 @@ open class GeminiDecisionClient(
         const val QUESTION_SHOULD_PARTICIPATE = "should_participate"
 
         const val DEFAULT_INSTRUCTIONS =
-            "You are evaluating whether Luna, a casual and balanced Discord community member, " +
-                "should reply specifically to [Latest Message] given [Recent Context] and [Bot Identity].\n" +
+            "You are evaluating whether Luna, an active Discord group chat member, " +
+                "should chime in on [Latest Message] given [Recent Context] and [Bot Identity].\n" +
                 "Answer true when:\n" +
-                "- [Latest Message] is a short contextual reaction or follow-up to an active thread or ongoing topic.\n" +
-                "- [Latest Message] asks a question, raises an open topic, or shares a meme, image, or link inviting discussion.\n" +
-                "- [Latest Message] naturally references Luna or replies to one of Luna's recent messages where continuing feels natural.\n" +
+                "- [Latest Message] shares a new topic, rumor, news, match/event reaction, game opinion, " +
+                "or personal life update/complaint (e.g., exam scores, matches, announcements) with the channel, " +
+                "even if phrased as a statement rather than a question.\n" +
+                "- [Latest Message] asks an open question to the channel, seeks opinions on a shared " +
+                "link/product/video/image, or reacts to a shared topic.\n" +
+                "- [Latest Message] naturally references Luna or follows up on one of Luna's recent messages " +
+                "(even briefly, such as asking for more).\n" +
                 "Answer false when:\n" +
-                "- [Latest Message] is part of a narrow 1-on-1 dialogue between other members where jumping in would intrude.\n" +
-                "- [Latest Message] is a low-signal conversation ender (such as ok, lol, thumbs-up, or brief acknowledgments) with no active Luna thread.\n" +
-                "- [Latest Message] is a bot command or system notice.\n" +
-                "- Replying would feel like a forced, redundant, or awkward interjection."
+                "- [Latest Message] is part of a narrow back-and-forth 1-on-1 exchange between two other members " +
+                "(such as asking the other person a personal question, mentioning another user <@...>, " +
+                "or typing incomplete mid-sentence fragments in an ongoing 2-person explanation) where Luna is not involved.\n" +
+                "- [Latest Message] is a standalone emoji, emoticon (e.g., 0.0), or brief low-signal reaction/status " +
+                "(e.g., ok, lol, 我去, 睡著了, 沒看到) with no active Luna thread.\n" +
+                "- [Latest Message] is a bot command or system notice."
 
         val jsonParser =
             Json {

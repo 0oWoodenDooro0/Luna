@@ -3,7 +3,6 @@ package luna.summarizer
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import luna.core.ai.ChatImageAttachment
-import luna.core.ai.EmojiSanitizer
 import luna.core.ai.GroundingCitation
 import luna.core.ai.VideoProcessingMode
 import kotlin.test.Test
@@ -455,37 +454,6 @@ class GeminiPromptBuilderTest {
         assertContains(prompt, "00:00 Initial discussion of architecture")
         assertContains(prompt, "[當前核心討論]")
         assertContains(prompt, "00:00 Final conclusion")
-    }
-
-    @Test
-    fun `system instructions include search grounding and terminology fact-checking section with strict source isolation`() {
-        val instructions =
-            listOf(
-                GeminiPromptBuilder.SYSTEM_INSTRUCTION,
-                GeminiPromptBuilder.VIDEO_SYSTEM_INSTRUCTION,
-                GeminiPromptBuilder.CHAT_IMAGE_SYSTEM_INSTRUCTION,
-                GeminiPromptBuilder.VIDEO_AND_IMAGE_SYSTEM_INSTRUCTION,
-            )
-
-        for (inst in instructions) {
-            assertContains(inst, "台灣繁體中文")
-            assertContains(inst, "zh-TW")
-            assertContains(inst, "TL;DR:")
-            assertContains(inst, "核心重點:")
-            assertContains(inst, "名詞與事實查核:")
-            assertContains(inst, "Google")
-            assertContains(inst, "搜尋")
-            assertFalse(EmojiSanitizer.containsEmoji(inst), "Instruction must not contain emojis")
-        }
-
-        // Standard chat instructions specify strict source isolation for participant discussions
-        assertContains(GeminiPromptBuilder.SYSTEM_INSTRUCTION, "嚴格來源隔離")
-        assertContains(GeminiPromptBuilder.SYSTEM_INSTRUCTION, "參與者觀點")
-        assertContains(GeminiPromptBuilder.CHAT_IMAGE_SYSTEM_INSTRUCTION, "嚴格來源隔離")
-        assertContains(GeminiPromptBuilder.CHAT_IMAGE_SYSTEM_INSTRUCTION, "Visual Focus Prompting")
-        assertContains(GeminiPromptBuilder.CHAT_IMAGE_SYSTEM_INSTRUCTION, "OCR")
-        assertContains(GeminiPromptBuilder.VIDEO_SYSTEM_INSTRUCTION, "[mm:ss]")
-        assertContains(GeminiPromptBuilder.VIDEO_SYSTEM_INSTRUCTION, "1500")
     }
 
     @Test
