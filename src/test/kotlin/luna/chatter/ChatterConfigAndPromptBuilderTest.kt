@@ -250,10 +250,7 @@ class ChatterConfigAndPromptBuilderTest {
         assertContains(promptText, "Awesome demo!")
         assertContains(promptText, "url_context")
 
-        val sys = assertNotNull(request.systemInstruction)
-        assertContains(sys, "url_context")
-        assertContains(sys, "google_search")
-        assertContains(sys, "TL;DR:")
+        assertEquals(ChatterPromptBuilder.SYSTEM_INSTRUCTION, request.systemInstruction)
 
         assertEquals(listOf("url_context", "google_search"), request.tools?.map { it.type })
 

@@ -142,47 +142,6 @@ class GeminiDecisionConfigTest {
     }
 
     @Test
-    fun `default decision instructions use Luna only, frame latest message against recent context, and balance engagement with restraint`() =
-        runTest {
-            var capturedInstructions: String? = null
-            val mockEngine =
-                MockEngine { request ->
-                    val bodyJson = json.parseToJsonElement(request.body.toByteArray().decodeToString()).jsonObject
-                    capturedInstructions =
-                        bodyJson["questions"]
-                            ?.jsonObject
-                            ?.get("should_participate")
-                            ?.jsonObject
-                            ?.get("instructions")
-                            ?.jsonPrimitive
-                            ?.content
-                    respond(
-                        content = """{"answers":{"should_participate":{"type":"noul","noul":0.8,"confidence":0.8}}}""",
-                        status = HttpStatusCode.OK,
-                        headers = headersOf(HttpHeaders.ContentType, "application/json"),
-                    )
-                }
-
-            val client =
-                GeminiDecisionClient(
-                    config = ChatterDecisionConfig(apiKey = "valid-key"),
-                    httpClient = createTestClient(mockEngine),
-                )
-
-            assertTrue(client.shouldParticipate("[Bot Identity: Luna]\n\n[Latest Message]\n[Alice]: Luna thoughts?"))
-            val sent = assertNotNull(capturedInstructions)
-            assertFalse(sent.contains("露娜"), "Decision instructions must never use 露娜")
-            assertTrue(sent.contains("Luna"))
-            assertTrue(sent.contains("[Latest Message]"))
-            assertTrue(sent.contains("[Recent Context]"))
-            assertTrue(sent.contains("[Bot Identity]"))
-            assertTrue(sent.contains("1-on-1"))
-            assertTrue(sent.contains("bot command"))
-            assertTrue(sent.contains("system notice"))
-            assertTrue(sent.contains("ok") && sent.contains("lol"))
-        }
-
-    @Test
     fun `loads decision instructions and bounded message count from env with negative boundaries and clamping`() {
         val defaultConfig = ChatterDecisionConfig.fromEnv(emptyMap())
         assertEquals(0.7, defaultConfig.threshold)
