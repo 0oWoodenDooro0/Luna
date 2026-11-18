@@ -1,6 +1,6 @@
 # Coding Standards
 
-Judgement calls for Luna services and libraries. Mechanical checks (singleton cache bounds, JVM-safe test names, 600-line test file cap, `*ServiceTest.kt` `assertEquals` ban, `.env.example` parity, plugin isolation) are enforced deterministically by `CodingStandardsTest` and linters—do not duplicate them here.
+Non-mechanical conventions and architectural constraints for Luna services and libraries (mechanical rules are enforced by `CodingStandardsTest` and linters).
 
 ## 1. Daemon State & Transient Failure Eviction
 
@@ -9,8 +9,6 @@ Luna is a long-running Discord bot daemon; non-singleton event/deduplication sto
 - **Evict transient failures**: Transient errors from external APIs (HTTP 429 rate limits, network timeouts, 5xx server errors) must not be cached as terminal failure states (`FAILED`). Remove transient errors from the cache immediately so subsequent user actions or retries can succeed. Terminal states (`DONE`) should remain cached to prevent redundant API invocations.
 
 ## 2. Multi-Project Library Boundaries
-
-Luna is a multi-project Gradle monorepo (`:libs:socialpeek`, `:libs:curtly`, and `:root` bot application).
 
 - **Explicit capability segregation**: When extending a shared library to handle broader input types (such as adding generic web article extraction to `:libs:socialpeek`), do not silently alter existing platform discovery contracts. Keep specialized capability checks (e.g., `SocialPeek.canResolveSocial(url)`) distinct from general fallback checks (`SocialPeek.canResolve(url)`) to avoid unintended scope creep in consuming bot listeners.
 - **Fail-open library callers**: Application services calling library extractors or external APIs should isolate individual failure domains (e.g., wrap in `runCatching` with specific logging) rather than terminating event pipelines.
@@ -27,7 +25,7 @@ Luna is a multi-project Gradle monorepo (`:libs:socialpeek`, `:libs:curtly`, and
 ## 4. Agent Worktree & Pipeline Seam Isolation
 
 - **Decouple parallel vertical slices**: When decomposing pipeline features into parallel agent worktrees (or subagents), vertical slices must not contend on the same monolithic service file. Isolate distinct pipeline stages into independent collaborator components (e.g., `DialogueNoiseFilter`, `ConversationSliceCollector`, `ContextUrlResolver`) or establish explicit interface seams in trunk tickets before scheduling parallel branches.
-- **Collaborator seam extraction**: When extending service pipelines with specialized entity parsing, attachment extraction, media validation, or byte-budget filtering, extract them into dedicated collaborator components with clean companion constants rather than inlining extraction heuristics into service coordinators.
+- **Collaborator seam extraction**: When extending service pipelines with specialized entity parsing, attachment extraction, media validation, or byte-budget filtering, extract them into dedicated collaborator components rather than inlining heuristics into service coordinators.
 - **Retire obsolete seams & keep test stubs out of `src/main`**: When deepening a module and extracting collaborator components, delete obsolete pass-through wrapper methods (Middle Man), vestigial compatibility parameters (`Any? = null`), and duplicate fallback branches on the coordinator, migrating tests directly to the deep module's public interface. Place test-only seam stubs/fixtures in `src/test`, never in production `src/main` seam files.
 
 ## 5. Test Boundaries & Observability

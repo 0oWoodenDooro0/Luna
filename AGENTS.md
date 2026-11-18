@@ -1,25 +1,17 @@
 # Agent Instructions
 
-## Modules & Navigation
-
-- `src/main/kotlin/luna/`: Discord bot host (`plugin/`), shared `core/` & `core/ai/`, and plugins (`chatter/`, `summarizer/`, `preview/`, `curtly/`, `mcp/`, `undercover/`). Explore symbols with `rg -n` instead of reading whole files.
-- `libs/socialpeek/`: Social post and video metadata resolver library.
-- `libs/config/`: Shared dotenv/env parsing, secret masking, and schema validation.
-- `libs/mcp-data/`: Shared SQLite persistence for MCP client credentials and webhooks.
-- `mcp-server/`: Standalone Gemini MCP server decoupled from Discord bot runtime.
-- `src/test/kotlin/` (`*Test.kt`): Split new test surfaces into focused files by concern rather than growing existing suites past 600 lines.
-
 ## Reference Pointers
 
-- **Issues & specs**: GitHub Issues workflow -> [`docs/agents/issue-tracker.md`](docs/agents/issue-tracker.md); triage labels -> [`docs/agents/triage-labels.md`](docs/agents/triage-labels.md).
-- **Domain & ADRs**: Glossary and architecture decisions -> [`docs/agents/domain.md`](docs/agents/domain.md).
-- **Coding standards**: Reviewers read [`CODING_STANDARDS.md`](CODING_STANDARDS.md). Implementers enforce mechanical rules (bounded caches, assertion shapes, JVM-safe test names, 600-line test cap, Dockerfile/env parity, plugin isolation) by running `./gradlew test --tests "luna.core.CodingStandardsTest" --console=plain -q` — skip reading `CODING_STANDARDS.md` and `CodingStandardsTest.kt`.
+- **Coding standards**: Read [`CODING_STANDARDS.md`](CODING_STANDARDS.md) when modifying or reviewing services, shared libraries, or tests. Verify mechanical rules by running `./gradlew test --tests "luna.core.CodingStandardsTest" --console=plain -q` (skip reading `CodingStandardsTest.kt`).
+- **Domain & ADRs**: Read [`GLOSSARY.md`](GLOSSARY.md) and relevant [`docs/adr/`](docs/adr/) before naming or designing domain changes ([`docs/agents/domain.md`](docs/agents/domain.md)).
+- **Issues & triage**: GitHub Issues workflow -> [`docs/agents/issue-tracker.md`](docs/agents/issue-tracker.md); triage labels -> [`docs/agents/triage-labels.md`](docs/agents/triage-labels.md).
 - **Configuration**: Unified env architecture -> [`docs/architecture/configuration.md`](docs/architecture/configuration.md).
 - **AI Trace debugging**: Daily JSONL trace schema & `jq`/`rg` queries -> [`docs/architecture/ai-tracing.md`](docs/architecture/ai-tracing.md).
-- **Dependencies & Kord**: Inspect `build.gradle.kts`, source definitions, or [`docs/kord-recipes.md`](docs/kord-recipes.md) instead of decompiling JARs.
+- **Kord**: `0.19.0-SNAPSHOT` constraints & API recipes -> [`docs/kord-recipes.md`](docs/kord-recipes.md).
+- **Code style**: Keep new code and comments consistent with the surrounding codebase.
 
 ## Verification
 
-- **Inner loop**: Run only targeted tests with `--console=plain -q` (e.g. `./gradlew test --tests "luna.summarizer.*" --console=plain -q`; failed test names and exceptions still print under `-q`); locate symbols with `rg -n` and bounded `view_file` ranges.
+- **Inner loop**: Run targeted tests with `--console=plain -q` (e.g. `./gradlew test --tests "luna.summarizer.*" --console=plain -q`; failed test names and exceptions still print under `-q`).
 - **Pre-review / pre-PR**: Run `./gradlew formatKotlin && ./gradlew check --console=plain -q` across all modules (`.githooks/pre-commit` runs `lintKotlin` + `CodingStandardsTest`; `.githooks/pre-push` runs `check`).
 - **CI parity**: Run `docker build -t luna:ci-test .` strictly as the final pre-PR/pre-merge check.
