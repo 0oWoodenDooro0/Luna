@@ -113,6 +113,35 @@ class ChatterEmojiVisionGuardrailsTest {
             ?.content
             .orEmpty()
 
+    private fun createChatterService(
+        httpClient: HttpClient,
+        catalog: ChatterEmojiCatalog,
+    ): ChatterService {
+        val cooldownCache = BoundedChannelCooldownCache(timeSource = { 100_000L })
+        return ChatterService(
+            filter = ChatterNoiseFilter(cooldownCache = cooldownCache),
+            decisionClient =
+                GeminiDecisionClient(
+                    config = ChatterDecisionConfig(apiKey = "secret-key", threshold = 0.70),
+                    httpClient = httpClient,
+                ),
+            chatterGenerator =
+                ChatterGenerator(
+                    config = ChatterConfig(apiKey = "secret-key", emojiVisionModel = "gemini-2.5-flash"),
+                    httpClient = httpClient,
+                ),
+            cooldownCache = cooldownCache,
+            historyFetcher = { _, _ -> emptyList() },
+            messageSender = { _, _ -> mockk(relaxed = true) },
+            contextCollector = ChatterContextCollector(ChatterNoiseFilter(), peekResolver = { null }),
+            burstCoordinator = BoundedChannelBurstCoordinator(debounceMs = 1L, mentionDebounceMs = 1L, maxDebounceMs = 10L),
+            randomProvider = { _, _ -> 0L },
+            afterMessagesFetcher = { _, _ -> emptyList() },
+            personaStateProvider = fixedPersonaProvider(),
+            emojiCatalog = catalog,
+        )
+    }
+
     private fun extractInteractionModel(body: String): String =
         json
             .parseToJsonElement(body)
@@ -228,31 +257,7 @@ class ChatterEmojiVisionGuardrailsTest {
                         clock = clock,
                     )
                 val catalog = DefaultChatterEmojiCatalog(meaningRepository = repo, visionResolver = visionResolver, clock = clock)
-                val cooldownCache = BoundedChannelCooldownCache(timeSource = { 100_000L })
-
-                val service =
-                    ChatterService(
-                        filter = ChatterNoiseFilter(cooldownCache = cooldownCache),
-                        decisionClient =
-                            GeminiDecisionClient(
-                                config = ChatterDecisionConfig(apiKey = "secret-key", threshold = 0.70),
-                                httpClient = httpClient,
-                            ),
-                        chatterGenerator =
-                            ChatterGenerator(
-                                config = ChatterConfig(apiKey = "secret-key", emojiVisionModel = "gemini-2.5-flash"),
-                                httpClient = httpClient,
-                            ),
-                        cooldownCache = cooldownCache,
-                        historyFetcher = { _, _ -> emptyList() },
-                        messageSender = { _, _ -> mockk(relaxed = true) },
-                        contextCollector = ChatterContextCollector(ChatterNoiseFilter(), peekResolver = { null }),
-                        burstCoordinator = BoundedChannelBurstCoordinator(debounceMs = 1L, mentionDebounceMs = 1L, maxDebounceMs = 10L),
-                        randomProvider = { _, _ -> 0L },
-                        afterMessagesFetcher = { _, _ -> emptyList() },
-                        personaStateProvider = fixedPersonaProvider(),
-                        emojiCatalog = catalog,
-                    )
+                val service = createChatterService(httpClient, catalog)
 
                 val mockGuild =
                     mockk<Guild>(relaxed = true).apply {
@@ -394,29 +399,7 @@ class ChatterEmojiVisionGuardrailsTest {
                         roundTimeoutMs = 150L,
                     )
                 val catalog = DefaultChatterEmojiCatalog(meaningRepository = repo, visionResolver = timeoutResolver, clock = clock)
-                val service =
-                    ChatterService(
-                        filter = ChatterNoiseFilter(cooldownCache = BoundedChannelCooldownCache(timeSource = { 100_000L })),
-                        decisionClient =
-                            GeminiDecisionClient(
-                                config = ChatterDecisionConfig(apiKey = "secret-key", threshold = 0.70),
-                                httpClient = slowClient,
-                            ),
-                        chatterGenerator =
-                            ChatterGenerator(
-                                config = ChatterConfig(apiKey = "secret-key", emojiVisionModel = "gemini-2.5-flash"),
-                                httpClient = slowClient,
-                            ),
-                        cooldownCache = BoundedChannelCooldownCache(timeSource = { 100_000L }),
-                        historyFetcher = { _, _ -> emptyList() },
-                        messageSender = { _, _ -> mockk(relaxed = true) },
-                        contextCollector = ChatterContextCollector(ChatterNoiseFilter(), peekResolver = { null }),
-                        burstCoordinator = BoundedChannelBurstCoordinator(debounceMs = 1L, mentionDebounceMs = 1L, maxDebounceMs = 10L),
-                        randomProvider = { _, _ -> 0L },
-                        afterMessagesFetcher = { _, _ -> emptyList() },
-                        personaStateProvider = fixedPersonaProvider(),
-                        emojiCatalog = catalog,
-                    )
+                val service = createChatterService(slowClient, catalog)
 
                 val mockGuild =
                     mockk<Guild>(relaxed = true).apply {
@@ -485,5 +468,104 @@ class ChatterEmojiVisionGuardrailsTest {
 
             assertEquals(1, calls.get(), "Concurrent calls for the same emoji_id must deduplicate to 1 vision request")
             assertEquals("共用語意", repo.findById("9901")?.meaning)
+        }
+
+    @Test
+    fun `single turn with uncached transcript and guild pool emojis enforces single combined round timeout without sequential retries`() =
+        runTest {
+            val clock = MutableClock(Instant.parse("2026-11-19T10:00:00Z"))
+            val db = openDatabase("single-turn-budget.db")
+            val repo = ExposedCustomEmojiMeaningRepository(database = db, clock = clock)
+
+            val visionCalls = AtomicInteger(0)
+            val capturedReplyPrompts = mutableListOf<String>()
+            val slowEngine =
+                MockEngine { request ->
+                    val url = request.url.toString()
+                    val body = request.body.toByteArray().decodeToString()
+                    when {
+                        url.contains("/v1beta/decisions") -> {
+                            respond(
+                                content =
+                                    """{"model":"gemini-decision-1","answers":{"should_participate":{"type":"noul","noul":0.95,"confidence":0.95}}}""",
+                                status = HttpStatusCode.OK,
+                                headers = headersOf(HttpHeaders.ContentType, "application/json"),
+                            )
+                        }
+
+                        url.contains("/v1beta/interactions") && extractInteractionModel(body) == "gemini-2.5-flash" -> {
+                            visionCalls.incrementAndGet()
+                            delay(1_000)
+                            respond(
+                                content = """{"id":"vis-late","status":"completed","finish_reason":"STOP","output_text":"太慢了"}""",
+                                status = HttpStatusCode.OK,
+                                headers = headersOf(HttpHeaders.ContentType, "application/json"),
+                            )
+                        }
+
+                        else -> {
+                            capturedReplyPrompts += extractInteractionPromptText(body)
+                            respond(
+                                content = """{"id":"int-reply","status":"completed","finish_reason":"STOP","output_text":"照常回覆"}""",
+                                status = HttpStatusCode.OK,
+                                headers = headersOf(HttpHeaders.ContentType, "application/json"),
+                            )
+                        }
+                    }
+                }
+
+            val client = createClient(slowEngine)
+            val resolver =
+                CustomEmojiVisionResolver(
+                    meaningRepository = repo,
+                    visionModel = "gemini-2.5-flash",
+                    interactionClient = GeminiInteractionClient(httpClient = client),
+                    apiKey = "secret-key",
+                    clock = clock,
+                    roundTimeoutMs = 200L,
+                )
+            val catalog = DefaultChatterEmojiCatalog(meaningRepository = repo, visionResolver = resolver, clock = clock)
+            val service = createChatterService(client, catalog)
+
+            val mockGuild =
+                mockk<Guild>(relaxed = true).apply {
+                    every { id } returns Snowflake(4010L)
+                    every { emojis } returns flowOf(guildEmoji(8102L, "guild_slow"))
+                }
+            val message =
+                ChatterAiTraceTestSupport.createMockMessage(
+                    id = 2010L,
+                    channelId = 3010L,
+                    content = "哈囉 <:ext_slow:8101>",
+                )
+            coEvery { message.getGuildOrNull() } returns mockGuild
+
+            val startedAtNanos = System.nanoTime()
+            assertTrue(
+                service.handleMessage(message),
+                "Single turn with uncached transcript and guild pool emojis must degrade gracefully",
+            )
+            val elapsedMs = (System.nanoTime() - startedAtNanos) / 1_000_000L
+
+            assertEquals(
+                1,
+                visionCalls.get(),
+                "Expected only the decision-stage uncached emoji to invoke vision before the 200ms round budget was exhausted",
+            )
+            assertTrue(
+                elapsedMs < 350L,
+                "Expected turn to stay bounded within a single 200ms round timeout without chaining sequential timeouts, took ${elapsedMs}ms",
+            )
+            val replyPrompt = capturedReplyPrompts.single()
+            assertContains(replyPrompt, "<:ext_slow:8101>")
+            assertContains(replyPrompt, "<:guild_slow:8102>")
+            assertFalse(
+                replyPrompt.contains("<:ext_slow:8101>("),
+                "Timed-out transcript emoji must degrade to bare token",
+            )
+            assertFalse(
+                replyPrompt.contains("<:guild_slow:8102>："),
+                "Skipped guild pool emoji after budget exhaustion must degrade to bare token",
+            )
         }
 }

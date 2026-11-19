@@ -31,6 +31,7 @@ import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import luna.chatter.BoundedChannelBurstCoordinator
 import luna.chatter.BoundedChannelCooldownCache
@@ -216,7 +217,10 @@ class ChatterEmojiPreScanBoundariesTest {
             val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
             try {
                 val job = service.register(mockKord, scope = scope)
-                delay(150L)
+                val subscribeDeadline = System.currentTimeMillis() + 5_000L
+                while (eventsFlow.subscriptionCount.value == 0 && System.currentTimeMillis() < subscribeDeadline) {
+                    withContext(Dispatchers.Default) { delay(10L) }
+                }
 
                 val updateEvent =
                     mockk<EmojisUpdateEvent>(relaxed = true) {

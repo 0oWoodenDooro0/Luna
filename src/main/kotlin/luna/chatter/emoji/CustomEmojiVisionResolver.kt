@@ -63,7 +63,7 @@ class CustomEmojiVisionResolver(
     private val apiKey: String = "",
     private val clock: Clock = Clock.systemUTC(),
     private val maxConcurrency: Int = DEFAULT_MAX_CONCURRENCY,
-    private val roundTimeoutMs: Long = DEFAULT_ROUND_TIMEOUT_MS,
+    val roundTimeoutMs: Long = DEFAULT_ROUND_TIMEOUT_MS,
     private val failureCooldownMs: Long = DEFAULT_FAILURE_COOLDOWN_MS,
 ) {
     private val logger = LoggerFactory.getLogger(CustomEmojiVisionResolver::class.java)
@@ -199,6 +199,14 @@ class CustomEmojiVisionResolver(
             val currentRecord =
                 runCatching {
                     dbMutex.withLock { meaningRepository.findById(target.id) }
+                }.onFailure { e ->
+                    if (e is CancellationException) throw e
+                    logger.warn(
+                        "Failed to re-check Custom Emoji Meaning cache for {} ({}) after acquiring semaphore; continuing with vision lookup: {}",
+                        target.id,
+                        target.name,
+                        e.message,
+                    )
                 }.getOrNull()
             val nowMs = clock.millis()
             if (currentRecord != null) {

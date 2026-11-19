@@ -22,7 +22,9 @@ import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.launch
 import luna.chatter.emoji.ChatterEmojiCatalog
+import luna.chatter.emoji.EmojiVisionTurnBudget
 import luna.chatter.emoji.NoOpChatterEmojiCatalog
+import luna.chatter.emoji.PreparedPromptEmojis
 import luna.core.ai.AiTraceDiscordContext
 import luna.core.ai.AiTraceFailureCategory
 import luna.core.ai.AiTraceOutcome
@@ -317,6 +319,7 @@ open class ChatterService(
                 currentCoroutineContext().ensureActive()
 
                 val allRaw = previousMessages + message
+                val emojiRoundBudget = EmojiVisionTurnBudget()
 
                 // 3. Participation evaluation: bypass for direct bot mentions
                 if (!isDirectMention) {
@@ -343,7 +346,11 @@ open class ChatterService(
                         return@coroutineScope false
                     }
 
-                    val annotatedDecisionTranscript = emojiCatalog.prepareTranscript(decisionContext.transcript)
+                    val annotatedDecisionTranscript =
+                        emojiCatalog.prepareTranscript(
+                            transcript = decisionContext.transcript,
+                            roundBudget = emojiRoundBudget,
+                        )
                     currentCoroutineContext().ensureActive()
                     val annotatedDecisionContext = decisionContext.copy(transcript = annotatedDecisionTranscript)
 
@@ -381,6 +388,7 @@ open class ChatterService(
                                 readingJob = readingJob,
                                 session = session,
                                 markDispatching = markDispatching,
+                                emojiRoundBudget = emojiRoundBudget,
                             )
                         }
 
@@ -447,32 +455,21 @@ open class ChatterService(
                     return@coroutineScope false
                 }
 
-                val guildId = runCatching { message.data.guildId.value }.getOrNull()
-                val availableGuildEmojis =
-                    resolveGuildEmojis(
+                val preparedEmojis =
+                    prepareGuildPromptEmojis(
                         message = message,
+                        transcript = replyContext.transcript,
                         fallbackDescription = "degrading to emoji-free text reply",
+                        roundBudget = emojiRoundBudget,
                     )
-                currentCoroutineContext().ensureActive()
-
-                val guildEmojis =
-                    emojiCatalog.prepareGuildEmojiPool(
-                        guildId = guildId,
-                        availableGuildEmojis = availableGuildEmojis,
-                        limit = ChatterPromptBuilder.MAX_PROMPT_GUILD_EMOJIS,
-                    )
-                currentCoroutineContext().ensureActive()
-
-                val annotatedTranscript = emojiCatalog.prepareTranscript(replyContext.transcript)
-                currentCoroutineContext().ensureActive()
 
                 val chatterInput =
                     replyContext
                         .toChatterInput(isDirectMention = isDirectMention)
                         .copy(
-                            transcript = annotatedTranscript,
+                            transcript = preparedEmojis.transcript,
                             personaState = personaState,
-                            guildEmojis = guildEmojis,
+                            guildEmojis = preparedEmojis.guildEmojis,
                         )
 
                 // Calls chatterGenerator.generateReply(chatterInput) while reading simulation runs concurrently
@@ -502,7 +499,7 @@ open class ChatterService(
                     return@coroutineScope false
                 }
 
-                val allowedCustomEmojiIds = guildEmojis.map { it.id.toString() }.toSet()
+                val allowedCustomEmojiIds = preparedEmojis.guildEmojis.map { it.id.toString() }.toSet()
                 val sanitizedReply = EmojiSanitizer.stripEmojis(replyText, allowedCustomEmojiIds = allowedCustomEmojiIds).trim()
                 val segments = ChatterPromptBuilder.splitReplySegments(sanitizedReply)
                 if (segments.isEmpty()) {
@@ -705,6 +702,45 @@ open class ChatterService(
         return guildEmojis
     }
 
+    private suspend fun prepareGuildPromptEmojis(
+        message: Message,
+        transcript: String?,
+        fallbackDescription: String,
+        roundBudget: EmojiVisionTurnBudget,
+    ): PreparedPromptEmojis {
+        val guildId = runCatching { message.data.guildId.value }.getOrNull()
+        val availableGuildEmojis =
+            resolveGuildEmojis(
+                message = message,
+                fallbackDescription = fallbackDescription,
+            )
+        currentCoroutineContext().ensureActive()
+
+        val prepared =
+            if (transcript != null) {
+                emojiCatalog.preparePromptEmojis(
+                    transcript = transcript,
+                    guildId = guildId,
+                    availableGuildEmojis = availableGuildEmojis,
+                    limit = ChatterPromptBuilder.MAX_PROMPT_GUILD_EMOJIS,
+                    roundBudget = roundBudget,
+                )
+            } else {
+                PreparedPromptEmojis(
+                    transcript = "",
+                    guildEmojis =
+                        emojiCatalog.prepareGuildEmojiPool(
+                            guildId = guildId,
+                            availableGuildEmojis = availableGuildEmojis,
+                            limit = ChatterPromptBuilder.MAX_PROMPT_GUILD_EMOJIS,
+                            roundBudget = roundBudget,
+                        ),
+                )
+            }
+        currentCoroutineContext().ensureActive()
+        return prepared
+    }
+
     private suspend fun handleSilentReactionPath(
         message: Message,
         decisionContext: ChatterDecisionContext,
@@ -716,22 +752,15 @@ open class ChatterService(
         readingJob: Job,
         session: AiTraceSession,
         markDispatching: () -> Boolean,
+        emojiRoundBudget: EmojiVisionTurnBudget,
     ): Boolean {
-        val guildId = runCatching { message.data.guildId.value }.getOrNull()
-        val availableGuildEmojis =
-            resolveGuildEmojis(
+        val preparedEmojis =
+            prepareGuildPromptEmojis(
                 message = message,
+                transcript = null,
                 fallbackDescription = "continuing with Unicode reactions only",
+                roundBudget = emojiRoundBudget,
             )
-        currentCoroutineContext().ensureActive()
-
-        val guildEmojis =
-            emojiCatalog.prepareGuildEmojiPool(
-                guildId = guildId,
-                availableGuildEmojis = availableGuildEmojis,
-                limit = ChatterPromptBuilder.MAX_PROMPT_GUILD_EMOJIS,
-            )
-        currentCoroutineContext().ensureActive()
 
         val reactionInput =
             ChatterInput(
@@ -739,7 +768,7 @@ open class ChatterService(
                 imageAttachments = decisionContext.images,
                 isDirectMention = false,
                 personaState = personaState,
-                guildEmojis = guildEmojis,
+                guildEmojis = preparedEmojis.guildEmojis,
             )
 
         val selectedEmoji =
@@ -779,7 +808,7 @@ open class ChatterService(
             return false
         }
 
-        val reactionEmoji = ChatterReactionEmojiValidator.toReactionEmoji(selectedEmoji, guildEmojis)
+        val reactionEmoji = ChatterReactionEmojiValidator.toReactionEmoji(selectedEmoji, preparedEmojis.guildEmojis)
         if (reactionEmoji == null) {
             logger.warn(
                 "Silent reaction emoji '{}' failed post-selection Discord conversion for message {}",

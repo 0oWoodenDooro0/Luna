@@ -7,6 +7,39 @@ import luna.chatter.ChatterPromptBuilder
 import luna.chatter.GuildCustomEmoji
 import org.slf4j.LoggerFactory
 import java.time.Clock
+import java.util.concurrent.ConcurrentHashMap
+
+/**
+ * Tracks a single conversation turn's shared vision-resolution budget across pipeline stages
+ * (`Participation Decision`, reply generation, and `Silent Reaction Path`) so a turn never
+ * chains sequential round timeouts or retries already-attempted emojis.
+ */
+class EmojiVisionTurnBudget(
+    private val startedAtNanos: Long = System.nanoTime(),
+) {
+    private val attemptedEmojiIds: MutableSet<String> = ConcurrentHashMap.newKeySet()
+
+    fun remainingTimeoutMs(roundTimeoutMs: Long): Long {
+        if (roundTimeoutMs <= 0L) return 0L
+        val elapsedMs = ((System.nanoTime() - startedAtNanos) / 1_000_000L).coerceAtLeast(0L)
+        return (roundTimeoutMs - elapsedMs).coerceAtLeast(0L)
+    }
+
+    fun filterUnattempted(targets: List<EmojiVisionRequest>): List<EmojiVisionRequest> = targets.filter { it.id !in attemptedEmojiIds }
+
+    fun markAttempted(targets: List<EmojiVisionRequest>) {
+        targets.forEach { attemptedEmojiIds.add(it.id) }
+    }
+}
+
+/**
+ * Combined result of preparing both the annotated dialogue transcript and the ranked guild emoji pool
+ * for a single turn.
+ */
+data class PreparedPromptEmojis(
+    val transcript: String,
+    val guildEmojis: List<GuildCustomEmoji>,
+)
 
 /**
  * Seam coordinating custom emoji semantic enrichment and guild selection pool preparation
@@ -16,13 +49,39 @@ import java.time.Clock
  * plug in behind this interface without requiring structural changes to [luna.chatter.ChatterService].
  */
 interface ChatterEmojiCatalog {
-    suspend fun prepareTranscript(transcript: String): String = transcript
+    suspend fun prepareTranscript(
+        transcript: String,
+        roundBudget: EmojiVisionTurnBudget? = null,
+    ): String = transcript
 
     suspend fun prepareGuildEmojiPool(
         guildId: Snowflake?,
         availableGuildEmojis: List<GuildCustomEmoji>,
         limit: Int = ChatterPromptBuilder.MAX_PROMPT_GUILD_EMOJIS,
+        roundBudget: EmojiVisionTurnBudget? = null,
     ): List<GuildCustomEmoji> = availableGuildEmojis.take(limit.coerceAtLeast(0))
+
+    suspend fun preparePromptEmojis(
+        transcript: String,
+        guildId: Snowflake?,
+        availableGuildEmojis: List<GuildCustomEmoji>,
+        limit: Int = ChatterPromptBuilder.MAX_PROMPT_GUILD_EMOJIS,
+        roundBudget: EmojiVisionTurnBudget? = null,
+    ): PreparedPromptEmojis {
+        val preparedPool =
+            prepareGuildEmojiPool(
+                guildId = guildId,
+                availableGuildEmojis = availableGuildEmojis,
+                limit = limit,
+                roundBudget = roundBudget,
+            )
+        val preparedTranscript =
+            prepareTranscript(
+                transcript = transcript,
+                roundBudget = roundBudget,
+            )
+        return PreparedPromptEmojis(transcript = preparedTranscript, guildEmojis = preparedPool)
+    }
 
     suspend fun recordMessageUsage(
         guildId: Snowflake?,
@@ -57,33 +116,15 @@ class DefaultChatterEmojiCatalog(
 ) : ChatterEmojiCatalog {
     private val logger = LoggerFactory.getLogger(DefaultChatterEmojiCatalog::class.java)
 
-    override suspend fun prepareTranscript(transcript: String): String {
-        val tokens = ChatterEmojiTranscriptAnnotator.extractEmojiTokens(transcript)
-        if (tokens.isEmpty()) return transcript
+    override suspend fun prepareTranscript(
+        transcript: String,
+        roundBudget: EmojiVisionTurnBudget?,
+    ): String {
+        val uniqueTargets = extractTranscriptTargets(transcript)
+        if (uniqueTargets.isEmpty()) return transcript
 
-        val uniqueTargets =
-            tokens
-                .associateBy { it.id }
-                .values
-                .map { token ->
-                    EmojiVisionRequest(
-                        id = token.id,
-                        name = token.name,
-                        isAnimated = token.isAnimated,
-                    )
-                }
-        resolveOrSyncMetadata(uniqueTargets, contextLabel = "transcript")
-
-        val meaningsById =
-            runCatching {
-                meaningRepository.findMeaningMap(uniqueTargets.map { it.id })
-            }.onFailure { e ->
-                logger.warn(
-                    "Failed to query cached Custom Emoji Meaning for transcript annotation; degrading to raw tokens: {}",
-                    e.message,
-                )
-            }.getOrDefault(emptyMap())
-
+        resolveOrSyncMetadata(uniqueTargets, contextLabel = "transcript", roundBudget = roundBudget)
+        val meaningsById = queryMeaningMap(uniqueTargets.map { it.id }, contextLabel = "transcript")
         return ChatterEmojiTranscriptAnnotator.annotate(transcript, meaningsById)
     }
 
@@ -91,13 +132,96 @@ class DefaultChatterEmojiCatalog(
         guildId: Snowflake?,
         availableGuildEmojis: List<GuildCustomEmoji>,
         limit: Int,
+        roundBudget: EmojiVisionTurnBudget?,
+    ): List<GuildCustomEmoji> {
+        val bounded = selectBoundedGuildEmojis(guildId, availableGuildEmojis, limit)
+        if (bounded.isEmpty()) return emptyList()
+
+        val targets = toVisionTargets(bounded)
+        resolveOrSyncMetadata(targets, contextLabel = "guild $guildId", roundBudget = roundBudget)
+        val meaningsById = queryMeaningMap(targets.map { it.id }, contextLabel = "guild $guildId")
+        return applyMeanings(bounded, meaningsById)
+    }
+
+    override suspend fun preparePromptEmojis(
+        transcript: String,
+        guildId: Snowflake?,
+        availableGuildEmojis: List<GuildCustomEmoji>,
+        limit: Int,
+        roundBudget: EmojiVisionTurnBudget?,
+    ): PreparedPromptEmojis {
+        val bounded = selectBoundedGuildEmojis(guildId, availableGuildEmojis, limit)
+        val transcriptTargets = extractTranscriptTargets(transcript)
+        val poolTargets = toVisionTargets(bounded)
+        val combinedTargets = (transcriptTargets + poolTargets).associateBy { it.id }.values.toList()
+
+        resolveOrSyncMetadata(
+            targets = combinedTargets,
+            contextLabel = "turn prompt (guild $guildId)",
+            roundBudget = roundBudget,
+        )
+
+        val meaningsById =
+            if (combinedTargets.isEmpty()) {
+                emptyMap()
+            } else {
+                queryMeaningMap(combinedTargets.map { it.id }, contextLabel = "turn prompt (guild $guildId)")
+            }
+
+        val annotatedTranscript =
+            if (transcriptTargets.isEmpty()) {
+                transcript
+            } else {
+                ChatterEmojiTranscriptAnnotator.annotate(transcript, meaningsById)
+            }
+        return PreparedPromptEmojis(
+            transcript = annotatedTranscript,
+            guildEmojis = applyMeanings(bounded, meaningsById),
+        )
+    }
+
+    private fun extractTranscriptTargets(transcript: String): List<EmojiVisionRequest> =
+        ChatterEmojiTranscriptAnnotator
+            .extractEmojiTokens(transcript)
+            .associateBy { it.id }
+            .values
+            .map { token ->
+                EmojiVisionRequest(
+                    id = token.id,
+                    name = token.name,
+                    isAnimated = token.isAnimated,
+                )
+            }
+
+    private fun toVisionTargets(emojis: List<GuildCustomEmoji>): List<EmojiVisionRequest> =
+        emojis.map { emoji ->
+            EmojiVisionRequest(
+                id = emoji.id.toString(),
+                name = emoji.name,
+                isAnimated = emoji.isAnimated,
+            )
+        }
+
+    private fun applyMeanings(
+        emojis: List<GuildCustomEmoji>,
+        meaningsById: Map<String, String>,
+    ): List<GuildCustomEmoji> =
+        emojis.map { emoji ->
+            val meaning = meaningsById[emoji.id.toString()]
+            if (meaning != null) emoji.copy(meaning = meaning) else emoji
+        }
+
+    private suspend fun selectBoundedGuildEmojis(
+        guildId: Snowflake?,
+        availableGuildEmojis: List<GuildCustomEmoji>,
+        limit: Int,
     ): List<GuildCustomEmoji> {
         val normalizedLimit = limit.coerceAtLeast(0)
         if (normalizedLimit == 0 || availableGuildEmojis.isEmpty()) return emptyList()
 
-        val usageRepo = usageRepository
+        val usageRepo = usageRepository ?: return availableGuildEmojis.take(normalizedLimit)
         val usageById =
-            if (guildId != null && usageRepo != null) {
+            if (guildId != null) {
                 runCatching {
                     usageRepo.findRollingUsageCounts(guildId.toString())
                 }.onFailure { e ->
@@ -111,44 +235,27 @@ class DefaultChatterEmojiCatalog(
                 emptyMap()
             }
 
-        val bounded =
-            if (usageRepository != null) {
-                availableGuildEmojis
-                    .sortedWith(
-                        compareByDescending<GuildCustomEmoji> { usageById[it.id.toString()] ?: 0L }
-                            .thenBy { it.name }
-                            .thenBy { it.id.value },
-                    ).take(normalizedLimit)
-            } else {
-                availableGuildEmojis.take(normalizedLimit)
-            }
-
-        val targets =
-            bounded.map { emoji ->
-                EmojiVisionRequest(
-                    id = emoji.id.toString(),
-                    name = emoji.name,
-                    isAnimated = emoji.isAnimated,
-                )
-            }
-        resolveOrSyncMetadata(targets, contextLabel = "guild $guildId")
-
-        val meaningsById =
-            runCatching {
-                meaningRepository.findMeaningMap(bounded.map { it.id.toString() }.distinct())
-            }.onFailure { e ->
-                logger.warn(
-                    "Failed to query cached Custom Emoji Meaning for guild {}; degrading to bare emoji mentions: {}",
-                    guildId,
-                    e.message,
-                )
-            }.getOrDefault(emptyMap())
-
-        return bounded.map { emoji ->
-            val meaning = meaningsById[emoji.id.toString()]
-            if (meaning != null) emoji.copy(meaning = meaning) else emoji
-        }
+        return availableGuildEmojis
+            .sortedWith(
+                compareByDescending<GuildCustomEmoji> { usageById[it.id.toString()] ?: 0L }
+                    .thenBy { it.name }
+                    .thenBy { it.id.value },
+            ).take(normalizedLimit)
     }
+
+    private suspend fun queryMeaningMap(
+        emojiIds: List<String>,
+        contextLabel: String,
+    ): Map<String, String> =
+        runCatching {
+            meaningRepository.findMeaningMap(emojiIds.distinct())
+        }.onFailure { e ->
+            logger.warn(
+                "Failed to query cached Custom Emoji Meaning for {}; degrading to bare emoji tokens: {}",
+                contextLabel,
+                e.message,
+            )
+        }.getOrDefault(emptyMap())
 
     override suspend fun recordMessageUsage(
         guildId: Snowflake?,
@@ -214,28 +321,47 @@ class DefaultChatterEmojiCatalog(
         targets: List<EmojiVisionRequest>,
         contextLabel: String,
         useRoundTimeout: Boolean = true,
+        roundBudget: EmojiVisionTurnBudget? = null,
     ) {
         if (targets.isEmpty()) return
-        if (visionResolver != null) {
-            try {
-                if (useRoundTimeout) {
-                    visionResolver.resolveMissing(targets)
+        val resolver = visionResolver
+        if (resolver != null) {
+            val unattempted = roundBudget?.filterUnattempted(targets) ?: targets
+            val effectiveTimeoutMs =
+                if (!useRoundTimeout) {
+                    null
+                } else if (roundBudget != null) {
+                    roundBudget.remainingTimeoutMs(resolver.roundTimeoutMs)
                 } else {
-                    visionResolver.resolveMissing(targets, timeoutMs = null)
+                    resolver.roundTimeoutMs
                 }
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: Exception) {
+
+            if (unattempted.isNotEmpty() && (effectiveTimeoutMs == null || effectiveTimeoutMs > 0L)) {
+                roundBudget?.markAttempted(unattempted)
+                try {
+                    resolver.resolveMissing(unattempted, timeoutMs = effectiveTimeoutMs)
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    logger.warn(
+                        "Custom Emoji Meaning vision resolution failed for {}; degrading gracefully: {}",
+                        contextLabel,
+                        e.message,
+                    )
+                }
+                return
+            }
+
+            if (unattempted.isNotEmpty() && effectiveTimeoutMs != null && effectiveTimeoutMs <= 0L) {
                 logger.warn(
-                    "Custom Emoji Meaning vision resolution failed for {}; degrading gracefully: {}",
+                    "Skipping on-demand Custom Emoji Meaning vision resolution for {} ({} emoji(s)); turn round budget exhausted",
                     contextLabel,
-                    e.message,
+                    unattempted.size,
                 )
             }
-            return
         }
 
-        // Even when vision resolution is not wired, keep observed emoji names/animation metadata fresh.
+        // Sync observed emoji names/animation metadata for already-cached rows when vision is not invoked.
         runCatching {
             val existingById = meaningRepository.findByIds(targets.map { it.id }.distinct())
             for (target in targets) {
