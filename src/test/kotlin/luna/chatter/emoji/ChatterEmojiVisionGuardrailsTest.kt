@@ -267,7 +267,7 @@ class ChatterEmojiVisionGuardrailsTest {
 
                 val msg1 = ChatterAiTraceTestSupport.createMockMessage(id = 2005L, channelId = 3005L, content = "<:sigh:1005> 唉")
                 coEvery { msg1.getGuildOrNull() } returns mockGuild
-                assertTrue(service.handleMessage(msg1))
+                assertTrue(service.handleMessage(msg1), "Expected first message turn to complete despite vision failure")
                 assertEquals(1, visionCalls.get())
                 val failedRecord = repo.findById("1005")
                 assertNotNull(failedRecord)
@@ -283,13 +283,13 @@ class ChatterEmojiVisionGuardrailsTest {
                 clock.advanceBySeconds(1800)
                 val msg2 = ChatterAiTraceTestSupport.createMockMessage(id = 2006L, channelId = 3006L, content = "<:sigh:1005> 唉")
                 coEvery { msg2.getGuildOrNull() } returns mockGuild
-                assertTrue(service.handleMessage(msg2))
+                assertTrue(service.handleMessage(msg2), "Expected second message turn to complete during cooldown")
                 assertEquals(1, visionCalls.get(), "Cooldown window must suppress vision retries")
 
                 clock.advanceBySeconds(1860)
                 val msg3 = ChatterAiTraceTestSupport.createMockMessage(id = 2007L, channelId = 3007L, content = "<:sigh:1005> 唉")
                 coEvery { msg3.getGuildOrNull() } returns mockGuild
-                assertTrue(service.handleMessage(msg3))
+                assertTrue(service.handleMessage(msg3), "Expected third message turn to complete after cooldown expiry")
                 assertEquals(2, visionCalls.get(), "Vision retries must resume after 1-hour cooldown expires")
                 assertEquals("無奈嘆氣", repo.findById("1005")?.meaning)
                 assertNull(repo.findById("1005")?.failedUntil)

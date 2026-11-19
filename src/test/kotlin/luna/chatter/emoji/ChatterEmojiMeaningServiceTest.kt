@@ -346,7 +346,10 @@ class ChatterEmojiMeaningServiceTest {
             val reactionSystemInstruction = extractInteractionSystemInstruction(reactionBody)
             assertContains(reactionSystemInstruction, "<:guild_happy:1001>：開心慶祝")
             assertContains(reactionSystemInstruction, "<:guild_uncached:1002>")
-            assertFalse(reactionSystemInstruction.contains("<:guild_uncached:1002>："))
+            assertFalse(
+                reactionSystemInstruction.contains("<:guild_uncached:1002>："),
+                "Uncached guild emoji must remain bare without meaning separator in reaction pool",
+            )
             assertFalse(reactionSystemInstruction.contains("9001"), "External Nitro emoji must not appear in reaction pool")
         }
 

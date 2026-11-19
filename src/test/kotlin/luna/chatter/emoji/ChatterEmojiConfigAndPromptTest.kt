@@ -125,13 +125,22 @@ class ChatterEmojiConfigAndPromptTest {
         val userPrompt = ChatterPromptBuilder.buildUserPrompt(ChatterInput(transcript = "[Alice]: hi", guildEmojis = emojis))
         assertContains(userPrompt, "<:blob_clap:1001>：開心拍手")
         assertContains(userPrompt, "<a:party_parrot:1002>")
-        assertFalse(userPrompt.contains("<a:party_parrot:1002>："))
+        assertFalse(
+            userPrompt.contains("<a:party_parrot:1002>："),
+            "Emoji with null meaning must not render a trailing separator in user prompt",
+        )
         assertContains(userPrompt, "<:blank_meaning:1003>")
-        assertFalse(userPrompt.contains("<:blank_meaning:1003>："))
+        assertFalse(
+            userPrompt.contains("<:blank_meaning:1003>："),
+            "Emoji with blank meaning must not render a trailing separator in user prompt",
+        )
 
         val reactionSys = ChatterPromptBuilder.buildReactionSystemInstruction(guildEmojis = emojis)
         assertContains(reactionSys, "<:blob_clap:1001>：開心拍手")
         assertContains(reactionSys, "<a:party_parrot:1002>")
-        assertFalse(reactionSys.contains("<a:party_parrot:1002>："))
+        assertFalse(
+            reactionSys.contains("<a:party_parrot:1002>："),
+            "Emoji with null meaning must not render a trailing separator in reaction system instruction",
+        )
     }
 }
