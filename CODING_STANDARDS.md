@@ -1,6 +1,6 @@
 # Coding Standards
 
-Non-mechanical conventions and architectural constraints for Luna services and libraries (mechanical rules are enforced by `CodingStandardsTest` and linters).
+Non-mechanical conventions and architectural constraints for Luna services and libraries (mechanical rules are enforced by `lintCodingStandards` and linters).
 
 ## 1. Daemon State & Transient Failure Eviction
 
@@ -33,7 +33,6 @@ Luna is a long-running Discord bot daemon; non-singleton event/deduplication sto
 
 - **Negative boundary test coverage**: Features enforcing data budgets, payload caps (e.g. 10MB limits), format whitelists (e.g. MIME restrictions), or fallback evictions must include explicit negative/rejection test cases (e.g. discarding oversized media, rejecting non-whitelisted formats with spoofed extensions) rather than only testing the happy path.
 - **Prompt and pipeline assertion decoupling**: High-level service integration tests must assert coordination, input propagation, and boundary limits (via pattern matching or containment) rather than verbatim prompt templates; test exact prompt wording and markdown headers in isolation within dedicated prompt builder unit tests (e.g., `GeminiPromptBuilderTest`).
-- **Diagnostic boolean assertions**: Provide contextual failure messages on boolean assertions (`assertTrue(cond) { "..." }`) so quiet `-q` test logs identify the mismatch directly without opening XML/HTML test reports.
 - **Modular test suites by concern**: Split new test concerns into focused files (following `GeminiSummarizerTest` / `GeminiSummarizerLookbackTest`) rather than appending to oversized suites.
 - **Observable fallback degraded states**: Fail-open fallback routines (such as degrading rich Data API video resolution to basic oEmbed, or defaulting URL resolution to channel chat history) must emit descriptive warning or debug logs with the underlying cause, preventing silent failure black holes during operations.
 
