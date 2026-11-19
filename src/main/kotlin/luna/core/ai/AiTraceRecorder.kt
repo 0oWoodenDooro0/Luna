@@ -1,5 +1,6 @@
 package luna.core.ai
 
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -411,6 +412,9 @@ suspend fun <T> AiTraceRecorder.withActiveOrStandaloneSession(
         withAiTraceSession(standaloneSession) {
             block(standaloneSession, true)
         }
+    } catch (e: CancellationException) {
+        standaloneSession.skip(reason = e.message ?: "Cancelled")
+        throw e
     } catch (e: Exception) {
         if (onStandaloneException != null) {
             onStandaloneException(standaloneSession, e)

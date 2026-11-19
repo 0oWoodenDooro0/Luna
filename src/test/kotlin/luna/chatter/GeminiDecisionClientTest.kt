@@ -13,6 +13,7 @@ import io.ktor.http.HttpMethod
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.headersOf
 import io.ktor.serialization.kotlinx.json.json
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonArray
@@ -21,6 +22,7 @@ import kotlinx.serialization.json.jsonPrimitive
 import luna.core.ai.ChatImageAttachment
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
@@ -492,5 +494,59 @@ class GeminiDecisionClientTest {
 
             // Non-finite effectiveThreshold falls back safely to config.threshold (0.70)
             assertFalse(client.decide("state", effectiveThreshold = Double.NaN).shouldParticipate)
+        }
+
+    @Test
+    fun `rethrows CancellationException without text-only retry or unexpected error trace`() =
+        runTest {
+            val traceDir =
+                java.nio.file.Files
+                    .createTempDirectory("decision-cancel-trace")
+            try {
+                val recorder =
+                    luna.core.ai.JsonlAiTraceRecorder(
+                        traceDir = traceDir,
+                        clock = java.time.Clock.fixed(java.time.Instant.parse("2026-11-19T00:00:00Z"), java.time.ZoneOffset.UTC),
+                    )
+                var requestCount = 0
+                val mockEngine =
+                    MockEngine {
+                        requestCount++
+                        throw CancellationException("Interrupted by newer message in channel 890896258229743677")
+                    }
+
+                val client =
+                    GeminiDecisionClient(
+                        config = ChatterDecisionConfig(apiKey = "valid-key"),
+                        httpClient = createTestClient(mockEngine),
+                        traceRecorder = recorder,
+                    )
+
+                val images = listOf(ChatImageAttachment("https://cdn.discordapp.com/img.png", "image/png"))
+                assertFailsWith<CancellationException> {
+                    client.decide("[Alice]: check this out", images)
+                }
+
+                // Must not perform text-only fallback retry after cancellation
+                assertEquals(1, requestCount)
+
+                recorder.flushAndClose()
+                val traceFile = traceDir.resolve("ai-2026-11-19.jsonl")
+                assertTrue(
+                    java.nio.file.Files
+                        .exists(traceFile),
+                    "Expected trace file to exist at $traceFile",
+                )
+                val line =
+                    java.nio.file.Files
+                        .readAllLines(traceFile)
+                        .single()
+                assertTrue(
+                    line.contains("\"outcome\":\"SKIPPED\""),
+                    "Expected SKIPPED outcome in trace line, got: $line",
+                )
+            } finally {
+                traceDir.toFile().deleteRecursively()
+            }
         }
 }

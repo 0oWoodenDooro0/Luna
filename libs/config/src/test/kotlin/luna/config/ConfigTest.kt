@@ -236,4 +236,36 @@ class ConfigTest {
             ),
         )
     }
+
+    @Test
+    fun `EnvSchemaAuditor ignores Docker system env keys and nested container maps while flagging unknown leaf keys`() {
+        val fallbackSchema = EnvSchemaAuditor.defaultFallbackSchema()
+        val timeoutSchema = fallbackSchema.firstOrNull { it.name == "CHATTER_DECISION_TIMEOUT_SECONDS" }
+        assertNotNull(timeoutSchema)
+        assertEquals("15", timeoutSchema.defaultValue)
+
+        val config =
+            mapOf(
+                "DISCORD_TOKEN" to "tok",
+                "JAVA_VERSION" to "jdk-17.0.14+7",
+                "LANGUAGE" to "en_US:en",
+                "curtly" to mapOf("baseUrl" to "http://localhost:8080"),
+                "curtly.baseUrl" to "http://localhost:8080",
+                "legacy.unknownKey" to "stale",
+            )
+        val result = EnvSchemaAuditor.auditDrift(config, fallbackSchema)
+        assertFalse(
+            result.unknownKeys.contains("JAVA_VERSION"),
+            "JAVA_VERSION must not be flagged as unknown, got ${result.unknownKeys}",
+        )
+        assertFalse(
+            result.unknownKeys.contains("LANGUAGE"),
+            "LANGUAGE must not be flagged as unknown, got ${result.unknownKeys}",
+        )
+        assertFalse(
+            result.unknownKeys.contains("curtly"),
+            "Nested map container key 'curtly' must not be flagged as unknown, got ${result.unknownKeys}",
+        )
+        assertEquals(listOf("legacy.unknownKey"), result.unknownKeys)
+    }
 }

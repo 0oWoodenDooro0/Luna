@@ -160,7 +160,7 @@ All schema models are defined in [`AiTraceModels.kt`](../../src/main/kotlin/luna
   - `SUMMARY_GENERATE`: `POST /v1beta/interactions` (`background = false`, `GeminiSummarizer` via `GeminiInteractionClient`) synchronous summary generation (no fallback retries).
   - `SUMMARY_TOOL_CONTINUATION`: `POST /v1beta/interactions` (`background = false`, `previous_interaction_id` + `function_result`) follow-up turn after fulfilling a `fetch_earlier_messages` tool call.
   - `CHATTER_GENERATE`: `POST /v1beta/interactions` (`background = false`, `ChatterGenerator` via `GeminiInteractionClient`) synchronous conversational reply generation (no fallback retries).
-  - `REACTION_SELECT`: `POST /v1beta/interactions` (`background = false`, `maxOutputTokens = 16`, `ChatterGenerator.selectReactionEmoji` via `GeminiInteractionClient`) lightweight multimodal single-emoji selection for `Silent Reaction Path` (no local fallback pool).
+  - `REACTION_SELECT`: `POST /v1beta/interactions` (`background = false`, `maxOutputTokens = 128`, `ChatterGenerator.selectReactionEmoji` via `GeminiInteractionClient`) lightweight multimodal single-emoji selection for `Silent Reaction Path` (no local fallback pool).
   - `AGENTIC_VIDEO`: `POST /v1beta/interactions` (`background = true`) + `GET /v1beta/interactions/{id}` polling (`GeminiInteractionClient`) for long videos (`> 5m`) in `Summary Pipeline` and direct-mention `Chatter Pipeline`.
 - **`AiAttemptOutcome`**: `SUCCESS`, `SKIPPED`, `TOOL_CALL`, `ERROR`.
 
