@@ -93,6 +93,20 @@ Do not connect live Discord gateways in tests. Use mock interactions or test rep
 - `McpWebhookRepository` / `McpClientRepository`: In-memory SQLite or H2 tests.
 - Verify REST payload serialization without calling Discord endpoints.
 
+### Event Listener Testing (`MutableSharedFlow`, `runTest`)
+```kotlin
+// 1. Wait for all kord.on<T> listeners to subscribe before emitting test events
+val eventsFlow = MutableSharedFlow<Event>(extraBufferCapacity = 16)
+while (eventsFlow.subscriptionCount.value < expectedCount) {
+    withContext(Dispatchers.Default) { delay(10L) }
+}
+eventsFlow.emit(testEvent)
+
+// 2. Use real-time delay when polling wall-clock deadlines or awaiting Dispatchers.Default work
+//    (runTest virtual delay advances virtual time without yielding to real background threads)
+withContext(Dispatchers.Default) { delay(10L) }
+```
+
 ---
 
 ## 6. Messages, Replies, Reactions, Stickers & Guild Emojis
@@ -127,12 +141,16 @@ val customEmoji = ReactionEmoji.Custom(id = Snowflake("123456"), name = "blobcat
 message.addReaction(unicodeEmoji)
 ```
 
-### Guild Custom Emojis (`Message.getGuildOrNull`)
+### Guild Custom Emojis (`Message.getGuildOrNull`, `EmojisUpdateEvent`)
 ```kotlin
 val guild = message.getGuildOrNull() // null in DMs or uncached/unavailable guilds
 val availableEmojis = guild?.emojis?.toList().orEmpty()
     .filter { it.isAvailable && !it.name.isNullOrBlank() }
 // Canonical Discord tag: if (emoji.isAnimated) "<a:${emoji.name}:${emoji.id.value}>" else "<:${emoji.name}:${emoji.id.value}>"
+
+// Cache invalidation on guild emoji updates: EmojisUpdateEvent(event.guildId, event.emojis: Set<GuildEmoji>)
+// GuildEmoji fields: id (Snowflake), name (String?), isAnimated (Boolean), isAvailable (Boolean)
+kord.on<EmojisUpdateEvent> { cache.invalidate(guildId) } // event.emojis holds updated GuildEmoji set
 ```
 
 ### Stickers & Embeds (`Message.stickers`, `MessageStickerType`, `Embed`)

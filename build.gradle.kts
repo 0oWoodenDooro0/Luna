@@ -176,3 +176,15 @@ tasks.register("installGitHooks") {
 tasks.named("compileKotlin") {
     dependsOn("installGitHooks")
 }
+
+apply(from = "gradle/coding-standards.gradle.kts")
+
+tasks.named("check") {
+    dependsOn("lintCodingStandards")
+}
+
+tasks.register("lint") {
+    group = "verification"
+    description = "Runs kotlinter and coding standards checks."
+    dependsOn("lintKotlin", "lintCodingStandards")
+}
