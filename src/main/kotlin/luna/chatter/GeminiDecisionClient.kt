@@ -17,6 +17,7 @@ import io.ktor.http.HttpStatusCode
 import io.ktor.http.contentType
 import io.ktor.http.isSuccess
 import io.ktor.serialization.kotlinx.json.json
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.serialization.json.Json
 import luna.core.ai.AiAttemptOutcome
@@ -263,7 +264,7 @@ open class GeminiDecisionClient(
                         setBody(requestPayload)
                     }
                 httpStatus = response.status.value
-                responseRaw = runCatching { response.bodyAsText() }.getOrNull()
+                responseRaw = readBodyTextSafely(response)
                 evaluateResponse(response, responseRaw, activeThreshold)
             } catch (e: HttpRequestTimeoutException) {
                 val reason = "request timeout after ${config.timeoutMillis}ms: ${e.message}"
@@ -277,6 +278,8 @@ open class GeminiDecisionClient(
                 val reason = "coroutine timeout: ${e.message}"
                 logger.warn("Gemini Decisions API coroutine timed out: {}", e.message)
                 RequestOutcome.Failure(reason, AiTraceFailureCategory.TIMEOUT, e)
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
                 val reason = "unexpected error: ${e.message}"
                 logger.warn("Unexpected failure invoking Gemini Decisions API: {}", e.message, e)
@@ -307,6 +310,15 @@ open class GeminiDecisionClient(
         )
         return outcome
     }
+
+    private suspend fun readBodyTextSafely(response: HttpResponse): String? =
+        try {
+            response.bodyAsText()
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            null
+        }
 
     private fun evaluateResponse(
         response: HttpResponse,

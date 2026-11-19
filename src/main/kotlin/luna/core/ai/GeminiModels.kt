@@ -224,15 +224,15 @@ data class GeminiGenerationConfig(
 @OptIn(ExperimentalSerializationApi::class)
 @Serializable
 data class GeminiUsageMetadata(
-    @JsonNames("prompt_token_count", "input_tokens")
+    @JsonNames("prompt_token_count", "input_tokens", "total_input_tokens")
     val promptTokenCount: Int? = null,
-    @JsonNames("candidates_token_count", "output_tokens")
+    @JsonNames("candidates_token_count", "output_tokens", "total_output_tokens")
     val candidatesTokenCount: Int? = null,
     @JsonNames("total_token_count", "total_tokens")
     val totalTokenCount: Int? = null,
-    @JsonNames("thoughts_token_count", "thoughts_tokens")
+    @JsonNames("thoughts_token_count", "thoughts_tokens", "total_thought_tokens")
     val thoughtsTokenCount: Int? = null,
-    @JsonNames("tool_use_prompt_token_count", "tool_use_input_tokens")
+    @JsonNames("tool_use_prompt_token_count", "tool_use_input_tokens", "total_tool_use_tokens")
     val toolUseInputTokens: Int? = null,
 )
 
@@ -561,6 +561,24 @@ data class GeminiInteractionStep(
     val status: String? = null,
 )
 
+enum class InteractionStatus(
+    val wireValue: String,
+) {
+    COMPLETED("completed"),
+    INCOMPLETE("incomplete"),
+    FAILED("failed"),
+    CANCELLED("cancelled"),
+    REQUIRES_ACTION("requires_action"),
+    ;
+
+    companion object {
+        fun fromWire(raw: String?): InteractionStatus? {
+            val normalized = raw?.trim()?.lowercase() ?: return null
+            return entries.firstOrNull { it.wireValue == normalized }
+        }
+    }
+}
+
 @OptIn(ExperimentalSerializationApi::class)
 @Serializable
 data class GeminiInteractionResponse(
@@ -578,6 +596,20 @@ data class GeminiInteractionResponse(
     val finishReason: String? = null,
     val error: GeminiApiErrorDetails? = null,
 ) {
+    fun parsedStatus(): InteractionStatus? = InteractionStatus.fromWire(status)
+
+    fun isIncompleteStatus(): Boolean = parsedStatus() == InteractionStatus.INCOMPLETE
+
+    fun isTerminalState(): Boolean =
+        parsedStatus() != null ||
+            error != null ||
+            extractFunctionCalls().isNotEmpty() ||
+            extractOutputText().isNotBlank()
+
+    fun resolvedFinishReason(): String? =
+        finishReason?.takeIf { it.isNotBlank() }
+            ?: if (isIncompleteStatus()) INCOMPLETE_FINISH_REASON else null
+
     fun extractOutputText(): String {
         val stepText =
             steps
@@ -726,6 +758,7 @@ data class GeminiInteractionResponse(
 
     companion object {
         const val MAX_GROUNDING_CITATIONS = 3
+        const val INCOMPLETE_FINISH_REASON = "INCOMPLETE"
 
         private fun extractUrlContextEntryFromObject(
             obj: JsonObject?,

@@ -537,4 +537,32 @@ class LunaConfigTest {
         assertTrue(audit.unknownKeys.isEmpty(), "AI_TRACE_* and ai.trace.* must be recognized, got unknown=${audit.unknownKeys}")
         assertEquals("data/logs/ai", audit.activeConfig["AI_TRACE_DIR"])
     }
+
+    @Test
+    fun `audit drift does not emit false drift warnings for flattened application yml containers or container runtime keys`() {
+        val loaded =
+            ConfigLoader.loadConfigFromSources(
+                dotenvContent =
+                    """
+                    DISCORD_TOKEN=test_bot_token
+                    DISCORD_CLIENT_ID=1234567890
+                    DISCORD_CLIENT_SECRET=test_client_secret
+                    """.trimIndent(),
+                systemEnv =
+                    mapOf(
+                        "JAVA_VERSION" to "jdk-17.0.14+7",
+                        "LANGUAGE" to "en_US:en",
+                    ),
+                yamlContent =
+                    """
+                    curtly:
+                      baseUrl: "${'$'}{BASE_URL:http://localhost:8080}"
+                    """.trimIndent(),
+            )
+        val result = ConfigLoader.auditDrift(loaded)
+        assertTrue(
+            result.unknownKeys.isEmpty(),
+            "Flattened YAML container keys and container runtime keys must not trigger drift, got ${result.unknownKeys}",
+        )
+    }
 }

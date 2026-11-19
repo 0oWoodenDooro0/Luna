@@ -11,6 +11,7 @@ import io.ktor.http.ContentType
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.contentType
 import io.ktor.http.isSuccess
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.delay
 import kotlinx.serialization.SerializationException
@@ -348,7 +349,7 @@ class GeminiInteractionClient(
                             setBody(requestPayload)
                         }
                     traceState.httpStatus = response.status.value
-                    val rawBody = runCatching { response.bodyAsText() }.getOrNull()
+                    val rawBody = readBodyTextSafely(response)
                     traceState.responseRaw = rawBody
 
                     if (response.status == HttpStatusCode.TooManyRequests) {
@@ -405,6 +406,8 @@ class GeminiInteractionClient(
                         message = "Gemini API coroutine timed out: ${e.message}",
                         cause = e,
                     )
+                } catch (e: CancellationException) {
+                    throw e
                 } catch (e: SerializationException) {
                     logger.error("Failed to parse Gemini interaction response: {}", localRedactor.redactString(e.message))
                     InteractionExecutionResult.Error.Generic(
@@ -476,17 +479,7 @@ class GeminiInteractionClient(
             )
         }
 
-        val immediateStatus = interaction.status?.lowercase()
-        val hasImmediateResult =
-            immediateStatus == "completed" ||
-                immediateStatus == "failed" ||
-                immediateStatus == "cancelled" ||
-                immediateStatus == "requires_action" ||
-                interaction.error != null ||
-                interaction.extractFunctionCalls().isNotEmpty() ||
-                interaction.extractOutputText().isNotBlank()
-
-        if (hasImmediateResult) {
+        if (interaction.isTerminalState()) {
             return evaluateCompletedResponse(
                 response = interaction,
                 inputUrls = inputUrls,
@@ -535,7 +528,7 @@ class GeminiInteractionClient(
 
             val response = httpClient.get(endpoint)
             traceState.httpStatus = response.status.value
-            val rawBody = runCatching { response.bodyAsText() }.getOrNull()
+            val rawBody = readBodyTextSafely(response)
             traceState.responseRaw = rawBody
 
             if (response.status == HttpStatusCode.TooManyRequests) {
@@ -558,17 +551,7 @@ class GeminiInteractionClient(
                 jsonParser.decodeFromString<GeminiInteractionResponse>(
                     rawBody?.takeIf { it.isNotBlank() } ?: throw SerializationException("Empty polling response body"),
                 )
-            val status = statusResponse.status?.lowercase()
-            val hasTerminalState =
-                status == "completed" ||
-                    status == "failed" ||
-                    status == "cancelled" ||
-                    status == "requires_action" ||
-                    statusResponse.error != null ||
-                    statusResponse.extractFunctionCalls().isNotEmpty() ||
-                    statusResponse.extractOutputText().isNotBlank()
-
-            if (hasTerminalState) {
+            if (statusResponse.isTerminalState()) {
                 return evaluateCompletedResponse(
                     response = statusResponse,
                     inputUrls = inputUrls,
@@ -597,8 +580,17 @@ class GeminiInteractionClient(
         localRedactor: AiTraceRedactor,
     ): InteractionExecutionResult {
         val interactionId = response.id
+        val parsedStatus = response.parsedStatus()
         traceState.usageMetadata = response.usage
-        traceState.finishReason = response.finishReason
+        traceState.finishReason = response.resolvedFinishReason()
+
+        if (response.isIncompleteStatus()) {
+            logger.warn(
+                "Gemini interaction {} returned status=incomplete (output may be truncated by max_output_tokens; outputTokens={})",
+                interactionId ?: "unknown",
+                response.usage?.candidatesTokenCount,
+            )
+        }
 
         val urlContextResults = response.extractUrlContextResults()
         val googleSearchQueries = response.extractGoogleSearchQueries()
@@ -621,8 +613,7 @@ class GeminiInteractionClient(
             }
         }
 
-        val status = response.status?.lowercase()
-        if (status == "failed" || status == "cancelled" || response.error != null) {
+        if (parsedStatus == InteractionStatus.FAILED || parsedStatus == InteractionStatus.CANCELLED || response.error != null) {
             val isSafety =
                 GeminiFinishReasons.isSafetyBlock(response.finishReason) ||
                     GeminiFinishReasons.isSafetyBlock(response.error?.status)
@@ -639,7 +630,7 @@ class GeminiInteractionClient(
         }
 
         val functionCalls = response.extractFunctionCalls()
-        if (status == "requires_action" || functionCalls.isNotEmpty()) {
+        if (parsedStatus == InteractionStatus.REQUIRES_ACTION || functionCalls.isNotEmpty()) {
             if (functionCalls.isEmpty()) {
                 logger.error("Gemini interaction {} returned requires_action with no function_call steps", interactionId ?: "unknown")
                 return InteractionExecutionResult.Error.Generic(
@@ -702,6 +693,15 @@ class GeminiInteractionClient(
             usageMetadata = response.usage,
         )
     }
+
+    private suspend fun readBodyTextSafely(response: HttpResponse): String? =
+        try {
+            response.bodyAsText()
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            null
+        }
 
     companion object {
         const val DEFAULT_POLLING_DELAY_MS = 2000L

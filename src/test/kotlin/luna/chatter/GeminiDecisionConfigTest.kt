@@ -71,7 +71,7 @@ class GeminiDecisionConfigTest {
         assertEquals(0.0, clampedLow.threshold)
 
         val invalidTimeout = ChatterDecisionConfig.fromEnv(mapOf("CHATTER_DECISION_TIMEOUT_SECONDS" to "0"))
-        assertEquals(10_000L, invalidTimeout.timeoutMillis)
+        assertEquals(15_000L, invalidTimeout.timeoutMillis)
     }
 
     @Test
@@ -145,6 +145,7 @@ class GeminiDecisionConfigTest {
     fun `loads decision instructions and bounded message count from env with negative boundaries and clamping`() {
         val defaultConfig = ChatterDecisionConfig.fromEnv(emptyMap())
         assertEquals(0.7, defaultConfig.threshold)
+        assertEquals(15_000L, defaultConfig.timeoutMillis)
         assertEquals(15, defaultConfig.decisionMessageCount)
         assertEquals(GeminiDecisionClient.DEFAULT_INSTRUCTIONS, defaultConfig.instructions)
 

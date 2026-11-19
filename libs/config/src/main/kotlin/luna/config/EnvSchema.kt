@@ -42,6 +42,8 @@ object EnvSchemaAuditor {
             "LC_ALL",
             "LC_CTYPE",
             "JAVA_HOME",
+            "JAVA_VERSION",
+            "LANGUAGE",
             "HOSTNAME",
             "SHLVL",
             "_",
@@ -191,7 +193,7 @@ object EnvSchemaAuditor {
             EnvVarSchema("CHATTER_GEMINI_MODEL", isRequired = false, defaultValue = "gemini-3.5-flash-lite", section = 3),
             EnvVarSchema("CHATTER_DECISION_MODEL", isRequired = false, defaultValue = "gemini-decision-1", section = 3),
             EnvVarSchema("CHATTER_DECISION_THRESHOLD", isRequired = false, defaultValue = "0.7", section = 3),
-            EnvVarSchema("CHATTER_DECISION_TIMEOUT_SECONDS", isRequired = false, defaultValue = "10", section = 3),
+            EnvVarSchema("CHATTER_DECISION_TIMEOUT_SECONDS", isRequired = false, defaultValue = "15", section = 3),
             EnvVarSchema("CHATTER_DECISION_INSTRUCTIONS", isRequired = false, section = 3),
             EnvVarSchema("CHATTER_DECISION_MESSAGE_COUNT", isRequired = false, defaultValue = "15", section = 3),
             EnvVarSchema("CHATTER_ENABLED", isRequired = false, defaultValue = "true", section = 3),
@@ -355,7 +357,8 @@ object EnvSchemaAuditor {
         }
 
         val unknownKeys = mutableListOf<String>()
-        for (key in config.keys) {
+        for ((key, value) in config) {
+            if (value is Map<*, *>) continue
             if (!isRecognizedKey(key, allSchemaKeys, candidateAliases)) {
                 unknownKeys.add(key)
             }

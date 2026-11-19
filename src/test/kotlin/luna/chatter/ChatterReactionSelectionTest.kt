@@ -151,7 +151,7 @@ class ChatterReactionSelectionTest {
     }
 
     @Test
-    fun `ChatterPromptBuilder buildReactionInteractionRequest sets maxOutputTokens 16, multimodal attachments, guild emojis, and persona drift`() {
+    fun `ChatterPromptBuilder buildReactionInteractionRequest sets maxOutputTokens 128, multimodal attachments, guild emojis, and persona drift`() {
         val personaState =
             PersonaState(
                 driftEnabled = true,
@@ -186,7 +186,7 @@ class ChatterReactionSelectionTest {
 
         val request = ChatterPromptBuilder.buildReactionInteractionRequest(input, model = "gemini-3.5-flash-lite")
 
-        assertEquals(16, request.generationConfig?.maxOutputTokens)
+        assertEquals(128, request.generationConfig?.maxOutputTokens)
         assertFalse(request.background)
         assertNull(request.tools)
         assertEquals(2, request.input.size)
@@ -202,7 +202,7 @@ class ChatterReactionSelectionTest {
     }
 
     @Test
-    fun `selectReactionEmoji invokes interactions with maxOutputTokens 16, multimodal attachments, and records REACTION_SELECT AI Trace`(
+    fun `selectReactionEmoji invokes interactions with maxOutputTokens 128, multimodal attachments, and records REACTION_SELECT AI Trace`(
         @TempDir tempDir: Path,
     ) = runTest {
         var capturedUrl: String? = null
@@ -247,7 +247,7 @@ class ChatterReactionSelectionTest {
 
         val reqObj = json.parseToJsonElement(checkNotNull(capturedBody)).jsonObject
         assertEquals(
-            16,
+            128,
             reqObj["generation_config"]
                 ?.jsonObject
                 ?.get("max_output_tokens")
@@ -401,5 +401,64 @@ class ChatterReactionSelectionTest {
         } finally {
             slf4jLogger.detachAppender(appender)
         }
+    }
+
+    @Test
+    fun `selectReactionEmoji records INCOMPLETE finishReason and Interactions token usage when interaction status is incomplete`(
+        @TempDir tempDir: Path,
+    ) = runTest {
+        val mockEngine =
+            MockEngine {
+                respond(
+                    content =
+                        """
+                        {
+                          "id": "int-incomplete-emoji",
+                          "status": "incomplete",
+                          "usage": {
+                            "total_tokens": 2237,
+                            "total_input_tokens": 2225,
+                            "total_output_tokens": 12,
+                            "total_thought_tokens": 0,
+                            "total_tool_use_tokens": 0
+                          },
+                          "steps": [
+                            {"signature": "sig-1", "type": "thought"},
+                            {"type": "model_output", "content": [{"type": "text", "text": "<:dora_peter:14336"}]}
+                          ]
+                        }
+                        """.trimIndent(),
+                    status = HttpStatusCode.OK,
+                    headers = headersOf(HttpHeaders.ContentType, "application/json"),
+                )
+            }
+
+        val recorder = JsonlAiTraceRecorder(traceDir = tempDir, clock = ChatterAiTraceTestSupport.fixedClock)
+        val generator =
+            ChatterGenerator(
+                config = ChatterConfig(apiKey = "secret-react-key"),
+                httpClient = createTestClient(mockEngine),
+                traceRecorder = recorder,
+            )
+
+        val emoji =
+            generator.selectReactionEmoji(
+                ChatterInput(
+                    transcript = "[Alice]: 看看這個",
+                    guildEmojis = listOf(GuildCustomEmoji(Snowflake(1433693710293667860L), "dora_peter")),
+                ),
+            )
+        recorder.flushAndClose()
+
+        assertNull(emoji, "Truncated custom emoji must fail closed without falling back")
+        val trace = ChatterAiTraceTestSupport.readTraceLines(tempDir).single()
+        assertEquals(AiTraceOutcome.SKIPPED, trace.outcome)
+        assertEquals(AiTraceFailureCategory.PARSE_ERROR, trace.failureCategory)
+        val attempt = trace.attempts.single()
+        assertEquals("INCOMPLETE", attempt.finishReason)
+        assertEquals(2225, attempt.usageMetadata?.promptTokenCount)
+        assertEquals(12, attempt.usageMetadata?.candidatesTokenCount)
+        assertEquals(2237, attempt.usageMetadata?.totalTokenCount)
+        assertEquals(0, attempt.usageMetadata?.thoughtsTokenCount)
     }
 }

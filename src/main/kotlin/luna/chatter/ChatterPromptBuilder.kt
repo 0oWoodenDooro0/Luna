@@ -15,7 +15,10 @@ import luna.core.ai.VideoProcessingMode
 object ChatterPromptBuilder {
     const val DISCORD_MAX_LENGTH: Int = 2000
     const val MAX_OUTPUT_TOKENS: Int = 512
-    const val REACTION_MAX_OUTPUT_TOKENS: Int = 16
+
+    // Guild custom emoji mentions (<:name:id> / <a:name:id>) tokenize digits individually (~27-55+ tokens)
+    // plus Interactions thought overhead; 16 tokens truncated custom emojis mid-ID with status=incomplete.
+    const val REACTION_MAX_OUTPUT_TOKENS: Int = 128
     const val MAX_PROMPT_GUILD_EMOJIS: Int = 50
     const val MAX_REPLY_SEGMENTS: Int = 3
     const val TRUNCATION_ELLIPSIS: String = "..."

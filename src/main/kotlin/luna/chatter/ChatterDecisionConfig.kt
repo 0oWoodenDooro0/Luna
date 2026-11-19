@@ -10,7 +10,7 @@ import luna.plugin.config
  * @property model Decision model identifier (defaults to `gemini-decision-1`).
  * @property baseUrl Base URL for Google Generative Language API (defaults to `https://generativelanguage.googleapis.com`).
  * @property threshold Minimum calibrated `noul` probability required for participation (clamped to `0.0..1.0`, default `0.7`).
- * @property timeoutMillis HTTP request/socket/connect timeout in milliseconds (default `10_000L`).
+ * @property timeoutMillis HTTP request/socket/connect timeout in milliseconds (default `15_000L`).
  * @property instructions Decision evaluation prompt instructions sent to `gemini-decision-1` (defaults to [GeminiDecisionClient.DEFAULT_INSTRUCTIONS]).
  * @property decisionMessageCount Maximum number of dialogue turns passed to `gemini-decision-1` (bounded to `1..100`, default `15`).
  */
@@ -39,7 +39,7 @@ data class ChatterDecisionConfig(
         const val DEFAULT_MODEL = "gemini-decision-1"
         const val DEFAULT_BASE_URL = "https://generativelanguage.googleapis.com"
         const val DEFAULT_THRESHOLD = 0.7
-        const val DEFAULT_TIMEOUT_SECONDS = 10L
+        const val DEFAULT_TIMEOUT_SECONDS = 15L
         const val DEFAULT_TIMEOUT_MILLIS = DEFAULT_TIMEOUT_SECONDS * 1000L
         const val DEFAULT_DECISION_MESSAGE_COUNT = 15
         const val MIN_DECISION_MESSAGE_COUNT = 1

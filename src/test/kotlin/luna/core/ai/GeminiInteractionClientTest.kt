@@ -10,10 +10,12 @@ import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.headersOf
 import io.ktor.serialization.kotlinx.json.json
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.Json
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertIs
 import kotlin.test.assertTrue
 
@@ -470,5 +472,91 @@ class GeminiInteractionClientTest {
                 )
             assertIs<InteractionExecutionResult.Error.Generic>(blankInputResult)
             assertEquals(AiTraceFailureCategory.CONTEXT_ERROR, blankInputResult.failureCategory)
+        }
+
+    @Test
+    fun `rethrows CancellationException during submission and polling without swallowing as Generic error`() =
+        runTest {
+            val traceDir =
+                java.nio.file.Files
+                    .createTempDirectory("interaction-cancel-trace")
+            try {
+                val recorder =
+                    JsonlAiTraceRecorder(
+                        traceDir = traceDir,
+                        clock = java.time.Clock.fixed(java.time.Instant.parse("2026-11-19T00:00:00Z"), java.time.ZoneOffset.UTC),
+                    )
+
+                val submitCancelEngine =
+                    MockEngine {
+                        throw CancellationException("Interrupted by newer message in channel 890896258229743677")
+                    }
+                val submitClient =
+                    GeminiInteractionClient(
+                        httpClient = createClient(submitCancelEngine),
+                        pollingDelayMs = 1L,
+                        traceRecorder = recorder,
+                    )
+                assertFailsWith<CancellationException> {
+                    submitClient.interact(
+                        baseUrl = "https://generativelanguage.googleapis.com",
+                        apiKey = "test-key",
+                        request =
+                            GeminiInteractionRequest(
+                                model = "gemini-3.5-flash-lite",
+                                input = listOf(GeminiInteractionInput.text("Hello")),
+                            ),
+                    )
+                }
+
+                val pollCancelEngine =
+                    MockEngine { request ->
+                        if (request.url.encodedPath.endsWith("/interactions")) {
+                            respond(
+                                content = """{"id": "int-cancel", "status": "in_progress"}""",
+                                status = HttpStatusCode.OK,
+                                headers = headersOf(HttpHeaders.ContentType, "application/json"),
+                            )
+                        } else {
+                            throw CancellationException("Cancelled while polling")
+                        }
+                    }
+                val pollClient =
+                    GeminiInteractionClient(
+                        httpClient = createClient(pollCancelEngine),
+                        pollingDelayMs = 1L,
+                        traceRecorder = recorder,
+                    )
+                assertFailsWith<CancellationException> {
+                    pollClient.interact(
+                        baseUrl = "https://generativelanguage.googleapis.com",
+                        apiKey = "test-key",
+                        request =
+                            agenticVideoRequest(
+                                model = "gemini-3.5-flash-lite",
+                                videoUri = "https://www.youtube.com/watch?v=cancel",
+                                promptText = "Prompt",
+                            ),
+                    )
+                }
+
+                recorder.flushAndClose()
+                val traceFile = traceDir.resolve("ai-2026-11-19.jsonl")
+                assertTrue(
+                    java.nio.file.Files
+                        .exists(traceFile),
+                    "Expected trace file to exist at $traceFile",
+                )
+                val lines =
+                    java.nio.file.Files
+                        .readAllLines(traceFile)
+                assertEquals(2, lines.size)
+                assertTrue(
+                    lines.all { it.contains("\"outcome\":\"SKIPPED\"") },
+                    "Expected all cancelled interaction traces to record SKIPPED outcome, got: $lines",
+                )
+            } finally {
+                traceDir.toFile().deleteRecursively()
+            }
         }
 }
