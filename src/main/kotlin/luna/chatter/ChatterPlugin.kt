@@ -8,6 +8,7 @@ import kotlinx.coroutines.Job
 import luna.chatter.emoji.ChatterEmojiCatalog
 import luna.chatter.emoji.DefaultChatterEmojiCatalog
 import luna.chatter.emoji.ExposedCustomEmojiMeaningRepository
+import luna.chatter.emoji.ExposedEmojiUsageRankingRepository
 import luna.chatter.emoji.NoOpChatterEmojiCatalog
 import luna.core.ai.SocialPeekFactory
 import luna.plugin.LunaPlugin
@@ -185,7 +186,11 @@ class ChatterPlugin(
         val catalog =
             runCatching {
                 val meaningRepository = ExposedCustomEmojiMeaningRepository(context.database)
-                DefaultChatterEmojiCatalog(meaningRepository = meaningRepository)
+                val usageRepository = ExposedEmojiUsageRankingRepository(context.database)
+                DefaultChatterEmojiCatalog(
+                    meaningRepository = meaningRepository,
+                    usageRepository = usageRepository,
+                )
             }.onFailure { e ->
                 logger.warn(
                     "Failed to initialize Custom Emoji Meaning repository; degrading to no-op emoji catalog: {}",

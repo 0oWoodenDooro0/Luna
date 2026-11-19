@@ -8,6 +8,7 @@ import dev.kord.core.behavior.reply
 import dev.kord.core.entity.Message
 import dev.kord.core.entity.ReactionEmoji
 import dev.kord.core.event.message.MessageCreateEvent
+import dev.kord.core.event.message.ReactionAddEvent
 import dev.kord.core.on
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -78,20 +79,37 @@ open class ChatterService(
     private val logger = LoggerFactory.getLogger(ChatterService::class.java)
 
     /**
-     * Registers the message create listener onto Kord.
+     * Registers the message create and reaction add listeners onto Kord.
      */
     fun register(
         kord: Kord,
         scope: CoroutineScope = safeScope(kord),
-    ): Job =
-        kord.on<MessageCreateEvent>(scope = scope) {
+    ): Job {
+        val parentJob = Job(scope.coroutineContext[Job])
+        val listenerScope = CoroutineScope(scope.coroutineContext + parentJob)
+        kord.on<MessageCreateEvent>(scope = listenerScope) {
             onMessageCreate(this)
         }
+        kord.on<ReactionAddEvent>(scope = listenerScope) {
+            onReactionAdd(this)
+        }
+        return parentJob
+    }
 
     /**
      * Handles incoming [MessageCreateEvent].
      */
     suspend fun onMessageCreate(event: MessageCreateEvent): Boolean = processMessage(event.message)
+
+    /**
+     * Handles incoming [ReactionAddEvent] for custom emoji usage tracking.
+     */
+    suspend fun onReactionAdd(event: ReactionAddEvent) {
+        val guildId = event.guildId ?: return
+        val selfId = runCatching { event.kord.selfId }.getOrNull()
+        if (selfId != null && event.userId == selfId) return
+        emojiCatalog.recordReactionUsage(guildId = guildId, emoji = event.emoji)
+    }
 
     /**
      * Alias for [processMessage] handling an incoming [Message].
@@ -104,6 +122,13 @@ open class ChatterService(
     suspend fun processMessage(message: Message): Boolean {
         val selfId = runCatching { message.kord.selfId }.getOrNull()
         val isDirectMention = filter.isDirectBotMention(message, selfId)
+
+        val isBotAuthor = runCatching { message.author?.isBot }.getOrNull() ?: false
+        if (!isBotAuthor) {
+            val guildId = runCatching { message.data.guildId.value }.getOrNull()
+            val content = runCatching { message.content }.getOrNull().orEmpty()
+            emojiCatalog.recordMessageUsage(guildId = guildId, content = content)
+        }
 
         // 1. Pre-checks filter before opening/extending/cancelling any debounce window
         if (!filter.shouldEvaluate(message, isDirectMention = isDirectMention, kordSelfId = selfId)) {

@@ -1,6 +1,7 @@
 package luna.chatter.emoji
 
 import dev.kord.common.entity.Snowflake
+import dev.kord.core.entity.ReactionEmoji
 import luna.chatter.ChatterPromptBuilder
 import luna.chatter.GuildCustomEmoji
 import org.slf4j.LoggerFactory
@@ -25,6 +26,11 @@ interface ChatterEmojiCatalog {
         guildId: Snowflake?,
         content: String,
     ) {}
+
+    suspend fun recordReactionUsage(
+        guildId: Snowflake?,
+        emoji: ReactionEmoji,
+    ) {}
 }
 
 /**
@@ -38,6 +44,7 @@ object NoOpChatterEmojiCatalog : ChatterEmojiCatalog
  */
 class DefaultChatterEmojiCatalog(
     private val meaningRepository: CustomEmojiMeaningRepository,
+    private val usageRepository: EmojiUsageRankingRepository? = null,
 ) : ChatterEmojiCatalog {
     private val logger = LoggerFactory.getLogger(DefaultChatterEmojiCatalog::class.java)
 
@@ -63,8 +70,36 @@ class DefaultChatterEmojiCatalog(
         availableGuildEmojis: List<GuildCustomEmoji>,
         limit: Int,
     ): List<GuildCustomEmoji> {
-        val bounded = availableGuildEmojis.take(limit.coerceAtLeast(0))
-        if (bounded.isEmpty()) return emptyList()
+        val normalizedLimit = limit.coerceAtLeast(0)
+        if (normalizedLimit == 0 || availableGuildEmojis.isEmpty()) return emptyList()
+
+        val usageRepo = usageRepository
+        val usageById =
+            if (guildId != null && usageRepo != null) {
+                runCatching {
+                    usageRepo.findRollingUsageCounts(guildId.toString())
+                }.onFailure { e ->
+                    logger.warn(
+                        "Failed to query 30-day Emoji Usage Ranking for guild {}; degrading to deterministic order: {}",
+                        guildId,
+                        e.message,
+                    )
+                }.getOrDefault(emptyMap())
+            } else {
+                emptyMap()
+            }
+
+        val bounded =
+            if (usageRepository != null) {
+                availableGuildEmojis
+                    .sortedWith(
+                        compareByDescending<GuildCustomEmoji> { usageById[it.id.toString()] ?: 0L }
+                            .thenBy { it.name }
+                            .thenBy { it.id.value },
+                    ).take(normalizedLimit)
+            } else {
+                availableGuildEmojis.take(normalizedLimit)
+            }
 
         val meaningsById =
             runCatching {
@@ -80,6 +115,46 @@ class DefaultChatterEmojiCatalog(
         return bounded.map { emoji ->
             val meaning = meaningsById[emoji.id.toString()]
             if (meaning != null) emoji.copy(meaning = meaning) else emoji
+        }
+    }
+
+    override suspend fun recordMessageUsage(
+        guildId: Snowflake?,
+        content: String,
+    ) {
+        if (guildId == null || content.isBlank()) return
+        val usageRepo = usageRepository ?: return
+        val tokens = ChatterEmojiTranscriptAnnotator.extractEmojiTokens(content)
+        if (tokens.isEmpty()) return
+
+        runCatching {
+            usageRepo.recordUsage(guildId.toString(), tokens.map { it.id })
+        }.onFailure { e ->
+            logger.warn(
+                "Failed to record custom emoji message usage for guild {}: {}",
+                guildId,
+                e.message,
+            )
+        }
+    }
+
+    override suspend fun recordReactionUsage(
+        guildId: Snowflake?,
+        emoji: ReactionEmoji,
+    ) {
+        if (guildId == null) return
+        val usageRepo = usageRepository ?: return
+        val customEmoji = emoji as? ReactionEmoji.Custom ?: return
+
+        runCatching {
+            usageRepo.recordUsage(guildId.toString(), listOf(customEmoji.id.toString()))
+        }.onFailure { e ->
+            logger.warn(
+                "Failed to record custom emoji reaction usage for guild {} and emoji {}: {}",
+                guildId,
+                customEmoji.id,
+                e.message,
+            )
         }
     }
 }
