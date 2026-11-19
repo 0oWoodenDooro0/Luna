@@ -2,13 +2,16 @@ package luna.chatter
 
 import dev.kord.common.entity.Snowflake
 import dev.kord.core.Kord
+import io.ktor.client.HttpClient
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import luna.chatter.emoji.ChatterEmojiCatalog
+import luna.chatter.emoji.CustomEmojiVisionResolver
 import luna.chatter.emoji.DefaultChatterEmojiCatalog
 import luna.chatter.emoji.ExposedCustomEmojiMeaningRepository
 import luna.chatter.emoji.NoOpChatterEmojiCatalog
+import luna.core.ai.GeminiInteractionClient
 import luna.core.ai.SocialPeekFactory
 import luna.plugin.LunaPlugin
 import luna.plugin.PluginContext
@@ -65,6 +68,11 @@ class ChatterPlugin(
 
     var emojiCatalog: ChatterEmojiCatalog? = null
         internal set
+
+    var emojiVisionResolver: CustomEmojiVisionResolver? = null
+        internal set
+
+    private var visionHttpClient: HttpClient? = null
 
     var maxImages: Int = ChatterContextCollector.DEFAULT_MAX_IMAGES
         internal set
@@ -185,7 +193,27 @@ class ChatterPlugin(
         val catalog =
             runCatching {
                 val meaningRepository = ExposedCustomEmojiMeaningRepository(context.database)
-                DefaultChatterEmojiCatalog(meaningRepository = meaningRepository)
+                val resolver =
+                    chatterConfig.cleanEmojiVisionModel?.takeIf { chatterConfig.isConfigured }?.let { visionModel ->
+                        val httpClient = CustomEmojiVisionResolver.createDefaultHttpClient()
+                        this.visionHttpClient = httpClient
+                        CustomEmojiVisionResolver(
+                            meaningRepository = meaningRepository,
+                            visionModel = visionModel,
+                            interactionClient =
+                                GeminiInteractionClient(
+                                    httpClient = httpClient,
+                                    traceRecorder = traceRecorder,
+                                ),
+                            baseUrl = chatterConfig.cleanBaseUrl,
+                            apiKey = chatterConfig.apiKey,
+                        )
+                    }
+                this.emojiVisionResolver = resolver
+                DefaultChatterEmojiCatalog(
+                    meaningRepository = meaningRepository,
+                    visionResolver = resolver,
+                )
             }.onFailure { e ->
                 logger.warn(
                     "Failed to initialize Custom Emoji Meaning repository; degrading to no-op emoji catalog: {}",
@@ -235,6 +263,8 @@ class ChatterPlugin(
         registrationJob?.cancel()
         decisionClient?.close()
         chatterGenerator?.close()
+        visionHttpClient?.close()
+        visionHttpClient = null
     }
 
     companion object {
