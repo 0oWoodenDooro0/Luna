@@ -16,6 +16,10 @@ import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.delay
 import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonObject
 import org.slf4j.LoggerFactory
 import java.net.SocketTimeoutException
 
@@ -360,15 +364,11 @@ class GeminiInteractionClient(
                             retryAfterSeconds = retryAfter,
                         )
                     } else if (!response.status.isSuccess()) {
-                        val errorBody = rawBody.orEmpty()
-                        logger.error(
-                            "Gemini interaction failed with HTTP {}: {}",
-                            response.status.value,
-                            localRedactor.redactString(errorBody),
-                        )
-                        InteractionExecutionResult.Error.ApiError(
+                        classifyHttpError(
                             statusCode = response.status.value,
-                            message = "Gemini API error (${response.status.value}): $errorBody",
+                            errorBody = rawBody.orEmpty(),
+                            traceState = traceState,
+                            localRedactor = localRedactor,
                         )
                     } else {
                         val interaction =
@@ -540,10 +540,12 @@ class GeminiInteractionClient(
                 )
             }
             if (!response.status.isSuccess()) {
-                logger.error("Gemini interaction polling failed for {} with HTTP {}", id, response.status.value)
-                return InteractionExecutionResult.Error.ApiError(
+                return classifyHttpError(
                     statusCode = response.status.value,
-                    message = "Error polling interaction: ${response.status.value}",
+                    errorBody = rawBody.orEmpty(),
+                    traceState = traceState,
+                    localRedactor = localRedactor,
+                    pollingInteractionId = id,
                 )
             }
 
@@ -692,6 +694,61 @@ class GeminiInteractionClient(
             googleSearchQueries = googleSearchQueries,
             usageMetadata = response.usage,
         )
+    }
+
+    private fun classifyHttpError(
+        statusCode: Int,
+        errorBody: String,
+        traceState: ExecutionTraceState,
+        localRedactor: AiTraceRedactor,
+        pollingInteractionId: String? = null,
+    ): InteractionExecutionResult.Error {
+        val safetyReason = extractSafetyBlockReason(errorBody)
+        if (safetyReason != null) {
+            traceState.finishReason = safetyReason
+            logger.warn(
+                "Gemini interaction{} blocked by safety/policy filter (HTTP {}, reason={}): {}",
+                pollingInteractionId?.let { " polling for $it" }.orEmpty(),
+                statusCode,
+                safetyReason,
+                localRedactor.redactString(errorBody),
+            )
+            return InteractionExecutionResult.Error.SafetyBlock(
+                message = "Gemini API error ($statusCode): $errorBody",
+                finishReason = safetyReason,
+            )
+        }
+        if (pollingInteractionId != null) {
+            logger.error("Gemini interaction polling failed for {} with HTTP {}", pollingInteractionId, statusCode)
+            return InteractionExecutionResult.Error.ApiError(
+                statusCode = statusCode,
+                message = "Error polling interaction: $statusCode",
+            )
+        }
+        logger.error(
+            "Gemini interaction failed with HTTP {}: {}",
+            statusCode,
+            localRedactor.redactString(errorBody),
+        )
+        return InteractionExecutionResult.Error.ApiError(
+            statusCode = statusCode,
+            message = "Gemini API error ($statusCode): $errorBody",
+        )
+    }
+
+    private fun extractSafetyBlockReason(errorBody: String): String? {
+        if (errorBody.isBlank()) return null
+        val errorObj =
+            runCatching {
+                jsonParser.parseToJsonElement(errorBody).jsonObject["error"] as? JsonObject
+            }.getOrNull() ?: return null
+        val code = (errorObj["code"] as? JsonPrimitive)?.contentOrNull
+        val status = (errorObj["status"] as? JsonPrimitive)?.contentOrNull
+        return when {
+            GeminiFinishReasons.isSafetyBlock(code) -> code!!.trim().uppercase()
+            GeminiFinishReasons.isSafetyBlock(status) -> status!!.trim().uppercase()
+            else -> null
+        }
     }
 
     private suspend fun readBodyTextSafely(response: HttpResponse): String? =

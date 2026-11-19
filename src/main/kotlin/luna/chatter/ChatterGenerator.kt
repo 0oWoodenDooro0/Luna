@@ -191,6 +191,17 @@ open class ChatterGenerator(
                 sanitized
             }
 
+            is InteractionExecutionResult.Error.SafetyBlock -> {
+                logger.warn(
+                    "ChatterGenerator interaction safety blocked (stage={}, reason={}): {}",
+                    stage,
+                    result.finishReason,
+                    result.message,
+                )
+                session?.fail(result.failureCategory, result.message)
+                null
+            }
+
             is InteractionExecutionResult.Error -> {
                 logger.error(
                     "ChatterGenerator interaction failed (stage={}, category={}): {}",

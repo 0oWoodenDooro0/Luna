@@ -72,6 +72,7 @@ class AsymmetricErrorEventFilter(
                 ErrorAlertSeverity.WARN -> isFirstPartyLogger(event.loggerName)
             }
         if (!passesSeverityPolicy) return false
+        if (isTransientGatewayDisconnect(event)) return false
 
         if (effectiveWindowMs <= 0L) return true
         // Third-party loggers do not emit paired JsonLogger events; avoid polluting correlation cache.
@@ -109,6 +110,14 @@ class AsymmetricErrorEventFilter(
                 )
             return true
         }
+    }
+
+    private fun isTransientGatewayDisconnect(event: OwnerErrorEvent): Boolean {
+        if (event.loggerName.trim() != KORD_DEFAULT_GATEWAY_LOGGER) return false
+        val throwableClass = event.throwableClass?.trim() ?: return false
+        if (throwableClass !in TRANSIENT_GATEWAY_THROWABLES) return false
+        val trace = event.stackTrace ?: return false
+        return trace.contains(WEBSOCKET_READER_MARKER)
     }
 
     private fun evictExpiredLocked(nowMs: Long) {
@@ -375,6 +384,14 @@ class AsymmetricErrorEventFilter(
         const val DEFAULT_MAX_TRACKED_ENTRIES = 512
         const val JSON_LOGGER_NAME = "JSON_LOGGER"
         const val UNCAUGHT_EXCEPTION_LOGGER_NAME = "luna.core.UncaughtException"
+
+        private const val KORD_DEFAULT_GATEWAY_LOGGER = "dev.kord.gateway.DefaultGateway"
+        private const val WEBSOCKET_READER_MARKER = "okhttp3.internal.ws.WebSocketReader"
+        private val TRANSIENT_GATEWAY_THROWABLES =
+            setOf(
+                "java.io.EOFException",
+                "java.net.SocketException",
+            )
 
         private const val NO_MATCH_SCORE = -1
         private const val MIN_CORRELATION_SCORE = 3
