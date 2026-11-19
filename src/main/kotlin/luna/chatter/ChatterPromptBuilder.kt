@@ -15,6 +15,7 @@ import luna.core.ai.VideoProcessingMode
 object ChatterPromptBuilder {
     const val DISCORD_MAX_LENGTH: Int = 2000
     const val MAX_OUTPUT_TOKENS: Int = 512
+    const val MAX_REPLY_SEGMENTS: Int = 3
     const val TRUNCATION_ELLIPSIS: String = "..."
 
     const val SYSTEM_INSTRUCTION: String =
@@ -22,9 +23,9 @@ object ChatterPromptBuilder {
             "請務必遵守以下所有對話原則：\n" +
             "1. 角色定位：你是 Discord 社群成員，不是客服或制式 AI 助手。以自然、隨性、平常群友打字聊天的口吻發言。\n" +
             "2. 禁用表情符號：嚴格禁止使用任何 emoji、表情符號或顏文字（包含 XD、Orz、(｡･ω･｡) 等一律禁止）。\n" +
-            "3. 不使用標點符號：盡量不使用標點符號（不加逗號、句號、驚嘆號），需要斷句或換口氣時一律用空格或分行隔開句子。\n" +
+            "3. 不使用標點符號與單一換行斷句：盡量不使用標點符號（不加逗號、句號、驚嘆號），需要斷句、換口氣或拆成多段短想法時，一律使用單一換行（\\n）分隔到不同行，不要用空格隔開句子，也不要留空行。\n" +
             "4. 極簡口語化：語句要極簡、口語化，不要有書面語、長句鋪陳或小說般的形容修辭，用字精簡自然，就像真正的 Discord 群友平常打字閒聊一樣隨性。\n" +
-            "5. 一次講一句重點：通常一次只講一句重點，最多兩到三句極短句，嚴禁長篇大論、說教或分析條列。\n" +
+            "5. 一次講一句重點：通常一次只講一句重點，最多兩到三句極短句（每段想法各佔一行），嚴禁長篇大論、說教或分析條列。\n" +
             "6. 語言用語：以台灣繁體中文（zh-TW）為主要社群慣用語，或配合對話語言交流。\n" +
             "7. 嚴格禁用 AI 套話與開場白：輸出中絕對嚴禁使用任何制式、官方或機械化的 AI 助理開場白或套話（例如「身為一個 AI」、「很高興為您服務」、「有什麼我可以幫忙的嗎」等），請直接切入話題搭話。\n" +
             "8. 對話脈絡理解：對話紀錄中標註了各發言者的名稱（例如 [使用者]: 內容）。請根據上下文脈絡隨性自然地搭話。\n" +
@@ -100,7 +101,7 @@ object ChatterPromptBuilder {
         sb.append(
             "\n\n請以 Luna 的社群成員口吻回覆這段對話$mediaDirective。" +
                 "要求：順著最新聊天紀錄接話（切勿回頭回覆早前的舊句子）、極簡口語、一次講一句重點（最多兩到三句極短句）、" +
-                "不加標點符號（不加逗號、句號、驚嘆號，斷句用空格或分行）、嚴禁使用任何 emoji 或表情符號、" +
+                "不加標點符號（不加逗號、句號、驚嘆號，不同短想法或換口氣時一律用單一換行 \\n 分行，不要用空格分隔）、嚴禁使用任何 emoji 或表情符號、" +
                 "切勿使用制式 AI 開場白與套話、不可輸出任何摘要標題、Markdown 網址列表或引用來源標註：",
         )
         return sb.toString().trim()
@@ -184,5 +185,37 @@ object ChatterPromptBuilder {
         if (text.length <= maxLength) return text
         val prefixLength = (maxLength - TRUNCATION_ELLIPSIS.length).coerceAtLeast(0)
         return text.take(prefixLength) + TRUNCATION_ELLIPSIS
+    }
+
+    /**
+     * Splits a sanitized reply on newline boundaries into non-empty trimmed segments capped at [maxSegments].
+     * Any trailing lines beyond [maxSegments] are merged into the final segment using `\n`, and every segment
+     * is individually bounded to [maxSegmentLength] with graceful ellipsis truncation.
+     */
+    fun splitReplySegments(
+        replyText: String,
+        maxSegments: Int = MAX_REPLY_SEGMENTS,
+        maxSegmentLength: Int = DISCORD_MAX_LENGTH,
+    ): List<String> {
+        require(maxSegments > 0) { "maxSegments must be positive, got $maxSegments" }
+        val nonEmptyLines =
+            replyText
+                .lines()
+                .map { it.trim() }
+                .filter { it.isNotEmpty() }
+
+        if (nonEmptyLines.isEmpty()) return emptyList()
+
+        val rawSegments =
+            if (nonEmptyLines.size <= maxSegments) {
+                nonEmptyLines
+            } else {
+                buildList(maxSegments) {
+                    addAll(nonEmptyLines.subList(0, maxSegments - 1))
+                    add(nonEmptyLines.subList(maxSegments - 1, nonEmptyLines.size).joinToString("\n"))
+                }
+            }
+
+        return rawSegments.map { truncateToDiscordLimit(it, maxLength = maxSegmentLength) }
     }
 }

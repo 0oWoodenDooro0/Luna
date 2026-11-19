@@ -175,6 +175,7 @@ class ChatterPlugin(
                 contextCollector = collector,
                 traceRecorder = traceRecorder,
                 burstCoordinator = coordinator,
+                afterMessagesFetcher = ChatterService.defaultAfterMessagesFetcher,
             )
         val finalService = serviceFactory?.invoke(chatterService) ?: chatterService
         this.service = finalService

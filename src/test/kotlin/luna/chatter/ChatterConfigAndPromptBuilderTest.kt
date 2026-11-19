@@ -413,4 +413,60 @@ class ChatterConfigAndPromptBuilderTest {
         assertTrue(result2001.endsWith("..."))
         assertEquals("a".repeat(1997) + "...", result2001)
     }
+
+    // --- Newline Prompt Directive & Segment Splitting Tests ---
+
+    @Test
+    fun `ChatterPromptBuilder system and user instructions direct single newline breaks instead of spaces`() {
+        val systemInstruction = ChatterPromptBuilder.buildSystemInstruction()
+        val userPrompt = ChatterPromptBuilder.buildUserPrompt("[Alice]: 晚餐要吃什麼")
+
+        assertContains(systemInstruction, "\\n")
+        assertContains(systemInstruction, "換行")
+        assertFalse(systemInstruction.contains("用空格或分行"))
+
+        assertContains(userPrompt, "\\n")
+        assertContains(userPrompt, "換行")
+        assertFalse(userPrompt.contains("斷句用空格或分行"))
+    }
+
+    @Test
+    fun `ChatterPromptBuilder splitReplySegments handles blank inputs, 1 to 3 segments, blank-line trimming, overflow merge, and 2000-char caps`() {
+        assertEquals(emptyList(), ChatterPromptBuilder.splitReplySegments(""))
+        assertEquals(emptyList(), ChatterPromptBuilder.splitReplySegments("   \n\r\n\t  "))
+
+        assertEquals(listOf("單句回覆"), ChatterPromptBuilder.splitReplySegments("  單句回覆  "))
+
+        assertEquals(
+            listOf("第一句", "第二句"),
+            ChatterPromptBuilder.splitReplySegments("第一句\n\n   \n  第二句  \r\n"),
+        )
+
+        assertEquals(
+            listOf("想法一", "想法二", "想法三"),
+            ChatterPromptBuilder.splitReplySegments("想法一\n想法二\n想法三"),
+        )
+
+        assertEquals(
+            listOf("第一段", "第二段", "第三段\n第四段\n第五段"),
+            ChatterPromptBuilder.splitReplySegments("第一段\n\n第二段\n第三段\n  \n第四段\n第五段"),
+        )
+
+        val longSeg1 = "a".repeat(2005)
+        val longSeg2 = "b".repeat(2000)
+        val longSeg3PartA = "c".repeat(1500)
+        val longSeg3PartB = "d".repeat(600)
+        val bounded =
+            ChatterPromptBuilder.splitReplySegments(
+                "$longSeg1\n$longSeg2\n$longSeg3PartA\n$longSeg3PartB",
+            )
+        assertEquals(3, bounded.size)
+        assertEquals(2000, bounded[0].length)
+        assertTrue(bounded[0].endsWith("..."))
+        assertEquals("a".repeat(1997) + "...", bounded[0])
+        assertEquals(longSeg2, bounded[1])
+        assertEquals(2000, bounded[2].length)
+        assertTrue(bounded[2].endsWith("..."))
+        assertTrue(bounded[2].startsWith(longSeg3PartA + "\n"))
+    }
 }

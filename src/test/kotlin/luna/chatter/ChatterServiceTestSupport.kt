@@ -50,6 +50,7 @@ internal class ChatterServiceTestSupport {
                 cooldownCache = cooldownCache,
                 historyFetcher = { _, _ -> emptyList() },
                 contextCollector = contextCollector,
+                afterMessagesFetcher = { _, _ -> emptyList() },
             )
     }
 

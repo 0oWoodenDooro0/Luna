@@ -4,6 +4,7 @@ import dev.kord.common.entity.Snowflake
 import dev.kord.core.Kord
 import dev.kord.core.behavior.channel.MessageChannelBehavior
 import dev.kord.core.behavior.channel.createMessage
+import dev.kord.core.behavior.reply
 import dev.kord.core.entity.Message
 import dev.kord.core.event.message.MessageCreateEvent
 import dev.kord.core.on
@@ -33,7 +34,8 @@ import kotlin.random.Random
  * 2. Coordinating per-channel burst debounce windows and pre-send cancellation via [burstCoordinator].
  * 3. Overlapping silent reading simulation (0.8s–2.0s via [randomProvider]) with participation decision and reply generation.
  * 4. Triggering `channel.type()` and length-paced typing delay (`min(charCount * 120ms, 4000ms)`) only when non-blank output is ready.
- * 5. Locking dispatch, delivering the reply via [deliverReply], and refreshing cooldown.
+ * 5. Locking dispatch, counting intervening post-trigger messages via [afterMessagesFetcher], delivering up to 3 segmented messages
+ *    with asymmetric reply threading via [deliverReply], and refreshing cooldown.
  */
 open class ChatterService(
     val filter: ChatterNoiseFilter = ChatterNoiseFilter(),
@@ -60,6 +62,8 @@ open class ChatterService(
     val randomProvider: (minInclusive: Long, maxInclusive: Long) -> Long = { min, max ->
         Random.nextLong(min, max + 1)
     },
+    val afterMessagesFetcher: suspend (message: Message, limit: Int) -> List<Message> = defaultAfterMessagesFetcher,
+    val replySender: (suspend (message: Message, content: String) -> Message)? = null,
 ) {
     private val logger = LoggerFactory.getLogger(ChatterService::class.java)
 
@@ -346,6 +350,16 @@ open class ChatterService(
                     return@coroutineScope false
                 }
 
+                val segments = ChatterPromptBuilder.splitReplySegments(replyText)
+                if (segments.isEmpty()) {
+                    logger.debug("ChatterPromptBuilder.splitReplySegments returned no segments for message {}", message.id)
+                    session.fail(
+                        AiTraceFailureCategory.EMPTY_OUTPUT,
+                        "ChatterGenerator returned blank segments",
+                    )
+                    return@coroutineScope false
+                }
+
                 // Wait for any remaining silent reading time before triggering typing indicator
                 readingJob.join()
                 currentCoroutineContext().ensureActive()
@@ -360,7 +374,7 @@ open class ChatterService(
                 }
                 currentCoroutineContext().ensureActive()
 
-                val typingDelayMs = minOf(replyText.length * TYPING_MS_PER_CHAR, MAX_TYPING_DELAY_MS)
+                val typingDelayMs = minOf(segments.first().length * TYPING_MS_PER_CHAR, MAX_TYPING_DELAY_MS)
                 if (typingDelayMs > 0L) {
                     delay(typingDelayMs)
                 }
@@ -372,9 +386,9 @@ open class ChatterService(
                     return@coroutineScope false
                 }
 
-                // 5. Deliver reply to channel
+                // 5. Deliver segmented reply batch to channel (no mid-burst cancellation after lock)
                 try {
-                    deliverReply(channel, replyText)
+                    deliverReply(channel, message, segments, selfId)
                 } catch (e: CancellationException) {
                     throw e
                 } catch (e: Exception) {
@@ -386,9 +400,10 @@ open class ChatterService(
                     return@coroutineScope false
                 }
 
+                val deliveredOutput = segments.joinToString("\n")
                 cooldownCache.record(message.channelId)
-                session.complete(finalOutput = replyText)
-                logger.info("Chatter sent reply to channel {}: {}", message.channelId, replyText)
+                session.complete(finalOutput = deliveredOutput)
+                logger.info("Chatter sent reply to channel {}: {}", message.channelId, deliveredOutput)
                 true
             } finally {
                 readingJob.cancel()
@@ -396,25 +411,132 @@ open class ChatterService(
         }
 
     /**
-     * Clean reply delivery seam for sending generated dialogue to a Discord channel.
+     * Clean reply delivery seam for sending segmented dialogue to a Discord channel with asymmetric reply threading.
      */
     protected open suspend fun deliverReply(
         channel: MessageChannelBehavior,
-        replyText: String,
+        triggerMessage: Message,
+        segments: List<String>,
+        selfId: Snowflake? = runCatching { triggerMessage.kord.selfId }.getOrNull(),
+    ) {
+        if (segments.isEmpty()) return
+
+        val useReplyThreading = shouldUseReplyThreading(triggerMessage, selfId)
+        if (useReplyThreading) {
+            sendReplyMessage(triggerMessage, segments.first())
+        } else {
+            sendChannelMessage(channel, segments.first())
+        }
+
+        for (index in 1 until segments.size) {
+            try {
+                channel.type()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                logger.warn(
+                    "channel.type() call failed before burst segment {} on channel {}: {}",
+                    index + 1,
+                    triggerMessage.channelId,
+                    e.message,
+                )
+            }
+
+            val rawSegmentDelayMs = randomProvider(MIN_SEGMENT_DELAY_MS, MAX_SEGMENT_DELAY_MS)
+            val segmentDelayMs =
+                if (rawSegmentDelayMs < 0L) {
+                    logger.warn("Negative segment delay '{}ms' returned by randomProvider; clamping to 0ms", rawSegmentDelayMs)
+                    0L
+                } else {
+                    rawSegmentDelayMs
+                }
+            if (segmentDelayMs > 0L) {
+                delay(segmentDelayMs)
+            }
+
+            sendChannelMessage(channel, segments[index])
+        }
+    }
+
+    private suspend fun shouldUseReplyThreading(
+        triggerMessage: Message,
+        selfId: Snowflake?,
+    ): Boolean {
+        val afterMessages =
+            try {
+                afterMessagesFetcher(triggerMessage, DEFAULT_AFTER_MESSAGES_LIMIT)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                logger.warn(
+                    "Failed to fetch post-trigger messages after {} in channel {}; failing open to createMessage: {}",
+                    triggerMessage.id,
+                    triggerMessage.channelId,
+                    e.message,
+                )
+                return false
+            }
+
+        val resolvedSelfId = selfId ?: runCatching { triggerMessage.kord.selfId }.getOrNull()
+        val interveningCount =
+            afterMessages.count { afterMsg ->
+                afterMsg.id != triggerMessage.id && !isAuthoredByLuna(afterMsg, resolvedSelfId)
+            }
+        return interveningCount >= REPLY_THREADING_THRESHOLD
+    }
+
+    private fun isAuthoredByLuna(
+        message: Message,
+        selfId: Snowflake?,
+    ): Boolean {
+        val resolvedSelfId = selfId ?: runCatching { message.kord.selfId }.getOrNull() ?: return false
+        val authorId =
+            runCatching { message.author?.id }.getOrNull()
+                ?: runCatching { message.data.author.id }.getOrNull()
+        return authorId == resolvedSelfId
+    }
+
+    private suspend fun sendChannelMessage(
+        channel: MessageChannelBehavior,
+        content: String,
     ) {
         if (messageSender != null) {
-            messageSender.invoke(channel, replyText)
+            messageSender.invoke(channel, content)
         } else {
-            channel.createMessage(replyText)
+            channel.createMessage(content)
+        }
+    }
+
+    private suspend fun sendReplyMessage(
+        triggerMessage: Message,
+        content: String,
+    ) {
+        if (replySender != null) {
+            replySender.invoke(triggerMessage, content)
+        } else {
+            triggerMessage.reply {
+                this.messageReference = triggerMessage.id
+                this.content = content
+            }
         }
     }
 
     companion object {
         const val DEFAULT_DECISION_MESSAGE_COUNT = 15
         const val DEFAULT_HISTORY_MESSAGE_COUNT = 15
+        const val DEFAULT_AFTER_MESSAGES_LIMIT = 20
+        const val REPLY_THREADING_THRESHOLD = 2
         const val MIN_READING_DELAY_MS = 800L
         const val MAX_READING_DELAY_MS = 2_000L
+        const val MIN_SEGMENT_DELAY_MS = 700L
+        const val MAX_SEGMENT_DELAY_MS = 1_500L
         const val TYPING_MS_PER_CHAR = 120L
         const val MAX_TYPING_DELAY_MS = 4_000L
+
+        val defaultAfterMessagesFetcher: suspend (message: Message, limit: Int) -> List<Message> = { message, limit ->
+            message.channel
+                .getMessagesAfter(message.id, limit = limit)
+                .toList()
+        }
     }
 }
