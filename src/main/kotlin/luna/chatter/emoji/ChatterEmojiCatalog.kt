@@ -33,6 +33,11 @@ interface ChatterEmojiCatalog {
         guildId: Snowflake?,
         emoji: ReactionEmoji,
     ) {}
+
+    suspend fun preScanGuildEmojis(
+        guildId: Snowflake?,
+        emojis: List<GuildCustomEmoji>,
+    ) {}
 }
 
 /**
@@ -185,19 +190,44 @@ class DefaultChatterEmojiCatalog(
         }
     }
 
+    override suspend fun preScanGuildEmojis(
+        guildId: Snowflake?,
+        emojis: List<GuildCustomEmoji>,
+    ) {
+        if (emojis.isEmpty()) return
+        val targets =
+            emojis.map { emoji ->
+                EmojiVisionRequest(
+                    id = emoji.id.toString(),
+                    name = emoji.name,
+                    isAnimated = emoji.isAnimated,
+                )
+            }
+        resolveOrSyncMetadata(
+            targets = targets,
+            contextLabel = "pre-scan guild $guildId",
+            useRoundTimeout = false,
+        )
+    }
+
     private suspend fun resolveOrSyncMetadata(
         targets: List<EmojiVisionRequest>,
         contextLabel: String,
+        useRoundTimeout: Boolean = true,
     ) {
         if (targets.isEmpty()) return
         if (visionResolver != null) {
             try {
-                visionResolver.resolveMissing(targets)
+                if (useRoundTimeout) {
+                    visionResolver.resolveMissing(targets)
+                } else {
+                    visionResolver.resolveMissing(targets, timeoutMs = null)
+                }
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
                 logger.warn(
-                    "On-demand Custom Emoji Meaning vision resolution failed for {}; degrading gracefully: {}",
+                    "Custom Emoji Meaning vision resolution failed for {}; degrading gracefully: {}",
                     contextLabel,
                     e.message,
                 )

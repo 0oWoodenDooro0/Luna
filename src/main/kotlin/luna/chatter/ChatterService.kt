@@ -5,8 +5,10 @@ import dev.kord.core.Kord
 import dev.kord.core.behavior.channel.MessageChannelBehavior
 import dev.kord.core.behavior.channel.createMessage
 import dev.kord.core.behavior.reply
+import dev.kord.core.entity.GuildEmoji
 import dev.kord.core.entity.Message
 import dev.kord.core.entity.ReactionEmoji
+import dev.kord.core.event.guild.EmojisUpdateEvent
 import dev.kord.core.event.message.MessageCreateEvent
 import dev.kord.core.event.message.ReactionAddEvent
 import dev.kord.core.on
@@ -93,7 +95,43 @@ open class ChatterService(
         kord.on<ReactionAddEvent>(scope = listenerScope) {
             onReactionAdd(this)
         }
+        kord.on<EmojisUpdateEvent>(scope = listenerScope) {
+            onEmojisUpdate(this)
+        }
+        listenerScope.launch {
+            preScanStartupGuilds(kord)
+        }
         return parentJob
+    }
+
+    /**
+     * Pre-scans custom emojis across all joined guilds on startup without blocking gateway dispatch.
+     */
+    suspend fun preScanStartupGuilds(kord: Kord) {
+        try {
+            coroutineScope {
+                kord.guilds.collect { guild ->
+                    val guildId = guild.id
+                    launch {
+                        runCatching {
+                            val availableEmojis = guild.emojis.toList().toAvailableGuildCustomEmojis()
+                            emojiCatalog.preScanGuildEmojis(guildId = guildId, emojis = availableEmojis)
+                        }.onFailure { e ->
+                            if (e is CancellationException) throw e
+                            logger.warn(
+                                "Failed to pre-scan custom emojis for guild {} on startup: {}",
+                                guildId,
+                                e.message,
+                            )
+                        }
+                    }
+                }
+            }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            logger.warn("Failed to enumerate guilds for startup custom emoji pre-scan: {}", e.message)
+        }
     }
 
     /**
@@ -109,6 +147,14 @@ open class ChatterService(
         val selfId = runCatching { event.kord.selfId }.getOrNull()
         if (selfId != null && event.userId == selfId) return
         emojiCatalog.recordReactionUsage(guildId = guildId, emoji = event.emoji)
+    }
+
+    /**
+     * Handles incoming [EmojisUpdateEvent] for background guild custom emoji pre-scanning.
+     */
+    suspend fun onEmojisUpdate(event: EmojisUpdateEvent) {
+        val availableEmojis = event.emojis.toAvailableGuildCustomEmojis()
+        emojiCatalog.preScanGuildEmojis(guildId = event.guildId, emojis = availableEmojis)
     }
 
     /**
@@ -824,21 +870,22 @@ open class ChatterService(
             if (guild == null) {
                 emptyList()
             } else {
-                guild.emojis
-                    .toList()
-                    .mapNotNull { emoji ->
-                        val emojiName = emoji.name?.takeIf { it.isNotBlank() }
-                        if (emoji.isAvailable && emojiName != null) {
-                            GuildCustomEmoji(
-                                id = emoji.id,
-                                name = emojiName,
-                                isAnimated = emoji.isAnimated,
-                            )
-                        } else {
-                            null
-                        }
-                    }
+                guild.emojis.toList().toAvailableGuildCustomEmojis()
             }
         }
+
+        internal fun Iterable<GuildEmoji>.toAvailableGuildCustomEmojis(): List<GuildCustomEmoji> =
+            mapNotNull { emoji ->
+                val emojiName = emoji.name?.takeIf { it.isNotBlank() }
+                if (emoji.isAvailable && emojiName != null) {
+                    GuildCustomEmoji(
+                        id = emoji.id,
+                        name = emojiName,
+                        isAnimated = emoji.isAnimated,
+                    )
+                } else {
+                    null
+                }
+            }
     }
 }
