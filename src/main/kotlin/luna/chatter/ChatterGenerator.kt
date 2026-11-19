@@ -149,6 +149,7 @@ open class ChatterGenerator(
                 background = background,
             )
 
+        val allowedCustomEmojiIds = effectiveInput.guildEmojis.map { it.id.toString() }.toSet()
         val result =
             interactionClient.interact(
                 baseUrl = config.cleanBaseUrl,
@@ -164,6 +165,7 @@ open class ChatterGenerator(
                         variant = null,
                         pipeline = AiTracePipeline.CHATTER,
                         trigger = trigger,
+                        allowedCustomEmojiIds = allowedCustomEmojiIds,
                     ),
             )
 
@@ -173,6 +175,7 @@ open class ChatterGenerator(
                     ChatterPromptBuilder.sanitizeResponse(
                         result.text,
                         maxLength = config.maxOutputCharacters,
+                        guildEmojis = effectiveInput.guildEmojis,
                     )
                 if (sanitized.isBlank()) {
                     logger.error("ChatterGenerator response was sanitized to blank")

@@ -24,7 +24,9 @@ object ChatterPromptBuilder {
         "你叫 Luna，是這個 Discord 社群伺服器的一員，是平常和大家一起打字閒聊的社群成員，不是客服或制式 AI 助手。\n\n" +
             "請務必遵守以下所有對話原則：\n" +
             "1. 角色定位：你是 Discord 社群成員，不是客服或制式 AI 助手。以自然、隨性、平常群友打字聊天的口吻發言。\n" +
-            "2. 禁用表情符號：嚴格禁止使用任何 emoji、表情符號或顏文字（包含 XD、Orz、(｡･ω･｡) 等一律禁止）。\n" +
+            "2. 表情符號規範：嚴格禁止使用任何標準 Unicode emoji 或顏文字（包含 😂、👍、XD、Orz、(｡･ω･｡) 等一律禁止）。" +
+            "僅當對話提示中另有提供伺服器自訂表情清單時，才可依語境自然選用並原封不動貼上完整標記（<:name:id> 或 <a:name:id>），" +
+            "切勿過度堆疊，也絕對禁止自行編造或修改表情名稱與數字 ID；若未提供清單則不可使用任何表情符號。\n" +
             "3. 不使用標點符號與單一換行斷句：盡量不使用標點符號（不加逗號、句號、驚嘆號），需要斷句、換口氣或拆成多段短想法時，一律使用單一換行（\\n）分隔到不同行，不要用空格隔開句子，也不要留空行。\n" +
             "4. 極簡口語化：語句要極簡、口語化，不要有書面語、長句鋪陳或小說般的形容修辭，用字精簡自然，就像真正的 Discord 群友平常打字閒聊一樣隨性。\n" +
             "5. 一次講一句重點：通常一次只講一句重點，最多兩到三句極短句（每段想法各佔一行），嚴禁長篇大論、說教或分析條列。\n" +
@@ -98,6 +100,12 @@ object ChatterPromptBuilder {
             sb.append(supplemental.toString().trimStart())
         }
 
+        val boundedEmojis = input.guildEmojis.take(MAX_PROMPT_GUILD_EMOJIS)
+        if (boundedEmojis.isNotEmpty()) {
+            sb.append("\n\n可用的伺服器自訂表情清單（僅可自然選用以下完整標記，切勿自行編造 ID）：\n")
+            sb.append(boundedEmojis.joinToString(" ") { it.mention })
+        }
+
         val mediaHints = mutableListOf<String>()
         if (!input.videoUri.isNullOrBlank()) {
             mediaHints.add("附帶 YouTube 影片請結合畫面與語音自然搭話")
@@ -114,11 +122,17 @@ object ChatterPromptBuilder {
             } else {
                 ""
             }
+        val emojiDirective =
+            if (boundedEmojis.isNotEmpty()) {
+                "嚴禁使用任何標準 Unicode emoji 或顏文字（可自然選用上方提供的伺服器自訂表情標記，切勿自行編造 ID）"
+            } else {
+                "嚴禁使用任何 Unicode emoji、自訂表情或顏文字"
+            }
 
         sb.append(
             "\n\n請以 Luna 的社群成員口吻回覆這段對話$mediaDirective。" +
                 "要求：順著最新聊天紀錄接話（切勿回頭回覆早前的舊句子）、極簡口語、一次講一句重點（最多兩到三句極短句）、" +
-                "不加標點符號（不加逗號、句號、驚嘆號，不同短想法或換口氣時一律用單一換行 \\n 分行，不要用空格分隔）、嚴禁使用任何 emoji 或表情符號、" +
+                "不加標點符號（不加逗號、句號、驚嘆號，不同短想法或換口氣時一律用單一換行 \\n 分行，不要用空格分隔）、$emojiDirective、" +
                 "切勿使用制式 AI 開場白與套話、不可輸出任何摘要標題、Markdown 網址列表或引用來源標註：",
         )
         return sb.toString().trim()
@@ -270,6 +284,7 @@ object ChatterPromptBuilder {
     fun sanitizeResponse(
         rawText: String,
         maxLength: Int = DISCORD_MAX_LENGTH,
+        guildEmojis: List<GuildCustomEmoji> = emptyList(),
     ): String {
         var text = rawText.trim()
 
@@ -291,7 +306,8 @@ object ChatterPromptBuilder {
             text = text.replace(pattern, "").trim()
         }
 
-        text = EmojiSanitizer.stripEmojis(text).trim()
+        val allowedCustomEmojiIds = guildEmojis.map { it.id.toString() }.toSet()
+        text = EmojiSanitizer.stripEmojis(text, allowedCustomEmojiIds = allowedCustomEmojiIds).trim()
 
         return truncateToDiscordLimit(text, maxLength = maxLength)
     }

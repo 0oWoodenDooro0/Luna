@@ -25,6 +25,7 @@ import luna.core.ai.AiTracePipeline
 import luna.core.ai.AiTraceRecorder
 import luna.core.ai.AiTraceSession
 import luna.core.ai.AiTraceTrigger
+import luna.core.ai.EmojiSanitizer
 import luna.core.ai.NoOpAiTraceRecorder
 import luna.core.ai.withAiTraceSession
 import org.slf4j.LoggerFactory
@@ -372,10 +373,20 @@ open class ChatterService(
                     return@coroutineScope false
                 }
 
+                val guildEmojis =
+                    resolveGuildEmojis(
+                        message = message,
+                        fallbackDescription = "degrading to emoji-free text reply",
+                    ).take(ChatterPromptBuilder.MAX_PROMPT_GUILD_EMOJIS)
+                currentCoroutineContext().ensureActive()
+
                 val chatterInput =
                     replyContext
                         .toChatterInput(isDirectMention = isDirectMention)
-                        .copy(personaState = personaState)
+                        .copy(
+                            personaState = personaState,
+                            guildEmojis = guildEmojis,
+                        )
 
                 // Calls chatterGenerator.generateReply(chatterInput) while reading simulation runs concurrently
                 val replyText =
@@ -404,7 +415,9 @@ open class ChatterService(
                     return@coroutineScope false
                 }
 
-                val segments = ChatterPromptBuilder.splitReplySegments(replyText)
+                val allowedCustomEmojiIds = guildEmojis.map { it.id.toString() }.toSet()
+                val sanitizedReply = EmojiSanitizer.stripEmojis(replyText, allowedCustomEmojiIds = allowedCustomEmojiIds).trim()
+                val segments = ChatterPromptBuilder.splitReplySegments(sanitizedReply)
                 if (segments.isEmpty()) {
                     logger.debug("ChatterPromptBuilder.splitReplySegments returned no segments for message {}", message.id)
                     session.fail(
@@ -575,6 +588,36 @@ open class ChatterService(
         }
     }
 
+    private suspend fun resolveGuildEmojis(
+        message: Message,
+        fallbackDescription: String,
+    ): List<GuildCustomEmoji> {
+        val guildEmojis =
+            try {
+                guildEmojisProvider(message)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                logger.warn(
+                    "Failed to resolve guild emojis for message {} in channel {}; {}: {}",
+                    message.id,
+                    message.channelId,
+                    fallbackDescription,
+                    e.message,
+                )
+                return emptyList()
+            }
+        if (guildEmojis.isEmpty()) {
+            logger.debug(
+                "No guild custom emojis available for message {} in channel {}; {}",
+                message.id,
+                message.channelId,
+                fallbackDescription,
+            )
+        }
+        return guildEmojis
+    }
+
     private suspend fun handleSilentReactionPath(
         message: Message,
         decisionContext: ChatterDecisionContext,
@@ -588,19 +631,10 @@ open class ChatterService(
         markDispatching: () -> Boolean,
     ): Boolean {
         val guildEmojis =
-            try {
-                guildEmojisProvider(message)
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: Exception) {
-                logger.warn(
-                    "Failed to resolve guild emojis for message {} in channel {}; continuing with Unicode reactions only: {}",
-                    message.id,
-                    message.channelId,
-                    e.message,
-                )
-                emptyList()
-            }
+            resolveGuildEmojis(
+                message = message,
+                fallbackDescription = "continuing with Unicode reactions only",
+            )
         currentCoroutineContext().ensureActive()
 
         val reactionInput =
