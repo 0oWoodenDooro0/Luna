@@ -337,7 +337,7 @@ class ChatterSegmentedDeliveryAndThreadingTest {
             val sentPayloads = mutableListOf<String>()
             val oversizedReply = "${"a".repeat(2020)}\n${"b".repeat(500)}\n${"c".repeat(1200)}\n${"d".repeat(1200)}"
 
-            coEvery { fixture.decisionClient.decide(any(), any()) } returns ParticipationDecision(shouldParticipate = true, noul = 0.95)
+            coEvery { fixture.decisionClient.decide(any(), any(), any()) } returns ParticipationDecision(shouldParticipate = true, noul = 0.95)
             coEvery { fixture.chatterGenerator.generateReply(any<ChatterInput>()) } returns oversizedReply
 
             val service =

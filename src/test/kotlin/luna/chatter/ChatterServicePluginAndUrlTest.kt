@@ -168,7 +168,7 @@ class ChatterServicePluginAndUrlTest {
             val channelId = 507L
             val message = fixture.createMockMessage(id = 110L, channelId = channelId, username = "Daisy", content = "Hello there from event")
 
-            coEvery { fixture.decisionClient.decide(any(), any()) } returns ParticipationDecision(shouldParticipate = true)
+            coEvery { fixture.decisionClient.decide(any(), any(), any()) } returns ParticipationDecision(shouldParticipate = true)
             coEvery { fixture.chatterGenerator.generateReply(any<ChatterInput>()) } returns "General Kenobi!"
 
             val job = fixture.service.register(mockKord, scope = this)
@@ -249,7 +249,7 @@ class ChatterServicePluginAndUrlTest {
                     content = socialUrl,
                 )
 
-            coEvery { fixture.decisionClient.decide(any(), any()) } answers {
+            coEvery { fixture.decisionClient.decide(any(), any(), any()) } answers {
                 callStages.add("decide")
                 ParticipationDecision(shouldParticipate = true, noul = 0.91)
             }
@@ -312,7 +312,7 @@ class ChatterServicePluginAndUrlTest {
                     content = "Check $webUrl",
                 )
 
-            coEvery { fixture.decisionClient.decide(any(), any()) } returns ParticipationDecision(shouldParticipate = true, noul = 0.91)
+            coEvery { fixture.decisionClient.decide(any(), any(), any()) } returns ParticipationDecision(shouldParticipate = true, noul = 0.91)
             coEvery { fixture.chatterGenerator.generateReply(any<ChatterInput>()) } returns "Kotlin 2.2 context parameters look neat"
 
             assertTrue(urlService.processMessage(urlMessage))
@@ -422,7 +422,7 @@ class ChatterServicePluginAndUrlTest {
                     content = "Latest turn",
                 )
 
-            coEvery { fixture.decisionClient.decide(any(), any()) } returns ParticipationDecision(shouldParticipate = false, noul = 0.2)
+            coEvery { fixture.decisionClient.decide(any(), any(), any()) } returns ParticipationDecision(shouldParticipate = false, noul = 0.2)
 
             // Case 1: decisionMessageCount > historyMessageCount (20 > 10) -> fetches 20
             val largeDecisionCollector =
@@ -457,6 +457,7 @@ class ChatterServicePluginAndUrlTest {
                             transcript.contains("[User20]: Turn 20") &&
                             transcript.contains("[TriggerUser]: Latest turn")
                     },
+                    any(),
                     any(),
                 )
             }

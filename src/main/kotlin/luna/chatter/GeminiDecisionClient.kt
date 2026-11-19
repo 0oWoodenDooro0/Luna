@@ -18,7 +18,6 @@ import io.ktor.http.contentType
 import io.ktor.http.isSuccess
 import io.ktor.serialization.kotlinx.json.json
 import kotlinx.coroutines.TimeoutCancellationException
-import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import luna.core.ai.AiAttemptOutcome
 import luna.core.ai.AiAttemptRequest
@@ -35,9 +34,6 @@ import luna.core.ai.elapsedMillisFromNanos
 import luna.core.ai.withActiveOrStandaloneSession
 import org.slf4j.LoggerFactory
 import java.net.SocketTimeoutException
-import kotlin.coroutines.AbstractCoroutineContextElement
-import kotlin.coroutines.CoroutineContext
-import kotlin.coroutines.coroutineContext
 
 /**
  * Low-latency Participation Decision client targeting Google Gemini Decisions API
@@ -75,7 +71,8 @@ open class GeminiDecisionClient(
     open suspend fun shouldParticipate(
         state: String,
         images: List<ChatImageAttachment> = emptyList(),
-    ): Boolean = decide(state, images).shouldParticipate
+        effectiveThreshold: Double? = null,
+    ): Boolean = decide(state, images, effectiveThreshold).shouldParticipate
 
     /**
      * Queries Gemini Decisions API and returns the detailed [ParticipationDecision] outcome.
@@ -83,6 +80,7 @@ open class GeminiDecisionClient(
     open suspend fun decide(
         state: String,
         images: List<ChatImageAttachment> = emptyList(),
+        effectiveThreshold: Double? = null,
     ): ParticipationDecision =
         traceRecorder.withActiveOrStandaloneSession(
             pipeline = AiTracePipeline.CHATTER,
@@ -95,12 +93,13 @@ open class GeminiDecisionClient(
                 ),
             secret = config.apiKey,
         ) { session, isStandalone ->
-            executeDecide(state, images, session, isStandalone)
+            executeDecide(state, images, effectiveThreshold, session, isStandalone)
         }
 
     private suspend fun executeDecide(
         state: String,
         images: List<ChatImageAttachment>,
+        effectiveThreshold: Double?,
         session: AiTraceSession?,
         isStandalone: Boolean,
     ): ParticipationDecision {
@@ -121,7 +120,11 @@ open class GeminiDecisionClient(
             return ParticipationDecision(shouldParticipate = false)
         }
 
-        val activeThreshold = currentEffectiveDecisionThreshold() ?: config.threshold
+        val activeThreshold =
+            effectiveThreshold
+                ?.takeIf { !it.isNaN() && !it.isInfinite() }
+                ?.coerceIn(0.0, 1.0)
+                ?: config.threshold
         val initialVariant = if (images.isNotEmpty()) "multimodal" else null
         return when (val initialOutcome = executeDecisionRequest(state, images, session, variant = initialVariant, activeThreshold = activeThreshold)) {
             is RequestOutcome.Success -> {
@@ -426,16 +429,3 @@ open class GeminiDecisionClient(
             }
     }
 }
-
-internal class DecisionThresholdContextElement(
-    val effectiveThreshold: Double,
-) : AbstractCoroutineContextElement(Key) {
-    companion object Key : CoroutineContext.Key<DecisionThresholdContextElement>
-}
-
-internal suspend fun currentEffectiveDecisionThreshold(): Double? = coroutineContext[DecisionThresholdContextElement]?.effectiveThreshold
-
-internal suspend fun <T> withEffectiveDecisionThreshold(
-    effectiveThreshold: Double,
-    block: suspend () -> T,
-): T = withContext(DecisionThresholdContextElement(effectiveThreshold)) { block() }

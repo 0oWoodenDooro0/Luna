@@ -77,7 +77,7 @@ class ChatterServiceConcurrencyAndCooldownTest {
                     contextCollector = realCollector,
                 )
 
-            coEvery { fixture.decisionClient.decide(any(), any()) } returns ParticipationDecision(shouldParticipate = true, noul = 0.9)
+            coEvery { fixture.decisionClient.decide(any(), any(), any()) } returns ParticipationDecision(shouldParticipate = true, noul = 0.9)
             coEvery { fixture.chatterGenerator.generateReply(any<ChatterInput>()) } returns "Nice article"
 
             assertTrue(pipelineService.processMessage(triggerMsg))
@@ -92,6 +92,7 @@ class ChatterServiceConcurrencyAndCooldownTest {
                             transcript.contains("[Bob 回覆 ExtUser「Original topic question」]: Check $socialUrl") &&
                             !transcript.contains("Article Title")
                     },
+                    any(),
                     any(),
                 )
             }
@@ -152,7 +153,7 @@ class ChatterServiceConcurrencyAndCooldownTest {
                     burstCoordinator = coordinator,
                 )
 
-            coEvery { fixture.decisionClient.decide(any(), any()) } returns ParticipationDecision(shouldParticipate = true, noul = 0.9)
+            coEvery { fixture.decisionClient.decide(any(), any(), any()) } returns ParticipationDecision(shouldParticipate = true, noul = 0.9)
             coEvery { fixture.chatterGenerator.generateReply(any<ChatterInput>()) } returns "Reply"
 
             val msg1 = fixture.createMockMessage(id = 7001L, channelId = channelId, username = "Alice", content = "first ambient")
@@ -170,7 +171,7 @@ class ChatterServiceConcurrencyAndCooldownTest {
             // Coalesced channel 700L invoked history/trace/decision once for the winning burst message + 1 for channel 701L
             assertEquals(2, historyCalls.get())
             assertEquals(2, traceSessionStarts.get())
-            coVerify(exactly = 2) { fixture.decisionClient.decide(any(), any()) }
+            coVerify(exactly = 2) { fixture.decisionClient.decide(any(), any(), any()) }
             assertFalse(coordinator.isActive(channelId))
             assertFalse(coordinator.isActive(otherChannelId))
             assertEquals(0, coordinator.size)
@@ -199,7 +200,7 @@ class ChatterServiceConcurrencyAndCooldownTest {
                     burstCoordinator = coordinator,
                 )
 
-            coEvery { fixture.decisionClient.decide(any(), any()) } coAnswers {
+            coEvery { fixture.decisionClient.decide(any(), any(), any()) } coAnswers {
                 val transcript = firstArg<String>()
                 if (transcript.contains("ambient in-flight")) {
                     ambientEnteredDecision.complete(Unit)
@@ -287,19 +288,19 @@ class ChatterServiceConcurrencyAndCooldownTest {
             val botSelfId = Snowflake(9999L)
             val channelId = 704L
 
-            coEvery { fixture.decisionClient.decide(any(), any()) } returns ParticipationDecision(shouldParticipate = true, noul = 0.9)
+            coEvery { fixture.decisionClient.decide(any(), any(), any()) } returns ParticipationDecision(shouldParticipate = true, noul = 0.9)
             coEvery { fixture.chatterGenerator.generateReply(any<ChatterInput>()) } returns "Hello!"
 
             // Initial ambient reply starts the 5s cooldown at simulatedTime
             val firstAmbient = fixture.createMockMessage(id = 7201L, channelId = channelId, username = "Alice", content = "anyone here?")
             assertTrue(fixture.service.processMessage(firstAmbient))
-            coVerify(exactly = 1) { fixture.decisionClient.decide(any(), any()) }
+            coVerify(exactly = 1) { fixture.decisionClient.decide(any(), any(), any()) }
 
             // 4.999s later: ambient message is blocked by default 5s cooldown
             fixture.simulatedTime += 4_999L
             val blockedAmbient = fixture.createMockMessage(id = 7202L, channelId = channelId, username = "Bob", content = "still blocked")
             assertFalse(fixture.service.processMessage(blockedAmbient))
-            coVerify(exactly = 1) { fixture.decisionClient.decide(any(), any()) }
+            coVerify(exactly = 1) { fixture.decisionClient.decide(any(), any(), any()) }
 
             // Direct @bot mention during the 5s cooldown still bypasses cooldown and replies
             val mentionDuringCooldown =
@@ -318,6 +319,6 @@ class ChatterServiceConcurrencyAndCooldownTest {
             fixture.simulatedTime += 5_000L
             val allowedAmbient = fixture.createMockMessage(id = 7204L, channelId = channelId, username = "Dave", content = "cooldown expired")
             assertTrue(fixture.service.processMessage(allowedAmbient))
-            coVerify(exactly = 2) { fixture.decisionClient.decide(any(), any()) }
+            coVerify(exactly = 2) { fixture.decisionClient.decide(any(), any(), any()) }
         }
 }

@@ -68,7 +68,7 @@ class ChatterBurstDebounceAndOverlapTest {
             coEvery { fixture.channel.type() } coAnswers {
                 timeline.add("type@$currentTime")
             }
-            coEvery { fixture.decisionClient.decide(any(), any()) } coAnswers {
+            coEvery { fixture.decisionClient.decide(any(), any(), any()) } coAnswers {
                 delay(200L)
                 timeline.add("decide@$currentTime")
                 ParticipationDecision(shouldParticipate = true, noul = 0.9)
@@ -154,7 +154,7 @@ class ChatterBurstDebounceAndOverlapTest {
             coEvery { fixture.channel.type() } coAnswers {
                 timeline.add("type@$currentTime")
             }
-            coEvery { fixture.decisionClient.decide(any(), any()) } coAnswers {
+            coEvery { fixture.decisionClient.decide(any(), any(), any()) } coAnswers {
                 delay(1_000L)
                 ParticipationDecision(shouldParticipate = true, noul = 0.9)
             }
@@ -200,11 +200,11 @@ class ChatterBurstDebounceAndOverlapTest {
                 )
 
             // 1. Decision returns false
-            coEvery { fixture.decisionClient.decide(any(), any()) } returns ParticipationDecision(shouldParticipate = false, noul = 0.2)
+            coEvery { fixture.decisionClient.decide(any(), any(), any()) } returns ParticipationDecision(shouldParticipate = false, noul = 0.2)
             assertFalse(service.processMessage(fixture.createMockMessage(id = 20L, channelId = 902L, content = "skip me")))
 
             // 2. Generator returns null
-            coEvery { fixture.decisionClient.decide(any(), any()) } returns ParticipationDecision(shouldParticipate = true, noul = 0.9)
+            coEvery { fixture.decisionClient.decide(any(), any(), any()) } returns ParticipationDecision(shouldParticipate = true, noul = 0.9)
             coEvery { fixture.chatterGenerator.generateReply(any<ChatterInput>()) } returns null
             assertFalse(service.processMessage(fixture.createMockMessage(id = 21L, channelId = 902L, content = "null gen")))
 
@@ -256,7 +256,7 @@ class ChatterBurstDebounceAndOverlapTest {
 
         val regJob = service.register(mockKord, scope = this)
 
-        coEvery { fixture.decisionClient.decide(any(), any()) } coAnswers {
+        coEvery { fixture.decisionClient.decide(any(), any(), any()) } coAnswers {
             val transcript = firstArg<String>()
             if (transcript.contains("msg-2")) {
                 enteredReading2.complete(Unit)
@@ -397,7 +397,7 @@ class ChatterBurstDebounceAndOverlapTest {
             assertFalse(r1.await())
             assertTrue(r3.await())
             assertEquals(listOf("hi alice"), sentReplies)
-            coVerify(exactly = 0) { fixture.decisionClient.decide(any(), any()) }
+            coVerify(exactly = 0) { fixture.decisionClient.decide(any(), any(), any()) }
             coVerify(exactly = 1) {
                 fixture.chatterGenerator.generateReply(
                     match<ChatterInput> { it.isDirectMention && it.transcript.contains("look at this too") },

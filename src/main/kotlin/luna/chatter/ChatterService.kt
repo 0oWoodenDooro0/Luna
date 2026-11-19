@@ -272,9 +272,11 @@ open class ChatterService(
                     val effectiveThreshold = personaState.effectiveThreshold
                     val decision =
                         try {
-                            withEffectiveDecisionThreshold(effectiveThreshold) {
-                                decisionClient.decide(decisionContext.transcript, decisionContext.images)
-                            }
+                            decisionClient.decide(
+                                decisionContext.transcript,
+                                decisionContext.images,
+                                effectiveThreshold = effectiveThreshold,
+                            )
                         } catch (e: CancellationException) {
                             throw e
                         } catch (e: Exception) {
@@ -287,13 +289,7 @@ open class ChatterService(
                         }
                     currentCoroutineContext().ensureActive()
 
-                    val shouldParticipate =
-                        if (decision.noul != null) {
-                            decision.noul >= effectiveThreshold
-                        } else {
-                            decision.shouldParticipate
-                        }
-                    if (!shouldParticipate) {
+                    if (!decision.shouldParticipate) {
                         val noul = decision.noul
                         if (noul != null && reactionThreshold < effectiveThreshold && noul >= reactionThreshold) {
                             return@coroutineScope handleSilentReactionPath(

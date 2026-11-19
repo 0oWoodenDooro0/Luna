@@ -68,37 +68,7 @@ object ChatterPromptBuilder {
 
     fun buildUserPrompt(input: ChatterInput): String {
         val sb = StringBuilder()
-        val trimmedTranscript = input.transcript.trim()
-        sb.append("以下為 Discord 頻道的近期對話紀錄：\n\n")
-        if (trimmedTranscript.isNotEmpty()) {
-            sb.append(trimmedTranscript)
-        }
-
-        val supplemental = StringBuilder()
-        val cleanTitle = input.title?.trim()?.takeIf { it.isNotEmpty() }
-        if (cleanTitle != null && !trimmedTranscript.contains(cleanTitle)) {
-            supplemental.append("\n標題：").append(cleanTitle)
-        }
-        val cleanUrl = input.url?.trim()?.takeIf { it.isNotEmpty() }
-        if (cleanUrl != null && !trimmedTranscript.contains(cleanUrl)) {
-            supplemental.append("\n來源網址：").append(cleanUrl)
-        }
-        val missingComments =
-            input.comments
-                .map { it.trim() }
-                .filter { it.isNotEmpty() && !trimmedTranscript.contains(it) }
-        if (missingComments.isNotEmpty()) {
-            supplemental.append("\n社群留言：")
-            missingComments.forEachIndexed { idx, comment ->
-                supplemental.append("\n${idx + 1}. ").append(comment)
-            }
-        }
-        if (supplemental.isNotEmpty()) {
-            if (trimmedTranscript.isNotEmpty()) {
-                sb.append("\n")
-            }
-            sb.append(supplemental.toString().trimStart())
-        }
+        sb.appendTranscriptAndSupplemental(input)
 
         val boundedEmojis = input.guildEmojis.take(MAX_PROMPT_GUILD_EMOJIS)
         if (boundedEmojis.isNotEmpty()) {
@@ -213,10 +183,27 @@ object ChatterPromptBuilder {
 
     fun buildReactionUserPrompt(input: ChatterInput): String {
         val sb = StringBuilder()
+        sb.appendTranscriptAndSupplemental(input)
+
+        val imageCue =
+            if (input.imageAttachments.isNotEmpty()) {
+                "（請一併參考附帶的圖片、貼圖或 GIF 畫面）"
+            } else {
+                ""
+            }
+
+        sb.append(
+            "\n\n請為最新這則訊息挑選一個最自然貼切的 Discord Reaction Emoji$imageCue。" +
+                "只輸出那唯一一個 Unicode emoji 或伺服器自訂表情標記，不要任何其他文字：",
+        )
+        return sb.toString().trim()
+    }
+
+    private fun StringBuilder.appendTranscriptAndSupplemental(input: ChatterInput) {
         val trimmedTranscript = input.transcript.trim()
-        sb.append("以下為 Discord 頻道的近期對話紀錄：\n\n")
+        append("以下為 Discord 頻道的近期對話紀錄：\n\n")
         if (trimmedTranscript.isNotEmpty()) {
-            sb.append(trimmedTranscript)
+            append(trimmedTranscript)
         }
 
         val supplemental = StringBuilder()
@@ -240,23 +227,10 @@ object ChatterPromptBuilder {
         }
         if (supplemental.isNotEmpty()) {
             if (trimmedTranscript.isNotEmpty()) {
-                sb.append("\n")
+                append("\n")
             }
-            sb.append(supplemental.toString().trimStart())
+            append(supplemental.toString().trimStart())
         }
-
-        val imageCue =
-            if (input.imageAttachments.isNotEmpty()) {
-                "（請一併參考附帶的圖片、貼圖或 GIF 畫面）"
-            } else {
-                ""
-            }
-
-        sb.append(
-            "\n\n請為最新這則訊息挑選一個最自然貼切的 Discord Reaction Emoji$imageCue。" +
-                "只輸出那唯一一個 Unicode emoji 或伺服器自訂表情標記，不要任何其他文字：",
-        )
-        return sb.toString().trim()
     }
 
     fun buildReactionInteractionRequest(

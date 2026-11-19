@@ -469,4 +469,30 @@ class ChatterConfigAndPromptBuilderTest {
         assertTrue(bounded[2].endsWith("..."))
         assertTrue(bounded[2].startsWith(longSeg3PartA + "\n"))
     }
+
+    @Test
+    fun `ChatterPromptBuilder buildUserPrompt and buildReactionUserPrompt share identical supplemental title url and comments formatting`() {
+        val input =
+            ChatterInput(
+                transcript = "[Alice]: 看看這個\n已有留言",
+                title = "測試標題",
+                url = "https://example.com/post",
+                comments = listOf("已有留言", "新留言 A", "  新留言 B  ", ""),
+            )
+
+        val replyPrompt = ChatterPromptBuilder.buildUserPrompt(input)
+        val reactionPrompt = ChatterPromptBuilder.buildReactionUserPrompt(input)
+
+        val expectedPrefix =
+            "以下為 Discord 頻道的近期對話紀錄：\n\n" +
+                "[Alice]: 看看這個\n已有留言\n" +
+                "標題：測試標題\n" +
+                "來源網址：https://example.com/post\n" +
+                "社群留言：\n" +
+                "1. 新留言 A\n" +
+                "2. 新留言 B"
+
+        assertTrue(replyPrompt.startsWith(expectedPrefix))
+        assertTrue(reactionPrompt.startsWith(expectedPrefix))
+    }
 }

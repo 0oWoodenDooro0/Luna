@@ -458,4 +458,39 @@ class GeminiDecisionClientTest {
             assertFalse(configuredClient.shouldParticipate("   "))
             assertFalse(requestExecuted)
         }
+
+    @Test
+    fun `explicit effectiveThreshold parameter overrides config threshold for decide and shouldParticipate`() =
+        runTest {
+            val mockEngine =
+                MockEngine {
+                    respond(
+                        content = """{"answers":{"should_participate":{"type":"noul","noul":0.65,"confidence":0.65}}}""",
+                        status = HttpStatusCode.OK,
+                        headers = headersOf(HttpHeaders.ContentType, "application/json"),
+                    )
+                }
+
+            val client =
+                GeminiDecisionClient(
+                    config = ChatterDecisionConfig(apiKey = "valid-key", threshold = 0.70),
+                    httpClient = createTestClient(mockEngine),
+                )
+
+            // Default config threshold (0.70) rejects noul=0.65
+            assertFalse(client.decide("state").shouldParticipate)
+            assertFalse(client.shouldParticipate("state"))
+
+            // Lowered explicit effectiveThreshold (0.60) accepts noul=0.65
+            val lowered = client.decide("state", effectiveThreshold = 0.60)
+            assertTrue(lowered.shouldParticipate)
+            assertEquals(0.65, lowered.noul)
+            assertTrue(client.shouldParticipate("state", effectiveThreshold = 0.65))
+
+            // Raised explicit effectiveThreshold (0.80) rejects noul=0.65
+            assertFalse(client.decide("state", effectiveThreshold = 0.80).shouldParticipate)
+
+            // Non-finite effectiveThreshold falls back safely to config.threshold (0.70)
+            assertFalse(client.decide("state", effectiveThreshold = Double.NaN).shouldParticipate)
+        }
 }

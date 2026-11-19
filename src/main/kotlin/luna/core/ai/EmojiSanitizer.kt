@@ -59,8 +59,26 @@ object EmojiSanitizer {
     /**
      * Checks if a Unicode code point falls into any emoji, pictograph, variation selector, or emoji joiner range.
      */
-    fun isEmojiCodePoint(cp: Int): Boolean =
-        when (cp) {
+    fun isEmojiCodePoint(codePoint: Int): Boolean =
+        isBaseEmojiCodePoint(codePoint) ||
+            when (codePoint) {
+                in 0xFE00..0xFE0F, // Variation Selectors
+                in 0x1F170..0x1F2FF, // Enclosed Alphanumeric/Ideographic Supplement & Regional Indicators
+                in 0x23F4..0x23F7, // Media control triangle symbols
+                in 0xE0020..0xE007F, // Tag characters for subdivision flags
+                0x200D, // Zero Width Joiner
+                0x20E3, // Combining Enclosing Keycap
+                -> true
+
+                else -> false
+            }
+
+    /**
+     * Checks if a Unicode code point is a standalone base emoji or pictograph symbol
+     * (excluding modifiers, variation selectors, joiners, keycaps, regional indicators, and tag characters).
+     */
+    fun isBaseEmojiCodePoint(codePoint: Int): Boolean =
+        when (codePoint) {
             in 0x1F600..0x1F64F, // Emoticons
             in 0x1F300..0x1F5FF, // Misc Symbols and Pictographs
             in 0x1F680..0x1F6FF, // Transport and Map
@@ -68,15 +86,11 @@ object EmojiSanitizer {
             in 0x1FA00..0x1FAFF, // Symbols and Pictographs Extended-A
             in 0x2600..0x26FF, // Misc Symbols
             in 0x2700..0x27BF, // Dingbats
-            in 0xFE00..0xFE0F, // Variation Selectors
-            in 0x1F170..0x1F2FF, // Enclosed Alphanumeric/Ideographic Supplement & Regional Indicators
-            in 0x23E9..0x23FA, // Media control & clock symbols
+            in 0x23E9..0x23F3, // Media control & clock symbols
+            in 0x23F8..0x23FA, // Media control symbols
             in 0x2B05..0x2B07, // Directional arrow emojis
-            in 0xE0020..0xE007F, // Tag characters for subdivision flags
             0x1F004, // Mahjong Red Dragon
             0x1F0CF, // Joker
-            0x200D, // Zero Width Joiner
-            0x20E3, // Combining Enclosing Keycap
             0x231A, // Watch
             0x231B, // Hourglass
             0x25AA, // Black Small Square
