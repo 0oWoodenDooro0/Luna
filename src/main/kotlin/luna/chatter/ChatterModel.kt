@@ -10,11 +10,13 @@ import luna.core.ai.ChatImageAttachment
  * @property id Discord emoji snowflake ID.
  * @property name Discord emoji shortcode name (without colons).
  * @property isAnimated Whether the custom emoji is animated (`<a:name:id>`).
+ * @property meaning Optional cached `Custom Emoji Meaning` in Traditional Chinese for prompt injection.
  */
 data class GuildCustomEmoji(
     val id: Snowflake,
     val name: String,
     val isAnimated: Boolean = false,
+    val meaning: String? = null,
 ) {
     val mention: String
         get() = if (isAnimated) "<a:$name:$id>" else "<:$name:$id>"

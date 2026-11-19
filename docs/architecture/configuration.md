@@ -51,6 +51,7 @@ Configuration Resolution Hierarchy
   - Provides typed configuration retrieval with defaults: `context.config("key", defaultValue)`.
   - Supports dual-namespace lookup (e.g. `summarizer.emoji` automatically falls back to `SUMMARY_EMOJI`).
   - Eliminates direct `System.getenv(...)` calls across all feature plugins (`CurtlyPlugin`, `SocialPreviewPlugin`, `SummarizerPlugin`).
+  - Strictly opt-in settings such as `CHATTER_EMOJI_VISION_MODEL` remain `null` when unset or blank and never fall back to `CHATTER_GEMINI_MODEL` or `GEMINI_MODEL`.
 
 ## Guardrails & Verification
 

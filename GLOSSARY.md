@@ -172,3 +172,11 @@ _Avoid_: Fallback reaction pool, emoji spam, reaction bot
 The `Chatter Pipeline` formatting and multimodal rule that strips Unicode emojis from generated text while permitting verified custom emojis from the target Discord guild, alongside raster sticker and animated GIF preview ingestion.
 _Avoid_: Global emoji ban, raw emoji passthrough, sticker spam
 
+**Custom Emoji Meaning**:
+A concise semantic description of a Discord custom emoji derived from its visual appearance and name, cached globally by emoji ID so the `Chatter Pipeline` can interpret both guild and external custom emojis in dialogue and select contextually appropriate guild emojis for replies and the `Silent Reaction Path`.
+_Avoid_: Emoji caption, emote tag, emoji dictionary
+
+**Emoji Usage Ranking**:
+The per-guild rolling frequency window over message occurrences and reactions used by the `Chatter Pipeline` to prioritize which guild custom emojis enter the bounded prompt selection pool ahead of deterministic backfill.
+_Avoid_: Emoji leaderboard, popular emotes, top-50 cache
+
