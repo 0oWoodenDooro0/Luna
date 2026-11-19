@@ -8,6 +8,7 @@ import luna.core.ai.ChatImageAttachment
 import luna.core.ai.ChatImageAttachmentExtractor
 import luna.core.ai.ContextUrlCategory
 import luna.core.ai.ContextUrlClassifier
+import luna.core.ai.DiscordMediaEmbedExtractor
 import luna.core.ai.SocialPeekFactory
 import org.slf4j.LoggerFactory
 
@@ -102,6 +103,7 @@ open class ChatterContextCollector(
                 messages = window,
                 maxImages = maxDecisionImages.coerceAtLeast(0),
                 maxImageBytes = maxImageBytes,
+                includeStickersAndGifEmbeds = true,
             )
         val decisionImages = imagesByMessage.values.flatten()
         val replyReferencesByMessage =
@@ -153,6 +155,7 @@ open class ChatterContextCollector(
                 messages = window,
                 maxImages = maxImages.coerceAtLeast(0),
                 maxImageBytes = maxImageBytes,
+                includeStickersAndGifEmbeds = true,
             )
         val replyImages = imagesByMessage.values.flatten()
         val replyReferencesByMessage =
@@ -168,7 +171,15 @@ open class ChatterContextCollector(
                 kordSelfId = resolvedSelfId,
             )
 
-        val capturedAttachmentUrls = replyImages.map { it.url }
+        val capturedGifEmbedPageUrls =
+            window.flatMap { msg ->
+                if (imagesByMessage[msg.id].isNullOrEmpty()) {
+                    emptyList()
+                } else {
+                    DiscordMediaEmbedExtractor.extractCapturedGifEmbedPageUrls(msg)
+                }
+            }
+        val capturedAttachmentUrls = (replyImages.map { it.url } + capturedGifEmbedPageUrls).distinct()
         val classifiedUrls =
             ContextUrlClassifier.classify(
                 messages = window.map { it.content },
@@ -394,6 +405,7 @@ open class ChatterContextCollector(
                     baseAuthor
                 }
 
+            val stickerText = DiscordMediaEmbedExtractor.formatStickerAnnotations(msg)
             val embedText = formatEmbedPreviews(msg)
             val images = imagesByMessage[msg.id].orEmpty()
             val markersText =
@@ -415,6 +427,7 @@ open class ChatterContextCollector(
             val parts =
                 listOfNotNull(
                     rawText,
+                    stickerText.takeIf { it.isNotEmpty() },
                     embedText.takeIf { it.isNotEmpty() },
                     markersText.takeIf { it.isNotEmpty() },
                 )
@@ -436,9 +449,14 @@ open class ChatterContextCollector(
 
         val previews =
             embeds.mapNotNull { embed ->
-                val title = embed.title?.trim()?.takeIf { it.isNotBlank() }
-                val desc = embed.description?.trim()?.takeIf { it.isNotBlank() }
+                val title = runCatching { embed.title }.getOrNull()?.trim()?.takeIf { it.isNotBlank() }
+                val desc = runCatching { embed.description }.getOrNull()?.trim()?.takeIf { it.isNotBlank() }
+                val isGifEmbed = DiscordMediaEmbedExtractor.isTenorOrGiphyEmbed(embed)
                 when {
+                    isGifEmbed && title != null && desc != null -> "[GIF: $title - $desc]"
+                    isGifEmbed && title != null -> "[GIF: $title]"
+                    isGifEmbed && desc != null -> "[GIF: $desc]"
+                    isGifEmbed -> DiscordMediaEmbedExtractor.GIF_PLACEHOLDER
                     title != null && desc != null -> "[連結預覽: $title - $desc]"
                     title != null -> "[連結預覽: $title]"
                     desc != null -> "[連結預覽: $desc]"

@@ -8,6 +8,7 @@ import luna.core.LunaWebhookRegistry
 import luna.core.SummaryMessageRegistry
 import luna.core.SummaryRegistry
 import luna.core.WebhookRegistry
+import luna.core.ai.DiscordMediaEmbedExtractor
 
 enum class RejectionReason {
     CHATTER_DISABLED,
@@ -134,12 +135,12 @@ open class ChatterNoiseFilter(
             )
         }
 
-        // 7. Check empty / whitespace-only messages without media attachments or embeds (CODING_STANDARDS.md §3)
+        // 7. Check empty / whitespace-only messages without media attachments, stickers, or embeds (CODING_STANDARDS.md §3)
         val placeholder = resolveBlankMessagePlaceholder(message)
         if (message.content.isBlank() && placeholder == null && !directMention) {
             return ChatterFilterResult.Rejected(
                 RejectionReason.EMPTY_MESSAGE,
-                "Message content is blank or empty without attachments or embeds",
+                "Message content is blank or empty without attachments, stickers, or embeds",
             )
         }
 
@@ -288,12 +289,22 @@ open class ChatterNoiseFilter(
         val URL_REGEX = Regex("""https?://[^\s<>"']+""")
         const val ATTACHMENT_PLACEHOLDER = "[Attachment]"
         const val EMBED_PLACEHOLDER = "[Embed]"
+        const val GIF_PLACEHOLDER = DiscordMediaEmbedExtractor.GIF_PLACEHOLDER
+        const val STICKER_PLACEHOLDER = DiscordMediaEmbedExtractor.STICKER_PLACEHOLDER
 
         fun resolveBlankMessagePlaceholder(message: Message): String? {
             val hasAttachments = runCatching { message.attachments.isNotEmpty() }.getOrDefault(false)
             if (hasAttachments) return ATTACHMENT_PLACEHOLDER
-            val hasEmbeds = runCatching { message.embeds.isNotEmpty() }.getOrDefault(false)
-            if (hasEmbeds) return EMBED_PLACEHOLDER
+            val stickerPlaceholder = DiscordMediaEmbedExtractor.formatStickerAnnotations(message)
+            if (stickerPlaceholder.isNotEmpty()) return stickerPlaceholder
+            val embeds = runCatching { message.embeds }.getOrDefault(emptyList())
+            if (embeds.isNotEmpty()) {
+                return if (embeds.any { DiscordMediaEmbedExtractor.isTenorOrGiphyEmbed(it) }) {
+                    GIF_PLACEHOLDER
+                } else {
+                    EMBED_PLACEHOLDER
+                }
+            }
             return null
         }
     }
