@@ -76,7 +76,7 @@ object ChatterPromptBuilder {
         val boundedEmojis = input.guildEmojis.take(MAX_PROMPT_GUILD_EMOJIS)
         if (boundedEmojis.isNotEmpty()) {
             sb.append("\n\n可用的伺服器自訂表情清單（僅可自然選用以下完整標記，切勿自行編造 ID）：\n")
-            sb.append(boundedEmojis.joinToString(" ") { it.mention })
+            sb.append(formatGuildEmojiPool(boundedEmojis))
         }
 
         val mediaHints = mutableListOf<String>()
@@ -165,7 +165,7 @@ object ChatterPromptBuilder {
         val boundedEmojis = guildEmojis.take(MAX_PROMPT_GUILD_EMOJIS)
         if (boundedEmojis.isNotEmpty()) {
             sb.append("\n\n可用的伺服器自訂表情清單（若選用請原封不動輸出其中一個標記）：\n")
-            sb.append(boundedEmojis.joinToString(" ") { it.mention })
+            sb.append(formatGuildEmojiPool(boundedEmojis))
         }
 
         if (personaState != null &&
@@ -200,6 +200,21 @@ object ChatterPromptBuilder {
                 "只輸出那唯一一個 Unicode emoji 或伺服器自訂表情標記，不要任何其他文字：",
         )
         return sb.toString().trim()
+    }
+
+    internal fun formatGuildEmojiPoolEntry(emoji: GuildCustomEmoji): String {
+        val cleanMeaning = emoji.meaning?.trim()?.takeIf { it.isNotEmpty() }
+        return if (cleanMeaning != null) {
+            "${emoji.mention}：$cleanMeaning"
+        } else {
+            emoji.mention
+        }
+    }
+
+    internal fun formatGuildEmojiPool(emojis: List<GuildCustomEmoji>): String {
+        val hasMeanings = emojis.any { !it.meaning.isNullOrBlank() }
+        val separator = if (hasMeanings) "\n" else " "
+        return emojis.joinToString(separator, transform = ::formatGuildEmojiPoolEntry)
     }
 
     private fun StringBuilder.appendTranscriptAndSupplemental(input: ChatterInput) {

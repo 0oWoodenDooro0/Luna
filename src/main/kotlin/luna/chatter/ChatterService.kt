@@ -18,6 +18,8 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.launch
+import luna.chatter.emoji.ChatterEmojiCatalog
+import luna.chatter.emoji.NoOpChatterEmojiCatalog
 import luna.core.ai.AiTraceDiscordContext
 import luna.core.ai.AiTraceFailureCategory
 import luna.core.ai.AiTraceOutcome
@@ -71,6 +73,7 @@ open class ChatterService(
     val personaStateProvider: PersonaStateProvider = CircadianPersonaDrift(),
     val guildEmojisProvider: suspend (message: Message) -> List<GuildCustomEmoji> = defaultGuildEmojisProvider,
     val reactionSender: (suspend (message: Message, emoji: ReactionEmoji) -> Unit)? = null,
+    val emojiCatalog: ChatterEmojiCatalog = NoOpChatterEmojiCatalog,
 ) {
     private val logger = LoggerFactory.getLogger(ChatterService::class.java)
 
@@ -269,12 +272,16 @@ open class ChatterService(
                         return@coroutineScope false
                     }
 
+                    val annotatedDecisionTranscript = emojiCatalog.prepareTranscript(decisionContext.transcript)
+                    currentCoroutineContext().ensureActive()
+                    val annotatedDecisionContext = decisionContext.copy(transcript = annotatedDecisionTranscript)
+
                     val effectiveThreshold = personaState.effectiveThreshold
                     val decision =
                         try {
                             decisionClient.decide(
-                                decisionContext.transcript,
-                                decisionContext.images,
+                                annotatedDecisionContext.transcript,
+                                annotatedDecisionContext.images,
                                 effectiveThreshold = effectiveThreshold,
                             )
                         } catch (e: CancellationException) {
@@ -294,7 +301,7 @@ open class ChatterService(
                         if (noul != null && reactionThreshold < effectiveThreshold && noul >= reactionThreshold) {
                             return@coroutineScope handleSilentReactionPath(
                                 message = message,
-                                decisionContext = decisionContext,
+                                decisionContext = annotatedDecisionContext,
                                 personaState = personaState,
                                 noul = noul,
                                 confidence = decision.confidence,
@@ -369,17 +376,30 @@ open class ChatterService(
                     return@coroutineScope false
                 }
 
-                val guildEmojis =
+                val guildId = runCatching { message.data.guildId.value }.getOrNull()
+                val availableGuildEmojis =
                     resolveGuildEmojis(
                         message = message,
                         fallbackDescription = "degrading to emoji-free text reply",
-                    ).take(ChatterPromptBuilder.MAX_PROMPT_GUILD_EMOJIS)
+                    )
+                currentCoroutineContext().ensureActive()
+
+                val guildEmojis =
+                    emojiCatalog.prepareGuildEmojiPool(
+                        guildId = guildId,
+                        availableGuildEmojis = availableGuildEmojis,
+                        limit = ChatterPromptBuilder.MAX_PROMPT_GUILD_EMOJIS,
+                    )
+                currentCoroutineContext().ensureActive()
+
+                val annotatedTranscript = emojiCatalog.prepareTranscript(replyContext.transcript)
                 currentCoroutineContext().ensureActive()
 
                 val chatterInput =
                     replyContext
                         .toChatterInput(isDirectMention = isDirectMention)
                         .copy(
+                            transcript = annotatedTranscript,
                             personaState = personaState,
                             guildEmojis = guildEmojis,
                         )
@@ -626,10 +646,19 @@ open class ChatterService(
         session: AiTraceSession,
         markDispatching: () -> Boolean,
     ): Boolean {
-        val guildEmojis =
+        val guildId = runCatching { message.data.guildId.value }.getOrNull()
+        val availableGuildEmojis =
             resolveGuildEmojis(
                 message = message,
                 fallbackDescription = "continuing with Unicode reactions only",
+            )
+        currentCoroutineContext().ensureActive()
+
+        val guildEmojis =
+            emojiCatalog.prepareGuildEmojiPool(
+                guildId = guildId,
+                availableGuildEmojis = availableGuildEmojis,
+                limit = ChatterPromptBuilder.MAX_PROMPT_GUILD_EMOJIS,
             )
         currentCoroutineContext().ensureActive()
 

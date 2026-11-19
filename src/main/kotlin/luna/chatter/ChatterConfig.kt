@@ -21,6 +21,7 @@ import kotlin.math.roundToLong
  * @property timezone IANA timezone ID for `Circadian Persona Drift` (defaults to `Asia/Taipei`).
  * @property driftEnabled Whether `Circadian Persona Drift` tone cues and threshold offsets are enabled (defaults to `true`).
  * @property reactionThreshold Minimum `noul` probability required for `Silent Reaction Path` (clamped to `[0.0, 1.0]`, defaults to `0.45`).
+ * @property emojiVisionModel Optional Gemini Vision model for `Custom Emoji Meaning` resolution (strictly opt-in, no fallback).
  */
 data class ChatterConfig(
     val apiKey: String = "",
@@ -36,12 +37,16 @@ data class ChatterConfig(
     val timezone: String = DEFAULT_TIMEZONE,
     val driftEnabled: Boolean = DEFAULT_DRIFT_ENABLED,
     val reactionThreshold: Double = DEFAULT_REACTION_THRESHOLD,
+    val emojiVisionModel: String? = null,
 ) {
     val isConfigured: Boolean
         get() = apiKey.isNotBlank()
 
     val cleanModel: String
         get() = model.trim().removePrefix("models/")
+
+    val cleanEmojiVisionModel: String?
+        get() = emojiVisionModel?.trim()?.removePrefix("models/")?.ifBlank { null }
 
     val cleanBaseUrl: String
         get() = baseUrl.trim().trimEnd('/').removeSuffix("/v1beta")
@@ -334,6 +339,11 @@ data class ChatterConfig(
                 normalizeReactionThreshold(
                     parseDoubleOrNull(env["CHATTER_REACTION_THRESHOLD"], "CHATTER_REACTION_THRESHOLD"),
                 )
+            val emojiVisionModel =
+                env["CHATTER_EMOJI_VISION_MODEL"]
+                    ?.trim()
+                    ?.removePrefix("models/")
+                    ?.ifBlank { null }
 
             return ChatterConfig(
                 apiKey = key,
@@ -348,6 +358,7 @@ data class ChatterConfig(
                 timezone = timezone,
                 driftEnabled = driftEnabled,
                 reactionThreshold = reactionThreshold,
+                emojiVisionModel = emojiVisionModel,
             )
         }
 
@@ -456,6 +467,13 @@ data class ChatterConfig(
                         "chatter.reaction_threshold",
                     ),
                 )
+            val emojiVisionModel =
+                readStringConfig(
+                    config,
+                    "CHATTER_EMOJI_VISION_MODEL",
+                    "chatter.emojiVisionModel",
+                    "chatter.emoji_vision_model",
+                )?.removePrefix("models/")?.ifBlank { null }
 
             return ChatterConfig(
                 apiKey = key,
@@ -470,6 +488,7 @@ data class ChatterConfig(
                 timezone = timezone,
                 driftEnabled = driftEnabled,
                 reactionThreshold = reactionThreshold,
+                emojiVisionModel = emojiVisionModel,
             )
         }
 
@@ -578,6 +597,13 @@ data class ChatterConfig(
                         "chatter.reaction_threshold",
                     ),
                 )
+            val emojiVisionModel =
+                readStringConfig(
+                    context,
+                    "CHATTER_EMOJI_VISION_MODEL",
+                    "chatter.emojiVisionModel",
+                    "chatter.emoji_vision_model",
+                )?.removePrefix("models/")?.ifBlank { null }
 
             return ChatterConfig(
                 apiKey = key,
@@ -592,6 +618,7 @@ data class ChatterConfig(
                 timezone = timezone,
                 driftEnabled = driftEnabled,
                 reactionThreshold = reactionThreshold,
+                emojiVisionModel = emojiVisionModel,
             )
         }
     }

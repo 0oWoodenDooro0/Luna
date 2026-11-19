@@ -191,6 +191,7 @@ object EnvSchemaAuditor {
             EnvVarSchema("SUMMARY_MAX_LOOKBACK_MESSAGES", isRequired = false, defaultValue = "20", section = 3),
             EnvVarSchema("SUMMARY_MAX_IMAGES", isRequired = false, defaultValue = "10", section = 3),
             EnvVarSchema("CHATTER_GEMINI_MODEL", isRequired = false, defaultValue = "gemini-3.5-flash-lite", section = 3),
+            EnvVarSchema("CHATTER_EMOJI_VISION_MODEL", isRequired = false, section = 3),
             EnvVarSchema("CHATTER_DECISION_MODEL", isRequired = false, defaultValue = "gemini-decision-1", section = 3),
             EnvVarSchema("CHATTER_DECISION_THRESHOLD", isRequired = false, defaultValue = "0.7", section = 3),
             EnvVarSchema("CHATTER_DECISION_TIMEOUT_SECONDS", isRequired = false, defaultValue = "15", section = 3),

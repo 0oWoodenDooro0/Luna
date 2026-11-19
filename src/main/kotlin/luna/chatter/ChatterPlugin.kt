@@ -5,6 +5,10 @@ import dev.kord.core.Kord
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import luna.chatter.emoji.ChatterEmojiCatalog
+import luna.chatter.emoji.DefaultChatterEmojiCatalog
+import luna.chatter.emoji.ExposedCustomEmojiMeaningRepository
+import luna.chatter.emoji.NoOpChatterEmojiCatalog
 import luna.core.ai.SocialPeekFactory
 import luna.plugin.LunaPlugin
 import luna.plugin.PluginContext
@@ -57,6 +61,9 @@ class ChatterPlugin(
         internal set
 
     var personaStateProvider: PersonaStateProvider? = null
+        internal set
+
+    var emojiCatalog: ChatterEmojiCatalog? = null
         internal set
 
     var maxImages: Int = ChatterContextCollector.DEFAULT_MAX_IMAGES
@@ -175,6 +182,18 @@ class ChatterPlugin(
             )
         this.personaStateProvider = drift
 
+        val catalog =
+            runCatching {
+                val meaningRepository = ExposedCustomEmojiMeaningRepository(context.database)
+                DefaultChatterEmojiCatalog(meaningRepository = meaningRepository)
+            }.onFailure { e ->
+                logger.warn(
+                    "Failed to initialize Custom Emoji Meaning repository; degrading to no-op emoji catalog: {}",
+                    e.message,
+                )
+            }.getOrElse { NoOpChatterEmojiCatalog }
+        this.emojiCatalog = catalog
+
         val chatterService =
             ChatterService(
                 filter = noiseFilter,
@@ -188,6 +207,7 @@ class ChatterPlugin(
                 afterMessagesFetcher = ChatterService.defaultAfterMessagesFetcher,
                 personaStateProvider = drift,
                 guildEmojisProvider = ChatterService.defaultGuildEmojisProvider,
+                emojiCatalog = catalog,
             )
         val finalService = serviceFactory?.invoke(chatterService) ?: chatterService
         this.service = finalService
