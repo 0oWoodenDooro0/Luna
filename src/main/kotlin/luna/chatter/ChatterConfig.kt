@@ -18,6 +18,8 @@ import kotlin.math.roundToLong
  * @property mentionDebounceSeconds Burst debounce window duration for direct `@Luna` mentions in seconds (defaults to 1.2).
  * @property debounceMaxSeconds Maximum cumulative burst debounce window ceiling in seconds, clamped to `[6.0, 8.0]` (defaults to 7.0).
  * @property maxInterrupts Maximum number of pre-send cancellations/restarts allowed per round before locking in delivery (defaults to 2).
+ * @property timezone IANA timezone ID for `Circadian Persona Drift` (defaults to `Asia/Taipei`).
+ * @property driftEnabled Whether `Circadian Persona Drift` tone cues and threshold offsets are enabled (defaults to `true`).
  */
 data class ChatterConfig(
     val apiKey: String = "",
@@ -30,6 +32,8 @@ data class ChatterConfig(
     val mentionDebounceSeconds: Double = DEFAULT_MENTION_DEBOUNCE_SECONDS,
     val debounceMaxSeconds: Double = DEFAULT_DEBOUNCE_MAX_SECONDS,
     val maxInterrupts: Int = DEFAULT_MAX_INTERRUPTS,
+    val timezone: String = DEFAULT_TIMEZONE,
+    val driftEnabled: Boolean = DEFAULT_DRIFT_ENABLED,
 ) {
     val isConfigured: Boolean
         get() = apiKey.isNotBlank()
@@ -73,6 +77,8 @@ data class ChatterConfig(
         const val MIN_DEBOUNCE_MAX_SECONDS = 6.0
         const val MAX_DEBOUNCE_MAX_SECONDS = 8.0
         const val DEFAULT_MAX_INTERRUPTS = 2
+        const val DEFAULT_TIMEZONE = "Asia/Taipei"
+        const val DEFAULT_DRIFT_ENABLED = true
 
         const val DEFAULT_DEBOUNCE_MILLIS = 2_500L
         const val DEFAULT_MENTION_DEBOUNCE_MILLIS = 1_200L
@@ -152,6 +158,51 @@ data class ChatterConfig(
             }
             return parsed
         }
+
+        private fun parseBooleanOrNull(
+            raw: String?,
+            keyName: String,
+        ): Boolean? {
+            val trimmed = raw?.trim()?.ifBlank { null } ?: return null
+            val parsed = trimmed.toBooleanStrictOrNull()
+            if (parsed == null) {
+                logger.warn("Unparseable boolean value '{}' for {}; using default", trimmed, keyName)
+            }
+            return parsed
+        }
+
+        private fun readStringConfig(
+            config: Map<String, Any?>,
+            vararg keys: String,
+        ): String? = keys.firstNotNullOfOrNull { key -> (config[key] as? String)?.trim()?.ifBlank { null } }
+
+        private fun readBooleanConfig(
+            config: Map<String, Any?>,
+            keyName: String,
+            vararg keys: String,
+        ): Boolean? =
+            keys.firstNotNullOfOrNull { key ->
+                when (val value = config[key]) {
+                    is Boolean -> value
+                    is String -> parseBooleanOrNull(value, keyName)
+                    else -> null
+                }
+            }
+
+        private fun readStringConfig(
+            context: PluginContext,
+            vararg keys: String,
+        ): String? = keys.firstNotNullOfOrNull { key -> context.config<String>(key)?.trim()?.ifBlank { null } }
+
+        private fun readBooleanConfig(
+            context: PluginContext,
+            keyName: String,
+            vararg keys: String,
+        ): Boolean? =
+            keys.firstNotNullOfOrNull { key ->
+                context.config<Boolean>(key)
+                    ?: parseBooleanOrNull(context.config<String>(key), keyName)
+            }
 
         private fun readDoubleConfig(
             config: Map<String, Any?>,
@@ -244,6 +295,10 @@ data class ChatterConfig(
                 normalizeMaxInterrupts(
                     parseLongOrNull(env["CHATTER_MAX_INTERRUPTS"], "CHATTER_MAX_INTERRUPTS"),
                 )
+            val timezone = env["CHATTER_TIMEZONE"]?.trim()?.ifBlank { null } ?: DEFAULT_TIMEZONE
+            val driftEnabled =
+                parseBooleanOrNull(env["CHATTER_DRIFT_ENABLED"], "CHATTER_DRIFT_ENABLED")
+                    ?: DEFAULT_DRIFT_ENABLED
 
             return ChatterConfig(
                 apiKey = key,
@@ -255,6 +310,8 @@ data class ChatterConfig(
                 mentionDebounceSeconds = mentionDebounceSeconds,
                 debounceMaxSeconds = debounceMaxSeconds,
                 maxInterrupts = maxInterrupts,
+                timezone = timezone,
+                driftEnabled = driftEnabled,
             )
         }
 
@@ -337,6 +394,22 @@ data class ChatterConfig(
                         "chatter.max_interrupts",
                     ),
                 )
+            val timezone =
+                readStringConfig(
+                    config,
+                    "CHATTER_TIMEZONE",
+                    "chatter.timezone",
+                    "chatter.timeZone",
+                    "chatter.time_zone",
+                ) ?: DEFAULT_TIMEZONE
+            val driftEnabled =
+                readBooleanConfig(
+                    config,
+                    "CHATTER_DRIFT_ENABLED",
+                    "CHATTER_DRIFT_ENABLED",
+                    "chatter.driftEnabled",
+                    "chatter.drift_enabled",
+                ) ?: DEFAULT_DRIFT_ENABLED
 
             return ChatterConfig(
                 apiKey = key,
@@ -348,6 +421,8 @@ data class ChatterConfig(
                 mentionDebounceSeconds = mentionDebounceSeconds,
                 debounceMaxSeconds = debounceMaxSeconds,
                 maxInterrupts = maxInterrupts,
+                timezone = timezone,
+                driftEnabled = driftEnabled,
             )
         }
 
@@ -430,6 +505,22 @@ data class ChatterConfig(
                         "chatter.max_interrupts",
                     ),
                 )
+            val timezone =
+                readStringConfig(
+                    context,
+                    "CHATTER_TIMEZONE",
+                    "chatter.timezone",
+                    "chatter.timeZone",
+                    "chatter.time_zone",
+                ) ?: DEFAULT_TIMEZONE
+            val driftEnabled =
+                readBooleanConfig(
+                    context,
+                    "CHATTER_DRIFT_ENABLED",
+                    "CHATTER_DRIFT_ENABLED",
+                    "chatter.driftEnabled",
+                    "chatter.drift_enabled",
+                ) ?: DEFAULT_DRIFT_ENABLED
 
             return ChatterConfig(
                 apiKey = key,
@@ -441,6 +532,8 @@ data class ChatterConfig(
                 mentionDebounceSeconds = mentionDebounceSeconds,
                 debounceMaxSeconds = debounceMaxSeconds,
                 maxInterrupts = maxInterrupts,
+                timezone = timezone,
+                driftEnabled = driftEnabled,
             )
         }
     }

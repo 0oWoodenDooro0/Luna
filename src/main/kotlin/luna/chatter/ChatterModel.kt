@@ -25,6 +25,7 @@ data class ChatMessage(
  * @property url Optional resolved clean URL.
  * @property comments Optional extracted social/YouTube audience comments.
  * @property webUrls Deduplicated general public web URLs in the dialogue window (up to 20) for `url_context`.
+ * @property personaState Optional active `Circadian Persona Drift` state injected into the system instruction.
  */
 data class ChatterInput(
     val transcript: String,
@@ -36,4 +37,5 @@ data class ChatterInput(
     val url: String? = null,
     val comments: List<String> = emptyList(),
     val webUrls: List<String> = emptyList(),
+    val personaState: PersonaState? = null,
 )

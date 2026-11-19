@@ -31,6 +31,7 @@ internal class ChatterServiceTestSupport {
         cooldownCache = BoundedChannelCooldownCache(timeSource = { simulatedTime })
         filter = ChatterNoiseFilter(cooldownCache = cooldownCache)
         decisionClient = mockk(relaxed = true)
+        every { decisionClient.config } returns ChatterDecisionConfig()
         chatterGenerator = mockk(relaxed = true)
         channel = mockk(relaxed = true)
         contextCollector =
@@ -51,6 +52,7 @@ internal class ChatterServiceTestSupport {
                 historyFetcher = { _, _ -> emptyList() },
                 contextCollector = contextCollector,
                 afterMessagesFetcher = { _, _ -> emptyList() },
+                personaStateProvider = CircadianPersonaDrift(enabled = false),
             )
     }
 

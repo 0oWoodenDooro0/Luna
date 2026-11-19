@@ -18,6 +18,7 @@ import io.ktor.http.contentType
 import io.ktor.http.isSuccess
 import io.ktor.serialization.kotlinx.json.json
 import kotlinx.coroutines.TimeoutCancellationException
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import luna.core.ai.AiAttemptOutcome
 import luna.core.ai.AiAttemptRequest
@@ -34,6 +35,9 @@ import luna.core.ai.elapsedMillisFromNanos
 import luna.core.ai.withActiveOrStandaloneSession
 import org.slf4j.LoggerFactory
 import java.net.SocketTimeoutException
+import kotlin.coroutines.AbstractCoroutineContextElement
+import kotlin.coroutines.CoroutineContext
+import kotlin.coroutines.coroutineContext
 
 /**
  * Low-latency Participation Decision client targeting Google Gemini Decisions API
@@ -117,15 +121,16 @@ open class GeminiDecisionClient(
             return ParticipationDecision(shouldParticipate = false)
         }
 
+        val activeThreshold = currentEffectiveDecisionThreshold() ?: config.threshold
         val initialVariant = if (images.isNotEmpty()) "multimodal" else null
-        return when (val initialOutcome = executeDecisionRequest(state, images, session, variant = initialVariant)) {
+        return when (val initialOutcome = executeDecisionRequest(state, images, session, variant = initialVariant, activeThreshold = activeThreshold)) {
             is RequestOutcome.Success -> {
                 val decision = initialOutcome.decision
                 if (!decision.shouldParticipate) {
                     session?.skip(
                         reason =
                             "Participation decision skipped (noul=${decision.noul}, " +
-                                "confidence=${decision.confidence}, threshold=${config.threshold})",
+                                "confidence=${decision.confidence}, threshold=$activeThreshold)",
                     )
                 } else if (isStandalone) {
                     session?.complete(
@@ -144,7 +149,16 @@ open class GeminiDecisionClient(
                         initialOutcome.cause,
                     )
                     session?.markDegraded(initialOutcome.reason)
-                    when (val retryOutcome = executeDecisionRequest(state, emptyList(), session, variant = "text-only")) {
+                    when (
+                        val retryOutcome =
+                            executeDecisionRequest(
+                                state,
+                                emptyList(),
+                                session,
+                                variant = "text-only",
+                                activeThreshold = activeThreshold,
+                            )
+                    ) {
                         is RequestOutcome.Success -> {
                             val decision = retryOutcome.decision
                             if (!decision.shouldParticipate) {
@@ -152,7 +166,7 @@ open class GeminiDecisionClient(
                                     reason =
                                         "Participation decision skipped after text-only retry " +
                                             "(noul=${decision.noul}, confidence=${decision.confidence}, " +
-                                            "threshold=${config.threshold})",
+                                            "threshold=$activeThreshold)",
                                 )
                             } else if (isStandalone) {
                                 session?.complete(
@@ -181,6 +195,7 @@ open class GeminiDecisionClient(
         images: List<ChatImageAttachment>,
         session: AiTraceSession?,
         variant: String?,
+        activeThreshold: Double,
     ): RequestOutcome {
         val inputBlocks =
             buildList {
@@ -246,7 +261,7 @@ open class GeminiDecisionClient(
                     }
                 httpStatus = response.status.value
                 responseRaw = runCatching { response.bodyAsText() }.getOrNull()
-                evaluateResponse(response, responseRaw)
+                evaluateResponse(response, responseRaw, activeThreshold)
             } catch (e: HttpRequestTimeoutException) {
                 val reason = "request timeout after ${config.timeoutMillis}ms: ${e.message}"
                 logger.warn("Gemini Decisions API request timed out after {}ms: {}", config.timeoutMillis, e.message)
@@ -293,6 +308,7 @@ open class GeminiDecisionClient(
     private fun evaluateResponse(
         response: HttpResponse,
         rawBody: String?,
+        activeThreshold: Double,
     ): RequestOutcome {
         val httpStatus = response.status.value
 
@@ -352,7 +368,7 @@ open class GeminiDecisionClient(
 
                 RequestOutcome.Success(
                     ParticipationDecision(
-                        shouldParticipate = noul >= config.threshold,
+                        shouldParticipate = noul >= activeThreshold,
                         noul = noul,
                         confidence = answer.confidence,
                         rawAnswer = answer,
@@ -410,3 +426,16 @@ open class GeminiDecisionClient(
             }
     }
 }
+
+internal class DecisionThresholdContextElement(
+    val effectiveThreshold: Double,
+) : AbstractCoroutineContextElement(Key) {
+    companion object Key : CoroutineContext.Key<DecisionThresholdContextElement>
+}
+
+internal suspend fun currentEffectiveDecisionThreshold(): Double? = coroutineContext[DecisionThresholdContextElement]?.effectiveThreshold
+
+internal suspend fun <T> withEffectiveDecisionThreshold(
+    effectiveThreshold: Double,
+    block: suspend () -> T,
+): T = withContext(DecisionThresholdContextElement(effectiveThreshold)) { block() }

@@ -80,6 +80,9 @@ All schema models are defined in [`AiTraceModels.kt`](../../src/main/kotlin/luna
 | `citations` | `List<GroundingCitation>` | Filtered `Search Grounding` citations (`[{"title": "...", "url": "..."}]`, max 3) extracted from Interactions `model_output` `url_citation` annotations excluding `url_context_result.retrieved_url` and original slice URLs; empty list `[]` if none (always `[]` for `CHATTER`). |
 | `errorSummary` | `String?` | Human-readable failure, degradation, or skip explanation (including `noul`, `confidence`, and `threshold` for `SKIPPED` decisions). |
 | `attempts` | `List<AiAttemptRecord>` | Chronologically ordered `AI Attempt` records executed during this trace. |
+| `circadianPeriod` | `String?` | Active circadian period (`LATE_NIGHT`, `MORNING`, `DAYTIME`, `EVENING`) recorded by `Chatter Pipeline` when drift is enabled; `null` for `SUMMARY` or when drift is disabled. |
+| `personaMood` | `String?` | Active transient in-memory mood/energy label (`ENERGETIC`, `CHATTY`, `STEADY`, `MELLOW`, `TIRED`, `LOW_BATTERY`) recorded by `Chatter Pipeline`; `null` for `SUMMARY` or when drift is disabled. |
+| `effectiveThreshold` | `Double?` | Effective `noul` participation threshold (`baseThreshold + circadianOffset + moodOffset` clamped to `[0.05, 0.98]`, or `baseThreshold` when drift is disabled) evaluated by `Chatter Pipeline`; `null` for `SUMMARY`. |
 
 #### `discord` Subfields (`AiTraceDiscordContext`)
 

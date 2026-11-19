@@ -201,6 +201,8 @@ object EnvSchemaAuditor {
             EnvVarSchema("CHATTER_MENTION_DEBOUNCE_SECONDS", isRequired = false, defaultValue = "1.2", section = 3),
             EnvVarSchema("CHATTER_DEBOUNCE_MAX_SECONDS", isRequired = false, defaultValue = "7.0", section = 3),
             EnvVarSchema("CHATTER_MAX_INTERRUPTS", isRequired = false, defaultValue = "2", section = 3),
+            EnvVarSchema("CHATTER_TIMEZONE", isRequired = false, defaultValue = "Asia/Taipei", section = 3),
+            EnvVarSchema("CHATTER_DRIFT_ENABLED", isRequired = false, defaultValue = "true", section = 3),
             EnvVarSchema("AI_TRACE_ENABLED", isRequired = false, defaultValue = "true", section = 3),
             EnvVarSchema("AI_TRACE_DIR", isRequired = false, defaultValue = "data/logs/ai", section = 3),
             EnvVarSchema("AI_TRACE_MAX_DAYS", isRequired = false, defaultValue = "14", section = 3),
@@ -291,6 +293,8 @@ object EnvSchemaAuditor {
                 "CHATTER_MENTION_DEBOUNCE_SECONDS" -> listOf("chatter.mentionDebounceSeconds", "chatter.mention_debounce_seconds")
                 "CHATTER_DEBOUNCE_MAX_SECONDS" -> listOf("chatter.debounceMaxSeconds", "chatter.debounce_max_seconds")
                 "CHATTER_MAX_INTERRUPTS" -> listOf("chatter.maxInterrupts", "chatter.max_interrupts")
+                "CHATTER_TIMEZONE" -> listOf("chatter.timezone", "chatter.timeZone", "chatter.time_zone")
+                "CHATTER_DRIFT_ENABLED" -> listOf("chatter.driftEnabled", "chatter.drift_enabled")
                 "GEMINI_API_KEY" -> listOf("gemini.apiKey", "gemini.api_key")
                 "GEMINI_MODEL" -> listOf("gemini.model")
                 "GEMINI_BASE_URL" -> listOf("gemini.baseUrl", "gemini.base_url")

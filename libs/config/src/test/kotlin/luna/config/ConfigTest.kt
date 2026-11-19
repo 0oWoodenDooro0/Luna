@@ -187,4 +187,24 @@ class ConfigTest {
         assertEquals("7.0", EnvSchemaAuditor.resolveVariableValue("CHATTER_DEBOUNCE_MAX_SECONDS", aliasConfig))
         assertEquals("2", EnvSchemaAuditor.resolveVariableValue("CHATTER_MAX_INTERRUPTS", aliasConfig))
     }
+
+    @Test
+    fun `EnvSchemaAuditor recognizes CHATTER_TIMEZONE, CHATTER_DRIFT_ENABLED, and chatter aliases`() {
+        val fallbackKeys = EnvSchemaAuditor.defaultFallbackSchema().map { it.name }.toSet()
+        assertTrue(fallbackKeys.contains("CHATTER_TIMEZONE"))
+        assertTrue(fallbackKeys.contains("CHATTER_DRIFT_ENABLED"))
+
+        assertTrue(EnvSchemaAuditor.isRecognizedKey("CHATTER_TIMEZONE", fallbackKeys))
+        assertTrue(EnvSchemaAuditor.isRecognizedKey("CHATTER_DRIFT_ENABLED", fallbackKeys))
+        assertTrue(EnvSchemaAuditor.isRecognizedKey("chatter.timezone", fallbackKeys))
+        assertTrue(EnvSchemaAuditor.isRecognizedKey("chatter.driftEnabled", fallbackKeys))
+
+        val aliasConfig =
+            mapOf(
+                "chatter.timezone" to "Asia/Tokyo",
+                "chatter.driftEnabled" to "false",
+            )
+        assertEquals("Asia/Tokyo", EnvSchemaAuditor.resolveVariableValue("CHATTER_TIMEZONE", aliasConfig))
+        assertEquals("false", EnvSchemaAuditor.resolveVariableValue("CHATTER_DRIFT_ENABLED", aliasConfig))
+    }
 }

@@ -36,7 +36,22 @@ object ChatterPromptBuilder {
             "絕對禁止輸出「TL;DR:」、「核心重點:」、「參與者觀點:」、「社群觀點:」、「名詞與事實查核:」等制式摘要標題，" +
             "也絕對不可附上 Markdown 網址列表、參考來源網址清單或任何引用來源標註。"
 
-    fun buildSystemInstruction(): String = SYSTEM_INSTRUCTION
+    fun buildSystemInstruction(): String = buildSystemInstruction(personaState = null)
+
+    fun buildSystemInstruction(personaState: PersonaState?): String {
+        if (personaState == null ||
+            !personaState.driftEnabled ||
+            personaState.circadianPeriod == null ||
+            personaState.mood == null
+        ) {
+            return SYSTEM_INSTRUCTION
+        }
+        return "$SYSTEM_INSTRUCTION\n\n" +
+            "目前社群時間與你的狀態：\n" +
+            "- 本地時間：${personaState.formattedWeekday} ${personaState.formattedTime}（${personaState.timezone}）\n" +
+            "- 時段狀態（${personaState.circadianPeriod.label}）：${personaState.circadianPeriod.promptCue}\n" +
+            "- 心情與精力（${personaState.mood.label}）：${personaState.mood.promptCue}"
+    }
 
     fun formatTranscript(messages: List<ChatMessage>): String =
         messages.joinToString("\n") { msg ->
@@ -138,7 +153,7 @@ object ChatterPromptBuilder {
         return GeminiInteractionRequest(
             model = model.trim().removePrefix("models/"),
             input = inputs,
-            systemInstruction = buildSystemInstruction(),
+            systemInstruction = buildSystemInstruction(input.personaState),
             tools = tools.takeIf { it.isNotEmpty() },
             generationConfig = GeminiInteractionGenerationConfig(maxOutputTokens = MAX_OUTPUT_TOKENS),
             background = background,

@@ -64,6 +64,7 @@ open class ChatterService(
     },
     val afterMessagesFetcher: suspend (message: Message, limit: Int) -> List<Message> = defaultAfterMessagesFetcher,
     val replySender: (suspend (message: Message, content: String) -> Message)? = null,
+    val personaStateProvider: PersonaStateProvider = CircadianPersonaDrift(),
 ) {
     private val logger = LoggerFactory.getLogger(ChatterService::class.java)
 
@@ -192,6 +193,16 @@ open class ChatterService(
         markDispatching: () -> Boolean,
     ): Boolean =
         coroutineScope {
+            val baseThreshold =
+                runCatching { decisionClient.config.threshold }
+                    .getOrDefault(ChatterDecisionConfig.DEFAULT_THRESHOLD)
+            val personaState = personaStateProvider.currentState(baseThreshold)
+            session.recordPersonaState(
+                circadianPeriod = personaState.circadianPeriod?.name,
+                personaMood = personaState.mood?.label,
+                effectiveThreshold = personaState.effectiveThreshold,
+            )
+
             val rawReadingDelayMs = randomProvider(MIN_READING_DELAY_MS, MAX_READING_DELAY_MS)
             val readingDelayMs =
                 if (rawReadingDelayMs < 0L) {
@@ -248,9 +259,12 @@ open class ChatterService(
                         return@coroutineScope false
                     }
 
+                    val effectiveThreshold = personaState.effectiveThreshold
                     val decision =
                         try {
-                            decisionClient.decide(decisionContext.transcript, decisionContext.images)
+                            withEffectiveDecisionThreshold(effectiveThreshold) {
+                                decisionClient.decide(decisionContext.transcript, decisionContext.images)
+                            }
                         } catch (e: CancellationException) {
                             throw e
                         } catch (e: Exception) {
@@ -263,14 +277,25 @@ open class ChatterService(
                         }
                     currentCoroutineContext().ensureActive()
 
-                    if (!decision.shouldParticipate) {
-                        logger.debug("Decision client evaluated shouldParticipate=false for message {}", message.id)
+                    val shouldParticipate =
                         if (decision.noul != null) {
-                            val threshold = runCatching { decisionClient.config.threshold }.getOrNull()
+                            decision.noul >= effectiveThreshold
+                        } else {
+                            decision.shouldParticipate
+                        }
+                    if (!shouldParticipate) {
+                        logger.debug(
+                            "Decision client evaluated shouldParticipate=false for message {} (noul={}, effectiveThreshold={})",
+                            message.id,
+                            decision.noul,
+                            effectiveThreshold,
+                        )
+                        if (decision.noul != null) {
                             session.skip(
                                 reason =
                                     "Participation decision skipped (noul=${decision.noul}, " +
-                                        "confidence=${decision.confidence}, threshold=$threshold)",
+                                        "confidence=${decision.confidence}, threshold=$effectiveThreshold, " +
+                                        "baseThreshold=$baseThreshold)",
                             )
                         }
                         return@coroutineScope false
@@ -321,7 +346,10 @@ open class ChatterService(
                     return@coroutineScope false
                 }
 
-                val chatterInput = replyContext.toChatterInput(isDirectMention = isDirectMention)
+                val chatterInput =
+                    replyContext
+                        .toChatterInput(isDirectMention = isDirectMention)
+                        .copy(personaState = personaState)
 
                 // Calls chatterGenerator.generateReply(chatterInput) while reading simulation runs concurrently
                 val replyText =

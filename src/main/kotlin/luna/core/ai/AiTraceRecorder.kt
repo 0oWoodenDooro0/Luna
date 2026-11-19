@@ -127,11 +127,27 @@ class AiTraceSession internal constructor(
     private var finalOutput: String? = null
     private var citations: List<GroundingCitation> = emptyList()
     private var errorSummary: String? = null
+    private var circadianPeriod: String? = null
+    private var personaMood: String? = null
+    private var effectiveThreshold: Double? = null
 
     fun registerSecret(secret: String?) {
         if (!isEnabled || secret.isNullOrBlank()) return
         synchronized(lock) {
             extraSecrets.add(secret)
+        }
+    }
+
+    fun recordPersonaState(
+        circadianPeriod: String?,
+        personaMood: String?,
+        effectiveThreshold: Double?,
+    ) {
+        if (!isEnabled) return
+        synchronized(lock) {
+            this.circadianPeriod = circadianPeriod
+            this.personaMood = personaMood
+            this.effectiveThreshold = effectiveThreshold
         }
     }
 
@@ -301,6 +317,9 @@ class AiTraceSession internal constructor(
                     citations = citations.toList(),
                     errorSummary = errorSummary,
                     attempts = attempts.toList(),
+                    circadianPeriod = circadianPeriod,
+                    personaMood = personaMood,
+                    effectiveThreshold = effectiveThreshold,
                 )
             secretsSnapshot = extraSecrets.toSet()
         }

@@ -118,6 +118,9 @@ data class AiTraceRecord(
     val citations: List<GroundingCitation> = emptyList(),
     val errorSummary: String? = null,
     val attempts: List<AiAttemptRecord> = emptyList(),
+    val circadianPeriod: String? = null,
+    val personaMood: String? = null,
+    val effectiveThreshold: Double? = null,
 )
 
 /**

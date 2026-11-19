@@ -56,6 +56,9 @@ class ChatterPlugin(
     var contextCollector: ChatterContextCollector? = null
         internal set
 
+    var personaStateProvider: PersonaStateProvider? = null
+        internal set
+
     var maxImages: Int = ChatterContextCollector.DEFAULT_MAX_IMAGES
         internal set
 
@@ -165,6 +168,13 @@ class ChatterPlugin(
             )
         this.contextCollector = collector
 
+        val drift =
+            CircadianPersonaDrift(
+                timezone = chatterConfig.timezone,
+                enabled = chatterConfig.driftEnabled,
+            )
+        this.personaStateProvider = drift
+
         val chatterService =
             ChatterService(
                 filter = noiseFilter,
@@ -176,6 +186,7 @@ class ChatterPlugin(
                 traceRecorder = traceRecorder,
                 burstCoordinator = coordinator,
                 afterMessagesFetcher = ChatterService.defaultAfterMessagesFetcher,
+                personaStateProvider = drift,
             )
         val finalService = serviceFactory?.invoke(chatterService) ?: chatterService
         this.service = finalService
