@@ -173,6 +173,20 @@ class ChatterEmojiPreScanBoundariesTest {
             every { this@mockk.isAnimated } returns isAnimated
         }
 
+    private suspend fun awaitListenersSubscribed(
+        eventsFlow: MutableSharedFlow<Event>,
+        expectedCount: Int = 3,
+    ) {
+        val deadline = System.currentTimeMillis() + 5_000L
+        while (eventsFlow.subscriptionCount.value < expectedCount && System.currentTimeMillis() < deadline) {
+            withContext(Dispatchers.Default) { delay(10L) }
+        }
+        assertTrue(
+            eventsFlow.subscriptionCount.value >= expectedCount,
+            "Expected at least $expectedCount Kord event listeners to subscribe, got ${eventsFlow.subscriptionCount.value}",
+        )
+    }
+
     @Test
     fun `when vision model is unset or blank startup and EmojisUpdateEvent trigger zero vision calls while syncing renames`() =
         runTest {
@@ -217,9 +231,11 @@ class ChatterEmojiPreScanBoundariesTest {
             val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
             try {
                 val job = service.register(mockKord, scope = scope)
-                val subscribeDeadline = System.currentTimeMillis() + 5_000L
-                while (eventsFlow.subscriptionCount.value == 0 && System.currentTimeMillis() < subscribeDeadline) {
-                    withContext(Dispatchers.Default) { delay(10L) }
+                awaitListenersSubscribed(eventsFlow)
+                val startupDeadline = System.currentTimeMillis() + 5_000L
+                while (System.currentTimeMillis() < startupDeadline) {
+                    if (meaningRepo.findById("4001")?.name == "renamed_emoji") break
+                    withContext(Dispatchers.Default) { delay(20L) }
                 }
 
                 val updateEvent =
@@ -236,7 +252,7 @@ class ChatterEmojiPreScanBoundariesTest {
                 val deadline = System.currentTimeMillis() + 5_000L
                 while (System.currentTimeMillis() < deadline) {
                     if (meaningRepo.findById("4001")?.name == "renamed_again") break
-                    delay(20L)
+                    withContext(Dispatchers.Default) { delay(20L) }
                 }
 
                 assertEquals(
@@ -304,7 +320,7 @@ class ChatterEmojiPreScanBoundariesTest {
             val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
             try {
                 val job = service.register(mockKord, scope = scope)
-                delay(50L)
+                awaitListenersSubscribed(eventsFlow)
 
                 val updateEvent =
                     mockk<EmojisUpdateEvent>(relaxed = true) {
@@ -322,7 +338,7 @@ class ChatterEmojiPreScanBoundariesTest {
                 val deadline = System.currentTimeMillis() + 5_000L
                 while (System.currentTimeMillis() < deadline) {
                     if (meaningRepo.findById("5004")?.meaning == "新表情") break
-                    delay(20L)
+                    withContext(Dispatchers.Default) { delay(20L) }
                 }
 
                 assertEquals(1, requestedIds.size, "Expected only 1 vision call for fresh available emoji 5004")
@@ -385,7 +401,7 @@ class ChatterEmojiPreScanBoundariesTest {
             val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
             try {
                 val job = service.register(mockKord, scope = scope)
-                delay(50L)
+                awaitListenersSubscribed(eventsFlow)
 
                 val emojis =
                     (1L..8L)
@@ -404,7 +420,7 @@ class ChatterEmojiPreScanBoundariesTest {
 
                 val hitDeadline = System.currentTimeMillis() + 5_000L
                 while (System.currentTimeMillis() < hitDeadline && totalCalls.get() < 5) {
-                    delay(10L)
+                    withContext(Dispatchers.Default) { delay(10L) }
                 }
                 gate.complete(Unit)
 
@@ -412,7 +428,7 @@ class ChatterEmojiPreScanBoundariesTest {
                 val doneDeadline = System.currentTimeMillis() + 5_000L
                 while (System.currentTimeMillis() < doneDeadline) {
                     if (meaningRepo.findMeaningMap(expectedIds).size == 8) break
-                    delay(20L)
+                    withContext(Dispatchers.Default) { delay(20L) }
                 }
 
                 assertEquals(8, meaningRepo.findMeaningMap(expectedIds).size, "Expected all 8 emojis cached")
