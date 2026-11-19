@@ -7,9 +7,15 @@ import dev.kord.core.behavior.channel.createMessage
 import dev.kord.core.entity.Message
 import dev.kord.core.event.message.MessageCreateEvent
 import dev.kord.core.on
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.toList
+import kotlinx.coroutines.launch
 import luna.core.ai.AiTraceDiscordContext
 import luna.core.ai.AiTraceFailureCategory
 import luna.core.ai.AiTracePipeline
@@ -19,14 +25,15 @@ import luna.core.ai.AiTraceTrigger
 import luna.core.ai.NoOpAiTraceRecorder
 import luna.core.ai.withAiTraceSession
 import org.slf4j.LoggerFactory
+import kotlin.random.Random
 
 /**
  * Service orchestrating the Chatter auto-reply pipeline:
  * 1. Pre-filtering incoming messages (noise, bot, command, cooldown, allowed channels).
- * 2. Assembling recent dialogue turns (up to 15 messages) with structural framing and reply chaining for Gemini Decision 1 participation evaluation.
- * 3. Triggering channel typing feedback when the decision model confirms participation.
- * 4. Assembling recent conversation history (10~20 messages) for Gemini dialogue generation.
- * 5. Sending generated reply to the Discord channel and refreshing cooldown.
+ * 2. Coordinating per-channel burst debounce windows and pre-send cancellation via [burstCoordinator].
+ * 3. Overlapping silent reading simulation (0.8s–2.0s via [randomProvider]) with participation decision and reply generation.
+ * 4. Triggering `channel.type()` and length-paced typing delay (`min(charCount * 120ms, 4000ms)`) only when non-blank output is ready.
+ * 5. Locking dispatch, delivering the reply via [deliverReply], and refreshing cooldown.
  */
 open class ChatterService(
     val filter: ChatterNoiseFilter = ChatterNoiseFilter(),
@@ -49,7 +56,10 @@ open class ChatterService(
             historyMessageCount = historyMessageCount,
         ),
     val traceRecorder: AiTraceRecorder = NoOpAiTraceRecorder,
-    val inFlightTracker: BoundedChannelInFlightTracker = BoundedChannelInFlightTracker(),
+    val burstCoordinator: BoundedChannelBurstCoordinator = BoundedChannelBurstCoordinator(),
+    val randomProvider: (minInclusive: Long, maxInclusive: Long) -> Long = { min, max ->
+        Random.nextLong(min, max + 1)
+    },
 ) {
     private val logger = LoggerFactory.getLogger(ChatterService::class.java)
 
@@ -81,72 +91,92 @@ open class ChatterService(
         val selfId = runCatching { message.kord.selfId }.getOrNull()
         val isDirectMention = filter.isDirectBotMention(message, selfId)
 
-        // 1. Pre-checks filter: filter.shouldEvaluate(message, isDirectMention = isDirectMention, kordSelfId = selfId)
+        // 1. Pre-checks filter before opening/extending/cancelling any debounce window
         if (!filter.shouldEvaluate(message, isDirectMention = isDirectMention, kordSelfId = selfId)) {
             logger.debug("ChatterNoiseFilter rejected message {}", message.id)
             return false
         }
 
         val channelId = message.channelId
-        if (isDirectMention) {
-            inFlightTracker.acquire(channelId)
-        } else if (!inFlightTracker.tryAcquire(channelId)) {
-            logger.debug(
-                "Skipping ambient message {} in channel {}: ChatterService run already in flight",
-                message.id,
-                channelId,
+        val authorId =
+            runCatching { message.author?.id }.getOrNull()
+                ?: runCatching { message.data.author.id }.getOrNull()
+
+        return burstCoordinator.executeWithDebounce(
+            channelId = channelId,
+            messageId = message.id,
+            authorId = authorId,
+            isDirectMention = isDirectMention,
+            canProceedAfterWait = {
+                filter.shouldEvaluate(message, isDirectMention = isDirectMention, kordSelfId = selfId)
+            },
+        ) { effectiveIsDirectMention, markDispatching ->
+            runTracedSession(
+                message = message,
+                selfId = selfId,
+                channelId = channelId,
+                authorId = authorId,
+                isDirectMention = effectiveIsDirectMention,
+                markDispatching = markDispatching,
             )
-            return false
         }
+    }
+
+    private suspend fun runTracedSession(
+        message: Message,
+        selfId: Snowflake?,
+        channelId: Snowflake,
+        authorId: Snowflake?,
+        isDirectMention: Boolean,
+        markDispatching: () -> Boolean,
+    ): Boolean {
+        val session =
+            traceRecorder.startSession(
+                pipeline = AiTracePipeline.CHATTER,
+                trigger = if (isDirectMention) AiTraceTrigger.MENTION else AiTraceTrigger.AMBIENT,
+                discord =
+                    AiTraceDiscordContext(
+                        guildId =
+                            runCatching {
+                                message.data.guildId.value
+                                    ?.toString()
+                            }.getOrNull(),
+                        channelId = channelId.toString(),
+                        messageId = message.id.toString(),
+                        authorId = authorId?.toString(),
+                        reactingUserId = null,
+                        isDirectMention = isDirectMention,
+                    ),
+            )
+        runCatching { session.registerSecret(decisionClient.config.apiKey) }
+        runCatching { session.registerSecret(chatterGenerator.config.apiKey) }
 
         return try {
-            val session =
-                traceRecorder.startSession(
-                    pipeline = AiTracePipeline.CHATTER,
-                    trigger = if (isDirectMention) AiTraceTrigger.MENTION else AiTraceTrigger.AMBIENT,
-                    discord =
-                        AiTraceDiscordContext(
-                            guildId =
-                                runCatching {
-                                    message.data.guildId.value
-                                        ?.toString()
-                                }.getOrNull(),
-                            channelId = channelId.toString(),
-                            messageId = message.id.toString(),
-                            authorId =
-                                runCatching { message.author?.id?.toString() }.getOrNull()
-                                    ?: runCatching {
-                                        message.data.author.id
-                                            .toString()
-                                    }.getOrNull(),
-                            reactingUserId = null,
-                            isDirectMention = isDirectMention,
-                        ),
+            withAiTraceSession(session) {
+                processEvaluatedMessage(
+                    message = message,
+                    selfId = selfId,
+                    isDirectMention = isDirectMention,
+                    session = session,
+                    markDispatching = markDispatching,
                 )
-            runCatching { session.registerSecret(decisionClient.config.apiKey) }
-            runCatching { session.registerSecret(chatterGenerator.config.apiKey) }
-
-            try {
-                withAiTraceSession(session) {
-                    processEvaluatedMessage(
-                        message = message,
-                        selfId = selfId,
-                        isDirectMention = isDirectMention,
-                        session = session,
-                    )
-                }
-            } catch (e: Exception) {
-                logger.error("Unexpected error in ChatterService.processMessage: {}", e.message, e)
-                session.fail(
-                    AiTraceFailureCategory.UNEXPECTED_ERROR,
-                    "Unexpected error in ChatterService.processMessage: ${e.message}",
-                )
-                false
-            } finally {
-                session.finish()
             }
+        } catch (e: BurstInterruptedCancellationException) {
+            logger.debug("Pre-send cancellation skipped Chatter run for message {}: {}", message.id, e.message)
+            session.skip(reason = e.message ?: "Cancelled by newer channel message before send")
+            false
+        } catch (e: CancellationException) {
+            session.skip(reason = e.message ?: "Cancelled before send")
+            throw e
+        } catch (e: Exception) {
+            logger.error("Unexpected error in ChatterService.processMessage: {}", e.message, e)
+            session.fail(
+                AiTraceFailureCategory.UNEXPECTED_ERROR,
+                "Unexpected error in ChatterService.processMessage: ${e.message}",
+            )
+            false
         } finally {
-            inFlightTracker.release(channelId)
+            session.finish()
         }
     }
 
@@ -155,163 +185,236 @@ open class ChatterService(
         selfId: Snowflake?,
         isDirectMention: Boolean,
         session: AiTraceSession,
-    ): Boolean {
-        // 2. Gathers recent messages from channel slice to construct state / history
-        val previousMessages =
+        markDispatching: () -> Boolean,
+    ): Boolean =
+        coroutineScope {
+            val rawReadingDelayMs = randomProvider(MIN_READING_DELAY_MS, MAX_READING_DELAY_MS)
+            val readingDelayMs =
+                if (rawReadingDelayMs < 0L) {
+                    logger.warn("Negative reading delay '{}ms' returned by randomProvider; clamping to 0ms", rawReadingDelayMs)
+                    0L
+                } else {
+                    rawReadingDelayMs
+                }
+
+            val readingJob =
+                launch {
+                    if (readingDelayMs > 0L) {
+                        delay(readingDelayMs)
+                    }
+                }
+
             try {
-                historyFetcher(message, maxOf(decisionMessageCount, historyMessageCount))
-            } catch (e: Exception) {
-                logger.warn("Failed to fetch channel history for message {}: {}", message.id, e.message)
-                emptyList()
-            }
+                // 2. Gathers recent messages from channel slice to construct state / history
+                val previousMessages =
+                    try {
+                        historyFetcher(message, maxOf(decisionMessageCount, historyMessageCount))
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (e: Exception) {
+                        logger.warn("Failed to fetch channel history for message {}: {}", message.id, e.message)
+                        emptyList()
+                    }
+                currentCoroutineContext().ensureActive()
 
-        val allRaw = previousMessages + message
+                val allRaw = previousMessages + message
 
-        // 3. Participation evaluation: bypass for direct bot mentions
-        if (!isDirectMention) {
-            val decisionContext =
-                try {
-                    contextCollector.collectDecisionContext(allRaw, kordSelfId = selfId)
-                } catch (e: Exception) {
-                    logger.warn("Error collecting decision context for message {}: {}", message.id, e.message)
+                // 3. Participation evaluation: bypass for direct bot mentions
+                if (!isDirectMention) {
+                    val decisionContext =
+                        try {
+                            contextCollector.collectDecisionContext(allRaw, kordSelfId = selfId)
+                        } catch (e: CancellationException) {
+                            throw e
+                        } catch (e: Exception) {
+                            logger.warn("Error collecting decision context for message {}: {}", message.id, e.message)
+                            session.fail(
+                                AiTraceFailureCategory.CONTEXT_ERROR,
+                                "Error collecting decision context for message ${message.id}: ${e.message}",
+                            )
+                            return@coroutineScope false
+                        }
+                    currentCoroutineContext().ensureActive()
+                    if (decisionContext.transcript.isBlank() && decisionContext.images.isEmpty()) {
+                        logger.debug("Assembled decision dialogue state is blank; skipping evaluation")
+                        session.fail(
+                            AiTraceFailureCategory.CONTEXT_ERROR,
+                            "Assembled decision dialogue state is blank",
+                        )
+                        return@coroutineScope false
+                    }
+
+                    val decision =
+                        try {
+                            decisionClient.decide(decisionContext.transcript, decisionContext.images)
+                        } catch (e: CancellationException) {
+                            throw e
+                        } catch (e: Exception) {
+                            logger.warn("Gemini decision evaluation threw error for state: {}", e.message)
+                            session.fail(
+                                AiTraceFailureCategory.UNEXPECTED_ERROR,
+                                "Gemini decision evaluation threw error: ${e.message}",
+                            )
+                            return@coroutineScope false
+                        }
+                    currentCoroutineContext().ensureActive()
+
+                    if (!decision.shouldParticipate) {
+                        logger.debug("Decision client evaluated shouldParticipate=false for message {}", message.id)
+                        if (decision.noul != null) {
+                            val threshold = runCatching { decisionClient.config.threshold }.getOrNull()
+                            session.skip(
+                                reason =
+                                    "Participation decision skipped (noul=${decision.noul}, " +
+                                        "confidence=${decision.confidence}, threshold=$threshold)",
+                            )
+                        }
+                        return@coroutineScope false
+                    }
+                } else {
+                    logger.info("Direct bot mention detected on message {}; bypassing decision evaluation", message.id)
+                }
+
+                // Resolve channel before heavy context/generation (no typing indicator yet!)
+                val channel =
+                    try {
+                        message.channel
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (e: Exception) {
+                        logger.warn("Unable to obtain channel for message {}: {}", message.id, e.message)
+                        session.fail(
+                            AiTraceFailureCategory.CONTEXT_ERROR,
+                            "Unable to obtain channel for message ${message.id}: ${e.message}",
+                        )
+                        return@coroutineScope false
+                    }
+
+                // Assemble heavy reply context (15 messages, reply chains, images, SocialPeek)
+                val replyContext =
+                    try {
+                        contextCollector.collectReplyContext(allRaw, kordSelfId = selfId)
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (e: Exception) {
+                        logger.warn("Error collecting reply context for message {}: {}", message.id, e.message)
+                        session.fail(
+                            AiTraceFailureCategory.CONTEXT_ERROR,
+                            "Error collecting reply context for message ${message.id}: ${e.message}",
+                        )
+                        return@coroutineScope false
+                    }
+                currentCoroutineContext().ensureActive()
+                if (replyContext.transcript.isBlank() &&
+                    replyContext.imageAttachments.isEmpty() &&
+                    replyContext.videoUri.isNullOrBlank()
+                ) {
+                    logger.debug("No valid chat messages or media found in reply context for message {}", message.id)
                     session.fail(
                         AiTraceFailureCategory.CONTEXT_ERROR,
-                        "Error collecting decision context for message ${message.id}: ${e.message}",
+                        "Reply context is blank and contains no media",
                     )
-                    return false
+                    return@coroutineScope false
                 }
-            if (decisionContext.transcript.isBlank() && decisionContext.images.isEmpty()) {
-                logger.debug("Assembled decision dialogue state is blank; skipping evaluation")
-                session.fail(
-                    AiTraceFailureCategory.CONTEXT_ERROR,
-                    "Assembled decision dialogue state is blank",
-                )
-                return false
-            }
 
-            val decision =
+                val chatterInput = replyContext.toChatterInput(isDirectMention = isDirectMention)
+
+                // Calls chatterGenerator.generateReply(chatterInput) while reading simulation runs concurrently
+                val replyText =
+                    try {
+                        chatterGenerator.generateReply(chatterInput)
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (e: Exception) {
+                        logger.error("ChatterGenerator failed to generate reply: {}", e.message, e)
+                        session.fail(
+                            AiTraceFailureCategory.UNEXPECTED_ERROR,
+                            "ChatterGenerator failed to generate reply: ${e.message}",
+                        )
+                        return@coroutineScope false
+                    }
+                currentCoroutineContext().ensureActive()
+
+                if (replyText.isNullOrBlank()) {
+                    logger.debug("ChatterGenerator returned null or blank reply for message {}", message.id)
+                    if (replyText != null) {
+                        session.fail(
+                            AiTraceFailureCategory.EMPTY_OUTPUT,
+                            "ChatterGenerator returned blank reply",
+                        )
+                    }
+                    return@coroutineScope false
+                }
+
+                // Wait for any remaining silent reading time before triggering typing indicator
+                readingJob.join()
+                currentCoroutineContext().ensureActive()
+
+                // 4. Both reading simulation and reply generation succeeded -> show typing and pace proportionally
                 try {
-                    decisionClient.decide(decisionContext.transcript, decisionContext.images)
+                    channel.type()
+                } catch (e: CancellationException) {
+                    throw e
                 } catch (e: Exception) {
-                    logger.warn("Gemini decision evaluation threw error for state: {}", e.message)
+                    logger.warn("channel.type() call failed on channel {}: {}", message.channelId, e.message)
+                }
+                currentCoroutineContext().ensureActive()
+
+                val typingDelayMs = minOf(replyText.length * TYPING_MS_PER_CHAR, MAX_TYPING_DELAY_MS)
+                if (typingDelayMs > 0L) {
+                    delay(typingDelayMs)
+                }
+                currentCoroutineContext().ensureActive()
+
+                // Acquire dispatch lock to prevent mid-send interruption
+                if (!markDispatching()) {
+                    session.skip(reason = "Cancelled right before dispatch lock in channel ${message.channelId}")
+                    return@coroutineScope false
+                }
+
+                // 5. Deliver reply to channel
+                try {
+                    deliverReply(channel, replyText)
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    logger.error("Failed to send reply to channel {}: {}", message.channelId, e.message, e)
                     session.fail(
                         AiTraceFailureCategory.UNEXPECTED_ERROR,
-                        "Gemini decision evaluation threw error: ${e.message}",
+                        "Failed to deliver Discord reply: ${e.message}",
                     )
-                    return false
+                    return@coroutineScope false
                 }
 
-            if (!decision.shouldParticipate) {
-                logger.debug("Decision client evaluated shouldParticipate=false for message {}", message.id)
-                if (decision.noul != null) {
-                    val threshold = runCatching { decisionClient.config.threshold }.getOrNull()
-                    session.skip(
-                        reason =
-                            "Participation decision skipped (noul=${decision.noul}, " +
-                                "confidence=${decision.confidence}, threshold=$threshold)",
-                    )
-                }
-                return false
+                cooldownCache.record(message.channelId)
+                session.complete(finalOutput = replyText)
+                logger.info("Chatter sent reply to channel {}: {}", message.channelId, replyText)
+                true
+            } finally {
+                readingJob.cancel()
             }
+        }
+
+    /**
+     * Clean reply delivery seam for sending generated dialogue to a Discord channel.
+     */
+    protected open suspend fun deliverReply(
+        channel: MessageChannelBehavior,
+        replyText: String,
+    ) {
+        if (messageSender != null) {
+            messageSender.invoke(channel, replyText)
         } else {
-            logger.info("Direct bot mention detected on message {}; bypassing decision evaluation", message.id)
+            channel.createMessage(replyText)
         }
-
-        // 4. Decision confirms participation: trigger channel.type()
-        val channel =
-            try {
-                message.channel
-            } catch (e: Exception) {
-                logger.warn("Unable to obtain channel for message {}: {}", message.id, e.message)
-                session.fail(
-                    AiTraceFailureCategory.CONTEXT_ERROR,
-                    "Unable to obtain channel for message ${message.id}: ${e.message}",
-                )
-                return false
-            }
-
-        try {
-            channel.type()
-        } catch (e: Exception) {
-            logger.warn("channel.type() call failed on channel {}: {}", message.channelId, e.message)
-        }
-
-        // Assemble heavy reply context (15 messages, reply chains, images, SocialPeek)
-        val replyContext =
-            try {
-                contextCollector.collectReplyContext(allRaw, kordSelfId = selfId)
-            } catch (e: Exception) {
-                logger.warn("Error collecting reply context for message {}: {}", message.id, e.message)
-                session.fail(
-                    AiTraceFailureCategory.CONTEXT_ERROR,
-                    "Error collecting reply context for message ${message.id}: ${e.message}",
-                )
-                return false
-            }
-        if (replyContext.transcript.isBlank() &&
-            replyContext.imageAttachments.isEmpty() &&
-            replyContext.videoUri.isNullOrBlank()
-        ) {
-            logger.debug("No valid chat messages or media found in reply context for message {}", message.id)
-            session.fail(
-                AiTraceFailureCategory.CONTEXT_ERROR,
-                "Reply context is blank and contains no media",
-            )
-            return false
-        }
-
-        val chatterInput = replyContext.toChatterInput(isDirectMention = isDirectMention)
-
-        // Calls chatterGenerator.generateReply(chatterInput)
-        val replyText =
-            try {
-                chatterGenerator.generateReply(chatterInput)
-            } catch (e: Exception) {
-                logger.error("ChatterGenerator failed to generate reply: {}", e.message, e)
-                session.fail(
-                    AiTraceFailureCategory.UNEXPECTED_ERROR,
-                    "ChatterGenerator failed to generate reply: ${e.message}",
-                )
-                return false
-            }
-
-        // If reply is not null/blank:
-        if (replyText.isNullOrBlank()) {
-            logger.debug("ChatterGenerator returned null or blank reply for message {}", message.id)
-            if (replyText != null) {
-                session.fail(
-                    AiTraceFailureCategory.EMPTY_OUTPUT,
-                    "ChatterGenerator returned blank reply",
-                )
-            }
-            return false
-        }
-
-        // Sends message directly to channel using channel.createMessage(replyText)
-        try {
-            if (messageSender != null) {
-                messageSender.invoke(channel, replyText)
-            } else {
-                channel.createMessage(replyText)
-            }
-        } catch (e: Exception) {
-            logger.error("Failed to send reply to channel {}: {}", message.channelId, e.message, e)
-            session.fail(
-                AiTraceFailureCategory.UNEXPECTED_ERROR,
-                "Failed to deliver Discord reply: ${e.message}",
-            )
-            return false
-        }
-
-        // Refreshes channel cooldown timestamp
-        cooldownCache.record(message.channelId)
-        session.complete(finalOutput = replyText)
-        logger.info("Chatter sent reply to channel {}: {}", message.channelId, replyText)
-        return true
     }
 
     companion object {
         const val DEFAULT_DECISION_MESSAGE_COUNT = 15
         const val DEFAULT_HISTORY_MESSAGE_COUNT = 15
+        const val MIN_READING_DELAY_MS = 800L
+        const val MAX_READING_DELAY_MS = 2_000L
+        const val TYPING_MS_PER_CHAR = 120L
+        const val MAX_TYPING_DELAY_MS = 4_000L
     }
 }

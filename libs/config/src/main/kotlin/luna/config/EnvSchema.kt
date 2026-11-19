@@ -188,6 +188,19 @@ object EnvSchemaAuditor {
             EnvVarSchema("SUMMARY_MAX_CHARACTER_BUDGET", isRequired = false, defaultValue = "20000", section = 3),
             EnvVarSchema("SUMMARY_MAX_LOOKBACK_MESSAGES", isRequired = false, defaultValue = "20", section = 3),
             EnvVarSchema("SUMMARY_MAX_IMAGES", isRequired = false, defaultValue = "10", section = 3),
+            EnvVarSchema("CHATTER_GEMINI_MODEL", isRequired = false, defaultValue = "gemini-3.5-flash-lite", section = 3),
+            EnvVarSchema("CHATTER_DECISION_MODEL", isRequired = false, defaultValue = "gemini-decision-1", section = 3),
+            EnvVarSchema("CHATTER_DECISION_THRESHOLD", isRequired = false, defaultValue = "0.7", section = 3),
+            EnvVarSchema("CHATTER_DECISION_TIMEOUT_SECONDS", isRequired = false, defaultValue = "10", section = 3),
+            EnvVarSchema("CHATTER_DECISION_INSTRUCTIONS", isRequired = false, section = 3),
+            EnvVarSchema("CHATTER_DECISION_MESSAGE_COUNT", isRequired = false, defaultValue = "15", section = 3),
+            EnvVarSchema("CHATTER_ENABLED", isRequired = false, defaultValue = "true", section = 3),
+            EnvVarSchema("CHATTER_ALLOWED_CHANNELS", isRequired = false, section = 3),
+            EnvVarSchema("CHATTER_COOLDOWN_SECONDS", isRequired = false, defaultValue = "5", section = 3),
+            EnvVarSchema("CHATTER_DEBOUNCE_SECONDS", isRequired = false, defaultValue = "2.5", section = 3),
+            EnvVarSchema("CHATTER_MENTION_DEBOUNCE_SECONDS", isRequired = false, defaultValue = "1.2", section = 3),
+            EnvVarSchema("CHATTER_DEBOUNCE_MAX_SECONDS", isRequired = false, defaultValue = "7.0", section = 3),
+            EnvVarSchema("CHATTER_MAX_INTERRUPTS", isRequired = false, defaultValue = "2", section = 3),
             EnvVarSchema("AI_TRACE_ENABLED", isRequired = false, defaultValue = "true", section = 3),
             EnvVarSchema("AI_TRACE_DIR", isRequired = false, defaultValue = "data/logs/ai", section = 3),
             EnvVarSchema("AI_TRACE_MAX_DAYS", isRequired = false, defaultValue = "14", section = 3),
@@ -238,6 +251,7 @@ object EnvSchemaAuditor {
         if (key.startsWith("plugins.") && key.endsWith(".enabled")) return true
         if (key.startsWith("curtly.") || key.startsWith("CURTLY_")) return true
         if (key.startsWith("summarizer.") || key.startsWith("summary.") || key.startsWith("SUMMARY_")) return true
+        if (key.startsWith("chatter.") || key.startsWith("CHATTER_")) return true
         if (key.startsWith("gemini.") || key.startsWith("GEMINI_")) return true
         if (key.startsWith("youtube.") || key.startsWith("YOUTUBE_")) return true
         if (key.startsWith("undercover.") || key.startsWith("UNDERCOVER_")) return true
@@ -273,6 +287,10 @@ object EnvSchemaAuditor {
                 "SUMMARY_MAX_CHARACTER_BUDGET" -> listOf("summary.maxCharacterBudget", "summarizer.maxCharacterBudget")
                 "SUMMARY_MAX_LOOKBACK_MESSAGES" -> listOf("summary.maxLookbackMessages", "summarizer.maxLookbackMessages")
                 "SUMMARY_MAX_IMAGES" -> listOf("summary.maxImages", "summarizer.maxImages")
+                "CHATTER_DEBOUNCE_SECONDS" -> listOf("chatter.debounceSeconds", "chatter.debounce_seconds")
+                "CHATTER_MENTION_DEBOUNCE_SECONDS" -> listOf("chatter.mentionDebounceSeconds", "chatter.mention_debounce_seconds")
+                "CHATTER_DEBOUNCE_MAX_SECONDS" -> listOf("chatter.debounceMaxSeconds", "chatter.debounce_max_seconds")
+                "CHATTER_MAX_INTERRUPTS" -> listOf("chatter.maxInterrupts", "chatter.max_interrupts")
                 "GEMINI_API_KEY" -> listOf("gemini.apiKey", "gemini.api_key")
                 "GEMINI_MODEL" -> listOf("gemini.model")
                 "GEMINI_BASE_URL" -> listOf("gemini.baseUrl", "gemini.base_url")

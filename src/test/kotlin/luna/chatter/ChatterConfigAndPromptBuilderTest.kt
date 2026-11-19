@@ -180,6 +180,115 @@ class ChatterConfigAndPromptBuilderTest {
         assertTrue(ChatterConfig.fromPluginContext(contextInvalidFallback).urlContextEnabled)
     }
 
+    @Test
+    fun `ChatterConfig resolves burst debounce and maxInterrupts defaults and aliases across fromEnv, fromConfig, and fromPluginContext`() {
+        val defaults = ChatterConfig()
+        assertEquals(2.5, defaults.debounceSeconds)
+        assertEquals(1.2, defaults.mentionDebounceSeconds)
+        assertEquals(7.0, defaults.debounceMaxSeconds)
+        assertEquals(2, defaults.maxInterrupts)
+
+        val envDefaults = ChatterConfig.fromEnv(emptyMap())
+        assertEquals(2.5, envDefaults.debounceSeconds)
+        assertEquals(1.2, envDefaults.mentionDebounceSeconds)
+        assertEquals(7.0, envDefaults.debounceMaxSeconds)
+        assertEquals(2, envDefaults.maxInterrupts)
+
+        val envCustom =
+            ChatterConfig.fromEnv(
+                mapOf(
+                    "CHATTER_DEBOUNCE_SECONDS" to "3.0",
+                    "CHATTER_MENTION_DEBOUNCE_SECONDS" to "1.5",
+                    "CHATTER_DEBOUNCE_MAX_SECONDS" to "6.5",
+                    "CHATTER_MAX_INTERRUPTS" to "4",
+                ),
+            )
+        assertEquals(3.0, envCustom.debounceSeconds)
+        assertEquals(1.5, envCustom.mentionDebounceSeconds)
+        assertEquals(6.5, envCustom.debounceMaxSeconds)
+        assertEquals(4, envCustom.maxInterrupts)
+
+        val configAliases =
+            ChatterConfig.fromConfig(
+                mapOf(
+                    "chatter.debounceSeconds" to 2.0,
+                    "chatter.mentionDebounceSeconds" to "1.0",
+                    "chatter.debounceMaxSeconds" to 8,
+                    "chatter.maxInterrupts" to 0,
+                ),
+            )
+        assertEquals(2.0, configAliases.debounceSeconds)
+        assertEquals(1.0, configAliases.mentionDebounceSeconds)
+        assertEquals(8.0, configAliases.debounceMaxSeconds)
+        assertEquals(0, configAliases.maxInterrupts)
+
+        val contextAliases =
+            DefaultPluginContext(
+                kord = mockk<Kord>(relaxed = true),
+                routing = mockk<Routing>(relaxed = true),
+                database = mockk<Database>(relaxed = true),
+                configMap =
+                    mapOf(
+                        "chatter.debounce_seconds" to "3.2",
+                        "chatter.mention_debounce_seconds" to 1.4,
+                        "chatter.debounce_max_seconds" to 6.2,
+                        "chatter.max_interrupts" to "3",
+                    ),
+            )
+        val fromCtx = ChatterConfig.fromPluginContext(contextAliases)
+        assertEquals(3.2, fromCtx.debounceSeconds)
+        assertEquals(1.4, fromCtx.mentionDebounceSeconds)
+        assertEquals(6.2, fromCtx.debounceMaxSeconds)
+        assertEquals(3, fromCtx.maxInterrupts)
+    }
+
+    @Test
+    fun `ChatterConfig clamps out-of-range debounceMaxSeconds to 6-8s and falls back safely on non-positive or invalid values`() {
+        val clamped =
+            ChatterConfig.fromEnv(
+                mapOf(
+                    "CHATTER_DEBOUNCE_MAX_SECONDS" to "2.0",
+                ),
+            )
+        assertEquals(6.0, clamped.debounceMaxSeconds)
+
+        val clampedHigh =
+            ChatterConfig.fromEnv(
+                mapOf(
+                    "CHATTER_DEBOUNCE_MAX_SECONDS" to "15.0",
+                ),
+            )
+        assertEquals(8.0, clampedHigh.debounceMaxSeconds)
+
+        val invalidEnv =
+            ChatterConfig.fromEnv(
+                mapOf(
+                    "CHATTER_DEBOUNCE_SECONDS" to "-1.0",
+                    "CHATTER_MENTION_DEBOUNCE_SECONDS" to "0",
+                    "CHATTER_DEBOUNCE_MAX_SECONDS" to "0.0",
+                    "CHATTER_MAX_INTERRUPTS" to "-3",
+                ),
+            )
+        assertEquals(2.5, invalidEnv.debounceSeconds)
+        assertEquals(1.2, invalidEnv.mentionDebounceSeconds)
+        assertEquals(7.0, invalidEnv.debounceMaxSeconds)
+        assertEquals(2, invalidEnv.maxInterrupts)
+
+        val garbageConfig =
+            ChatterConfig.fromConfig(
+                mapOf(
+                    "CHATTER_DEBOUNCE_SECONDS" to "NaN",
+                    "CHATTER_MENTION_DEBOUNCE_SECONDS" to "Infinity",
+                    "CHATTER_DEBOUNCE_MAX_SECONDS" to "not-a-number",
+                    "CHATTER_MAX_INTERRUPTS" to "abc",
+                ),
+            )
+        assertEquals(2.5, garbageConfig.debounceSeconds)
+        assertEquals(1.2, garbageConfig.mentionDebounceSeconds)
+        assertEquals(7.0, garbageConfig.debounceMaxSeconds)
+        assertEquals(2, garbageConfig.maxInterrupts)
+    }
+
     // --- Prompt Builder & Persona Tests ---
 
     @Test

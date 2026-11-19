@@ -60,6 +60,7 @@ internal class ChatterServiceTestSupport {
     fun createMockMessage(
         id: Long = 1L,
         channelId: Long = 100L,
+        authorId: Long = id,
         username: String = "Alice",
         content: String = "Hello Luna, how are you today?",
         isBot: Boolean = false,
@@ -78,13 +79,13 @@ internal class ChatterServiceTestSupport {
                 val user = mockk<User>()
                 every { user.username } returns username
                 every { user.isBot } returns isBot
-                every { user.id } returns Snowflake(id)
+                every { user.id } returns Snowflake(authorId)
                 user
             }
 
         val userData = mockk<UserData>()
         every { userData.username } returns username
-        every { userData.id } returns (webhookId ?: Snowflake(id))
+        every { userData.id } returns (webhookId ?: Snowflake(authorId))
 
         val messageData = mockk<MessageData>()
         every { messageData.author } returns userData
