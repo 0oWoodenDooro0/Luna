@@ -349,6 +349,10 @@ class ChatterServicePluginAndUrlTest {
                             "SUMMARY_MAX_IMAGES" to 6,
                             "GEMINI_SEARCH_GROUNDING_ENABLED" to false,
                             "GEMINI_URL_CONTEXT_ENABLED" to false,
+                            "CHATTER_DEBOUNCE_SECONDS" to 3.0,
+                            "CHATTER_MENTION_DEBOUNCE_SECONDS" to 0.8,
+                            "CHATTER_DEBOUNCE_MAX_SECONDS" to 6.5,
+                            "CHATTER_MAX_INTERRUPTS" to 4,
                         ),
                 )
 
@@ -360,6 +364,11 @@ class ChatterServicePluginAndUrlTest {
             assertSame(customPlugin.contextCollector, customPlugin.service?.contextCollector)
             assertFalse(customPlugin.chatterGenerator?.config?.searchGroundingEnabled ?: true)
             assertFalse(customPlugin.chatterGenerator?.config?.urlContextEnabled ?: true)
+            assertSame(customPlugin.burstCoordinator, customPlugin.service?.burstCoordinator)
+            assertEquals(3_000L, customPlugin.burstCoordinator?.debounceMs)
+            assertEquals(800L, customPlugin.burstCoordinator?.mentionDebounceMs)
+            assertEquals(6_500L, customPlugin.burstCoordinator?.maxDebounceMs)
+            assertEquals(4, customPlugin.burstCoordinator?.maxInterrupts)
             customPlugin.shutdown()
 
             val defaultContext =
@@ -380,8 +389,12 @@ class ChatterServicePluginAndUrlTest {
             assertTrue(defaultPlugin.chatterGenerator?.config?.urlContextEnabled ?: false)
             assertEquals(5_000L, defaultPlugin.filter?.cooldownDurationMs)
             assertEquals(5_000L, defaultPlugin.cooldownCache?.defaultCooldownDurationMs)
-            assertNotNull(defaultPlugin.inFlightTracker)
-            assertSame(defaultPlugin.inFlightTracker, defaultPlugin.service?.inFlightTracker)
+            assertNotNull(defaultPlugin.burstCoordinator)
+            assertSame(defaultPlugin.burstCoordinator, defaultPlugin.service?.burstCoordinator)
+            assertEquals(2_500L, defaultPlugin.burstCoordinator?.debounceMs)
+            assertEquals(1_200L, defaultPlugin.burstCoordinator?.mentionDebounceMs)
+            assertEquals(7_000L, defaultPlugin.burstCoordinator?.maxDebounceMs)
+            assertEquals(2, defaultPlugin.burstCoordinator?.maxInterrupts)
             defaultPlugin.shutdown()
         }
 

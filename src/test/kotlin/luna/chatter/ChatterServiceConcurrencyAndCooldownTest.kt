@@ -111,15 +111,13 @@ class ChatterServiceConcurrencyAndCooldownTest {
         }
 
     @Test
-    fun `concurrent ambient messages skip immediately before fetching history, starting trace session, or invoking AI`() =
+    fun `same-channel burst coalesces before history and AI while different channels run independently`() =
         runTest {
             val channelId = 700L
             val otherChannelId = 701L
             val historyCalls = AtomicInteger(0)
             val traceSessionStarts = AtomicInteger(0)
-            val tracker = BoundedChannelInFlightTracker()
-            val enteredDecision = CompletableDeferred<Unit>()
-            val releaseDecision = CompletableDeferred<Unit>()
+            val coordinator = BoundedChannelBurstCoordinator()
 
             val countingTraceRecorder =
                 object : AiTraceRecorder {
@@ -145,70 +143,46 @@ class ChatterServiceConcurrencyAndCooldownTest {
                     decisionClient = fixture.decisionClient,
                     chatterGenerator = fixture.chatterGenerator,
                     cooldownCache = fixture.cooldownCache,
-                    historyFetcher = { msg, _ ->
+                    historyFetcher = { _, _ ->
                         historyCalls.incrementAndGet()
-                        if (msg.channelId == Snowflake(channelId)) {
-                            emptyList()
-                        } else {
-                            emptyList()
-                        }
+                        emptyList()
                     },
                     contextCollector = fixture.contextCollector,
                     traceRecorder = countingTraceRecorder,
-                    inFlightTracker = tracker,
+                    burstCoordinator = coordinator,
                 )
 
-            coEvery { fixture.decisionClient.decide(any(), any()) } coAnswers {
-                val transcript = firstArg<String>()
-                if (transcript.contains("first ambient")) {
-                    enteredDecision.complete(Unit)
-                    releaseDecision.await()
-                }
-                ParticipationDecision(shouldParticipate = true, noul = 0.9)
-            }
+            coEvery { fixture.decisionClient.decide(any(), any()) } returns ParticipationDecision(shouldParticipate = true, noul = 0.9)
             coEvery { fixture.chatterGenerator.generateReply(any<ChatterInput>()) } returns "Reply"
 
             val msg1 = fixture.createMockMessage(id = 7001L, channelId = channelId, username = "Alice", content = "first ambient")
-            val msg2Concurrent = fixture.createMockMessage(id = 7002L, channelId = channelId, username = "Bob", content = "second ambient")
+            val msg2Burst = fixture.createMockMessage(id = 7002L, channelId = channelId, username = "Bob", content = "second ambient")
             val msgOtherChannel = fixture.createMockMessage(id = 7003L, channelId = otherChannelId, username = "Cara", content = "other channel")
 
             val firstRun = async { guardedService.processMessage(msg1) }
-            enteredDecision.await()
+            val burstRun = async { guardedService.processMessage(msg2Burst) }
+            val otherChannelRun = async { guardedService.processMessage(msgOtherChannel) }
 
-            assertTrue(tracker.isInFlight(channelId))
-            assertEquals(1, tracker.activeCount(channelId))
-            assertEquals(1, historyCalls.get())
-            assertEquals(1, traceSessionStarts.get())
+            assertFalse(firstRun.await())
+            assertTrue(burstRun.await())
+            assertTrue(otherChannelRun.await())
 
-            // Concurrent ambient message on the same channel skips immediately before history, trace session, or AI
-            assertFalse(guardedService.processMessage(msg2Concurrent))
-            assertEquals(1, historyCalls.get())
-            assertEquals(1, traceSessionStarts.get())
-            coVerify(exactly = 1) { fixture.decisionClient.decide(any(), any()) }
-
-            // Different channel is unaffected by channel 700L in-flight state
-            assertTrue(guardedService.processMessage(msgOtherChannel))
+            // Coalesced channel 700L invoked history/trace/decision once for the winning burst message + 1 for channel 701L
             assertEquals(2, historyCalls.get())
             assertEquals(2, traceSessionStarts.get())
-
-            releaseDecision.complete(Unit)
-            assertTrue(firstRun.await())
-
-            assertFalse(tracker.isInFlight(channelId))
-            assertEquals(0, tracker.activeCount(channelId))
-            assertEquals(0, tracker.size)
+            coVerify(exactly = 2) { fixture.decisionClient.decide(any(), any()) }
+            assertFalse(coordinator.isActive(channelId))
+            assertFalse(coordinator.isActive(otherChannelId))
+            assertEquals(0, coordinator.size)
         }
 
     @Test
-    fun `direct bot mention bypasses in-flight guard, keeps reference count across concurrent runs, and releases on exception`() =
+    fun `direct bot mention interrupts active ambient run and coordinator releases channel state on exception`() =
         runTest {
             val botSelfId = Snowflake(9999L)
             val channelId = 702L
-            val tracker = BoundedChannelInFlightTracker()
+            val coordinator = BoundedChannelBurstCoordinator()
             val ambientEnteredDecision = CompletableDeferred<Unit>()
-            val releaseAmbientDecision = CompletableDeferred<Unit>()
-            val mentionEnteredGenerate = CompletableDeferred<Unit>()
-            val releaseMentionGenerate = CompletableDeferred<Unit>()
             val historyCalls = AtomicInteger(0)
 
             val guardedService =
@@ -222,22 +196,18 @@ class ChatterServiceConcurrencyAndCooldownTest {
                         emptyList()
                     },
                     contextCollector = fixture.contextCollector,
-                    inFlightTracker = tracker,
+                    burstCoordinator = coordinator,
                 )
 
             coEvery { fixture.decisionClient.decide(any(), any()) } coAnswers {
                 val transcript = firstArg<String>()
                 if (transcript.contains("ambient in-flight")) {
                     ambientEnteredDecision.complete(Unit)
-                    releaseAmbientDecision.await()
+                    kotlinx.coroutines.delay(5_000L)
                 }
                 ParticipationDecision(shouldParticipate = false, noul = 0.2)
             }
-            coEvery { fixture.chatterGenerator.generateReply(any<ChatterInput>()) } coAnswers {
-                mentionEnteredGenerate.complete(Unit)
-                releaseMentionGenerate.await()
-                throw RuntimeException("simulated generator failure")
-            }
+            coEvery { fixture.chatterGenerator.generateReply(any<ChatterInput>()) } throws RuntimeException("simulated generator failure")
 
             val ambient1 = fixture.createMockMessage(id = 7101L, channelId = channelId, username = "Alice", content = "ambient in-flight")
             val mentionMsg =
@@ -249,44 +219,27 @@ class ChatterServiceConcurrencyAndCooldownTest {
                     mentionedUserIds = setOf(botSelfId),
                     selfId = botSelfId,
                 )
-            val ambient2WhileMentionRuns =
-                fixture.createMockMessage(id = 7103L, channelId = channelId, username = "Cara", content = "ambient burst")
-            val ambient3AfterCleanup =
+            val ambientAfterCleanup =
                 fixture.createMockMessage(id = 7104L, channelId = channelId, username = "Dave", content = "after cleanup")
 
             val ambientRun = async { guardedService.processMessage(ambient1) }
             ambientEnteredDecision.await()
-            assertEquals(1, tracker.activeCount(channelId))
+            assertTrue(coordinator.isActive(channelId))
 
-            // Direct @bot mention proceeds concurrently and increments active count to 2
-            val mentionRun = async { guardedService.processMessage(mentionMsg) }
-            mentionEnteredGenerate.await()
-            assertEquals(2, tracker.activeCount(channelId))
-
-            // Completing ambient run only decrements count from 2 -> 1; mention is still active
-            releaseAmbientDecision.complete(Unit)
+            // Direct @bot mention cancels in-flight ambient run and fails gracefully on generator exception
+            assertFalse(guardedService.processMessage(mentionMsg))
             assertFalse(ambientRun.await())
-            assertTrue(tracker.isInFlight(channelId))
-            assertEquals(1, tracker.activeCount(channelId))
-
-            // Ambient message while direct mention is still running must still skip immediately
-            val historyCountBeforeBurst = historyCalls.get()
-            assertFalse(guardedService.processMessage(ambient2WhileMentionRuns))
-            assertEquals(historyCountBeforeBurst, historyCalls.get())
-
-            // Direct mention fails with RuntimeException; try/finally must release count back to 0
-            releaseMentionGenerate.complete(Unit)
-            assertFalse(mentionRun.await())
-            assertFalse(tracker.isInFlight(channelId))
-            assertEquals(0, tracker.activeCount(channelId))
+            assertFalse(coordinator.isActive(channelId))
+            assertEquals(0, coordinator.size)
 
             // Subsequent ambient message proceeds normally after exception cleanup
-            assertFalse(guardedService.processMessage(ambient3AfterCleanup))
-            assertEquals(historyCountBeforeBurst + 1, historyCalls.get())
-            assertFalse(tracker.isInFlight(channelId))
-            assertEquals(0, tracker.activeCount(channelId))
+            val historyBefore = historyCalls.get()
+            assertFalse(guardedService.processMessage(ambientAfterCleanup))
+            assertEquals(historyBefore + 1, historyCalls.get())
+            assertFalse(coordinator.isActive(channelId))
+            assertEquals(0, coordinator.size)
 
-            // Unhandled exception from startSession still releases in-flight count via finally
+            // Unhandled exception from startSession still releases channel state via finally
             val throwingTraceRecorder =
                 object : AiTraceRecorder {
                     override fun isEnabled(): Boolean = false
@@ -310,7 +263,7 @@ class ChatterServiceConcurrencyAndCooldownTest {
                     historyFetcher = { _, _ -> emptyList() },
                     contextCollector = fixture.contextCollector,
                     traceRecorder = throwingTraceRecorder,
-                    inFlightTracker = tracker,
+                    burstCoordinator = coordinator,
                 )
             val failingMention =
                 fixture.createMockMessage(
@@ -324,8 +277,8 @@ class ChatterServiceConcurrencyAndCooldownTest {
             assertFailsWith<IllegalStateException> {
                 throwingService.processMessage(failingMention)
             }
-            assertFalse(tracker.isInFlight(703L))
-            assertEquals(0, tracker.activeCount(703L))
+            assertFalse(coordinator.isActive(703L))
+            assertEquals(0, coordinator.size)
         }
 
     @Test
