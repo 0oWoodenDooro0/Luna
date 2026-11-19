@@ -276,6 +276,12 @@ class OwnerErrorNotifier(
                     if (isNotEmpty()) append(" | ")
                     append(explicitErrorMsg)
                 }
+            }.ifBlank {
+                throwableProxy
+                    ?.message
+                    ?.takeIf { it.isNotBlank() }
+                    ?: throwableProxy?.className?.takeIf { it.isNotBlank() }
+                    ?: ""
             }
 
         return OwnerErrorEvent(

@@ -503,4 +503,49 @@ class OwnerErrorNotifierTest {
                 "Unreachable user 502 must log degraded warning without blocking user 501",
             )
         }
+
+    @Test
+    fun `blank log message with throwable falls back to throwable message or class name and redacts secrets`() =
+        runTest {
+            val delivered = CopyOnWriteArrayList<Pair<Snowflake, String>>()
+            val notifier =
+                OwnerErrorNotifier(
+                    config = ErrorNotifyConfig(recipientUserIds = listOf(Snowflake(42uL)), cooldownSeconds = 1),
+                    secretConfig = mapOf("GEMINI_API_KEY" to "AIzaSyFallbackSecret999"),
+                    startupBuffer = ImmediateReadyStartupAlertBuffer,
+                    clock = fixedClock,
+                    dmSender = { userId, content -> delivered.add(userId to content) },
+                )
+
+            val (logger, appender) = attachTestAppender("luna.core.EmptyMsgFallbackLogger", notifier)
+            try {
+                logger.error("", java.net.SocketException("Connection reset"))
+                logger.error("", java.io.EOFException())
+                logger.error("", IllegalStateException("Auth failed apiKey=AIzaSyFallbackSecret999"))
+                logger.error("")
+            } finally {
+                logger.detachAppender(appender)
+                appender.stop()
+                notifier.flushAndClose()
+            }
+
+            assertEquals(4, delivered.size)
+            val messages = delivered.map { it.second }
+            assertTrue(
+                messages[0].contains("**Message:** Connection reset") && !messages[0].contains("(empty message)"),
+                "Blank log with SocketException must fall back to exception message: ${messages[0]}",
+            )
+            assertTrue(
+                messages[1].contains("**Message:** java.io.EOFException") && !messages[1].contains("(empty message)"),
+                "Blank log with null-message EOFException must fall back to exception class: ${messages[1]}",
+            )
+            assertTrue(
+                messages[2].contains("******") && !messages[2].contains("AIzaSyFallbackSecret999"),
+                "Fallback throwable message must still be redacted: ${messages[2]}",
+            )
+            assertTrue(
+                messages[3].contains("**Message:** (empty message)"),
+                "Blank log without throwable should still display (empty message): ${messages[3]}",
+            )
+        }
 }

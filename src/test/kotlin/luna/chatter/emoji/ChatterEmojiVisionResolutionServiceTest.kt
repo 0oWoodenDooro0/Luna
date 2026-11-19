@@ -61,6 +61,7 @@ import java.time.Instant
 import java.time.ZoneId
 import java.time.ZoneOffset
 import java.time.ZonedDateTime
+import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.atomic.AtomicInteger
 import kotlin.coroutines.EmptyCoroutineContext
 import kotlin.test.assertContains
@@ -181,7 +182,7 @@ class ChatterEmojiVisionResolutionServiceTest {
             val db = openDatabase("first-turn.db")
             val repo = ExposedCustomEmojiMeaningRepository(database = db, clock = clock)
 
-            val capturedBodies = mutableListOf<Pair<String, String>>()
+            val capturedBodies = CopyOnWriteArrayList<Pair<String, String>>()
             val mockEngine =
                 MockEngine { request ->
                     val url = request.url.toString()
@@ -236,7 +237,7 @@ class ChatterEmojiVisionResolutionServiceTest {
                 )
             val catalog = DefaultChatterEmojiCatalog(meaningRepository = repo, visionResolver = visionResolver, clock = clock)
 
-            val sentMessages = mutableListOf<String>()
+            val sentMessages = CopyOnWriteArrayList<String>()
             val service =
                 ChatterService(
                     filter = ChatterNoiseFilter(cooldownCache = BoundedChannelCooldownCache(timeSource = { 100_000L })),
@@ -335,7 +336,7 @@ class ChatterEmojiVisionResolutionServiceTest {
             val repo = ExposedCustomEmojiMeaningRepository(database = db, clock = clock)
             repo.upsertResolvedMeaning(emojiId = "1001", name = "cached", isAnimated = false, meaning = "已快取意思")
 
-            val capturedBodies = mutableListOf<Pair<String, String>>()
+            val capturedBodies = CopyOnWriteArrayList<Pair<String, String>>()
             val mockEngine =
                 MockEngine { request ->
                     val url = request.url.toString()
@@ -371,7 +372,7 @@ class ChatterEmojiVisionResolutionServiceTest {
                 )
             val catalog = DefaultChatterEmojiCatalog(meaningRepository = repo, visionResolver = visionResolver, clock = clock)
 
-            val sentMessages = mutableListOf<String>()
+            val sentMessages = CopyOnWriteArrayList<String>()
             val service =
                 ChatterService(
                     filter = ChatterNoiseFilter(cooldownCache = BoundedChannelCooldownCache(timeSource = { 100_000L })),
@@ -472,7 +473,7 @@ class ChatterEmojiVisionResolutionServiceTest {
             val db = openDatabase("silent-reaction.db")
             val repo = ExposedCustomEmojiMeaningRepository(database = db, clock = clock)
 
-            val capturedReactionPrompts = mutableListOf<Pair<String, String>>()
+            val capturedReactionPrompts = CopyOnWriteArrayList<Pair<String, String>>()
             val mockEngine =
                 MockEngine { request ->
                     val url = request.url.toString()
