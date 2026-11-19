@@ -183,7 +183,7 @@ class ChatterPersonaDriftServiceAndTraceTest {
                     ),
                 chatterGenerator =
                     ChatterGenerator(
-                        config = ChatterConfig(apiKey = "secret-key"),
+                        config = ChatterConfig(apiKey = "secret-key", reactionThreshold = 1.0),
                         httpClient = httpClient,
                         traceRecorder = recorder,
                     ),

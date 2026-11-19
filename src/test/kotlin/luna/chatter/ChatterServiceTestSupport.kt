@@ -33,6 +33,7 @@ internal class ChatterServiceTestSupport {
         decisionClient = mockk(relaxed = true)
         every { decisionClient.config } returns ChatterDecisionConfig()
         chatterGenerator = mockk(relaxed = true)
+        every { chatterGenerator.config } returns ChatterConfig()
         channel = mockk(relaxed = true)
         contextCollector =
             ChatterContextCollector(

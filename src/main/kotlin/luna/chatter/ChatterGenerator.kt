@@ -210,6 +210,125 @@ open class ChatterGenerator(
     }
 
     /**
+     * Selects a single Discord reaction emoji (standard Unicode or verified guild custom emoji) from
+     * multimodal [ChatterInput] without generating a text reply or using fallback emoji pools.
+     */
+    open suspend fun selectReactionEmoji(input: ChatterInput): String? =
+        traceRecorder.withActiveOrStandaloneSession(
+            pipeline = AiTracePipeline.CHATTER,
+            trigger = if (input.isDirectMention) AiTraceTrigger.MENTION else AiTraceTrigger.AMBIENT,
+            discord =
+                AiTraceDiscordContext(
+                    channelId = "standalone",
+                    messageId = "standalone",
+                    isDirectMention = input.isDirectMention,
+                ),
+            secret = config.apiKey,
+        ) { session, isStandalone ->
+            executeSelectReactionEmoji(input, session, isStandalone)
+        }
+
+    private suspend fun executeSelectReactionEmoji(
+        input: ChatterInput,
+        session: AiTraceSession?,
+        isStandalone: Boolean,
+    ): String? {
+        if (!config.isConfigured) {
+            logger.warn("ChatterGenerator reaction selection skipped: Gemini API key is not configured")
+            session?.skip(
+                reason = "GEMINI_API_KEY is not configured",
+                failureCategory = AiTraceFailureCategory.NOT_CONFIGURED,
+            )
+            return null
+        }
+        if (input.transcript.isBlank() && input.imageAttachments.isEmpty()) {
+            logger.debug("ChatterGenerator reaction selection received blank input, skipping reaction")
+            session?.skip(
+                reason = "Chatter reaction selection received blank input",
+                failureCategory = AiTraceFailureCategory.CONTEXT_ERROR,
+            )
+            return null
+        }
+
+        val request =
+            ChatterPromptBuilder.buildReactionInteractionRequest(
+                input = input,
+                model = config.cleanModel,
+            )
+
+        val result =
+            interactionClient.interact(
+                baseUrl = config.cleanBaseUrl,
+                apiKey = config.apiKey,
+                request = request,
+                traceContext =
+                    InteractionTraceContext(
+                        webUrlCount = 0,
+                        inputUrls = emptyList(),
+                        transcriptLength = input.transcript.length,
+                        stage = AiAttemptStage.REACTION_SELECT,
+                        variant = null,
+                        pipeline = AiTracePipeline.CHATTER,
+                        trigger = AiTraceTrigger.AMBIENT,
+                        stripOutputEmojis = false,
+                    ),
+            )
+
+        return when (result) {
+            is InteractionExecutionResult.Success -> {
+                if (result.text.isBlank()) {
+                    logger.warn("ChatterGenerator reaction selection returned blank output")
+                    session?.skip(
+                        reason = "Gemini reaction selection output is blank",
+                        failureCategory = AiTraceFailureCategory.EMPTY_OUTPUT,
+                    )
+                    return null
+                }
+                val normalized = ChatterReactionEmojiValidator.validateAndNormalize(result.text, input.guildEmojis)
+                if (normalized == null) {
+                    logger.warn(
+                        "ChatterGenerator reaction selection returned invalid or unverified emoji: {}",
+                        result.text.trim().take(80),
+                    )
+                    session?.skip(
+                        reason = "Reaction selection output was not a single valid Unicode or verified guild custom emoji",
+                        failureCategory = AiTraceFailureCategory.PARSE_ERROR,
+                    )
+                    return null
+                }
+                if (isStandalone) {
+                    session?.complete(finalOutput = normalized, citations = emptyList())
+                }
+                normalized
+            }
+
+            is InteractionExecutionResult.Error -> {
+                logger.warn(
+                    "ChatterGenerator reaction selection failed (category={}): {}",
+                    result.failureCategory,
+                    result.message,
+                    result.cause,
+                )
+                session?.skip(
+                    reason = result.message,
+                    failureCategory = result.failureCategory,
+                )
+                null
+            }
+
+            is InteractionExecutionResult.FunctionCall -> {
+                val msg = "Unexpected function_call returned for reaction selection interaction ${result.interactionId}"
+                logger.warn(msg)
+                session?.skip(
+                    reason = msg,
+                    failureCategory = AiTraceFailureCategory.PARSE_ERROR,
+                )
+                null
+            }
+        }
+    }
+
+    /**
      * Generates a conversational community-style reply given the formatted conversation [transcript].
      */
     open suspend fun generateReply(transcript: String): String? = generateReply(ChatterInput(transcript = transcript))

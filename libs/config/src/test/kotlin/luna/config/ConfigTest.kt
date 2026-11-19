@@ -207,4 +207,33 @@ class ConfigTest {
         assertEquals("Asia/Tokyo", EnvSchemaAuditor.resolveVariableValue("CHATTER_TIMEZONE", aliasConfig))
         assertEquals("false", EnvSchemaAuditor.resolveVariableValue("CHATTER_DRIFT_ENABLED", aliasConfig))
     }
+
+    @Test
+    fun `EnvSchemaAuditor recognizes CHATTER_REACTION_THRESHOLD and chatter aliases`() {
+        val fallbackSchema = EnvSchemaAuditor.defaultFallbackSchema()
+        val reactionSchema = fallbackSchema.firstOrNull { it.name == "CHATTER_REACTION_THRESHOLD" }
+        assertNotNull(reactionSchema)
+        assertFalse(reactionSchema.isRequired)
+        assertEquals("0.45", reactionSchema.defaultValue)
+
+        val fallbackKeys = fallbackSchema.map { it.name }.toSet()
+        assertTrue(EnvSchemaAuditor.isRecognizedKey("CHATTER_REACTION_THRESHOLD", fallbackKeys))
+        assertTrue(EnvSchemaAuditor.isRecognizedKey("chatter.reactionThreshold", fallbackKeys))
+        assertTrue(EnvSchemaAuditor.isRecognizedKey("chatter.reaction_threshold", fallbackKeys))
+
+        assertEquals(
+            "0.55",
+            EnvSchemaAuditor.resolveVariableValue(
+                "CHATTER_REACTION_THRESHOLD",
+                mapOf("chatter.reactionThreshold" to "0.55"),
+            ),
+        )
+        assertEquals(
+            "0.35",
+            EnvSchemaAuditor.resolveVariableValue(
+                "CHATTER_REACTION_THRESHOLD",
+                mapOf("chatter.reaction_threshold" to "0.35"),
+            ),
+        )
+    }
 }

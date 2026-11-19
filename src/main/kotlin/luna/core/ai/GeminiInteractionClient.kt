@@ -33,6 +33,7 @@ data class InteractionTraceContext(
     val variant: String? = null,
     val pipeline: AiTracePipeline = AiTracePipeline.SUMMARY,
     val trigger: AiTraceTrigger = AiTraceTrigger.REACTION,
+    val stripOutputEmojis: Boolean = true,
 )
 
 /**
@@ -379,6 +380,7 @@ class GeminiInteractionClient(
                             apiKey = apiKey,
                             background = requestPayload.background,
                             inputUrls = traceContext.inputUrls,
+                            stripOutputEmojis = traceContext.stripOutputEmojis,
                             traceState = traceState,
                             localRedactor = localRedactor,
                         )
@@ -456,6 +458,7 @@ class GeminiInteractionClient(
         apiKey: String,
         background: Boolean,
         inputUrls: List<String>,
+        stripOutputEmojis: Boolean,
         traceState: ExecutionTraceState,
         localRedactor: AiTraceRedactor,
     ): InteractionExecutionResult {
@@ -463,6 +466,7 @@ class GeminiInteractionClient(
             return evaluateCompletedResponse(
                 response = interaction,
                 inputUrls = inputUrls,
+                stripOutputEmojis = stripOutputEmojis,
                 traceState = traceState,
                 localRedactor = localRedactor,
             )
@@ -482,6 +486,7 @@ class GeminiInteractionClient(
             return evaluateCompletedResponse(
                 response = interaction,
                 inputUrls = inputUrls,
+                stripOutputEmojis = stripOutputEmojis,
                 traceState = traceState,
                 localRedactor = localRedactor,
             )
@@ -497,6 +502,7 @@ class GeminiInteractionClient(
             apiKey = apiKey,
             id = interactionId,
             inputUrls = inputUrls,
+            stripOutputEmojis = stripOutputEmojis,
             traceState = traceState,
             localRedactor = localRedactor,
         )
@@ -507,6 +513,7 @@ class GeminiInteractionClient(
         apiKey: String,
         id: String,
         inputUrls: List<String>,
+        stripOutputEmojis: Boolean,
         traceState: ExecutionTraceState,
         localRedactor: AiTraceRedactor,
     ): InteractionExecutionResult {
@@ -558,6 +565,7 @@ class GeminiInteractionClient(
                 return evaluateCompletedResponse(
                     response = statusResponse,
                     inputUrls = inputUrls,
+                    stripOutputEmojis = stripOutputEmojis,
                     traceState = traceState,
                     localRedactor = localRedactor,
                 )
@@ -575,6 +583,7 @@ class GeminiInteractionClient(
     private fun evaluateCompletedResponse(
         response: GeminiInteractionResponse,
         inputUrls: List<String>,
+        stripOutputEmojis: Boolean,
         traceState: ExecutionTraceState,
         localRedactor: AiTraceRedactor,
     ): InteractionExecutionResult {
@@ -661,7 +670,12 @@ class GeminiInteractionClient(
             )
         }
 
-        val sanitized = EmojiSanitizer.stripEmojis(rawOutput).trim()
+        val sanitized =
+            if (stripOutputEmojis) {
+                EmojiSanitizer.stripEmojis(rawOutput).trim()
+            } else {
+                rawOutput.trim()
+            }
         if (sanitized.isBlank()) {
             logger.error("Gemini interaction {} completed with empty or emoji-only output", interactionId ?: "unknown")
             return InteractionExecutionResult.Error.EmptyOutput(

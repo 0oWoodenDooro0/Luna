@@ -187,6 +187,7 @@ class ChatterPlugin(
                 burstCoordinator = coordinator,
                 afterMessagesFetcher = ChatterService.defaultAfterMessagesFetcher,
                 personaStateProvider = drift,
+                guildEmojisProvider = ChatterService.defaultGuildEmojisProvider,
             )
         val finalService = serviceFactory?.invoke(chatterService) ?: chatterService
         this.service = finalService

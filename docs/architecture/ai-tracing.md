@@ -7,7 +7,7 @@ Every Discord-triggered AI workflow across Luna's `Summary Pipeline` and `Chatte
 ```
 Discord Trigger (Reaction / Mention / Ambient Message)
   └─> AiTraceSession (UUID traceId, coroutine-scoped via AiTraceContextElement)
-        ├─> Attempt 1..N (DECISION / SUMMARY_GENERATE / SUMMARY_TOOL_CONTINUATION / CHATTER_GENERATE / AGENTIC_VIDEO)
+        ├─> Attempt 1..N (DECISION / SUMMARY_GENERATE / SUMMARY_TOOL_CONTINUATION / CHATTER_GENERATE / REACTION_SELECT / AGENTIC_VIDEO)
         └─> finally { session.finish() }
               ├─> AiTraceRedactor -> AiTraceJson -> Channel(256) -> luna-ai-trace-writer -> data/logs/ai/ai-YYYY-MM-DD.jsonl
               └─> JsonLogger.log(layer="AI_TRACE", operation="traceRecorded", data={traceId, outcome, ...}) -> data/logs/luna-json.log
@@ -83,6 +83,7 @@ All schema models are defined in [`AiTraceModels.kt`](../../src/main/kotlin/luna
 | `circadianPeriod` | `String?` | Active circadian period (`LATE_NIGHT`, `MORNING`, `DAYTIME`, `EVENING`) recorded by `Chatter Pipeline` when drift is enabled; `null` for `SUMMARY` or when drift is disabled. |
 | `personaMood` | `String?` | Active transient in-memory mood/energy label (`ENERGETIC`, `CHATTY`, `STEADY`, `MELLOW`, `TIRED`, `LOW_BATTERY`) recorded by `Chatter Pipeline`; `null` for `SUMMARY` or when drift is disabled. |
 | `effectiveThreshold` | `Double?` | Effective `noul` participation threshold (`baseThreshold + circadianOffset + moodOffset` clamped to `[0.05, 0.98]`, or `baseThreshold` when drift is disabled) evaluated by `Chatter Pipeline`; `null` for `SUMMARY`. |
+| `reactionThreshold` | `Double?` | Configured `Silent Reaction Path` `noul` lower threshold (`CHATTER_REACTION_THRESHOLD`, clamped `[0.0, 1.0]`, default `0.45`) evaluated by `Chatter Pipeline`; `null` for `SUMMARY`. |
 
 #### `discord` Subfields (`AiTraceDiscordContext`)
 
@@ -121,7 +122,7 @@ All schema models are defined in [`AiTraceModels.kt`](../../src/main/kotlin/luna
 | Field | Type | Description |
 | :--- | :--- | :--- |
 | `attemptIndex` | `Int` | 1-based ordinal index of this attempt within `attempts[]`. |
-| `stage` | `AiAttemptStage` | Execution stage: `DECISION`, `SUMMARY_GENERATE`, `SUMMARY_TOOL_CONTINUATION`, `CHATTER_GENERATE`, or `AGENTIC_VIDEO`. |
+| `stage` | `AiAttemptStage` | Execution stage: `DECISION`, `SUMMARY_GENERATE`, `SUMMARY_TOOL_CONTINUATION`, `CHATTER_GENERATE`, `REACTION_SELECT`, or `AGENTIC_VIDEO`. |
 | `model` | `String?` | Gemini model ID used for this call (e.g. `gemini-3.5-flash-lite`, `gemini-decision-1`). |
 | `endpoint` | `String?` | Target upstream URL with API keys masked (e.g. `https://generativelanguage.googleapis.com/v1beta/interactions?key=******` or `https://generativelanguage.googleapis.com/v1beta/decisions`). |
 | `latencyMs` | `Long` | Elapsed duration of this attempt in milliseconds (for `AGENTIC_VIDEO`, spans submission through final polling completion). |
@@ -159,6 +160,7 @@ All schema models are defined in [`AiTraceModels.kt`](../../src/main/kotlin/luna
   - `SUMMARY_GENERATE`: `POST /v1beta/interactions` (`background = false`, `GeminiSummarizer` via `GeminiInteractionClient`) synchronous summary generation (no fallback retries).
   - `SUMMARY_TOOL_CONTINUATION`: `POST /v1beta/interactions` (`background = false`, `previous_interaction_id` + `function_result`) follow-up turn after fulfilling a `fetch_earlier_messages` tool call.
   - `CHATTER_GENERATE`: `POST /v1beta/interactions` (`background = false`, `ChatterGenerator` via `GeminiInteractionClient`) synchronous conversational reply generation (no fallback retries).
+  - `REACTION_SELECT`: `POST /v1beta/interactions` (`background = false`, `maxOutputTokens = 16`, `ChatterGenerator.selectReactionEmoji` via `GeminiInteractionClient`) lightweight multimodal single-emoji selection for `Silent Reaction Path` (no local fallback pool).
   - `AGENTIC_VIDEO`: `POST /v1beta/interactions` (`background = true`) + `GET /v1beta/interactions/{id}` polling (`GeminiInteractionClient`) for long videos (`> 5m`) in `Summary Pipeline` and direct-mention `Chatter Pipeline`.
 - **`AiAttemptOutcome`**: `SUCCESS`, `SKIPPED`, `TOOL_CALL`, `ERROR`.
 

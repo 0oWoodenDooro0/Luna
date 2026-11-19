@@ -15,6 +15,8 @@ import luna.core.ai.VideoProcessingMode
 object ChatterPromptBuilder {
     const val DISCORD_MAX_LENGTH: Int = 2000
     const val MAX_OUTPUT_TOKENS: Int = 512
+    const val REACTION_MAX_OUTPUT_TOKENS: Int = 16
+    const val MAX_PROMPT_GUILD_EMOJIS: Int = 50
     const val MAX_REPLY_SEGMENTS: Int = 3
     const val TRUNCATION_ELLIPSIS: String = "..."
 
@@ -157,6 +159,111 @@ object ChatterPromptBuilder {
             tools = tools.takeIf { it.isNotEmpty() },
             generationConfig = GeminiInteractionGenerationConfig(maxOutputTokens = MAX_OUTPUT_TOKENS),
             background = background,
+        )
+    }
+
+    fun buildReactionSystemInstruction(
+        personaState: PersonaState? = null,
+        guildEmojis: List<GuildCustomEmoji> = emptyList(),
+    ): String {
+        val sb = StringBuilder()
+        sb.append(
+            "你叫 Luna，是這個 Discord 社群伺服器的一員。現在你決定不打字回覆，而是用一個 Discord 表情符號（Reaction Emoji）悄悄對最新訊息表態。\n\n" +
+                "請嚴格遵守以下規則：\n" +
+                "1. 只能輸出「剛好一個」表情符號，不要加任何文字、說明、標點符號、空白、引號或程式碼區塊。\n" +
+                "2. 可以選擇一個標準 Unicode emoji（例如 👍、😂、👀、❤️、🔥），或直接從下方提供的伺服器自訂表情清單中挑選一個並原封不動輸出完整標記。\n" +
+                "3. 絕對不可同時輸出多個表情符號，也絕對不可自己編造或修改自訂表情名稱與數字 ID。",
+        )
+
+        val boundedEmojis = guildEmojis.take(MAX_PROMPT_GUILD_EMOJIS)
+        if (boundedEmojis.isNotEmpty()) {
+            sb.append("\n\n可用的伺服器自訂表情清單（若選用請原封不動輸出其中一個標記）：\n")
+            sb.append(boundedEmojis.joinToString(" ") { it.mention })
+        }
+
+        if (personaState != null &&
+            personaState.driftEnabled &&
+            personaState.circadianPeriod != null &&
+            personaState.mood != null
+        ) {
+            sb.append(
+                "\n\n目前社群時間與你的狀態：\n" +
+                    "- 本地時間：${personaState.formattedWeekday} ${personaState.formattedTime}（${personaState.timezone}）\n" +
+                    "- 時段狀態（${personaState.circadianPeriod.label}）：${personaState.circadianPeriod.promptCue}\n" +
+                    "- 心情與精力（${personaState.mood.label}）：${personaState.mood.promptCue}",
+            )
+        }
+
+        return sb.toString()
+    }
+
+    fun buildReactionUserPrompt(input: ChatterInput): String {
+        val sb = StringBuilder()
+        val trimmedTranscript = input.transcript.trim()
+        sb.append("以下為 Discord 頻道的近期對話紀錄：\n\n")
+        if (trimmedTranscript.isNotEmpty()) {
+            sb.append(trimmedTranscript)
+        }
+
+        val supplemental = StringBuilder()
+        val cleanTitle = input.title?.trim()?.takeIf { it.isNotEmpty() }
+        if (cleanTitle != null && !trimmedTranscript.contains(cleanTitle)) {
+            supplemental.append("\n標題：").append(cleanTitle)
+        }
+        val cleanUrl = input.url?.trim()?.takeIf { it.isNotEmpty() }
+        if (cleanUrl != null && !trimmedTranscript.contains(cleanUrl)) {
+            supplemental.append("\n來源網址：").append(cleanUrl)
+        }
+        val missingComments =
+            input.comments
+                .map { it.trim() }
+                .filter { it.isNotEmpty() && !trimmedTranscript.contains(it) }
+        if (missingComments.isNotEmpty()) {
+            supplemental.append("\n社群留言：")
+            missingComments.forEachIndexed { idx, comment ->
+                supplemental.append("\n${idx + 1}. ").append(comment)
+            }
+        }
+        if (supplemental.isNotEmpty()) {
+            if (trimmedTranscript.isNotEmpty()) {
+                sb.append("\n")
+            }
+            sb.append(supplemental.toString().trimStart())
+        }
+
+        val imageCue =
+            if (input.imageAttachments.isNotEmpty()) {
+                "（請一併參考附帶的圖片、貼圖或 GIF 畫面）"
+            } else {
+                ""
+            }
+
+        sb.append(
+            "\n\n請為最新這則訊息挑選一個最自然貼切的 Discord Reaction Emoji$imageCue。" +
+                "只輸出那唯一一個 Unicode emoji 或伺服器自訂表情標記，不要任何其他文字：",
+        )
+        return sb.toString().trim()
+    }
+
+    fun buildReactionInteractionRequest(
+        input: ChatterInput,
+        model: String = ChatterConfig.DEFAULT_MODEL,
+    ): GeminiInteractionRequest {
+        val inputs =
+            GeminiInteractionClient.buildMultimodalInputs(
+                promptText = buildReactionUserPrompt(input),
+                imageAttachments = input.imageAttachments,
+                videoUri = null,
+                videoProcessingMode = VideoProcessingMode.STATIC,
+            )
+
+        return GeminiInteractionRequest(
+            model = model.trim().removePrefix("models/"),
+            input = inputs,
+            systemInstruction = buildReactionSystemInstruction(input.personaState, input.guildEmojis),
+            tools = null,
+            generationConfig = GeminiInteractionGenerationConfig(maxOutputTokens = REACTION_MAX_OUTPUT_TOKENS),
+            background = false,
         )
     }
 

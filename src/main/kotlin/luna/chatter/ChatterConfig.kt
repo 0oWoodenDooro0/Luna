@@ -20,6 +20,7 @@ import kotlin.math.roundToLong
  * @property maxInterrupts Maximum number of pre-send cancellations/restarts allowed per round before locking in delivery (defaults to 2).
  * @property timezone IANA timezone ID for `Circadian Persona Drift` (defaults to `Asia/Taipei`).
  * @property driftEnabled Whether `Circadian Persona Drift` tone cues and threshold offsets are enabled (defaults to `true`).
+ * @property reactionThreshold Minimum `noul` probability required for `Silent Reaction Path` (clamped to `[0.0, 1.0]`, defaults to `0.45`).
  */
 data class ChatterConfig(
     val apiKey: String = "",
@@ -34,6 +35,7 @@ data class ChatterConfig(
     val maxInterrupts: Int = DEFAULT_MAX_INTERRUPTS,
     val timezone: String = DEFAULT_TIMEZONE,
     val driftEnabled: Boolean = DEFAULT_DRIFT_ENABLED,
+    val reactionThreshold: Double = DEFAULT_REACTION_THRESHOLD,
 ) {
     val isConfigured: Boolean
         get() = apiKey.isNotBlank()
@@ -63,6 +65,9 @@ data class ChatterConfig(
     val normalizedMaxInterrupts: Int
         get() = normalizeMaxInterrupts(maxInterrupts.toLong())
 
+    val normalizedReactionThreshold: Double
+        get() = normalizeReactionThreshold(reactionThreshold)
+
     companion object {
         private val logger = LoggerFactory.getLogger(ChatterConfig::class.java)
 
@@ -79,6 +84,9 @@ data class ChatterConfig(
         const val DEFAULT_MAX_INTERRUPTS = 2
         const val DEFAULT_TIMEZONE = "Asia/Taipei"
         const val DEFAULT_DRIFT_ENABLED = true
+        const val DEFAULT_REACTION_THRESHOLD = 0.45
+        const val MIN_REACTION_THRESHOLD = 0.0
+        const val MAX_REACTION_THRESHOLD = 1.0
 
         const val DEFAULT_DEBOUNCE_MILLIS = 2_500L
         const val DEFAULT_MENTION_DEBOUNCE_MILLIS = 1_200L
@@ -133,6 +141,29 @@ data class ChatterConfig(
                 return DEFAULT_MAX_INTERRUPTS
             }
             return raw.toInt()
+        }
+
+        private fun normalizeReactionThreshold(raw: Double?): Double {
+            if (raw == null) return DEFAULT_REACTION_THRESHOLD
+            if (raw.isNaN() || raw.isInfinite()) {
+                logger.warn(
+                    "Invalid CHATTER_REACTION_THRESHOLD '{}'; falling back to default {}",
+                    raw,
+                    DEFAULT_REACTION_THRESHOLD,
+                )
+                return DEFAULT_REACTION_THRESHOLD
+            }
+            val clamped = raw.coerceIn(MIN_REACTION_THRESHOLD, MAX_REACTION_THRESHOLD)
+            if (clamped != raw) {
+                logger.warn(
+                    "Out-of-range CHATTER_REACTION_THRESHOLD '{}'; clamped to {} (allowed [{}, {}])",
+                    raw,
+                    clamped,
+                    MIN_REACTION_THRESHOLD,
+                    MAX_REACTION_THRESHOLD,
+                )
+            }
+            return clamped
         }
 
         private fun parseDoubleOrNull(
@@ -299,6 +330,10 @@ data class ChatterConfig(
             val driftEnabled =
                 parseBooleanOrNull(env["CHATTER_DRIFT_ENABLED"], "CHATTER_DRIFT_ENABLED")
                     ?: DEFAULT_DRIFT_ENABLED
+            val reactionThreshold =
+                normalizeReactionThreshold(
+                    parseDoubleOrNull(env["CHATTER_REACTION_THRESHOLD"], "CHATTER_REACTION_THRESHOLD"),
+                )
 
             return ChatterConfig(
                 apiKey = key,
@@ -312,6 +347,7 @@ data class ChatterConfig(
                 maxInterrupts = maxInterrupts,
                 timezone = timezone,
                 driftEnabled = driftEnabled,
+                reactionThreshold = reactionThreshold,
             )
         }
 
@@ -410,6 +446,16 @@ data class ChatterConfig(
                     "chatter.driftEnabled",
                     "chatter.drift_enabled",
                 ) ?: DEFAULT_DRIFT_ENABLED
+            val reactionThreshold =
+                normalizeReactionThreshold(
+                    readDoubleConfig(
+                        config,
+                        "CHATTER_REACTION_THRESHOLD",
+                        "CHATTER_REACTION_THRESHOLD",
+                        "chatter.reactionThreshold",
+                        "chatter.reaction_threshold",
+                    ),
+                )
 
             return ChatterConfig(
                 apiKey = key,
@@ -423,6 +469,7 @@ data class ChatterConfig(
                 maxInterrupts = maxInterrupts,
                 timezone = timezone,
                 driftEnabled = driftEnabled,
+                reactionThreshold = reactionThreshold,
             )
         }
 
@@ -521,6 +568,16 @@ data class ChatterConfig(
                     "chatter.driftEnabled",
                     "chatter.drift_enabled",
                 ) ?: DEFAULT_DRIFT_ENABLED
+            val reactionThreshold =
+                normalizeReactionThreshold(
+                    readDoubleConfig(
+                        context,
+                        "CHATTER_REACTION_THRESHOLD",
+                        "CHATTER_REACTION_THRESHOLD",
+                        "chatter.reactionThreshold",
+                        "chatter.reaction_threshold",
+                    ),
+                )
 
             return ChatterConfig(
                 apiKey = key,
@@ -534,6 +591,7 @@ data class ChatterConfig(
                 maxInterrupts = maxInterrupts,
                 timezone = timezone,
                 driftEnabled = driftEnabled,
+                reactionThreshold = reactionThreshold,
             )
         }
     }

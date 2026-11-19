@@ -6,6 +6,7 @@ import dev.kord.core.behavior.channel.MessageChannelBehavior
 import dev.kord.core.behavior.channel.createMessage
 import dev.kord.core.behavior.reply
 import dev.kord.core.entity.Message
+import dev.kord.core.entity.ReactionEmoji
 import dev.kord.core.event.message.MessageCreateEvent
 import dev.kord.core.on
 import kotlinx.coroutines.CancellationException
@@ -19,6 +20,7 @@ import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.launch
 import luna.core.ai.AiTraceDiscordContext
 import luna.core.ai.AiTraceFailureCategory
+import luna.core.ai.AiTraceOutcome
 import luna.core.ai.AiTracePipeline
 import luna.core.ai.AiTraceRecorder
 import luna.core.ai.AiTraceSession
@@ -32,8 +34,9 @@ import kotlin.random.Random
  * Service orchestrating the Chatter auto-reply pipeline:
  * 1. Pre-filtering incoming messages (noise, bot, command, cooldown, allowed channels).
  * 2. Coordinating per-channel burst debounce windows and pre-send cancellation via [burstCoordinator].
- * 3. Overlapping silent reading simulation (0.8s–2.0s via [randomProvider]) with participation decision and reply generation.
- * 4. Triggering `channel.type()` and length-paced typing delay (`min(charCount * 120ms, 4000ms)`) only when non-blank output is ready.
+ * 3. Overlapping silent reading simulation (0.8s–2.0s via [randomProvider]) with participation decision and
+ *    routing intermediate scores into the Silent Reaction Path or full reply generation.
+ * 4. Triggering `channel.type()` and length-paced typing delay (`min(charCount * 120ms, 4000ms)`) only when non-blank text reply output is ready.
  * 5. Locking dispatch, counting intervening post-trigger messages via [afterMessagesFetcher], delivering up to 3 segmented messages
  *    with asymmetric reply threading via [deliverReply], and refreshing cooldown.
  */
@@ -65,6 +68,8 @@ open class ChatterService(
     val afterMessagesFetcher: suspend (message: Message, limit: Int) -> List<Message> = defaultAfterMessagesFetcher,
     val replySender: (suspend (message: Message, content: String) -> Message)? = null,
     val personaStateProvider: PersonaStateProvider = CircadianPersonaDrift(),
+    val guildEmojisProvider: suspend (message: Message) -> List<GuildCustomEmoji> = defaultGuildEmojisProvider,
+    val reactionSender: (suspend (message: Message, emoji: ReactionEmoji) -> Unit)? = null,
 ) {
     private val logger = LoggerFactory.getLogger(ChatterService::class.java)
 
@@ -196,11 +201,15 @@ open class ChatterService(
             val baseThreshold =
                 runCatching { decisionClient.config.threshold }
                     .getOrDefault(ChatterDecisionConfig.DEFAULT_THRESHOLD)
+            val reactionThreshold =
+                runCatching { chatterGenerator.config.normalizedReactionThreshold }
+                    .getOrDefault(ChatterConfig.DEFAULT_REACTION_THRESHOLD)
             val personaState = personaStateProvider.currentState(baseThreshold)
             session.recordPersonaState(
                 circadianPeriod = personaState.circadianPeriod?.name,
                 personaMood = personaState.mood?.label,
                 effectiveThreshold = personaState.effectiveThreshold,
+                reactionThreshold = reactionThreshold,
             )
 
             val rawReadingDelayMs = randomProvider(MIN_READING_DELAY_MS, MAX_READING_DELAY_MS)
@@ -284,18 +293,35 @@ open class ChatterService(
                             decision.shouldParticipate
                         }
                     if (!shouldParticipate) {
+                        val noul = decision.noul
+                        if (noul != null && reactionThreshold < effectiveThreshold && noul >= reactionThreshold) {
+                            return@coroutineScope handleSilentReactionPath(
+                                message = message,
+                                decisionContext = decisionContext,
+                                personaState = personaState,
+                                noul = noul,
+                                confidence = decision.confidence,
+                                effectiveThreshold = effectiveThreshold,
+                                reactionThreshold = reactionThreshold,
+                                readingJob = readingJob,
+                                session = session,
+                                markDispatching = markDispatching,
+                            )
+                        }
+
                         logger.debug(
-                            "Decision client evaluated shouldParticipate=false for message {} (noul={}, effectiveThreshold={})",
+                            "Decision client evaluated shouldParticipate=false for message {} (noul={}, effectiveThreshold={}, reactionThreshold={})",
                             message.id,
                             decision.noul,
                             effectiveThreshold,
+                            reactionThreshold,
                         )
                         if (decision.noul != null) {
                             session.skip(
                                 reason =
                                     "Participation decision skipped (noul=${decision.noul}, " +
                                         "confidence=${decision.confidence}, threshold=$effectiveThreshold, " +
-                                        "baseThreshold=$baseThreshold)",
+                                        "reactionThreshold=$reactionThreshold, baseThreshold=$baseThreshold)",
                             )
                         }
                         return@coroutineScope false
@@ -549,6 +575,148 @@ open class ChatterService(
         }
     }
 
+    private suspend fun handleSilentReactionPath(
+        message: Message,
+        decisionContext: ChatterDecisionContext,
+        personaState: PersonaState,
+        noul: Double,
+        confidence: Double?,
+        effectiveThreshold: Double,
+        reactionThreshold: Double,
+        readingJob: Job,
+        session: AiTraceSession,
+        markDispatching: () -> Boolean,
+    ): Boolean {
+        val guildEmojis =
+            try {
+                guildEmojisProvider(message)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                logger.warn(
+                    "Failed to resolve guild emojis for message {} in channel {}; continuing with Unicode reactions only: {}",
+                    message.id,
+                    message.channelId,
+                    e.message,
+                )
+                emptyList()
+            }
+        currentCoroutineContext().ensureActive()
+
+        val reactionInput =
+            ChatterInput(
+                transcript = decisionContext.transcript,
+                imageAttachments = decisionContext.images,
+                isDirectMention = false,
+                personaState = personaState,
+                guildEmojis = guildEmojis,
+            )
+
+        val selectedEmoji =
+            try {
+                chatterGenerator.selectReactionEmoji(reactionInput)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                logger.warn(
+                    "ChatterGenerator failed during silent reaction selection for message {}: {}",
+                    message.id,
+                    e.message,
+                    e,
+                )
+                session.skip(
+                    reason = "Silent reaction selection failed: ${e.message}",
+                    failureCategory = AiTraceFailureCategory.UNEXPECTED_ERROR,
+                )
+                return false
+            }
+        currentCoroutineContext().ensureActive()
+
+        if (selectedEmoji.isNullOrBlank()) {
+            logger.debug(
+                "Silent reaction selection returned no valid emoji for message {} (noul={})",
+                message.id,
+                noul,
+            )
+            if (session.currentOutcome() != AiTraceOutcome.SKIPPED) {
+                session.skip(
+                    reason =
+                        "Silent reaction selection returned no valid emoji (noul=$noul, " +
+                            "reactionThreshold=$reactionThreshold, effectiveThreshold=$effectiveThreshold)",
+                    failureCategory = AiTraceFailureCategory.EMPTY_OUTPUT,
+                )
+            }
+            return false
+        }
+
+        val reactionEmoji = ChatterReactionEmojiValidator.toReactionEmoji(selectedEmoji, guildEmojis)
+        if (reactionEmoji == null) {
+            logger.warn(
+                "Silent reaction emoji '{}' failed post-selection Discord conversion for message {}",
+                selectedEmoji,
+                message.id,
+            )
+            session.skip(
+                reason = "Silent reaction emoji failed validation before Discord dispatch",
+                failureCategory = AiTraceFailureCategory.PARSE_ERROR,
+            )
+            return false
+        }
+
+        readingJob.join()
+        currentCoroutineContext().ensureActive()
+
+        if (!markDispatching()) {
+            session.skip(reason = "Cancelled right before silent reaction dispatch in channel ${message.channelId}")
+            return false
+        }
+
+        try {
+            dispatchReaction(message, reactionEmoji)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            logger.warn(
+                "Failed to add silent reaction '{}' to message {} in channel {}: {}",
+                selectedEmoji,
+                message.id,
+                message.channelId,
+                e.message,
+                e,
+            )
+            session.skip(
+                reason = "Failed to add Discord reaction: ${e.message}",
+                failureCategory = AiTraceFailureCategory.UNEXPECTED_ERROR,
+            )
+            return false
+        }
+
+        session.complete(finalOutput = selectedEmoji)
+        logger.info(
+            "Chatter added silent reaction {} to message {} in channel {} " +
+                "(noul={}, confidence={}, reactionThreshold={}, effectiveThreshold={})",
+            selectedEmoji,
+            message.id,
+            message.channelId,
+            noul,
+            confidence,
+            reactionThreshold,
+            effectiveThreshold,
+        )
+        return true
+    }
+
+    private suspend fun dispatchReaction(
+        message: Message,
+        emoji: ReactionEmoji,
+    ) {
+        if (reactionSender != null) {
+            reactionSender.invoke(message, emoji)
+        } else {
+            message.addReaction(emoji)
+        }
+    }
+
     companion object {
         const val DEFAULT_DECISION_MESSAGE_COUNT = 15
         const val DEFAULT_HISTORY_MESSAGE_COUNT = 15
@@ -565,6 +733,28 @@ open class ChatterService(
             message.channel
                 .getMessagesAfter(message.id, limit = limit)
                 .toList()
+        }
+
+        val defaultGuildEmojisProvider: suspend (message: Message) -> List<GuildCustomEmoji> = { message ->
+            val guild = message.getGuildOrNull()
+            if (guild == null) {
+                emptyList()
+            } else {
+                guild.emojis
+                    .toList()
+                    .mapNotNull { emoji ->
+                        val emojiName = emoji.name?.takeIf { it.isNotBlank() }
+                        if (emoji.isAvailable && emojiName != null) {
+                            GuildCustomEmoji(
+                                id = emoji.id,
+                                name = emojiName,
+                                isAnimated = emoji.isAnimated,
+                            )
+                        } else {
+                            null
+                        }
+                    }
+            }
         }
     }
 }

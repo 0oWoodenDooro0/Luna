@@ -203,6 +203,7 @@ object EnvSchemaAuditor {
             EnvVarSchema("CHATTER_MAX_INTERRUPTS", isRequired = false, defaultValue = "2", section = 3),
             EnvVarSchema("CHATTER_TIMEZONE", isRequired = false, defaultValue = "Asia/Taipei", section = 3),
             EnvVarSchema("CHATTER_DRIFT_ENABLED", isRequired = false, defaultValue = "true", section = 3),
+            EnvVarSchema("CHATTER_REACTION_THRESHOLD", isRequired = false, defaultValue = "0.45", section = 3),
             EnvVarSchema("AI_TRACE_ENABLED", isRequired = false, defaultValue = "true", section = 3),
             EnvVarSchema("AI_TRACE_DIR", isRequired = false, defaultValue = "data/logs/ai", section = 3),
             EnvVarSchema("AI_TRACE_MAX_DAYS", isRequired = false, defaultValue = "14", section = 3),
@@ -295,6 +296,7 @@ object EnvSchemaAuditor {
                 "CHATTER_MAX_INTERRUPTS" -> listOf("chatter.maxInterrupts", "chatter.max_interrupts")
                 "CHATTER_TIMEZONE" -> listOf("chatter.timezone", "chatter.timeZone", "chatter.time_zone")
                 "CHATTER_DRIFT_ENABLED" -> listOf("chatter.driftEnabled", "chatter.drift_enabled")
+                "CHATTER_REACTION_THRESHOLD" -> listOf("chatter.reactionThreshold", "chatter.reaction_threshold")
                 "GEMINI_API_KEY" -> listOf("gemini.apiKey", "gemini.api_key")
                 "GEMINI_MODEL" -> listOf("gemini.model")
                 "GEMINI_BASE_URL" -> listOf("gemini.baseUrl", "gemini.base_url")
