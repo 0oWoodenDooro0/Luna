@@ -92,3 +92,60 @@ Do not connect live Discord gateways in tests. Use mock interactions or test rep
 - `McpSecurity`: Pure cryptographic and hashing functions.
 - `McpWebhookRepository` / `McpClientRepository`: In-memory SQLite or H2 tests.
 - Verify REST payload serialization without calling Discord endpoints.
+
+---
+
+## 6. Messages, Replies, Reactions, Stickers & Guild Emojis
+
+> Context7 (`/kordlib/kord`) only indexes basic wiki/README snippets and omits Kord `0.19.0-SNAPSHOT` entity/behavior signatures. Use the verified patterns below before inspecting Kord JARs.
+
+### Reply & Intervening Messages (`Message`, `MessageChannelBehavior`)
+```kotlin
+import dev.kord.core.behavior.reply
+import dev.kord.core.behavior.channel.createMessage
+import kotlinx.coroutines.flow.toList
+
+// Plain channel message vs explicit Discord reply reference
+channel.createMessage { this.content = text }
+triggerMessage.reply {
+    this.messageReference = triggerMessage.id
+    this.content = text
+}
+
+// Fetch messages posted after a trigger message
+val after = message.channel.getMessagesAfter(message.id, limit = 20).toList()
+```
+
+### Reactions (`ReactionEmoji`, `Message.addReaction`)
+```kotlin
+import dev.kord.common.entity.Snowflake
+import dev.kord.core.entity.ReactionEmoji
+
+// Unicode emoji vs guild custom emoji (id is Snowflake, isAnimated is Boolean)
+val unicodeEmoji = ReactionEmoji.Unicode("👍")
+val customEmoji = ReactionEmoji.Custom(id = Snowflake("123456"), name = "blobcat", isAnimated = false)
+message.addReaction(unicodeEmoji)
+```
+
+### Guild Custom Emojis (`Message.getGuildOrNull`)
+```kotlin
+val guild = message.getGuildOrNull() // null in DMs or uncached/unavailable guilds
+val availableEmojis = guild?.emojis?.toList().orEmpty()
+    .filter { it.isAvailable && !it.name.isNullOrBlank() }
+// Canonical Discord tag: if (emoji.isAnimated) "<a:${emoji.name}:${emoji.id.value}>" else "<:${emoji.name}:${emoji.id.value}>"
+```
+
+### Stickers & Embeds (`Message.stickers`, `MessageStickerType`, `Embed`)
+```kotlin
+import dev.kord.common.entity.MessageStickerType
+
+// StickerItem fields: id (Snowflake), name (String), formatType (MessageStickerType)
+// MessageStickerType cases: PNG, APNG, GIF (CDN: "https://cdn.discordapp.com/stickers/${sticker.id.value}.png|.gif"),
+//   LOTTIE (vector JSON, degrade to "[貼圖: ${sticker.name}]"), is MessageStickerType.Unknown
+message.stickers.forEach { sticker -> /* check sticker.formatType */ }
+
+// Embed fields (probe defensively with runCatching on partial/malformed embeds):
+// embed.url, embed.title, embed.provider?.name, embed.provider?.url,
+// embed.image?.url, embed.image?.proxyUrl, embed.thumbnail?.url, embed.thumbnail?.proxyUrl, embed.video?.url
+```
+
