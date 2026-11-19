@@ -412,7 +412,7 @@ class ChatterEmojiVisionResolutionServiceTest {
                 )
             coEvery { message.getGuildOrNull() } returns mockGuild
 
-            assertTrue(service.handleMessage(message))
+            assertTrue(service.handleMessage(message), "Expected ChatterService to handle message when vision model is unset")
 
             val interactionRequests = capturedBodies.filter { (url, _) -> url.contains("/v1beta/interactions") }
             assertEquals(1, interactionRequests.size, "Expected only the reply interaction request and zero vision requests")
@@ -445,7 +445,10 @@ class ChatterEmojiVisionResolutionServiceTest {
                 ),
             )
             assertNotNull(pluginWithVision.emojiVisionResolver)
-            assertTrue(pluginWithVision.emojiVisionResolver!!.isEnabled)
+            assertTrue(
+                pluginWithVision.emojiVisionResolver!!.isEnabled,
+                "Expected emojiVisionResolver to be enabled when CHATTER_EMOJI_VISION_MODEL is configured",
+            )
             assertIs<DefaultChatterEmojiCatalog>(pluginWithVision.emojiCatalog)
             pluginWithVision.shutdown()
 

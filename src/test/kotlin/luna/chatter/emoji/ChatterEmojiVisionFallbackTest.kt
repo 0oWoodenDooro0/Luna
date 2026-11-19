@@ -267,7 +267,7 @@ class ChatterEmojiVisionFallbackTest {
                     )
                 coEvery { message.getGuildOrNull() } returns mockGuild
 
-                assertTrue(service.handleMessage(message))
+                assertTrue(service.handleMessage(message), "Expected ChatterService to handle message with animated emoji fallback")
                 assertEquals(
                     listOf(
                         "https://cdn.discordapp.com/emojis/1003.gif" to "image/gif",
@@ -391,7 +391,7 @@ class ChatterEmojiVisionFallbackTest {
                 )
             coEvery { message.getGuildOrNull() } returns mockGuild
 
-            assertTrue(service.handleMessage(message))
+            assertTrue(service.handleMessage(message), "Expected ChatterService to handle message with renamed and manual-override emojis")
             assertEquals(0, visionCallCount.get(), "Renames and manual overrides must not invoke vision API")
 
             val renamed = repo.findById("1001")
@@ -403,6 +403,6 @@ class ChatterEmojiVisionFallbackTest {
             assertNotNull(manual)
             assertEquals("manual_renamed", manual.name)
             assertEquals("管理員手動設定", manual.meaning)
-            assertTrue(manual.isManualOverride)
+            assertTrue(manual.isManualOverride, "Manual override flag must be preserved after emoji rename")
         }
 }
