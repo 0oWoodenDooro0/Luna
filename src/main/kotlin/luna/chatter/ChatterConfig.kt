@@ -2,6 +2,8 @@ package luna.chatter
 
 import luna.plugin.PluginContext
 import luna.plugin.config
+import org.slf4j.LoggerFactory
+import kotlin.math.roundToLong
 
 /**
  * Configuration for Google Gemini Conversational Dialogue Generator (Chatter).
@@ -12,6 +14,13 @@ import luna.plugin.config
  * @property maxOutputCharacters Maximum length of generated Discord response (defaults to 2000).
  * @property searchGroundingEnabled Whether autonomous Google Search Grounding is enabled (defaults to true).
  * @property urlContextEnabled Whether Gemini URL Context tool is enabled for general public web URLs (defaults to true).
+ * @property debounceSeconds Burst debounce window duration for ambient messages in seconds (defaults to 2.5).
+ * @property mentionDebounceSeconds Burst debounce window duration for direct `@Luna` mentions in seconds (defaults to 1.2).
+ * @property debounceMaxSeconds Maximum cumulative burst debounce window ceiling in seconds, clamped to `[6.0, 8.0]` (defaults to 7.0).
+ * @property maxInterrupts Maximum number of pre-send cancellations/restarts allowed per round before locking in delivery (defaults to 2).
+ * @property timezone IANA timezone ID for `Circadian Persona Drift` (defaults to `Asia/Taipei`).
+ * @property driftEnabled Whether `Circadian Persona Drift` tone cues and threshold offsets are enabled (defaults to `true`).
+ * @property reactionThreshold Minimum `noul` probability required for `Silent Reaction Path` (clamped to `[0.0, 1.0]`, defaults to `0.45`).
  */
 data class ChatterConfig(
     val apiKey: String = "",
@@ -20,6 +29,13 @@ data class ChatterConfig(
     val maxOutputCharacters: Int = DEFAULT_MAX_OUTPUT_CHARACTERS,
     val searchGroundingEnabled: Boolean = DEFAULT_SEARCH_GROUNDING_ENABLED,
     val urlContextEnabled: Boolean = DEFAULT_URL_CONTEXT_ENABLED,
+    val debounceSeconds: Double = DEFAULT_DEBOUNCE_SECONDS,
+    val mentionDebounceSeconds: Double = DEFAULT_MENTION_DEBOUNCE_SECONDS,
+    val debounceMaxSeconds: Double = DEFAULT_DEBOUNCE_MAX_SECONDS,
+    val maxInterrupts: Int = DEFAULT_MAX_INTERRUPTS,
+    val timezone: String = DEFAULT_TIMEZONE,
+    val driftEnabled: Boolean = DEFAULT_DRIFT_ENABLED,
+    val reactionThreshold: Double = DEFAULT_REACTION_THRESHOLD,
 ) {
     val isConfigured: Boolean
         get() = apiKey.isNotBlank()
@@ -30,12 +46,242 @@ data class ChatterConfig(
     val cleanBaseUrl: String
         get() = baseUrl.trim().trimEnd('/').removeSuffix("/v1beta")
 
+    val debounceMillis: Long
+        get() = (normalizePositiveSeconds(debounceSeconds, DEFAULT_DEBOUNCE_SECONDS, "CHATTER_DEBOUNCE_SECONDS") * 1000.0).roundToLong()
+
+    val mentionDebounceMillis: Long
+        get() =
+            (
+                normalizePositiveSeconds(
+                    mentionDebounceSeconds,
+                    DEFAULT_MENTION_DEBOUNCE_SECONDS,
+                    "CHATTER_MENTION_DEBOUNCE_SECONDS",
+                ) * 1000.0
+            ).roundToLong()
+
+    val debounceMaxMillis: Long
+        get() = (normalizeDebounceMaxSeconds(debounceMaxSeconds) * 1000.0).roundToLong()
+
+    val normalizedMaxInterrupts: Int
+        get() = normalizeMaxInterrupts(maxInterrupts.toLong())
+
+    val normalizedReactionThreshold: Double
+        get() = normalizeReactionThreshold(reactionThreshold)
+
     companion object {
+        private val logger = LoggerFactory.getLogger(ChatterConfig::class.java)
+
         const val DEFAULT_MODEL = "gemini-3.5-flash-lite"
         const val DEFAULT_BASE_URL = "https://generativelanguage.googleapis.com"
         const val DEFAULT_MAX_OUTPUT_CHARACTERS = 2000
         const val DEFAULT_SEARCH_GROUNDING_ENABLED = true
         const val DEFAULT_URL_CONTEXT_ENABLED = true
+        const val DEFAULT_DEBOUNCE_SECONDS = 2.5
+        const val DEFAULT_MENTION_DEBOUNCE_SECONDS = 1.2
+        const val DEFAULT_DEBOUNCE_MAX_SECONDS = 7.0
+        const val MIN_DEBOUNCE_MAX_SECONDS = 6.0
+        const val MAX_DEBOUNCE_MAX_SECONDS = 8.0
+        const val DEFAULT_MAX_INTERRUPTS = 2
+        const val DEFAULT_TIMEZONE = "Asia/Taipei"
+        const val DEFAULT_DRIFT_ENABLED = true
+        const val DEFAULT_REACTION_THRESHOLD = 0.45
+        const val MIN_REACTION_THRESHOLD = 0.0
+        const val MAX_REACTION_THRESHOLD = 1.0
+
+        const val DEFAULT_DEBOUNCE_MILLIS = 2_500L
+        const val DEFAULT_MENTION_DEBOUNCE_MILLIS = 1_200L
+        const val DEFAULT_DEBOUNCE_MAX_MILLIS = 7_000L
+        const val MIN_DEBOUNCE_MAX_MILLIS = 6_000L
+        const val MAX_DEBOUNCE_MAX_MILLIS = 8_000L
+
+        private fun normalizePositiveSeconds(
+            raw: Double?,
+            defaultValue: Double,
+            keyName: String,
+        ): Double {
+            if (raw == null) return defaultValue
+            if (raw.isNaN() || raw.isInfinite() || raw <= 0.0) {
+                logger.warn("Invalid {} '{}'; falling back to default {}s", keyName, raw, defaultValue)
+                return defaultValue
+            }
+            return raw
+        }
+
+        private fun normalizeDebounceMaxSeconds(raw: Double?): Double {
+            if (raw == null) return DEFAULT_DEBOUNCE_MAX_SECONDS
+            if (raw.isNaN() || raw.isInfinite() || raw <= 0.0) {
+                logger.warn(
+                    "Invalid CHATTER_DEBOUNCE_MAX_SECONDS '{}'; falling back to default {}s",
+                    raw,
+                    DEFAULT_DEBOUNCE_MAX_SECONDS,
+                )
+                return DEFAULT_DEBOUNCE_MAX_SECONDS
+            }
+            val clamped = raw.coerceIn(MIN_DEBOUNCE_MAX_SECONDS, MAX_DEBOUNCE_MAX_SECONDS)
+            if (clamped != raw) {
+                logger.warn(
+                    "Out-of-range CHATTER_DEBOUNCE_MAX_SECONDS '{}'; clamped to {}s (allowed [{}, {}])",
+                    raw,
+                    clamped,
+                    MIN_DEBOUNCE_MAX_SECONDS,
+                    MAX_DEBOUNCE_MAX_SECONDS,
+                )
+            }
+            return clamped
+        }
+
+        private fun normalizeMaxInterrupts(raw: Long?): Int {
+            if (raw == null) return DEFAULT_MAX_INTERRUPTS
+            if (raw < 0L || raw > Int.MAX_VALUE) {
+                logger.warn(
+                    "Invalid CHATTER_MAX_INTERRUPTS '{}'; falling back to default {}",
+                    raw,
+                    DEFAULT_MAX_INTERRUPTS,
+                )
+                return DEFAULT_MAX_INTERRUPTS
+            }
+            return raw.toInt()
+        }
+
+        private fun normalizeReactionThreshold(raw: Double?): Double {
+            if (raw == null) return DEFAULT_REACTION_THRESHOLD
+            if (raw.isNaN() || raw.isInfinite()) {
+                logger.warn(
+                    "Invalid CHATTER_REACTION_THRESHOLD '{}'; falling back to default {}",
+                    raw,
+                    DEFAULT_REACTION_THRESHOLD,
+                )
+                return DEFAULT_REACTION_THRESHOLD
+            }
+            val clamped = raw.coerceIn(MIN_REACTION_THRESHOLD, MAX_REACTION_THRESHOLD)
+            if (clamped != raw) {
+                logger.warn(
+                    "Out-of-range CHATTER_REACTION_THRESHOLD '{}'; clamped to {} (allowed [{}, {}])",
+                    raw,
+                    clamped,
+                    MIN_REACTION_THRESHOLD,
+                    MAX_REACTION_THRESHOLD,
+                )
+            }
+            return clamped
+        }
+
+        private fun parseDoubleOrNull(
+            raw: String?,
+            keyName: String,
+        ): Double? {
+            val trimmed = raw?.trim()?.ifBlank { null } ?: return null
+            val parsed = trimmed.toDoubleOrNull()
+            if (parsed == null) {
+                logger.warn("Unparseable numeric value '{}' for {}; using default", trimmed, keyName)
+            }
+            return parsed
+        }
+
+        private fun parseLongOrNull(
+            raw: String?,
+            keyName: String,
+        ): Long? {
+            val trimmed = raw?.trim()?.ifBlank { null } ?: return null
+            val parsed = trimmed.toLongOrNull()
+            if (parsed == null) {
+                logger.warn("Unparseable integer value '{}' for {}; using default", trimmed, keyName)
+            }
+            return parsed
+        }
+
+        private fun parseBooleanOrNull(
+            raw: String?,
+            keyName: String,
+        ): Boolean? {
+            val trimmed = raw?.trim()?.ifBlank { null } ?: return null
+            val parsed = trimmed.toBooleanStrictOrNull()
+            if (parsed == null) {
+                logger.warn("Unparseable boolean value '{}' for {}; using default", trimmed, keyName)
+            }
+            return parsed
+        }
+
+        private fun readStringConfig(
+            config: Map<String, Any?>,
+            vararg keys: String,
+        ): String? = keys.firstNotNullOfOrNull { key -> (config[key] as? String)?.trim()?.ifBlank { null } }
+
+        private fun readBooleanConfig(
+            config: Map<String, Any?>,
+            keyName: String,
+            vararg keys: String,
+        ): Boolean? =
+            keys.firstNotNullOfOrNull { key ->
+                when (val value = config[key]) {
+                    is Boolean -> value
+                    is String -> parseBooleanOrNull(value, keyName)
+                    else -> null
+                }
+            }
+
+        private fun readStringConfig(
+            context: PluginContext,
+            vararg keys: String,
+        ): String? = keys.firstNotNullOfOrNull { key -> context.config<String>(key)?.trim()?.ifBlank { null } }
+
+        private fun readBooleanConfig(
+            context: PluginContext,
+            keyName: String,
+            vararg keys: String,
+        ): Boolean? =
+            keys.firstNotNullOfOrNull { key ->
+                context.config<Boolean>(key)
+                    ?: parseBooleanOrNull(context.config<String>(key), keyName)
+            }
+
+        private fun readDoubleConfig(
+            config: Map<String, Any?>,
+            keyName: String,
+            vararg keys: String,
+        ): Double? =
+            keys.firstNotNullOfOrNull { key ->
+                when (val value = config[key]) {
+                    is Number -> value.toDouble()
+                    is String -> parseDoubleOrNull(value, keyName)
+                    else -> null
+                }
+            }
+
+        private fun readLongConfig(
+            config: Map<String, Any?>,
+            keyName: String,
+            vararg keys: String,
+        ): Long? =
+            keys.firstNotNullOfOrNull { key ->
+                when (val value = config[key]) {
+                    is Number -> value.toLong()
+                    is String -> parseLongOrNull(value, keyName)
+                    else -> null
+                }
+            }
+
+        private fun readDoubleConfig(
+            context: PluginContext,
+            keyName: String,
+            vararg keys: String,
+        ): Double? =
+            keys.firstNotNullOfOrNull { key ->
+                context.config<Double>(key)
+                    ?: context.config<Number>(key)?.toDouble()
+                    ?: parseDoubleOrNull(context.config<String>(key), keyName)
+            }
+
+        private fun readLongConfig(
+            context: PluginContext,
+            keyName: String,
+            vararg keys: String,
+        ): Long? =
+            keys.firstNotNullOfOrNull { key ->
+                context.config<Long>(key)
+                    ?: context.config<Int>(key)?.toLong()
+                    ?: parseLongOrNull(context.config<String>(key), keyName)
+            }
 
         fun fromEnv(env: Map<String, String> = System.getenv()): ChatterConfig {
             val key = env["GEMINI_API_KEY"]?.trim().orEmpty()
@@ -60,12 +306,48 @@ data class ChatterConfig(
                     ?.toBooleanStrictOrNull()
                     ?: DEFAULT_URL_CONTEXT_ENABLED
 
+            val debounceSeconds =
+                normalizePositiveSeconds(
+                    parseDoubleOrNull(env["CHATTER_DEBOUNCE_SECONDS"], "CHATTER_DEBOUNCE_SECONDS"),
+                    DEFAULT_DEBOUNCE_SECONDS,
+                    "CHATTER_DEBOUNCE_SECONDS",
+                )
+            val mentionDebounceSeconds =
+                normalizePositiveSeconds(
+                    parseDoubleOrNull(env["CHATTER_MENTION_DEBOUNCE_SECONDS"], "CHATTER_MENTION_DEBOUNCE_SECONDS"),
+                    DEFAULT_MENTION_DEBOUNCE_SECONDS,
+                    "CHATTER_MENTION_DEBOUNCE_SECONDS",
+                )
+            val debounceMaxSeconds =
+                normalizeDebounceMaxSeconds(
+                    parseDoubleOrNull(env["CHATTER_DEBOUNCE_MAX_SECONDS"], "CHATTER_DEBOUNCE_MAX_SECONDS"),
+                )
+            val maxInterrupts =
+                normalizeMaxInterrupts(
+                    parseLongOrNull(env["CHATTER_MAX_INTERRUPTS"], "CHATTER_MAX_INTERRUPTS"),
+                )
+            val timezone = env["CHATTER_TIMEZONE"]?.trim()?.ifBlank { null } ?: DEFAULT_TIMEZONE
+            val driftEnabled =
+                parseBooleanOrNull(env["CHATTER_DRIFT_ENABLED"], "CHATTER_DRIFT_ENABLED")
+                    ?: DEFAULT_DRIFT_ENABLED
+            val reactionThreshold =
+                normalizeReactionThreshold(
+                    parseDoubleOrNull(env["CHATTER_REACTION_THRESHOLD"], "CHATTER_REACTION_THRESHOLD"),
+                )
+
             return ChatterConfig(
                 apiKey = key,
                 model = model,
                 baseUrl = baseUrl,
                 searchGroundingEnabled = searchGroundingEnabled,
                 urlContextEnabled = urlContextEnabled,
+                debounceSeconds = debounceSeconds,
+                mentionDebounceSeconds = mentionDebounceSeconds,
+                debounceMaxSeconds = debounceMaxSeconds,
+                maxInterrupts = maxInterrupts,
+                timezone = timezone,
+                driftEnabled = driftEnabled,
+                reactionThreshold = reactionThreshold,
             )
         }
 
@@ -104,12 +386,90 @@ data class ChatterConfig(
                     ?: (config["gemini.urlContextEnabled"] as? String)?.trim()?.toBooleanStrictOrNull()
                     ?: DEFAULT_URL_CONTEXT_ENABLED
 
+            val debounceSeconds =
+                normalizePositiveSeconds(
+                    readDoubleConfig(
+                        config,
+                        "CHATTER_DEBOUNCE_SECONDS",
+                        "CHATTER_DEBOUNCE_SECONDS",
+                        "chatter.debounceSeconds",
+                        "chatter.debounce_seconds",
+                    ),
+                    DEFAULT_DEBOUNCE_SECONDS,
+                    "CHATTER_DEBOUNCE_SECONDS",
+                )
+            val mentionDebounceSeconds =
+                normalizePositiveSeconds(
+                    readDoubleConfig(
+                        config,
+                        "CHATTER_MENTION_DEBOUNCE_SECONDS",
+                        "CHATTER_MENTION_DEBOUNCE_SECONDS",
+                        "chatter.mentionDebounceSeconds",
+                        "chatter.mention_debounce_seconds",
+                    ),
+                    DEFAULT_MENTION_DEBOUNCE_SECONDS,
+                    "CHATTER_MENTION_DEBOUNCE_SECONDS",
+                )
+            val debounceMaxSeconds =
+                normalizeDebounceMaxSeconds(
+                    readDoubleConfig(
+                        config,
+                        "CHATTER_DEBOUNCE_MAX_SECONDS",
+                        "CHATTER_DEBOUNCE_MAX_SECONDS",
+                        "chatter.debounceMaxSeconds",
+                        "chatter.debounce_max_seconds",
+                    ),
+                )
+            val maxInterrupts =
+                normalizeMaxInterrupts(
+                    readLongConfig(
+                        config,
+                        "CHATTER_MAX_INTERRUPTS",
+                        "CHATTER_MAX_INTERRUPTS",
+                        "chatter.maxInterrupts",
+                        "chatter.max_interrupts",
+                    ),
+                )
+            val timezone =
+                readStringConfig(
+                    config,
+                    "CHATTER_TIMEZONE",
+                    "chatter.timezone",
+                    "chatter.timeZone",
+                    "chatter.time_zone",
+                ) ?: DEFAULT_TIMEZONE
+            val driftEnabled =
+                readBooleanConfig(
+                    config,
+                    "CHATTER_DRIFT_ENABLED",
+                    "CHATTER_DRIFT_ENABLED",
+                    "chatter.driftEnabled",
+                    "chatter.drift_enabled",
+                ) ?: DEFAULT_DRIFT_ENABLED
+            val reactionThreshold =
+                normalizeReactionThreshold(
+                    readDoubleConfig(
+                        config,
+                        "CHATTER_REACTION_THRESHOLD",
+                        "CHATTER_REACTION_THRESHOLD",
+                        "chatter.reactionThreshold",
+                        "chatter.reaction_threshold",
+                    ),
+                )
+
             return ChatterConfig(
                 apiKey = key,
                 model = model,
                 baseUrl = baseUrl,
                 searchGroundingEnabled = searchGroundingEnabled,
                 urlContextEnabled = urlContextEnabled,
+                debounceSeconds = debounceSeconds,
+                mentionDebounceSeconds = mentionDebounceSeconds,
+                debounceMaxSeconds = debounceMaxSeconds,
+                maxInterrupts = maxInterrupts,
+                timezone = timezone,
+                driftEnabled = driftEnabled,
+                reactionThreshold = reactionThreshold,
             )
         }
 
@@ -148,12 +508,90 @@ data class ChatterConfig(
                     ?: context.config<String>("gemini.urlContextEnabled")?.trim()?.toBooleanStrictOrNull()
                     ?: DEFAULT_URL_CONTEXT_ENABLED
 
+            val debounceSeconds =
+                normalizePositiveSeconds(
+                    readDoubleConfig(
+                        context,
+                        "CHATTER_DEBOUNCE_SECONDS",
+                        "CHATTER_DEBOUNCE_SECONDS",
+                        "chatter.debounceSeconds",
+                        "chatter.debounce_seconds",
+                    ),
+                    DEFAULT_DEBOUNCE_SECONDS,
+                    "CHATTER_DEBOUNCE_SECONDS",
+                )
+            val mentionDebounceSeconds =
+                normalizePositiveSeconds(
+                    readDoubleConfig(
+                        context,
+                        "CHATTER_MENTION_DEBOUNCE_SECONDS",
+                        "CHATTER_MENTION_DEBOUNCE_SECONDS",
+                        "chatter.mentionDebounceSeconds",
+                        "chatter.mention_debounce_seconds",
+                    ),
+                    DEFAULT_MENTION_DEBOUNCE_SECONDS,
+                    "CHATTER_MENTION_DEBOUNCE_SECONDS",
+                )
+            val debounceMaxSeconds =
+                normalizeDebounceMaxSeconds(
+                    readDoubleConfig(
+                        context,
+                        "CHATTER_DEBOUNCE_MAX_SECONDS",
+                        "CHATTER_DEBOUNCE_MAX_SECONDS",
+                        "chatter.debounceMaxSeconds",
+                        "chatter.debounce_max_seconds",
+                    ),
+                )
+            val maxInterrupts =
+                normalizeMaxInterrupts(
+                    readLongConfig(
+                        context,
+                        "CHATTER_MAX_INTERRUPTS",
+                        "CHATTER_MAX_INTERRUPTS",
+                        "chatter.maxInterrupts",
+                        "chatter.max_interrupts",
+                    ),
+                )
+            val timezone =
+                readStringConfig(
+                    context,
+                    "CHATTER_TIMEZONE",
+                    "chatter.timezone",
+                    "chatter.timeZone",
+                    "chatter.time_zone",
+                ) ?: DEFAULT_TIMEZONE
+            val driftEnabled =
+                readBooleanConfig(
+                    context,
+                    "CHATTER_DRIFT_ENABLED",
+                    "CHATTER_DRIFT_ENABLED",
+                    "chatter.driftEnabled",
+                    "chatter.drift_enabled",
+                ) ?: DEFAULT_DRIFT_ENABLED
+            val reactionThreshold =
+                normalizeReactionThreshold(
+                    readDoubleConfig(
+                        context,
+                        "CHATTER_REACTION_THRESHOLD",
+                        "CHATTER_REACTION_THRESHOLD",
+                        "chatter.reactionThreshold",
+                        "chatter.reaction_threshold",
+                    ),
+                )
+
             return ChatterConfig(
                 apiKey = key,
                 model = model,
                 baseUrl = baseUrl,
                 searchGroundingEnabled = searchGroundingEnabled,
                 urlContextEnabled = urlContextEnabled,
+                debounceSeconds = debounceSeconds,
+                mentionDebounceSeconds = mentionDebounceSeconds,
+                debounceMaxSeconds = debounceMaxSeconds,
+                maxInterrupts = maxInterrupts,
+                timezone = timezone,
+                driftEnabled = driftEnabled,
+                reactionThreshold = reactionThreshold,
             )
         }
     }

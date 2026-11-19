@@ -49,46 +49,59 @@ object ChatImageAttachmentExtractor {
     /**
      * Extracts valid [ChatImageAttachment]s from a Discord [message], enforcing the MIME whitelist
      * and the per-image byte ceiling [maxImageBytes].
+     *
+     * When [includeStickersAndGifEmbeds] is `true`, also extracts raster Discord stickers
+     * (`PNG`, `APNG`, `GIF`).
      */
     fun extractFromMessage(
         message: Message,
         maxImageBytes: Int = DEFAULT_MAX_IMAGE_BYTES,
+        includeStickersAndGifEmbeds: Boolean = false,
     ): List<ChatImageAttachment> {
         if (maxImageBytes <= 0) {
             return emptyList()
         }
 
         val attachments = runCatching { message.attachments }.getOrElse { emptySet() }
-        if (attachments.isEmpty()) {
-            return emptyList()
-        }
-
-        return attachments.mapNotNull { attachment ->
-            val size = runCatching { attachment.size }.getOrNull()
-            if (size != null && size > maxImageBytes) {
-                logger.debug(
-                    "Discarded oversized image attachment on message {} (size={} bytes > max={} bytes)",
-                    runCatching { message.id }.getOrNull(),
-                    size,
-                    maxImageBytes,
-                )
-                return@mapNotNull null
-            }
-
-            val contentType = runCatching { attachment.contentType }.getOrNull()
-            val filename = runCatching { attachment.filename }.getOrNull()
-            val resolvedMimeType = resolveImageMimeType(contentType, filename)
-            if (resolvedMimeType != null) {
-                val url = runCatching { attachment.url }.getOrNull() ?: return@mapNotNull null
-                ChatImageAttachment(
-                    url = url,
-                    mimeType = resolvedMimeType,
-                    filename = filename,
-                )
+        val attachmentImages =
+            if (attachments.isEmpty()) {
+                emptyList()
             } else {
-                null
+                attachments.mapNotNull { attachment ->
+                    val size = runCatching { attachment.size }.getOrNull()
+                    if (size != null && size > maxImageBytes) {
+                        logger.debug(
+                            "Discarded oversized image attachment on message {} (size={} bytes > max={} bytes)",
+                            runCatching { message.id }.getOrNull(),
+                            size,
+                            maxImageBytes,
+                        )
+                        return@mapNotNull null
+                    }
+
+                    val contentType = runCatching { attachment.contentType }.getOrNull()
+                    val filename = runCatching { attachment.filename }.getOrNull()
+                    val resolvedMimeType = resolveImageMimeType(contentType, filename)
+                    if (resolvedMimeType != null) {
+                        val url = runCatching { attachment.url }.getOrNull() ?: return@mapNotNull null
+                        ChatImageAttachment(
+                            url = url,
+                            mimeType = resolvedMimeType,
+                            filename = filename,
+                        )
+                    } else {
+                        null
+                    }
+                }
             }
+
+        if (!includeStickersAndGifEmbeds) {
+            return attachmentImages
         }
+
+        val stickerImages = DiscordMediaEmbedExtractor.extractStickerImages(message)
+        val gifEmbedImages = DiscordMediaEmbedExtractor.extractGifEmbedImages(message)
+        return attachmentImages + stickerImages + gifEmbedImages
     }
 
     /**
@@ -105,6 +118,7 @@ object ChatImageAttachmentExtractor {
         maxImages: Int,
         maxImageBytes: Int = DEFAULT_MAX_IMAGE_BYTES,
         prioritizedMessageId: Snowflake? = null,
+        includeStickersAndGifEmbeds: Boolean = false,
     ): Map<Snowflake, List<ChatImageAttachment>> {
         if (maxImages <= 0 || maxImageBytes <= 0 || messages.isEmpty()) {
             return emptyMap()
@@ -113,7 +127,14 @@ object ChatImageAttachmentExtractor {
         val retainedTargetImages =
             if (prioritizedMessageId != null) {
                 val targetMessage = messages.firstOrNull { it.id == prioritizedMessageId }
-                targetMessage?.let { extractFromMessage(it, maxImageBytes).take(maxImages) }.orEmpty()
+                targetMessage
+                    ?.let {
+                        extractFromMessage(
+                            message = it,
+                            maxImageBytes = maxImageBytes,
+                            includeStickersAndGifEmbeds = includeStickersAndGifEmbeds,
+                        ).take(maxImages)
+                    }.orEmpty()
             } else {
                 emptyList()
             }
@@ -132,7 +153,12 @@ object ChatImageAttachmentExtractor {
                 retainedOtherByMessage[msg.id] = emptyList()
                 continue
             }
-            val images = extractFromMessage(msg, maxImageBytes)
+            val images =
+                extractFromMessage(
+                    message = msg,
+                    maxImageBytes = maxImageBytes,
+                    includeStickersAndGifEmbeds = includeStickersAndGifEmbeds,
+                )
             if (images.isEmpty()) {
                 retainedOtherByMessage[msg.id] = emptyList()
                 continue
@@ -167,11 +193,13 @@ object ChatImageAttachmentExtractor {
         maxImages: Int,
         maxImageBytes: Int = DEFAULT_MAX_IMAGE_BYTES,
         prioritizedMessageId: Snowflake? = null,
+        includeStickersAndGifEmbeds: Boolean = false,
     ): List<ChatImageAttachment> =
         selectChronologicalImages(
             messages = messages,
             maxImages = maxImages,
             maxImageBytes = maxImageBytes,
             prioritizedMessageId = prioritizedMessageId,
+            includeStickersAndGifEmbeds = includeStickersAndGifEmbeds,
         ).values.flatten()
 }

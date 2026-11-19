@@ -49,7 +49,7 @@ class ChatterServiceTest {
             val result = fixture.service.processMessage(message)
 
             assertTrue(result, "Expected processMessage to reply to direct bot mention even during cooldown")
-            coVerify(exactly = 0) { fixture.decisionClient.decide(any(), any()) }
+            coVerify(exactly = 0) { fixture.decisionClient.decide(any(), any(), any()) }
             coVerify(exactly = 1) { fixture.channel.type() }
             coVerify(exactly = 1) {
                 fixture.chatterGenerator.generateReply(
@@ -66,7 +66,7 @@ class ChatterServiceTest {
     fun `short ambient messages enter participation decision instead of being pre-filtered`() =
         runTest {
             val channelId = 500L
-            coEvery { fixture.decisionClient.decide(any(), any()) } returns ParticipationDecision(shouldParticipate = false, noul = 0.2)
+            coEvery { fixture.decisionClient.decide(any(), any(), any()) } returns ParticipationDecision(shouldParticipate = false, noul = 0.2)
 
             for ((idx, shortText) in listOf("?", "草", "真的嗎", "ok").withIndex()) {
                 val msg =
@@ -79,7 +79,7 @@ class ChatterServiceTest {
                 val result = fixture.service.processMessage(msg)
                 assertFalse(result)
                 coVerify(exactly = 1) {
-                    fixture.decisionClient.decide(match { it.contains("[Bob]: $shortText") }, any())
+                    fixture.decisionClient.decide(match { it.contains("[Bob]: $shortText") }, any(), any())
                 }
             }
         }
@@ -98,13 +98,13 @@ class ChatterServiceTest {
                     content = "",
                     embeds = listOf(embed),
                 )
-            coEvery { fixture.decisionClient.decide(any(), any()) } returns ParticipationDecision(shouldParticipate = false, noul = 0.3)
+            coEvery { fixture.decisionClient.decide(any(), any(), any()) } returns ParticipationDecision(shouldParticipate = false, noul = 0.3)
 
             val result = fixture.service.processMessage(message)
 
             assertFalse(result)
             coVerify(exactly = 1) {
-                fixture.decisionClient.decide(match { it.contains("[Charlie]: [Embed]") }, any())
+                fixture.decisionClient.decide(match { it.contains("[Charlie]: [Embed]") }, any(), any())
             }
         }
 
@@ -112,7 +112,7 @@ class ChatterServiceTest {
     fun `plain-text luna mention, reply to luna, and unresolved selfId route through participation decision with raw text`() =
         runTest {
             val botSelfId = Snowflake(9999L)
-            coEvery { fixture.decisionClient.decide(any(), any()) } returns ParticipationDecision(shouldParticipate = false, noul = 0.4)
+            coEvery { fixture.decisionClient.decide(any(), any(), any()) } returns ParticipationDecision(shouldParticipate = false, noul = 0.4)
 
             // 1. Plain-text @luna
             val plainLunaMsg =
@@ -125,7 +125,7 @@ class ChatterServiceTest {
                 )
             assertFalse(fixture.service.processMessage(plainLunaMsg))
             coVerify(exactly = 1) {
-                fixture.decisionClient.decide(match { it.contains("[Alice]: Hey @luna what's up?") }, any())
+                fixture.decisionClient.decide(match { it.contains("[Alice]: Hey @luna what's up?") }, any(), any())
             }
 
             // 2. Discord reply to Luna
@@ -148,7 +148,7 @@ class ChatterServiceTest {
                 )
             assertFalse(fixture.service.processMessage(replyToLuna))
             coVerify(exactly = 1) {
-                fixture.decisionClient.decide(match { it.contains("[Bob 回覆 Luna「Earlier bot reply」]: Sounds good") }, any())
+                fixture.decisionClient.decide(match { it.contains("[Bob 回覆 Luna「Earlier bot reply」]: Sounds good") }, any(), any())
             }
 
             // 3. Unresolved selfId (null) does not bypass decision even with <@9999>
@@ -163,7 +163,7 @@ class ChatterServiceTest {
                 )
             assertFalse(fixture.service.processMessage(unresolvedSelfIdMsg))
             coVerify(exactly = 1) {
-                fixture.decisionClient.decide(match { it.contains("[Dave]: <@9999> hello") }, any())
+                fixture.decisionClient.decide(match { it.contains("[Dave]: <@9999> hello") }, any(), any())
             }
         }
 
@@ -181,7 +181,7 @@ class ChatterServiceTest {
                 assertFalse(fixture.service.processMessage(msg))
             }
 
-            coVerify(exactly = 0) { fixture.decisionClient.decide(any(), any()) }
+            coVerify(exactly = 0) { fixture.decisionClient.decide(any(), any(), any()) }
         }
 
     @Test
@@ -191,13 +191,13 @@ class ChatterServiceTest {
             val message = fixture.createMockMessage(id = 101L, channelId = channelId, username = "Alice", content = "Does anyone know when Luna updates?")
             val replyText = "Luna updates frequently! Check out the releases page."
 
-            coEvery { fixture.decisionClient.decide(any(), any()) } returns ParticipationDecision(shouldParticipate = true, noul = 0.95)
+            coEvery { fixture.decisionClient.decide(any(), any(), any()) } returns ParticipationDecision(shouldParticipate = true, noul = 0.95)
             coEvery { fixture.chatterGenerator.generateReply(any<ChatterInput>()) } returns replyText
 
             val result = fixture.service.processMessage(message)
 
             assertTrue(result, "Expected processMessage to return true when reply is successfully sent")
-            coVerify(exactly = 1) { fixture.decisionClient.decide(match { it.contains("Alice") && it.contains("Luna updates") }, any()) }
+            coVerify(exactly = 1) { fixture.decisionClient.decide(match { it.contains("Alice") && it.contains("Luna updates") }, any(), any()) }
             coVerify(exactly = 1) { fixture.channel.type() }
             coVerify(exactly = 1) {
                 fixture.chatterGenerator.generateReply(
@@ -214,12 +214,12 @@ class ChatterServiceTest {
             val channelId = 501L
             val message = fixture.createMockMessage(id = 102L, channelId = channelId, username = "Bob", content = "Good morning")
 
-            coEvery { fixture.decisionClient.decide(any(), any()) } returns ParticipationDecision(shouldParticipate = false, noul = 0.2)
+            coEvery { fixture.decisionClient.decide(any(), any(), any()) } returns ParticipationDecision(shouldParticipate = false, noul = 0.2)
 
             val result = fixture.service.processMessage(message)
 
             assertFalse(result, "Expected processMessage to return false when decision client rejects participation")
-            coVerify(exactly = 1) { fixture.decisionClient.decide(any(), any()) }
+            coVerify(exactly = 1) { fixture.decisionClient.decide(any(), any(), any()) }
             coVerify(exactly = 0) { fixture.channel.type() }
             coVerify(exactly = 0) { fixture.chatterGenerator.generateReply(any<ChatterInput>()) }
             coVerify(exactly = 0) { fixture.channel.createMessage(any<String>()) }
@@ -232,7 +232,7 @@ class ChatterServiceTest {
             val channelId = 505L
             val message = fixture.createMockMessage(id = 109L, channelId = channelId, content = "Tell me something cool")
 
-            coEvery { fixture.decisionClient.decide(any(), any()) } returns ParticipationDecision(shouldParticipate = true)
+            coEvery { fixture.decisionClient.decide(any(), any(), any()) } returns ParticipationDecision(shouldParticipate = true)
             coEvery { fixture.chatterGenerator.generateReply(any<ChatterInput>()) } returns null
 
             val resultNull = fixture.service.processMessage(message)

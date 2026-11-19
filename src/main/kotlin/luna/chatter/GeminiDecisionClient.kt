@@ -71,7 +71,8 @@ open class GeminiDecisionClient(
     open suspend fun shouldParticipate(
         state: String,
         images: List<ChatImageAttachment> = emptyList(),
-    ): Boolean = decide(state, images).shouldParticipate
+        effectiveThreshold: Double? = null,
+    ): Boolean = decide(state, images, effectiveThreshold).shouldParticipate
 
     /**
      * Queries Gemini Decisions API and returns the detailed [ParticipationDecision] outcome.
@@ -79,6 +80,7 @@ open class GeminiDecisionClient(
     open suspend fun decide(
         state: String,
         images: List<ChatImageAttachment> = emptyList(),
+        effectiveThreshold: Double? = null,
     ): ParticipationDecision =
         traceRecorder.withActiveOrStandaloneSession(
             pipeline = AiTracePipeline.CHATTER,
@@ -91,12 +93,13 @@ open class GeminiDecisionClient(
                 ),
             secret = config.apiKey,
         ) { session, isStandalone ->
-            executeDecide(state, images, session, isStandalone)
+            executeDecide(state, images, effectiveThreshold, session, isStandalone)
         }
 
     private suspend fun executeDecide(
         state: String,
         images: List<ChatImageAttachment>,
+        effectiveThreshold: Double?,
         session: AiTraceSession?,
         isStandalone: Boolean,
     ): ParticipationDecision {
@@ -117,15 +120,20 @@ open class GeminiDecisionClient(
             return ParticipationDecision(shouldParticipate = false)
         }
 
+        val activeThreshold =
+            effectiveThreshold
+                ?.takeIf { !it.isNaN() && !it.isInfinite() }
+                ?.coerceIn(0.0, 1.0)
+                ?: config.threshold
         val initialVariant = if (images.isNotEmpty()) "multimodal" else null
-        return when (val initialOutcome = executeDecisionRequest(state, images, session, variant = initialVariant)) {
+        return when (val initialOutcome = executeDecisionRequest(state, images, session, variant = initialVariant, activeThreshold = activeThreshold)) {
             is RequestOutcome.Success -> {
                 val decision = initialOutcome.decision
                 if (!decision.shouldParticipate) {
                     session?.skip(
                         reason =
                             "Participation decision skipped (noul=${decision.noul}, " +
-                                "confidence=${decision.confidence}, threshold=${config.threshold})",
+                                "confidence=${decision.confidence}, threshold=$activeThreshold)",
                     )
                 } else if (isStandalone) {
                     session?.complete(
@@ -144,7 +152,16 @@ open class GeminiDecisionClient(
                         initialOutcome.cause,
                     )
                     session?.markDegraded(initialOutcome.reason)
-                    when (val retryOutcome = executeDecisionRequest(state, emptyList(), session, variant = "text-only")) {
+                    when (
+                        val retryOutcome =
+                            executeDecisionRequest(
+                                state,
+                                emptyList(),
+                                session,
+                                variant = "text-only",
+                                activeThreshold = activeThreshold,
+                            )
+                    ) {
                         is RequestOutcome.Success -> {
                             val decision = retryOutcome.decision
                             if (!decision.shouldParticipate) {
@@ -152,7 +169,7 @@ open class GeminiDecisionClient(
                                     reason =
                                         "Participation decision skipped after text-only retry " +
                                             "(noul=${decision.noul}, confidence=${decision.confidence}, " +
-                                            "threshold=${config.threshold})",
+                                            "threshold=$activeThreshold)",
                                 )
                             } else if (isStandalone) {
                                 session?.complete(
@@ -181,6 +198,7 @@ open class GeminiDecisionClient(
         images: List<ChatImageAttachment>,
         session: AiTraceSession?,
         variant: String?,
+        activeThreshold: Double,
     ): RequestOutcome {
         val inputBlocks =
             buildList {
@@ -246,7 +264,7 @@ open class GeminiDecisionClient(
                     }
                 httpStatus = response.status.value
                 responseRaw = runCatching { response.bodyAsText() }.getOrNull()
-                evaluateResponse(response, responseRaw)
+                evaluateResponse(response, responseRaw, activeThreshold)
             } catch (e: HttpRequestTimeoutException) {
                 val reason = "request timeout after ${config.timeoutMillis}ms: ${e.message}"
                 logger.warn("Gemini Decisions API request timed out after {}ms: {}", config.timeoutMillis, e.message)
@@ -293,6 +311,7 @@ open class GeminiDecisionClient(
     private fun evaluateResponse(
         response: HttpResponse,
         rawBody: String?,
+        activeThreshold: Double,
     ): RequestOutcome {
         val httpStatus = response.status.value
 
@@ -352,7 +371,7 @@ open class GeminiDecisionClient(
 
                 RequestOutcome.Success(
                     ParticipationDecision(
-                        shouldParticipate = noul >= config.threshold,
+                        shouldParticipate = noul >= activeThreshold,
                         noul = noul,
                         confidence = answer.confidence,
                         rawAnswer = answer,

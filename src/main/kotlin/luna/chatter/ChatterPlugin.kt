@@ -2,8 +2,6 @@ package luna.chatter
 
 import dev.kord.common.entity.Snowflake
 import dev.kord.core.Kord
-import dev.kord.core.event.message.MessageCreateEvent
-import dev.kord.core.on
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -52,10 +50,13 @@ class ChatterPlugin(
     var cooldownCache: BoundedChannelCooldownCache? = null
         internal set
 
-    var inFlightTracker: BoundedChannelInFlightTracker? = null
+    var burstCoordinator: BoundedChannelBurstCoordinator? = null
         internal set
 
     var contextCollector: ChatterContextCollector? = null
+        internal set
+
+    var personaStateProvider: PersonaStateProvider? = null
         internal set
 
     var maxImages: Int = ChatterContextCollector.DEFAULT_MAX_IMAGES
@@ -139,8 +140,14 @@ class ChatterPlugin(
         val cooldown = BoundedChannelCooldownCache(defaultCooldownDurationMs = cooldownDurationMs)
         this.cooldownCache = cooldown
 
-        val tracker = BoundedChannelInFlightTracker()
-        this.inFlightTracker = tracker
+        val coordinator =
+            BoundedChannelBurstCoordinator(
+                debounceMs = chatterConfig.debounceMillis,
+                mentionDebounceMs = chatterConfig.mentionDebounceMillis,
+                maxDebounceMs = chatterConfig.debounceMaxMillis,
+                maxInterrupts = chatterConfig.normalizedMaxInterrupts,
+            )
+        this.burstCoordinator = coordinator
 
         val noiseFilter =
             ChatterNoiseFilter(
@@ -161,6 +168,13 @@ class ChatterPlugin(
             )
         this.contextCollector = collector
 
+        val drift =
+            CircadianPersonaDrift(
+                timezone = chatterConfig.timezone,
+                enabled = chatterConfig.driftEnabled,
+            )
+        this.personaStateProvider = drift
+
         val chatterService =
             ChatterService(
                 filter = noiseFilter,
@@ -170,7 +184,10 @@ class ChatterPlugin(
                 decisionMessageCount = decisionConfig.decisionMessageCount,
                 contextCollector = collector,
                 traceRecorder = traceRecorder,
-                inFlightTracker = tracker,
+                burstCoordinator = coordinator,
+                afterMessagesFetcher = ChatterService.defaultAfterMessagesFetcher,
+                personaStateProvider = drift,
+                guildEmojisProvider = ChatterService.defaultGuildEmojisProvider,
             )
         val finalService = serviceFactory?.invoke(chatterService) ?: chatterService
         this.service = finalService

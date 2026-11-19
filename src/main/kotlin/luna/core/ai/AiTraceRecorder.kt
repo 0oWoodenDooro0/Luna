@@ -127,6 +127,10 @@ class AiTraceSession internal constructor(
     private var finalOutput: String? = null
     private var citations: List<GroundingCitation> = emptyList()
     private var errorSummary: String? = null
+    private var circadianPeriod: String? = null
+    private var personaMood: String? = null
+    private var effectiveThreshold: Double? = null
+    private var reactionThreshold: Double? = null
 
     fun registerSecret(secret: String?) {
         if (!isEnabled || secret.isNullOrBlank()) return
@@ -134,6 +138,28 @@ class AiTraceSession internal constructor(
             extraSecrets.add(secret)
         }
     }
+
+    fun recordPersonaState(
+        circadianPeriod: String?,
+        personaMood: String?,
+        effectiveThreshold: Double?,
+        reactionThreshold: Double? = null,
+    ) {
+        if (!isEnabled) return
+        synchronized(lock) {
+            this.circadianPeriod = circadianPeriod
+            this.personaMood = personaMood
+            this.effectiveThreshold = effectiveThreshold
+            if (reactionThreshold != null) {
+                this.reactionThreshold = reactionThreshold
+            }
+        }
+    }
+
+    fun currentOutcome(): AiTraceOutcome? =
+        synchronized(lock) {
+            outcome
+        }
 
     fun recordAttempt(
         stage: AiAttemptStage,
@@ -209,6 +235,10 @@ class AiTraceSession internal constructor(
             this.outcome = if (degraded) AiTraceOutcome.DEGRADED_SUCCESS else AiTraceOutcome.SUCCESS
             this.finalOutput = finalOutput
             this.citations = citations
+            if (!degraded) {
+                this.errorSummary = null
+                this.failureCategory = null
+            }
         }
     }
 
@@ -301,6 +331,10 @@ class AiTraceSession internal constructor(
                     citations = citations.toList(),
                     errorSummary = errorSummary,
                     attempts = attempts.toList(),
+                    circadianPeriod = circadianPeriod,
+                    personaMood = personaMood,
+                    effectiveThreshold = effectiveThreshold,
+                    reactionThreshold = reactionThreshold,
                 )
             secretsSnapshot = extraSecrets.toSet()
         }

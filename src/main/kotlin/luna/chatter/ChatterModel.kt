@@ -1,6 +1,31 @@
 package luna.chatter
 
+import dev.kord.common.entity.Snowflake
+import dev.kord.core.entity.ReactionEmoji
 import luna.core.ai.ChatImageAttachment
+
+/**
+ * Snapshot of an available Discord guild custom emoji for Chatter reaction selection and custom emoji verification.
+ *
+ * @property id Discord emoji snowflake ID.
+ * @property name Discord emoji shortcode name (without colons).
+ * @property isAnimated Whether the custom emoji is animated (`<a:name:id>`).
+ */
+data class GuildCustomEmoji(
+    val id: Snowflake,
+    val name: String,
+    val isAnimated: Boolean = false,
+) {
+    val mention: String
+        get() = if (isAnimated) "<a:$name:$id>" else "<:$name:$id>"
+
+    fun toReactionEmoji(): ReactionEmoji.Custom =
+        ReactionEmoji.Custom(
+            id = id,
+            name = name,
+            isAnimated = isAnimated,
+        )
+}
 
 /**
  * Single turn message in a conversational dialogue.
@@ -25,6 +50,8 @@ data class ChatMessage(
  * @property url Optional resolved clean URL.
  * @property comments Optional extracted social/YouTube audience comments.
  * @property webUrls Deduplicated general public web URLs in the dialogue window (up to 20) for `url_context`.
+ * @property personaState Optional active `Circadian Persona Drift` state injected into the system instruction.
+ * @property guildEmojis Available custom emojis from the target Discord guild for reaction/custom emoji verification.
  */
 data class ChatterInput(
     val transcript: String,
@@ -36,4 +63,6 @@ data class ChatterInput(
     val url: String? = null,
     val comments: List<String> = emptyList(),
     val webUrls: List<String> = emptyList(),
+    val personaState: PersonaState? = null,
+    val guildEmojis: List<GuildCustomEmoji> = emptyList(),
 )

@@ -160,4 +160,80 @@ class ConfigTest {
         assertEquals("7", EnvSchemaAuditor.resolveVariableValue("AI_TRACE_MAX_DAYS", aliasConfig))
         assertEquals("64", EnvSchemaAuditor.resolveVariableValue("AI_TRACE_MAX_TOTAL_MB", aliasConfig))
     }
+
+    @Test
+    fun `EnvSchemaAuditor recognizes CHATTER debounce keys and chatter aliases`() {
+        val fallbackKeys = EnvSchemaAuditor.defaultFallbackSchema().map { it.name }.toSet()
+        assertTrue(fallbackKeys.contains("CHATTER_DEBOUNCE_SECONDS"))
+        assertTrue(fallbackKeys.contains("CHATTER_MENTION_DEBOUNCE_SECONDS"))
+        assertTrue(fallbackKeys.contains("CHATTER_DEBOUNCE_MAX_SECONDS"))
+        assertTrue(fallbackKeys.contains("CHATTER_MAX_INTERRUPTS"))
+
+        assertTrue(EnvSchemaAuditor.isRecognizedKey("CHATTER_DEBOUNCE_SECONDS", fallbackKeys))
+        assertTrue(EnvSchemaAuditor.isRecognizedKey("chatter.debounceSeconds", fallbackKeys))
+        assertTrue(EnvSchemaAuditor.isRecognizedKey("chatter.mentionDebounceSeconds", fallbackKeys))
+        assertTrue(EnvSchemaAuditor.isRecognizedKey("chatter.debounceMaxSeconds", fallbackKeys))
+        assertTrue(EnvSchemaAuditor.isRecognizedKey("chatter.maxInterrupts", fallbackKeys))
+
+        val aliasConfig =
+            mapOf(
+                "chatter.debounceSeconds" to "2.5",
+                "chatter.mentionDebounceSeconds" to "1.2",
+                "chatter.debounceMaxSeconds" to "7.0",
+                "chatter.maxInterrupts" to "2",
+            )
+        assertEquals("2.5", EnvSchemaAuditor.resolveVariableValue("CHATTER_DEBOUNCE_SECONDS", aliasConfig))
+        assertEquals("1.2", EnvSchemaAuditor.resolveVariableValue("CHATTER_MENTION_DEBOUNCE_SECONDS", aliasConfig))
+        assertEquals("7.0", EnvSchemaAuditor.resolveVariableValue("CHATTER_DEBOUNCE_MAX_SECONDS", aliasConfig))
+        assertEquals("2", EnvSchemaAuditor.resolveVariableValue("CHATTER_MAX_INTERRUPTS", aliasConfig))
+    }
+
+    @Test
+    fun `EnvSchemaAuditor recognizes CHATTER_TIMEZONE, CHATTER_DRIFT_ENABLED, and chatter aliases`() {
+        val fallbackKeys = EnvSchemaAuditor.defaultFallbackSchema().map { it.name }.toSet()
+        assertTrue(fallbackKeys.contains("CHATTER_TIMEZONE"))
+        assertTrue(fallbackKeys.contains("CHATTER_DRIFT_ENABLED"))
+
+        assertTrue(EnvSchemaAuditor.isRecognizedKey("CHATTER_TIMEZONE", fallbackKeys))
+        assertTrue(EnvSchemaAuditor.isRecognizedKey("CHATTER_DRIFT_ENABLED", fallbackKeys))
+        assertTrue(EnvSchemaAuditor.isRecognizedKey("chatter.timezone", fallbackKeys))
+        assertTrue(EnvSchemaAuditor.isRecognizedKey("chatter.driftEnabled", fallbackKeys))
+
+        val aliasConfig =
+            mapOf(
+                "chatter.timezone" to "Asia/Tokyo",
+                "chatter.driftEnabled" to "false",
+            )
+        assertEquals("Asia/Tokyo", EnvSchemaAuditor.resolveVariableValue("CHATTER_TIMEZONE", aliasConfig))
+        assertEquals("false", EnvSchemaAuditor.resolveVariableValue("CHATTER_DRIFT_ENABLED", aliasConfig))
+    }
+
+    @Test
+    fun `EnvSchemaAuditor recognizes CHATTER_REACTION_THRESHOLD and chatter aliases`() {
+        val fallbackSchema = EnvSchemaAuditor.defaultFallbackSchema()
+        val reactionSchema = fallbackSchema.firstOrNull { it.name == "CHATTER_REACTION_THRESHOLD" }
+        assertNotNull(reactionSchema)
+        assertFalse(reactionSchema.isRequired)
+        assertEquals("0.45", reactionSchema.defaultValue)
+
+        val fallbackKeys = fallbackSchema.map { it.name }.toSet()
+        assertTrue(EnvSchemaAuditor.isRecognizedKey("CHATTER_REACTION_THRESHOLD", fallbackKeys))
+        assertTrue(EnvSchemaAuditor.isRecognizedKey("chatter.reactionThreshold", fallbackKeys))
+        assertTrue(EnvSchemaAuditor.isRecognizedKey("chatter.reaction_threshold", fallbackKeys))
+
+        assertEquals(
+            "0.55",
+            EnvSchemaAuditor.resolveVariableValue(
+                "CHATTER_REACTION_THRESHOLD",
+                mapOf("chatter.reactionThreshold" to "0.55"),
+            ),
+        )
+        assertEquals(
+            "0.35",
+            EnvSchemaAuditor.resolveVariableValue(
+                "CHATTER_REACTION_THRESHOLD",
+                mapOf("chatter.reaction_threshold" to "0.35"),
+            ),
+        )
+    }
 }

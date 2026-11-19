@@ -46,6 +46,7 @@ enum class AiAttemptStage {
     SUMMARY_GENERATE,
     SUMMARY_TOOL_CONTINUATION,
     CHATTER_GENERATE,
+    REACTION_SELECT,
     AGENTIC_VIDEO,
 }
 
@@ -118,6 +119,10 @@ data class AiTraceRecord(
     val citations: List<GroundingCitation> = emptyList(),
     val errorSummary: String? = null,
     val attempts: List<AiAttemptRecord> = emptyList(),
+    val circadianPeriod: String? = null,
+    val personaMood: String? = null,
+    val effectiveThreshold: Double? = null,
+    val reactionThreshold: Double? = null,
 )
 
 /**

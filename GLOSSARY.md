@@ -144,3 +144,31 @@ _Avoid_: API hit, retry log, model call record
 An asynchronous Discord direct message dispatched by Luna Host to configured operator User IDs when a runtime `WARN` or `ERROR` event passes source filtering, secret masking, and deduplication.
 _Avoid_: Error alert DM, crash ping, admin webhook
 
+**Burst Debounce Window**:
+The bounded per-channel coalescing interval triggered by incoming Discord messages before `Participation Decision` and reply generation, allowing newer messages to cancel and restart an active run while isolating direct mentions from unrelated bystander chatter.
+_Avoid_: Typing wait, message queue, cooldown buffer
+
+**Overlapping Reading Simulation**:
+The silent reading-delay phase executed concurrently with `Participation Decision` and reply generation after the `Burst Debounce Window` closes, deferring Discord's typing indicator until generated text is ready for length-paced playback.
+_Avoid_: Pre-typing sleep, fake read delay, AI wait
+
+**Asymmetric Reply Threading**:
+The delivery anchoring rule that posts unreferenced channel messages when the target message remains near the bottom of the channel and attaches a Discord reply reference to the opening segment once two or more non-Luna messages intervene.
+_Avoid_: Quote fallback, reply ping, thread anchoring
+
+**Segmented Burst Delivery**:
+The multi-turn conversational output cadence that splits a generated `Chatter Pipeline` reply into bounded sequential messages separated by brief typing pauses.
+_Avoid_: Multi-line spam, message chunking, stream split
+
+**Circadian Persona Drift**:
+The transient in-memory modulation of Luna's `Chatter Pipeline` conversational tone and effective `Participation Decision` threshold across local time-of-day periods and periodic mood/energy shifts.
+_Avoid_: Persistent mood store, sleep mode, static persona
+
+**Silent Reaction Path**:
+The zero-text participation outcome in which `Chatter Pipeline` responds to an intermediate `Participation Decision` probability band by adding a single Discord emoji reaction instead of sending text, failing silently when selection yields no valid emoji.
+_Avoid_: Fallback reaction pool, emoji spam, reaction bot
+
+**Guild Custom Emoji Policy**:
+The `Chatter Pipeline` formatting and multimodal rule that strips Unicode emojis from generated text while permitting verified custom emojis from the target Discord guild, alongside raster sticker and animated GIF preview ingestion.
+_Avoid_: Global emoji ban, raw emoji passthrough, sticker spam
+

@@ -33,4 +33,36 @@ class EmojiSanitizerTest {
         assertFalse(EmojiSanitizer.containsEmoji(result))
         assertEquals(expected, result)
     }
+
+    @Test
+    fun `stripEmojis strips all custom emoji tokens by default for Summary Pipeline`() {
+        val input = "大家在討論 <:blobcat:111222333444> 跟 <a:party:555666777888> 🔥"
+        val result = EmojiSanitizer.stripEmojis(input)
+
+        assertTrue(EmojiSanitizer.containsEmoji(input))
+        assertFalse(EmojiSanitizer.containsEmoji(result))
+        assertEquals("大家在討論  跟  ", result)
+    }
+
+    @Test
+    fun `stripEmojis preserves verified guild custom emojis while stripping Unicode and hallucinated custom emojis`() {
+        val allowedIds = setOf("111222333444", "555666777888")
+        val input =
+            "這波太強 <:blobcat:111222333444> <a:party:555666777888> <:fake:999999> <a:other:111111> 😂👍🏻⭐⏰1️⃣🇹🇼"
+
+        val result = EmojiSanitizer.stripEmojis(input, allowedCustomEmojiIds = allowedIds)
+
+        assertTrue(EmojiSanitizer.containsEmoji(input, allowedCustomEmojiIds = allowedIds))
+        assertFalse(EmojiSanitizer.containsEmoji(result, allowedCustomEmojiIds = allowedIds))
+        assertEquals("這波太強 <:blobcat:111222333444> <a:party:555666777888>   1", result.trimEnd())
+    }
+
+    @Test
+    fun `stripEmojis strips ZWJ, variation selectors, and tag flags while preserving Discord user, channel, and timestamp tags`() {
+        val input = "找 <@123456> 去 <#654321> 看 <t:1700000000:R> 🤦‍♀️ 🏴󠁧󠁢󠁥󠁮󠁧󠁿"
+        val result = EmojiSanitizer.stripEmojis(input, allowedCustomEmojiIds = setOf("999")).trim()
+
+        assertFalse(EmojiSanitizer.containsEmoji(result, allowedCustomEmojiIds = setOf("999")))
+        assertEquals("找 <@123456> 去 <#654321> 看 <t:1700000000:R>", result)
+    }
 }

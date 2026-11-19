@@ -128,6 +128,8 @@ class AiTraceRedactor(
             errorSummary = redactString(trace.errorSummary),
             citations = trace.citations.map(::redactCitation),
             attempts = trace.attempts.map { redactAttempt(it) },
+            circadianPeriod = redactString(trace.circadianPeriod),
+            personaMood = redactString(trace.personaMood),
         )
 
     private fun redactCitation(citation: GroundingCitation): GroundingCitation =
