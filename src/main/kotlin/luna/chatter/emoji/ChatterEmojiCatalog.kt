@@ -8,21 +8,29 @@ import luna.chatter.GuildCustomEmoji
 import org.slf4j.LoggerFactory
 import java.time.Clock
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicLong
 
 /**
  * Tracks a single conversation turn's shared vision-resolution budget across pipeline stages
  * (`Participation Decision`, reply generation, and `Silent Reaction Path`) so a turn never
- * chains sequential round timeouts or retries already-attempted emojis.
+ * chains sequential round timeouts or retries already-attempted emojis, while ensuring
+ * non-vision latency (such as LLM decision calls or reply context collection) never starves
+ * the vision round budget.
  */
-class EmojiVisionTurnBudget(
-    private val startedAtNanos: Long = System.nanoTime(),
-) {
+class EmojiVisionTurnBudget {
     private val attemptedEmojiIds: MutableSet<String> = ConcurrentHashMap.newKeySet()
+    private val consumedVisionNanos: AtomicLong = AtomicLong(0L)
 
     fun remainingTimeoutMs(roundTimeoutMs: Long): Long {
         if (roundTimeoutMs <= 0L) return 0L
-        val elapsedMs = ((System.nanoTime() - startedAtNanos) / 1_000_000L).coerceAtLeast(0L)
+        val elapsedMs = (consumedVisionNanos.get() / 1_000_000L).coerceAtLeast(0L)
         return (roundTimeoutMs - elapsedMs).coerceAtLeast(0L)
+    }
+
+    fun recordVisionElapsedNanos(elapsedNanos: Long) {
+        if (elapsedNanos > 0L) {
+            consumedVisionNanos.addAndGet(elapsedNanos)
+        }
     }
 
     fun filterUnattempted(targets: List<EmojiVisionRequest>): List<EmojiVisionRequest> = targets.filter { it.id !in attemptedEmojiIds }
@@ -338,6 +346,7 @@ class DefaultChatterEmojiCatalog(
 
             if (unattempted.isNotEmpty() && (effectiveTimeoutMs == null || effectiveTimeoutMs > 0L)) {
                 roundBudget?.markAttempted(unattempted)
+                val callStartedAtNanos = System.nanoTime()
                 try {
                     resolver.resolveMissing(unattempted, timeoutMs = effectiveTimeoutMs)
                 } catch (e: CancellationException) {
@@ -348,6 +357,8 @@ class DefaultChatterEmojiCatalog(
                         contextLabel,
                         e.message,
                     )
+                } finally {
+                    roundBudget?.recordVisionElapsedNanos(System.nanoTime() - callStartedAtNanos)
                 }
                 return
             }
