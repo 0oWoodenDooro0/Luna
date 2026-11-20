@@ -203,7 +203,7 @@ open class ChatterNoiseFilter(
             runCatching { message.author?.id }.getOrNull()
                 ?: runCatching { message.data.author.id }.getOrNull()
         val isLunaBot = resolvedSelfId != null && authorId == resolvedSelfId
-        if (!isLunaWebhook && !isLunaBot && (message.author == null || message.author?.isBot == true)) return false
+        if (!isLunaWebhook && !isLunaBot && message.author == null) return false
 
         if (isLunaBot) {
             val isSummary = summaryRegistry.contains(message.id) || SummaryRegistry.isSummaryContent(message.content)
@@ -233,6 +233,7 @@ open class ChatterNoiseFilter(
             runCatching { message.author?.id }.getOrNull()
                 ?: runCatching { message.data.author.id }.getOrNull()
         val isLunaBot = resolvedSelfId != null && authorId == resolvedSelfId
+        val isThirdPartyBot = !isLunaBot && (runCatching { message.author?.isBot }.getOrNull() == true)
 
         val content =
             if (message.content.isNotBlank()) {
@@ -242,7 +243,12 @@ open class ChatterNoiseFilter(
             }
 
         val speaker = if (isLunaBot) "Luna" else extractSpeakerName(message)
-        return ChatMessage(speaker, content)
+        return ChatMessage(
+            author = speaker,
+            content = content,
+            authorId = authorId?.toString(),
+            isBot = isThirdPartyBot,
+        )
     }
 
     fun filterHistory(

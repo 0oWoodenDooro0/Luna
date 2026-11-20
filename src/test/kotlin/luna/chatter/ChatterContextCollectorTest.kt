@@ -61,13 +61,13 @@ class ChatterContextCollectorTest {
 
             assertFalse(result.transcript.contains("Earlier oldest message"))
             assertFalse(result.transcript.contains("MusicBot"))
-            assertTrue(result.transcript.contains("[Bob]: <@9999>  second  newest  valid"))
+            assertTrue(result.transcript.contains("Bob (uid:3): <@9999>  second  newest  valid"))
             assertTrue(
                 result.transcript.contains(
-                    "[Charlie]: Check https://example.com/release [連結預覽: Release Notes - v2.0 highlights]",
+                    "Charlie (uid:4): Check https://example.com/release [連結預覽: Release Notes - v2.0 highlights]",
                 ),
             )
-            assertTrue(result.transcript.contains("[Dave]: @Luna look at this [附帶圖片 1: cat.png]"))
+            assertTrue(result.transcript.contains("Dave (uid:5): @Luna look at this [附帶圖片 1: cat.png]"))
 
             assertEquals(1, result.images.size)
             assertEquals("https://cdn.example.com/cat.png", result.images.first().url)
@@ -107,11 +107,11 @@ class ChatterContextCollectorTest {
                     kordSelfId = botSelfId,
                 )
 
-            assertTrue(result.transcript.contains("[Alice]: <@!9999>"))
+            assertTrue(result.transcript.contains("Alice (uid:6): <@!9999>"))
             assertFalse(result.transcript.contains("你好"))
-            assertTrue(result.transcript.contains("[Bob]: [連結預覽: Preview Title]"))
-            assertFalse(result.transcript.contains("[Bob]: [Embed]"))
-            assertTrue(result.transcript.contains("[Charlie]: [Embed]"))
+            assertTrue(result.transcript.contains("Bob (uid:7): [連結預覽: Preview Title]"))
+            assertFalse(result.transcript.contains("Bob (uid:7): [Embed]"))
+            assertTrue(result.transcript.contains("Charlie (uid:8): [Embed]"))
         }
 
     @Test
@@ -142,11 +142,11 @@ class ChatterContextCollectorTest {
                 listOf("https://cdn.example.com/2.jpg", "https://cdn.example.com/3.webp", "https://cdn.example.com/4.gif"),
                 result.images.map { it.url },
             )
-            assertTrue(result.transcript.contains("[Alice]: Old pics [附帶圖片 1: 2.jpg]"))
-            assertTrue(result.transcript.contains("[Bob]: [Attachment]"))
+            assertTrue(result.transcript.contains("Alice (uid:10): Old pics [附帶圖片 1: 2.jpg]"))
+            assertTrue(result.transcript.contains("Bob (uid:11): [Attachment]"))
             assertFalse(result.transcript.contains("huge.png"))
             assertFalse(result.transcript.contains("fake.png"))
-            assertTrue(result.transcript.contains("[Charlie]: New pics [附帶圖片 2: 3.webp] [附帶圖片 3: 4.gif]"))
+            assertTrue(result.transcript.contains("Charlie (uid:12): New pics [附帶圖片 2: 3.webp] [附帶圖片 3: 4.gif]"))
         }
 
     @Test
@@ -183,7 +183,12 @@ class ChatterContextCollectorTest {
                 }
             val latestMessage = createMockMessage(id = 215L, username = "Trigger", content = "Should Luna reply?")
 
-            val collector = ChatterContextCollector(noiseFilter = filter, peekResolver = { null })
+            val collector =
+                ChatterContextCollector(
+                    noiseFilter = filter,
+                    decisionMessageCount = 15,
+                    peekResolver = { null },
+                )
             val result =
                 collector.collectDecisionContext(
                     messages = listOf(olderDropped, botNoise) + recentMessages + listOf(latestMessage),
@@ -196,11 +201,11 @@ class ChatterContextCollectorTest {
                     appendLine()
                     appendLine("[Recent Context]")
                     (1..14).forEach { idx ->
-                        appendLine("[User$idx]: Context turn $idx")
+                        appendLine("User$idx (uid:${200L + idx}): Context turn $idx")
                     }
                     appendLine()
                     appendLine("[Latest Message]")
-                    append("[Trigger]: Should Luna reply?")
+                    append("Trigger (uid:215): Should Luna reply?")
                 }
 
             assertFalse(result.transcript.contains("Message outside 15 window"))
@@ -218,7 +223,7 @@ class ChatterContextCollectorTest {
             // Single message with known selfId omits [Recent Context]
             val singleResult = collector.collectDecisionContext(listOf(singleMsg), kordSelfId = botSelfId)
             assertEquals(
-                "[Bot Identity: Luna | Discord Mention: <@9999>]\n\n[Latest Message]\n[Alice]: Anyone around?",
+                "[Bot Identity: Luna | Discord Mention: <@9999>]\n\n[Latest Message]\nAlice (uid:301): Anyone around?",
                 singleResult.transcript,
             )
             assertFalse(singleResult.transcript.contains("[Recent Context]"))
@@ -227,7 +232,7 @@ class ChatterContextCollectorTest {
             val earlierMsg = createMockMessage(id = 300L, username = "Bob", content = "First line", kordUnavailable = true)
             val nullSelfResult = collector.collectDecisionContext(listOf(earlierMsg, singleMsg), kordSelfId = null)
             assertEquals(
-                "[Bot Identity: Luna]\n\n[Recent Context]\n[Bob]: First line\n\n[Latest Message]\n[Alice]: Anyone around?",
+                "[Bot Identity: Luna]\n\n[Recent Context]\nBob (uid:300): First line\n\n[Latest Message]\nAlice (uid:301): Anyone around?",
                 nullSelfResult.transcript,
             )
             assertFalse(nullSelfResult.transcript.contains("Discord Mention"))
@@ -260,9 +265,9 @@ class ChatterContextCollectorTest {
             val expectedTranscript =
                 "[Bot Identity: Luna | Discord Mention: <@9999>]\n\n" +
                     "[Recent Context]\n" +
-                    "[Alice]: Line one of recent\nLine two of recent [附帶圖片 1: first.png]\n\n" +
+                    "Alice (uid:401): Line one of recent\nLine two of recent [附帶圖片 1: first.png]\n\n" +
                     "[Latest Message]\n" +
-                    "[Bob]: Line one of latest\nLine two of latest [附帶圖片 2: second.jpg]"
+                    "Bob (uid:402): Line one of latest\nLine two of latest [附帶圖片 2: second.jpg]"
             assertEquals(expectedTranscript, result.transcript)
             assertEquals(2, result.images.size)
         }
@@ -316,13 +321,13 @@ class ChatterContextCollectorTest {
 
             val expectedExcerpt1 = "B".repeat(37) + "..."
             assertFalse(peekCalled)
-            assertTrue(result.transcript.contains("[U1 回覆 ExtAlice「$expectedExcerpt1」]: Reply 1"))
-            assertTrue(result.transcript.contains("[U2 回覆 ExtBob「Earlier question」]: Reply 2"))
-            assertTrue(result.transcript.contains("[U3 回覆 ExtDave「Fourth external beyond cap」]: Reply 3"))
-            assertTrue(result.transcript.contains("[U4]: Reply in window"))
+            assertTrue(result.transcript.contains("U1 (uid:5101) 回覆 ExtAlice (uid:5001)「$expectedExcerpt1」: Reply 1"))
+            assertTrue(result.transcript.contains("U2 (uid:5102) 回覆 ExtBob (uid:5002)「Earlier question」: Reply 2"))
+            assertTrue(result.transcript.contains("U3 (uid:5103) 回覆 ExtDave (uid:5004)「Fourth external beyond cap」: Reply 3"))
+            assertTrue(result.transcript.contains("U4 (uid:5104): Reply in window"))
             assertFalse(result.transcript.contains("回覆 U0"))
             // 4th unique external reference (ext3 on latest) is capped at maxExternalReferences = 3
-            assertTrue(result.transcript.contains("[U5]: Follow-up with link https://www.youtube.com/watch?v=dQw4w9WgXcQ"))
+            assertTrue(result.transcript.contains("U5 (uid:5105): Follow-up with link https://www.youtube.com/watch?v=dQw4w9WgXcQ"))
             assertFalse(result.transcript.contains("回覆 ExtCharlie"))
         }
 }

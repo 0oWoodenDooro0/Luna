@@ -34,10 +34,14 @@ data class GuildCustomEmoji(
  *
  * @property author Username or nickname of the message speaker.
  * @property content Textual content of the message.
+ * @property authorId Optional Discord user snowflake ID string for speaker attribution.
+ * @property isBot Whether the speaker is a third-party Discord bot (`[BOT]` badge; false for Luna and humans).
  */
 data class ChatMessage(
     val author: String,
     val content: String,
+    val authorId: String? = null,
+    val isBot: Boolean = false,
 )
 
 /**

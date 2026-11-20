@@ -214,7 +214,7 @@ class ChatterNoiseFilterContextTest {
     }
 
     @Test
-    fun `filterContextMessages preserves valid dialogue, attachments, embeds, and Luna chatter while dropping noise`() {
+    fun `filterContextMessages preserves valid dialogue, third-party bots, attachments, embeds, and Luna chatter while dropping noise`() {
         val botSelfId = Snowflake(42L)
         val validMsg = createMockMessage(id = 801L, username = "Alice", content = "Check this out")
         val botMsg = createMockMessage(id = 802L, username = "SpamBot", content = "Spam", isBot = true)
@@ -248,7 +248,11 @@ class ChatterNoiseFilterContextTest {
                 kordSelfId = botSelfId,
             )
 
-        assertEquals(listOf(801L, 804L, 806L), filtered.map { it.id.value.toLong() })
+        assertEquals(listOf(801L, 802L, 804L, 806L), filtered.map { it.id.value.toLong() })
+
+        val botEval = filter.evaluate(botMsg, kordSelfId = botSelfId)
+        assertIs<ChatterFilterResult.Rejected>(botEval)
+        assertEquals(RejectionReason.BOT_MESSAGE, botEval.reason)
     }
 
     @Test
