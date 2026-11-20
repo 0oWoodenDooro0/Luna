@@ -2,6 +2,8 @@ package luna.chatter
 
 import dev.kord.common.entity.Snowflake
 import dev.kord.core.Kord
+import dev.kord.core.event.interaction.ChatInputCommandInteractionCreateEvent
+import dev.kord.core.on
 import io.ktor.client.HttpClient
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -12,6 +14,10 @@ import luna.chatter.emoji.DefaultChatterEmojiCatalog
 import luna.chatter.emoji.ExposedCustomEmojiMeaningRepository
 import luna.chatter.emoji.ExposedEmojiUsageRankingRepository
 import luna.chatter.emoji.NoOpChatterEmojiCatalog
+import luna.chatter.memory.ChatterMemoryStore
+import luna.chatter.memory.MemoryCommand
+import luna.chatter.memory.SqliteChatterMemoryStore
+import luna.core.JsonLogger
 import luna.core.ai.GeminiInteractionClient
 import luna.core.ai.SocialPeekFactory
 import luna.plugin.LunaPlugin
@@ -73,6 +79,12 @@ class ChatterPlugin(
     var emojiVisionResolver: CustomEmojiVisionResolver? = null
         internal set
 
+    var memoryStore: ChatterMemoryStore? = null
+        internal set
+
+    var memoryCommand: MemoryCommand? = null
+        internal set
+
     private var visionHttpClient: HttpClient? = null
 
     var maxImages: Int = ChatterContextCollector.DEFAULT_MAX_IMAGES
@@ -82,6 +94,7 @@ class ChatterPlugin(
         internal set
 
     private var registrationJob: Job? = null
+    private var memoryCommandJob: Job? = null
 
     override suspend fun initialize(context: PluginContext) {
         val decisionConfig = ChatterDecisionConfig.fromPluginContext(context)
@@ -243,6 +256,55 @@ class ChatterPlugin(
         val finalService = serviceFactory?.invoke(chatterService) ?: chatterService
         this.service = finalService
 
+        val store =
+            runCatching {
+                SqliteChatterMemoryStore(context.database)
+            }.onFailure { e ->
+                logger.warn("Failed to initialize ChatterMemoryStore; /memory command disabled: {}", e.message)
+            }.getOrNull()
+        this.memoryStore = store
+
+        if (store != null) {
+            val command = MemoryCommand(store)
+            this.memoryCommand = command
+            try {
+                val scope = safeScope(context.kord)
+                command.register(context.kord)
+                this.memoryCommandJob =
+                    context.kord.on<ChatInputCommandInteractionCreateEvent>(scope = scope) {
+                        if (interaction.command.rootName == command.name) {
+                            try {
+                                command.handle(interaction)
+                                JsonLogger.log(
+                                    layer = "COMMAND",
+                                    component = command.javaClass.simpleName,
+                                    operation = "handle",
+                                    data =
+                                        mapOf(
+                                            "userId" to interaction.user.id.toString(),
+                                            "command" to command.name,
+                                        ),
+                                )
+                            } catch (e: Exception) {
+                                JsonLogger.error(
+                                    layer = "COMMAND",
+                                    component = command.javaClass.simpleName,
+                                    operation = "handle",
+                                    data =
+                                        mapOf(
+                                            "userId" to interaction.user.id.toString(),
+                                            "command" to command.name,
+                                        ),
+                                    errorMessage = e.message,
+                                )
+                            }
+                        }
+                    }
+            } catch (e: Exception) {
+                logger.warn("Could not register /memory command to Kord: {}", e.message)
+            }
+        }
+
         if (geminiApiKey.isBlank()) {
             logger.info("GEMINI_API_KEY is not configured; ChatterPlugin running in disabled mode")
             return
@@ -264,6 +326,8 @@ class ChatterPlugin(
 
     override suspend fun shutdown() {
         registrationJob?.cancel()
+        memoryCommandJob?.cancel()
+        memoryCommandJob = null
         decisionClient?.close()
         chatterGenerator?.close()
         visionHttpClient?.close()
