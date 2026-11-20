@@ -14,10 +14,13 @@ import luna.chatter.emoji.DefaultChatterEmojiCatalog
 import luna.chatter.emoji.ExposedCustomEmojiMeaningRepository
 import luna.chatter.emoji.ExposedEmojiUsageRankingRepository
 import luna.chatter.emoji.NoOpChatterEmojiCatalog
+import luna.chatter.memory.ChatterMemoryConfig
 import luna.chatter.memory.ChatterMemoryStore
+import luna.chatter.memory.ChatterMemoryToolHandler
 import luna.chatter.memory.MemoryCommand
 import luna.chatter.memory.SqliteChatterMemoryStore
 import luna.core.JsonLogger
+import luna.core.ai.GeminiEmbeddingClient
 import luna.core.ai.GeminiInteractionClient
 import luna.core.ai.SocialPeekFactory
 import luna.plugin.LunaPlugin
@@ -85,6 +88,10 @@ class ChatterPlugin(
     var memoryCommand: MemoryCommand? = null
         internal set
 
+    var memoryToolHandler: ChatterMemoryToolHandler? = null
+        internal set
+
+    private var embeddingClient: GeminiEmbeddingClient? = null
     private var visionHttpClient: HttpClient? = null
 
     var maxImages: Int = ChatterContextCollector.DEFAULT_MAX_IMAGES
@@ -161,9 +168,58 @@ class ChatterPlugin(
         this.decisionClient = client
 
         val chatterConfig = ChatterConfig.fromPluginContext(context)
+        val memoryConfig = ChatterMemoryConfig.fromPluginContext(context)
+        val initializedStore =
+            if (memoryConfig.enabled) {
+                runCatching {
+                    SqliteChatterMemoryStore(
+                        database = context.database,
+                        maxPerUser = memoryConfig.maxPerUser,
+                        maxPerChannel = memoryConfig.maxPerChannel,
+                    )
+                }.onFailure { e ->
+                    logger.warn(
+                        "Failed to initialize SqliteChatterMemoryStore; degrading without long-term memory: {}",
+                        e.message,
+                    )
+                }.getOrNull()
+            } else {
+                null
+            }
+        this.memoryStore = initializedStore
+
+        val initializedEmbeddingClient =
+            if (memoryConfig.enabled && initializedStore != null && chatterConfig.isConfigured) {
+                GeminiEmbeddingClient(
+                    apiKey = chatterConfig.apiKey,
+                    baseUrl = chatterConfig.cleanBaseUrl,
+                    model = memoryConfig.cleanEmbeddingModel,
+                )
+            } else {
+                null
+            }
+        this.embeddingClient = initializedEmbeddingClient
+
+        val toolHandler =
+            if (initializedStore != null && initializedEmbeddingClient != null) {
+                ChatterMemoryToolHandler(
+                    embeddingClient = initializedEmbeddingClient,
+                    memoryStore = initializedStore,
+                    config = memoryConfig,
+                )
+            } else {
+                null
+            }
+        this.memoryToolHandler = toolHandler
+
         val generator =
             generatorFactory?.invoke(chatterConfig)
-                ?: ChatterGenerator(config = chatterConfig, traceRecorder = traceRecorder)
+                ?: ChatterGenerator(
+                    config = chatterConfig,
+                    traceRecorder = traceRecorder,
+                    memoryConfig = memoryConfig,
+                    memoryToolHandler = toolHandler,
+                )
         this.chatterGenerator = generator
 
         val cooldown = BoundedChannelCooldownCache(defaultCooldownDurationMs = cooldownDurationMs)
@@ -192,8 +248,10 @@ class ChatterPlugin(
             ChatterContextCollector(
                 noiseFilter = noiseFilter,
                 decisionMessageCount = decisionConfig.decisionMessageCount,
+                historyMessageCount = memoryConfig.historyMessageCount,
                 maxImages = imagesLimit,
                 peekResolver = peekResolver,
+                historyWindowMinutes = memoryConfig.historyWindowMinutes,
             )
         this.contextCollector = collector
 
@@ -245,6 +303,7 @@ class ChatterPlugin(
                 chatterGenerator = generator,
                 cooldownCache = cooldown,
                 decisionMessageCount = decisionConfig.decisionMessageCount,
+                historyMessageCount = memoryConfig.historyMessageCount,
                 contextCollector = collector,
                 traceRecorder = traceRecorder,
                 burstCoordinator = coordinator,
@@ -256,16 +315,8 @@ class ChatterPlugin(
         val finalService = serviceFactory?.invoke(chatterService) ?: chatterService
         this.service = finalService
 
-        val store =
-            runCatching {
-                SqliteChatterMemoryStore(context.database)
-            }.onFailure { e ->
-                logger.warn("Failed to initialize ChatterMemoryStore; /memory command disabled: {}", e.message)
-            }.getOrNull()
-        this.memoryStore = store
-
-        if (store != null) {
-            val command = MemoryCommand(store)
+        if (initializedStore != null) {
+            val command = MemoryCommand(initializedStore)
             this.memoryCommand = command
             try {
                 val scope = safeScope(context.kord)
@@ -330,6 +381,8 @@ class ChatterPlugin(
         memoryCommandJob = null
         decisionClient?.close()
         chatterGenerator?.close()
+        embeddingClient?.close()
+        embeddingClient = null
         visionHttpClient?.close()
         visionHttpClient = null
     }
