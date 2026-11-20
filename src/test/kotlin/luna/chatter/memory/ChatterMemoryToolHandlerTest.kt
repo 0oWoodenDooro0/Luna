@@ -294,4 +294,65 @@ class ChatterMemoryToolHandlerTest {
             assertEquals("invalid_argument", badScopeObj["status"]?.jsonPrimitive?.content)
             assertEquals(0, embedCalls.get())
         }
+
+    @Test
+    fun `workingMemoryStartMs eliminates distillation recency black hole while still preventing duplication`() =
+        runBlocking {
+            val mutableClock =
+                object : Clock() {
+                    var now: Instant = Instant.parse("2026-01-01T10:05:00Z")
+
+                    override fun getZone() = ZoneOffset.UTC
+
+                    override fun withZone(zone: java.time.ZoneId) = this
+
+                    override fun instant(): Instant = now
+                }
+            val store = createStore(mutableClock)
+            // Memory distilled at 10:05 from messages originally sent at 10:00
+            store.insertMemory(
+                guildId = "1001",
+                scope = MemoryScope.USER,
+                targetUserId = "999001",
+                channelId = "2001",
+                content = "Alice prefers pour-over coffee",
+            )
+            val embeddingClient = createMockEmbeddingClient()
+            val handler =
+                ChatterMemoryToolHandler(
+                    embeddingClient = embeddingClient,
+                    memoryStore = store,
+                    config = ChatterMemoryConfig(recencyExcludeMinutes = 10L),
+                )
+
+            // At 10:11 (only 6m after distillation), conversation resumed after >10m gap so Working Memory starts at 10:11
+            mutableClock.now = Instant.parse("2026-01-01T10:11:00Z")
+            val resumedResult =
+                json
+                    .parseToJsonElement(
+                        handler.handleToolCall(
+                            arguments = buildJsonObject { put("query", "pour-over coffee") },
+                            guildId = "1001",
+                            channelId = "2001",
+                            defaultAuthorId = "999001",
+                            workingMemoryStartMs = Instant.parse("2026-01-01T10:11:00Z").toEpochMilli(),
+                        ),
+                    ).jsonObject
+            assertEquals(1, resumedResult["count"]?.jsonPrimitive?.content?.toInt())
+
+            // When Working Memory still covers 10:00..10:08, memory distilled at 10:05 is excluded to avoid duplication
+            mutableClock.now = Instant.parse("2026-01-01T10:08:00Z")
+            val overlapResult =
+                json
+                    .parseToJsonElement(
+                        handler.handleToolCall(
+                            arguments = buildJsonObject { put("query", "pour-over coffee") },
+                            guildId = "1001",
+                            channelId = "2001",
+                            defaultAuthorId = "999001",
+                            workingMemoryStartMs = Instant.parse("2026-01-01T10:00:00Z").toEpochMilli(),
+                        ),
+                    ).jsonObject
+            assertEquals(0, overlapResult["count"]?.jsonPrimitive?.content?.toInt())
+        }
 }

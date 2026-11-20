@@ -245,6 +245,7 @@ class SqliteChatterMemoryStore(
         targetUserId: String?,
         limit: Int,
         recencyExcludeMinutes: Int?,
+        maxUpdatedAtMs: Long?,
         scoreCutoff: Double?,
         updateLastAccessed: Boolean,
     ): List<ChatterMemorySearchHit> {
@@ -263,10 +264,11 @@ class SqliteChatterMemoryStore(
             val conn = currentJdbcConnection()
             val now = clock.millis()
             val maxUpdatedAt =
-                if (effectiveRecencyMinutes > 0) {
-                    now - TimeUnit.MINUTES.toMillis(effectiveRecencyMinutes.toLong())
-                } else {
-                    null
+                when {
+                    recencyExcludeMinutes == 0 -> null
+                    maxUpdatedAtMs != null -> maxUpdatedAtMs
+                    effectiveRecencyMinutes > 0 -> now - TimeUnit.MINUTES.toMillis(effectiveRecencyMinutes.toLong())
+                    else -> null
                 }
 
             val candidateLimit = maxOf(limit * 5, 40)
@@ -797,44 +799,19 @@ class SqliteChatterMemoryStore(
         queryEmbedding: FloatArray,
         limit: Int,
     ): List<VectorCandidate> {
-        val recencySql = if (maxUpdatedAt != null) "AND m.updated_at <= ?" else ""
-        val k = maxOf(limit, 50)
-        val sql =
-            """
-            SELECT m.id, m.guild_id, m.scope, m.target_user_id, m.channel_id, m.content, m.created_at, m.updated_at, m.last_accessed_at,
-                   v.distance
-            FROM chatter_memories_vec v
-            JOIN chatter_memories m ON m.id = v.memory_id
-            WHERE v.embedding MATCH ?
-              AND v.k = ?
-              AND m.guild_id = ?
-              AND ${scopeFilter.clause}
-              $recencySql
-            ORDER BY v.distance ASC
-            LIMIT ?
-            """.trimIndent()
+        val sql = buildVectorSearchSql(scopeClause = scopeFilter.clause, hasRecencyFilter = maxUpdatedAt != null)
         return conn.prepareStatement(sql).use { ps ->
             var idx = 1
             ps.setBytes(idx++, floatArrayToLittleEndianBytes(queryEmbedding))
-            ps.setInt(idx++, k)
+            ps.setInt(idx++, limit)
             ps.setString(idx++, guildId)
-            for (p in scopeFilter.params) {
-                ps.setString(idx++, p)
-            }
-            if (maxUpdatedAt != null) {
-                ps.setLong(idx++, maxUpdatedAt)
-            }
+            for (p in scopeFilter.params) ps.setString(idx++, p)
+            if (maxUpdatedAt != null) ps.setLong(idx++, maxUpdatedAt)
             ps.setInt(idx, limit)
             ps.executeQuery().use { rs ->
                 buildList {
                     while (rs.next()) {
-                        val distance = rs.getDouble("distance")
-                        add(
-                            VectorCandidate(
-                                record = readMemoryRecord(rs),
-                                cosineSimilarity = 1.0 - distance,
-                            ),
-                        )
+                        add(VectorCandidate(readMemoryRecord(rs), 1.0 - rs.getDouble("distance")))
                     }
                 }
             }
@@ -847,15 +824,11 @@ class SqliteChatterMemoryStore(
         now: Long,
     ) {
         val placeholders = ids.joinToString(",") { "?" }
-        conn
-            .prepareStatement("UPDATE chatter_memories SET last_accessed_at = ? WHERE id IN ($placeholders)")
-            .use { ps ->
-                ps.setLong(1, now)
-                ids.forEachIndexed { index, id ->
-                    ps.setLong(index + 2, id)
-                }
-                ps.executeUpdate()
-            }
+        conn.prepareStatement("UPDATE chatter_memories SET last_accessed_at = ? WHERE id IN ($placeholders)").use { ps ->
+            ps.setLong(1, now)
+            ids.forEachIndexed { index, id -> ps.setLong(index + 2, id) }
+            ps.executeUpdate()
+        }
     }
 
     private fun readMemoryRecord(rs: ResultSet): ChatterMemoryRecord =
@@ -880,17 +853,31 @@ class SqliteChatterMemoryStore(
         private const val RRF_K = 60.0
         private val WHITESPACE_REGEX = Regex("""\s+""")
 
-        private fun escapeLikePattern(token: String): String =
-            token
-                .replace("\\", "\\\\")
-                .replace("%", "\\%")
-                .replace("_", "\\_")
+        private fun escapeLikePattern(token: String): String = token.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+        internal fun buildVectorSearchSql(
+            scopeClause: String,
+            hasRecencyFilter: Boolean,
+        ): String {
+            val prefilterScopeClause = scopeClause.replace("m.", "m2.")
+            val prefilterRecencySql = if (hasRecencyFilter) "AND m2.updated_at <= ?" else ""
+            return """
+                SELECT m.id, m.guild_id, m.scope, m.target_user_id, m.channel_id, m.content, m.created_at, m.updated_at, m.last_accessed_at, v.distance
+                FROM chatter_memories_vec v
+                JOIN chatter_memories m ON m.id = v.memory_id
+                WHERE v.embedding MATCH ? AND v.k = ?
+                  AND v.memory_id IN (
+                      SELECT m2.id FROM chatter_memories m2
+                      WHERE m2.guild_id = ? AND $prefilterScopeClause $prefilterRecencySql
+                  )
+                ORDER BY v.distance ASC
+                LIMIT ?
+                """.trimIndent()
+        }
 
         internal fun floatArrayToLittleEndianBytes(values: FloatArray): ByteArray {
             val buffer = ByteBuffer.allocate(values.size * 4).order(ByteOrder.LITTLE_ENDIAN)
-            for (v in values) {
-                buffer.putFloat(v)
-            }
+            for (v in values) buffer.putFloat(v)
             return buffer.array()
         }
 

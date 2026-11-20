@@ -35,6 +35,7 @@ data class PreparedChatterContext(
     val videoUri: String? = null,
     val videoDurationSeconds: Long? = null,
     val webUrls: List<String> = emptyList(),
+    val oldestWindowTimestampMs: Long? = null,
 ) {
     fun toChatterInput(isDirectMention: Boolean = false): ChatterInput =
         ChatterInput(
@@ -47,6 +48,7 @@ data class PreparedChatterContext(
             url = url,
             comments = comments,
             webUrls = webUrls,
+            workingMemoryStartMs = oldestWindowTimestampMs,
         )
 }
 
@@ -154,6 +156,10 @@ open class ChatterContextCollector(
 
         val recent = filterByRecencyWindow(filtered)
         val window = recent.takeLast(historyMessageCount.coerceAtLeast(1))
+        val oldestWindowTimestampMs =
+            window.firstNotNullOfOrNull { msg ->
+                runCatching { msg.timestamp.toEpochMilliseconds() }.getOrNull()
+            }
         val imagesByMessage =
             ChatImageAttachmentExtractor.selectChronologicalImages(
                 messages = window,
@@ -245,6 +251,7 @@ open class ChatterContextCollector(
                     videoUri = videoUri,
                     videoDurationSeconds = videoDurationSeconds,
                     webUrls = classifiedUrls.webUrls,
+                    oldestWindowTimestampMs = oldestWindowTimestampMs,
                 )
             } else if (postOutcome.isSuccess) {
                 logger.warn(
@@ -266,6 +273,7 @@ open class ChatterContextCollector(
                     videoUri = primaryUrl,
                     videoDurationSeconds = null,
                     webUrls = classifiedUrls.webUrls,
+                    oldestWindowTimestampMs = oldestWindowTimestampMs,
                 )
             }
         }
@@ -275,18 +283,39 @@ open class ChatterContextCollector(
             imageAttachments = replyImages,
             primaryUrl = primaryUrl,
             webUrls = classifiedUrls.webUrls,
+            oldestWindowTimestampMs = oldestWindowTimestampMs,
         )
     }
 
     internal fun filterByRecencyWindow(messages: List<Message>): List<Message> {
         if (messages.isEmpty()) return emptyList()
-        val effectiveWindowMinutes = historyWindowMinutes.coerceAtLeast(MIN_HISTORY_WINDOW_MINUTES)
+        val effectiveGapMinutes = historyWindowMinutes.coerceAtLeast(MIN_HISTORY_WINDOW_MINUTES)
         val anchorTimestamp = runCatching { messages.last().timestamp }.getOrNull() ?: return messages
-        val cutoff = anchorTimestamp - effectiveWindowMinutes.minutes
-        return messages.filter { msg ->
+        val maxLookbackMinutes = maxOf(effectiveGapMinutes * MAX_LOOKBACK_GAP_MULTIPLIER, DEFAULT_MAX_HISTORY_LOOKBACK_MINUTES)
+        val oldestAllowedTimestamp = anchorTimestamp - maxLookbackMinutes.minutes
+        val maxGap = effectiveGapMinutes.minutes
+
+        val keptReversed = mutableListOf(messages.last())
+        var nextTimestamp = anchorTimestamp
+
+        for (index in messages.size - 2 downTo 0) {
+            val msg = messages[index]
             val msgTimestamp = runCatching { msg.timestamp }.getOrNull()
-            msgTimestamp == null || msgTimestamp >= cutoff
+            if (msgTimestamp == null) {
+                keptReversed.add(msg)
+                continue
+            }
+            if (msgTimestamp < oldestAllowedTimestamp) {
+                break
+            }
+            if (nextTimestamp - msgTimestamp > maxGap) {
+                break
+            }
+            keptReversed.add(msg)
+            nextTimestamp = msgTimestamp
         }
+
+        return keptReversed.asReversed()
     }
 
     internal suspend fun resolveExternalReplyReferences(
@@ -522,9 +551,11 @@ open class ChatterContextCollector(
         const val DEFAULT_HISTORY_MESSAGE_COUNT = 30
         const val DEFAULT_HISTORY_WINDOW_MINUTES = 10L
         const val MIN_HISTORY_WINDOW_MINUTES = 1L
+        const val DEFAULT_MAX_HISTORY_LOOKBACK_MINUTES = 60L
+        const val MAX_LOOKBACK_GAP_MULTIPLIER = 6L
         const val DEFAULT_MAX_DECISION_IMAGES = 3
         const val DEFAULT_MAX_IMAGES = 10
         const val DEFAULT_MAX_EXTERNAL_REFERENCES = 3
-        const val MAX_REPLY_EXCERPT_LENGTH = 40
+        const val MAX_REPLY_EXCERPT_LENGTH = 120
     }
 }
