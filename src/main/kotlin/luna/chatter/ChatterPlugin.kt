@@ -2,16 +2,23 @@ package luna.chatter
 
 import dev.kord.common.entity.Snowflake
 import dev.kord.core.Kord
+import dev.kord.core.entity.channel.MessageChannel
 import io.ktor.client.HttpClient
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.flow.toList
 import luna.chatter.emoji.ChatterEmojiCatalog
 import luna.chatter.emoji.CustomEmojiVisionResolver
 import luna.chatter.emoji.DefaultChatterEmojiCatalog
 import luna.chatter.emoji.ExposedCustomEmojiMeaningRepository
 import luna.chatter.emoji.ExposedEmojiUsageRankingRepository
 import luna.chatter.emoji.NoOpChatterEmojiCatalog
+import luna.chatter.memory.ChatterMemoryConfig
+import luna.chatter.memory.MemoryDistillationCoordinator
+import luna.chatter.memory.MemoryDistiller
+import luna.chatter.memory.SqliteChatterMemoryStore
+import luna.core.ai.GeminiEmbeddingClient
 import luna.core.ai.GeminiInteractionClient
 import luna.core.ai.SocialPeekFactory
 import luna.plugin.LunaPlugin
@@ -73,7 +80,12 @@ class ChatterPlugin(
     var emojiVisionResolver: CustomEmojiVisionResolver? = null
         internal set
 
+    var memoryDistillationCoordinator: MemoryDistillationCoordinator? = null
+        internal set
+
     private var visionHttpClient: HttpClient? = null
+    private var distillationHttpClient: HttpClient? = null
+    private var memoryEmbeddingClient: GeminiEmbeddingClient? = null
 
     var maxImages: Int = ChatterContextCollector.DEFAULT_MAX_IMAGES
         internal set
@@ -82,6 +94,8 @@ class ChatterPlugin(
         internal set
 
     private var registrationJob: Job? = null
+    private var distillationObserverJob: Job? = null
+    private var distillationTickerJob: Job? = null
 
     override suspend fun initialize(context: PluginContext) {
         val decisionConfig = ChatterDecisionConfig.fromPluginContext(context)
@@ -256,18 +270,98 @@ class ChatterPlugin(
         try {
             val scope = safeScope(context.kord)
             this.registrationJob = finalService.register(context.kord, scope = scope)
+            initializeMemoryDistillation(
+                context = context,
+                chatterConfig = chatterConfig,
+                noiseFilter = noiseFilter,
+                allowedChannels = allowedChannels,
+                scope = scope,
+            )
             logger.info("ChatterPlugin initialized successfully and registered message listener")
         } catch (e: Exception) {
             logger.warn("Could not register ChatterPlugin message listener to Kord: {}", e.message)
         }
     }
 
+    private fun initializeMemoryDistillation(
+        context: PluginContext,
+        chatterConfig: ChatterConfig,
+        noiseFilter: ChatterNoiseFilter,
+        allowedChannels: Set<Snowflake>,
+        scope: CoroutineScope,
+    ) {
+        val memoryConfig = ChatterMemoryConfig.fromPluginContext(context)
+        if (!memoryConfig.enabled) return
+
+        runCatching {
+            val memoryStore =
+                SqliteChatterMemoryStore(
+                    database = context.database,
+                    defaultRecencyExcludeMinutes = memoryConfig.recencyExcludeMinutes.toInt(),
+                    defaultScoreCutoff = memoryConfig.scoreCutoff,
+                    maxPerUser = memoryConfig.maxPerUser,
+                    maxPerChannel = memoryConfig.maxPerChannel,
+                )
+            val embeddingClient =
+                GeminiEmbeddingClient(
+                    apiKey = chatterConfig.apiKey,
+                    baseUrl = chatterConfig.cleanBaseUrl,
+                    model = memoryConfig.cleanEmbeddingModel,
+                ).also { this.memoryEmbeddingClient = it }
+            val distillHttp = MemoryDistiller.createDefaultHttpClient().also { this.distillationHttpClient = it }
+            val distiller =
+                MemoryDistiller(
+                    memoryStore = memoryStore,
+                    embeddingClient = embeddingClient,
+                    interactionClient =
+                        GeminiInteractionClient(
+                            httpClient = distillHttp,
+                            traceRecorder = context.aiTraceRecorder,
+                        ),
+                    noiseFilter = noiseFilter,
+                    config = memoryConfig,
+                    apiKey = chatterConfig.apiKey,
+                    baseUrl = chatterConfig.cleanBaseUrl,
+                    traceRecorder = context.aiTraceRecorder,
+                    messagesAfterFetcher = { channelId, afterMessageId, limit ->
+                        runCatching { context.kord.getChannelOf<MessageChannel>(channelId) }
+                            .getOrNull()
+                            ?.getMessagesAfter(afterMessageId, limit = limit)
+                            ?.toList()
+                            ?: emptyList()
+                    },
+                    kordSelfIdProvider = { runCatching { context.kord.selfId }.getOrNull() },
+                )
+            val distCoordinator =
+                MemoryDistillationCoordinator(
+                    memoryStore = memoryStore,
+                    noiseFilter = noiseFilter,
+                    config = memoryConfig,
+                    allowedChannels = allowedChannels,
+                    chatterEnabled = isChatterEnabled,
+                    kordSelfIdProvider = { runCatching { context.kord.selfId }.getOrNull() },
+                    distillExecutor = distiller::distillChannel,
+                )
+            this.memoryDistillationCoordinator = distCoordinator
+            this.distillationObserverJob = distCoordinator.registerMessageObserver(context.kord, scope = scope)
+            this.distillationTickerJob = distCoordinator.startTicker(scope = scope)
+        }.onFailure { e ->
+            logger.warn("Failed to initialize Memory Distillation; continuing without background distillation: {}", e.message)
+        }
+    }
+
     override suspend fun shutdown() {
         registrationJob?.cancel()
+        distillationObserverJob?.cancel()
+        distillationTickerJob?.cancel()
         decisionClient?.close()
         chatterGenerator?.close()
         visionHttpClient?.close()
         visionHttpClient = null
+        distillationHttpClient?.close()
+        distillationHttpClient = null
+        memoryEmbeddingClient?.close()
+        memoryEmbeddingClient = null
     }
 
     companion object {
