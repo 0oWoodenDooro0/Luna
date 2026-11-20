@@ -207,6 +207,42 @@ class ChatterServicePluginAndUrlTest {
         }
 
     @Test
+    fun `chatter plugin fails fast with ConfigValidationException on invalid enabled, cooldown, allowed channels, or max images`() =
+        runTest {
+            val invalidCases =
+                listOf(
+                    "CHATTER_ENABLED" to "maybe",
+                    "CHATTER_COOLDOWN_SECONDS" to "-1",
+                    "CHATTER_COOLDOWN_SECONDS" to "abc",
+                    "CHATTER_ALLOWED_CHANNELS" to "111,not-a-snowflake",
+                    "CHATTER_ALLOWED_CHANNELS" to "-123",
+                    "SUMMARY_MAX_IMAGES" to "0",
+                    "SUMMARY_MAX_IMAGES" to "abc",
+                )
+            for ((key, value) in invalidCases) {
+                val context =
+                    DefaultPluginContext(
+                        kord = mockk<Kord>(relaxed = true),
+                        routing = mockk(relaxed = true),
+                        database = mockk(relaxed = true),
+                        env =
+                            luna.config.EnvReader.of(
+                                "GEMINI_API_KEY" to "gemini-secret-key-456",
+                                key to value,
+                            ),
+                    )
+                val plugin = ChatterPlugin()
+                val ex =
+                    kotlin.test.assertFailsWith<luna.config.ConfigValidationException>(
+                        "Expected ConfigValidationException for $key=$value",
+                    ) {
+                        plugin.initialize(context)
+                    }
+                assertTrue(ex.message?.contains(key) == true, "Expected error message to mention $key: ${ex.message}")
+            }
+        }
+
+    @Test
     fun `URL-only social ambient message skips SocialPeek in decision stage and propagates resolved post content to ChatterGenerator`() =
         runTest {
             val channelId = 603L

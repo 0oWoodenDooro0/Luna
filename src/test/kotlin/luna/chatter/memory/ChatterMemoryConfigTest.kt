@@ -1,13 +1,11 @@
 package luna.chatter.memory
 
-import dev.kord.core.Kord
-import io.ktor.server.routing.Routing
-import io.mockk.mockk
+import luna.config.ConfigValidationException
+import luna.config.EnvReader
 import luna.config.EnvSchemaAuditor
-import luna.plugin.DefaultPluginContext
-import org.jetbrains.exposed.v1.jdbc.Database
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
@@ -35,9 +33,9 @@ class ChatterMemoryConfigTest {
     }
 
     @Test
-    fun `ChatterMemoryConfig parses valid overrides from env, config map, and PluginContext`() {
+    fun `ChatterMemoryConfig parses valid overrides from EnvReader`() {
         val env =
-            mapOf(
+            EnvReader.of(
                 "CHATTER_HISTORY_WINDOW_MINUTES" to "15",
                 "CHATTER_HISTORY_MESSAGE_COUNT" to "45",
                 "CHATTER_MEMORY_ENABLED" to "false",
@@ -57,45 +55,54 @@ class ChatterMemoryConfigTest {
                 "SQLITE_VEC_EXTENSION_PATH" to "/opt/sqlite/vec0.so",
             )
 
-        val fromEnv = ChatterMemoryConfig.fromEnv(env)
-        assertEquals(15L, fromEnv.historyWindowMinutes)
-        assertEquals(45, fromEnv.historyMessageCount)
-        assertFalse(fromEnv.enabled, "Expected enabled override to parse false")
-        assertEquals("gemini-2.5-flash-lite", fromEnv.cleanDistillModel)
-        assertEquals("gemini-embedding-001", fromEnv.cleanEmbeddingModel)
-        assertEquals(8L, fromEnv.quietMinutes)
-        assertEquals(7, fromEnv.minMessages)
-        assertEquals(80, fromEnv.maxBatchMessages)
-        assertEquals(45L, fromEnv.maxBatchAgeMinutes)
-        assertEquals(12L, fromEnv.recencyExcludeMinutes)
-        assertEquals(0.72, fromEnv.scoreCutoff)
-        assertEquals(3, fromEnv.maxToolCalls)
-        assertEquals(9, fromEnv.maxTurns)
-        assertEquals(4500L, fromEnv.toolTimeoutMs)
-        assertEquals(150, fromEnv.maxPerUser)
-        assertEquals(300, fromEnv.maxPerChannel)
-        assertEquals("/opt/sqlite/vec0.so", fromEnv.sqliteVecExtensionPath)
-
-        val fromMap = ChatterMemoryConfig.fromConfig(env)
-        assertEquals(fromEnv, fromMap)
-
-        val context =
-            DefaultPluginContext(
-                kord = mockk<Kord>(relaxed = true),
-                routing = mockk<Routing>(relaxed = true),
-                database = mockk<Database>(relaxed = true),
-                configMap = env,
-            )
-        val fromCtx = ChatterMemoryConfig.fromPluginContext(context)
-        assertEquals(fromEnv, fromCtx)
+        val config = ChatterMemoryConfig.from(env)
+        assertEquals(15L, config.historyWindowMinutes)
+        assertEquals(45, config.historyMessageCount)
+        assertFalse(config.enabled, "Expected enabled override to parse false")
+        assertEquals("gemini-2.5-flash-lite", config.cleanDistillModel)
+        assertEquals("gemini-embedding-001", config.cleanEmbeddingModel)
+        assertEquals(8L, config.quietMinutes)
+        assertEquals(7, config.minMessages)
+        assertEquals(80, config.maxBatchMessages)
+        assertEquals(45L, config.maxBatchAgeMinutes)
+        assertEquals(12L, config.recencyExcludeMinutes)
+        assertEquals(0.72, config.scoreCutoff)
+        assertEquals(3, config.maxToolCalls)
+        assertEquals(9, config.maxTurns)
+        assertEquals(4500L, config.toolTimeoutMs)
+        assertEquals(150, config.maxPerUser)
+        assertEquals(300, config.maxPerChannel)
+        assertEquals("/opt/sqlite/vec0.so", config.sqliteVecExtensionPath)
     }
 
     @Test
-    fun `ChatterMemoryConfig rejects invalid bounds and enforces maxTurns invariant`() {
-        val invalidEnv =
-            mapOf(
+    fun `ChatterMemoryConfig treats blank values as defaults and ignores legacy or chat model keys`() {
+        val config =
+            ChatterMemoryConfig.from(
+                EnvReader.of(
+                    "CHATTER_MEMORY_DISTILL_MODEL" to "   ",
+                    "CHATTER_MEMORY_EMBEDDING_MODEL" to "   ",
+                    "CHATTER_GEMINI_MODEL" to "gemini-chat-model",
+                    "GEMINI_MODEL" to "gemini-default-model",
+                    "SQLITE_VEC_EXTENSION_PATH" to "   ",
+                    "chatter.historyWindowMinutes" to "99",
+                    "chatter.memory.enabled" to "false",
+                ),
+            )
+        assertEquals(ChatterMemoryConfig.DEFAULT_DISTILL_MODEL, config.cleanDistillModel)
+        assertEquals(ChatterMemoryConfig.DEFAULT_EMBEDDING_MODEL, config.cleanEmbeddingModel)
+        assertEquals(ChatterMemoryConfig.DEFAULT_SQLITE_VEC_EXTENSION_PATH, config.sqliteVecExtensionPath)
+        assertEquals(10L, config.historyWindowMinutes)
+        assertTrue(config.enabled, "Expected memory enabled by default when legacy keys are ignored")
+    }
+
+    @Test
+    fun `ChatterMemoryConfig fails fast on invalid types, out-of-range bounds, and maxTurns invariant`() {
+        val invalidCases =
+            listOf(
                 "CHATTER_HISTORY_WINDOW_MINUTES" to "0",
                 "CHATTER_HISTORY_MESSAGE_COUNT" to "-5",
+                "CHATTER_HISTORY_MESSAGE_COUNT" to "250",
                 "CHATTER_MEMORY_ENABLED" to "maybe",
                 "CHATTER_MEMORY_QUIET_MINUTES" to "-1",
                 "CHATTER_MEMORY_MIN_MESSAGES" to "0",
@@ -103,58 +110,51 @@ class ChatterMemoryConfigTest {
                 "CHATTER_MEMORY_MAX_BATCH_AGE_MINUTES" to "-10",
                 "CHATTER_MEMORY_RECENCY_EXCLUDE_MINUTES" to "-3",
                 "CHATTER_MEMORY_SCORE_CUTOFF" to "NaN",
+                "CHATTER_MEMORY_SCORE_CUTOFF" to "-0.1",
+                "CHATTER_MEMORY_SCORE_CUTOFF" to "1.01",
+                "CHATTER_MEMORY_SCORE_CUTOFF" to "Infinity",
                 "CHATTER_MEMORY_MAX_TOOL_CALLS" to "0",
                 "CHATTER_MEMORY_MAX_TURNS" to "-2",
                 "CHATTER_MEMORY_TOOL_TIMEOUT_MS" to "0",
                 "CHATTER_MEMORY_MAX_PER_USER" to "-10",
                 "CHATTER_MEMORY_MAX_PER_CHANNEL" to "0",
-                "SQLITE_VEC_EXTENSION_PATH" to "   ",
             )
-        val config = ChatterMemoryConfig.fromEnv(invalidEnv)
-        assertEquals(10L, config.historyWindowMinutes)
-        assertEquals(30, config.historyMessageCount)
-        assertTrue(config.enabled, "Expected memory enabled by default")
-        assertEquals(5L, config.quietMinutes)
-        assertEquals(5, config.minMessages)
-        assertEquals(50, config.maxBatchMessages)
-        assertEquals(30L, config.maxBatchAgeMinutes)
-        assertEquals(10L, config.recencyExcludeMinutes)
-        assertEquals(0.55, config.scoreCutoff)
-        assertEquals(5, config.maxToolCalls)
-        assertEquals(8, config.maxTurns)
-        assertEquals(3000L, config.toolTimeoutMs)
-        assertEquals(100, config.maxPerUser)
-        assertEquals(200, config.maxPerChannel)
-        assertEquals("/app/lib/vec0.so", config.sqliteVecExtensionPath)
+        for ((key, value) in invalidCases) {
+            val ex =
+                assertFailsWith<ConfigValidationException>("Expected ConfigValidationException for $key=$value") {
+                    ChatterMemoryConfig.from(EnvReader.of(key to value))
+                }
+            assertTrue(ex.message?.contains(key) == true, "Expected error message to mention $key: ${ex.message}")
+        }
 
-        // Out-of-range scoreCutoff (< 0.0 and > 1.0)
-        assertEquals(0.55, ChatterMemoryConfig.fromEnv(mapOf("CHATTER_MEMORY_SCORE_CUTOFF" to "-0.1")).scoreCutoff)
-        assertEquals(0.55, ChatterMemoryConfig.fromEnv(mapOf("CHATTER_MEMORY_SCORE_CUTOFF" to "1.01")).scoreCutoff)
-        assertEquals(0.55, ChatterMemoryConfig.fromEnv(mapOf("CHATTER_MEMORY_SCORE_CUTOFF" to "Infinity")).scoreCutoff)
+        // maxTurns < maxToolCalls + 2 throws ConfigValidationException
+        val turnsEx1 =
+            assertFailsWith<ConfigValidationException> {
+                ChatterMemoryConfig.from(
+                    EnvReader.of(
+                        "CHATTER_MEMORY_MAX_TOOL_CALLS" to "6",
+                        "CHATTER_MEMORY_MAX_TURNS" to "7",
+                    ),
+                )
+            }
+        assertTrue(
+            turnsEx1.message?.contains("CHATTER_MEMORY_MAX_TURNS") == true,
+            "Expected error message to mention CHATTER_MEMORY_MAX_TURNS: ${turnsEx1.message}",
+        )
 
-        // historyMessageCount > 100 clamps to 100
-        assertEquals(100, ChatterMemoryConfig.fromEnv(mapOf("CHATTER_HISTORY_MESSAGE_COUNT" to "250")).historyMessageCount)
-
-        // maxTurns < maxToolCalls + 2 raises maxTurns to maxToolCalls + 2
-        val adjustedTurns =
-            ChatterMemoryConfig.fromEnv(
-                mapOf(
-                    "CHATTER_MEMORY_MAX_TOOL_CALLS" to "6",
-                    "CHATTER_MEMORY_MAX_TURNS" to "7",
-                ),
-            )
-        assertEquals(6, adjustedTurns.maxToolCalls)
-        assertEquals(8, adjustedTurns.maxTurns)
-
-        val adjustedFromDefault =
-            ChatterMemoryConfig.fromEnv(
-                mapOf(
-                    "CHATTER_MEMORY_MAX_TOOL_CALLS" to "5",
-                    "CHATTER_MEMORY_MAX_TURNS" to "4",
-                ),
-            )
-        assertEquals(5, adjustedFromDefault.maxToolCalls)
-        assertEquals(7, adjustedFromDefault.maxTurns)
+        val turnsEx2 =
+            assertFailsWith<ConfigValidationException> {
+                ChatterMemoryConfig.from(
+                    EnvReader.of(
+                        "CHATTER_MEMORY_MAX_TOOL_CALLS" to "5",
+                        "CHATTER_MEMORY_MAX_TURNS" to "4",
+                    ),
+                )
+            }
+        assertTrue(
+            turnsEx2.message?.contains("CHATTER_MEMORY_MAX_TURNS") == true,
+            "Expected error message to mention CHATTER_MEMORY_MAX_TURNS: ${turnsEx2.message}",
+        )
     }
 
     @Test

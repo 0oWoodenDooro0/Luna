@@ -23,13 +23,13 @@ import luna.chatter.memory.MemoryCommand
 import luna.chatter.memory.MemoryDistillationCoordinator
 import luna.chatter.memory.MemoryDistiller
 import luna.chatter.memory.SqliteChatterMemoryStore
+import luna.config.ConfigValidationException
 import luna.core.JsonLogger
 import luna.core.ai.GeminiEmbeddingClient
 import luna.core.ai.GeminiInteractionClient
 import luna.core.ai.SocialPeekFactory
 import luna.plugin.LunaPlugin
 import luna.plugin.PluginContext
-import luna.plugin.config
 import org.slf4j.LoggerFactory
 
 internal fun safeScope(kord: Kord): CoroutineScope {
@@ -114,57 +114,37 @@ class ChatterPlugin(
     private var distillationTickerJob: Job? = null
 
     override suspend fun initialize(context: PluginContext) {
-        val decisionConfig = ChatterDecisionConfig.fromPluginContext(context)
+        val decisionConfig = ChatterDecisionConfig.from(context.env)
         val geminiApiKey = decisionConfig.apiKey
 
-        val chatterEnabledConfig =
-            context.config<Boolean>("CHATTER_ENABLED")
-                ?: context.config<String>("CHATTER_ENABLED")?.toBooleanStrictOrNull()
-                ?: context.config<Boolean>("chatter.enabled")
-                ?: context.config<String>("chatter.enabled")?.toBooleanStrictOrNull()
-
-        val chatterEnabled = (chatterEnabledConfig ?: true) && geminiApiKey.isNotBlank()
+        val chatterEnabledConfig = context.env.boolean("CHATTER_ENABLED", true)
+        val chatterEnabled = chatterEnabledConfig && geminiApiKey.isNotBlank()
         this.isChatterEnabled = chatterEnabled
 
-        val allowedChannelsRaw =
-            context.config<String>("CHATTER_ALLOWED_CHANNELS")
-                ?: context.config<String>("chatter.allowedChannels")
-                ?: context.config<String>("chatter.allowed_channels")
-                ?: ""
-
         val allowedChannels: Set<Snowflake> =
-            if (allowedChannelsRaw.isBlank()) {
-                emptySet()
-            } else {
-                allowedChannelsRaw
-                    .split(',')
-                    .map { it.trim() }
-                    .filter { it.isNotBlank() }
-                    .mapNotNull { runCatching { Snowflake(it) }.getOrNull() }
-                    .toSet()
-            }
+            context.env
+                .csv("CHATTER_ALLOWED_CHANNELS")
+                .map { rawId ->
+                    val idValue =
+                        rawId.toULongOrNull()
+                            ?: throw ConfigValidationException(
+                                "Invalid configuration for CHATTER_ALLOWED_CHANNELS: " +
+                                    "expected comma-separated Discord Snowflake IDs, but got '$rawId'",
+                            )
+                    Snowflake(idValue)
+                }.toSet()
 
-        val cooldownSeconds =
-            context.config<Long>("CHATTER_COOLDOWN_SECONDS")
-                ?: context.config<Int>("CHATTER_COOLDOWN_SECONDS")?.toLong()
-                ?: context.config<String>("CHATTER_COOLDOWN_SECONDS")?.toLongOrNull()
-                ?: context.config<Long>("chatter.cooldownSeconds")
-                ?: context.config<Int>("chatter.cooldownSeconds")?.toLong()
-                ?: context.config<String>("chatter.cooldownSeconds")?.toLongOrNull()
-                ?: 5L
+        val cooldownSeconds = context.env.long("CHATTER_COOLDOWN_SECONDS", 5L, 0L..Long.MAX_VALUE)
         val cooldownDurationMs = cooldownSeconds * 1000L
 
-        val youtubeApiKey =
-            context.config<String>("YOUTUBE_API_KEY")?.takeIf { it.isNotBlank() }
-                ?: context.config<String>("youtube.apiKey")?.takeIf { it.isNotBlank() }
-                ?: context.config<String>("youtube.api_key")?.takeIf { it.isNotBlank() }
+        val youtubeApiKey = context.env.string("YOUTUBE_API_KEY")
 
         val imagesLimit =
-            context.config<Int>("SUMMARY_MAX_IMAGES")?.takeIf { it > 0 }
-                ?: context.config<String>("SUMMARY_MAX_IMAGES")?.toIntOrNull()?.takeIf { it > 0 }
-                ?: context.config<Int>("summary.maxImages")?.takeIf { it > 0 }
-                ?: context.config<String>("summary.maxImages")?.toIntOrNull()?.takeIf { it > 0 }
-                ?: ChatterContextCollector.DEFAULT_MAX_IMAGES
+            context.env.int(
+                "SUMMARY_MAX_IMAGES",
+                ChatterContextCollector.DEFAULT_MAX_IMAGES,
+                1..Int.MAX_VALUE,
+            )
         this.maxImages = imagesLimit
 
         val traceRecorder = context.aiTraceRecorder
@@ -177,8 +157,8 @@ class ChatterPlugin(
                 )
         this.decisionClient = client
 
-        val chatterConfig = ChatterConfig.fromPluginContext(context)
-        val memoryConfig = ChatterMemoryConfig.fromPluginContext(context)
+        val chatterConfig = ChatterConfig.from(context.env)
+        val memoryConfig = ChatterMemoryConfig.from(context.env)
         val initializedStore =
             if (memoryConfig.enabled) {
                 runCatching {

@@ -345,8 +345,8 @@ class ChatterGeneratorTest {
             val noToolsGen =
                 ChatterGenerator(
                     config =
-                        ChatterConfig.fromEnv(
-                            mapOf(
+                        ChatterConfig.from(
+                            luna.config.EnvReader.of(
                                 "GEMINI_API_KEY" to "valid-key",
                                 "GEMINI_SEARCH_GROUNDING_ENABLED" to "false",
                                 "GEMINI_URL_CONTEXT_ENABLED" to "false",
