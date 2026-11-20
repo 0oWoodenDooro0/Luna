@@ -61,6 +61,7 @@ data class ChatMessage(
  * @property guildId Optional Discord guild Snowflake ID for guild-isolated `Long-Term Memory` retrieval.
  * @property channelId Optional Discord channel Snowflake ID for channel-scoped `Long-Term Memory` retrieval.
  * @property authorId Optional triggering author Snowflake ID for default `target_user_id` in `scope="both"`.
+ * @property recentReactions Optional list of recently delivered reaction emojis in the target channel for reaction diversity.
  */
 data class ChatterInput(
     val transcript: String,
@@ -77,4 +78,5 @@ data class ChatterInput(
     val guildId: String? = null,
     val channelId: String? = null,
     val authorId: String? = null,
+    val recentReactions: List<String> = emptyList(),
 )

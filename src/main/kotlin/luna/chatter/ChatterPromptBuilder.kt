@@ -21,6 +21,7 @@ object ChatterPromptBuilder {
     // plus Interactions thought overhead; 16 tokens truncated custom emojis mid-ID with status=incomplete.
     const val REACTION_MAX_OUTPUT_TOKENS: Int = 128
     const val MAX_PROMPT_GUILD_EMOJIS: Int = 50
+    const val MAX_REPLY_PROMPT_GUILD_EMOJIS: Int = 15
     const val MAX_REPLY_SEGMENTS: Int = 3
     const val TRUNCATION_ELLIPSIS: String = "..."
 
@@ -29,8 +30,10 @@ object ChatterPromptBuilder {
             "請務必遵守以下所有對話原則：\n" +
             "1. 角色定位：你是 Discord 社群成員，不是客服或制式 AI 助手。以自然、隨性、平常群友打字聊天的口吻發言。\n" +
             "2. 表情符號規範：嚴格禁止使用任何標準 Unicode emoji 或顏文字（包含 😂、👍、XD、Orz、(｡･ω･｡) 等一律禁止）。" +
-            "僅當對話提示中另有提供伺服器自訂表情清單時，才可依語境自然選用並原封不動貼上完整標記（<:name:id> 或 <a:name:id>），" +
-            "切勿過度堆疊，也絕對禁止自行編造或修改表情名稱與數字 ID；若未提供清單則不可使用任何表情符號。\n" +
+            "預設一律只用純文字回覆；僅當對話提示中另有提供伺服器自訂表情清單，且其中某個表情的語意與當下回覆高度貼合、能明顯加分時，" +
+            "才可偶爾在句中或句尾自然使用最多 1 個完整標記（<:name:id> 或 <a:name:id>）。" +
+            "大多數回覆不需要加任何表情，切勿為了結尾裝飾而單獨換行放表情，也不要因為前面對話剛用過就跟著重複複製；" +
+            "絕對禁止自行編造或修改表情名稱與數字 ID，若未提供清單則不可使用任何表情符號。\n" +
             "3. 不使用標點符號與單一換行斷句：盡量不使用標點符號（不加逗號、句號、驚嘆號），需要斷句、換口氣或拆成多段短想法時，一律使用單一換行（\\n）分隔到不同行，不要用空格隔開句子，也不要留空行。\n" +
             "4. 極簡口語化：語句要極簡、口語化，不要有書面語、長句鋪陳或小說般的形容修辭，用字精簡自然，就像真正的 Discord 群友平常打字閒聊一樣隨性。\n" +
             "5. 一次講一句重點：通常一次只講一句重點，最多兩到三句極短句（每段想法各佔一行），嚴禁長篇大論、說教或分析條列。\n" +
@@ -106,9 +109,9 @@ object ChatterPromptBuilder {
         val sb = StringBuilder()
         sb.appendTranscriptAndSupplemental(input)
 
-        val boundedEmojis = input.guildEmojis.take(MAX_PROMPT_GUILD_EMOJIS)
+        val boundedEmojis = input.guildEmojis.take(MAX_REPLY_PROMPT_GUILD_EMOJIS)
         if (boundedEmojis.isNotEmpty()) {
-            sb.append("\n\n可用的伺服器自訂表情清單（僅可自然選用以下完整標記，切勿自行編造 ID）：\n")
+            sb.append("\n\n可用的伺服器自訂表情清單（預設只用純文字回覆，僅在語意高度貼合時偶爾選用最多一個完整標記，勿單獨換行放結尾，切勿自行編造 ID）：\n")
             sb.append(formatGuildEmojiPool(boundedEmojis))
         }
 
@@ -130,7 +133,7 @@ object ChatterPromptBuilder {
             }
         val emojiDirective =
             if (boundedEmojis.isNotEmpty()) {
-                "嚴禁使用任何標準 Unicode emoji 或顏文字（可自然選用上方提供的伺服器自訂表情標記，切勿自行編造 ID）"
+                "嚴禁使用任何標準 Unicode emoji 或顏文字（預設僅用純文字回覆；僅在語意高度貼合時偶爾選用最多 1 個上方伺服器自訂表情標記，勿單獨換行放在最後，切勿自行編造 ID）"
             } else {
                 "嚴禁使用任何 Unicode emoji、自訂表情或顏文字"
             }
@@ -190,20 +193,33 @@ object ChatterPromptBuilder {
     fun buildReactionSystemInstruction(
         personaState: PersonaState? = null,
         guildEmojis: List<GuildCustomEmoji> = emptyList(),
+        recentReactions: List<String> = emptyList(),
     ): String {
         val sb = StringBuilder()
         sb.append(
-            "你叫 Luna，是這個 Discord 社群伺服器的一員。現在你決定不打字回覆，而是用一個 Discord 表情符號（Reaction Emoji）悄悄對最新訊息表態。\n\n" +
+            "你叫 Luna，是這個 Discord 社群伺服器的一員。現在你決定不打字回覆，而是用一個 Discord 表情符號（Reaction Emoji）對最新訊息表態。\n\n" +
                 "請嚴格遵守以下規則：\n" +
-                "1. 只能輸出「剛好一個」表情符號，不要加任何文字、說明、標點符號、空白、引號或程式碼區塊。\n" +
-                "2. 可以選擇一個標準 Unicode emoji（例如 👍、😂、👀、❤️、🔥），或直接從下方提供的伺服器自訂表情清單中挑選一個並原封不動輸出完整標記。\n" +
-                "3. 絕對不可同時輸出多個表情符號，也絕對不可自己編造或修改自訂表情名稱與數字 ID。",
+                "1. 只能輸出「剛好一個」表情符號，或在不適合／沒必要表態時直接輸出 NONE；不要加任何多餘文字、說明、標點符號、空白、引號或程式碼區塊。\n" +
+                "2. 依照最新訊息真實的情緒與語氣（例如好笑、無言、震驚、認同、同情、佩服、慶祝等）挑選最自然貼切的標準 Unicode emoji，或直接從下方提供的伺服器自訂表情清單中挑選一個並原封不動輸出完整標記；若伺服器表情清單中有更貼切語意者可優先選用。\n" +
+                "3. 如果最新訊息平淡、缺乏明確情緒點，或沒有真正貼切的選擇，請直接輸出 NONE，不要硬擠一個勉強湊數的表情。\n" +
+                "4. 絕對不可同時輸出多個表情符號，也絕對不可自己編造或修改自訂表情名稱與數字 ID。",
         )
 
         val boundedEmojis = guildEmojis.take(MAX_PROMPT_GUILD_EMOJIS)
         if (boundedEmojis.isNotEmpty()) {
             sb.append("\n\n可用的伺服器自訂表情清單（若選用請原封不動輸出其中一個標記）：\n")
             sb.append(formatGuildEmojiPool(boundedEmojis))
+        }
+
+        val cleanRecentReactions =
+            recentReactions
+                .map { it.trim() }
+                .filter { it.isNotEmpty() }
+        if (cleanRecentReactions.isNotEmpty()) {
+            sb.append(
+                "\n\n近期在這個頻道已使用過的 Reaction（除非真的最貼切，否則請避免連續重複使用相同表情）：\n" +
+                    cleanRecentReactions.joinToString(" "),
+            )
         }
 
         if (personaState != null &&
@@ -235,7 +251,7 @@ object ChatterPromptBuilder {
 
         sb.append(
             "\n\n請為最新這則訊息挑選一個最自然貼切的 Discord Reaction Emoji$imageCue。" +
-                "只輸出那唯一一個 Unicode emoji 或伺服器自訂表情標記，不要任何其他文字：",
+                "只輸出那唯一一個 Unicode emoji 或伺服器自訂表情標記；若無明確情緒點或不適合表態則只輸出 NONE，不要任何其他文字：",
         )
         return sb.toString().trim()
     }
@@ -304,7 +320,12 @@ object ChatterPromptBuilder {
         return GeminiInteractionRequest(
             model = model.trim().removePrefix("models/"),
             input = inputs,
-            systemInstruction = buildReactionSystemInstruction(input.personaState, input.guildEmojis),
+            systemInstruction =
+                buildReactionSystemInstruction(
+                    personaState = input.personaState,
+                    guildEmojis = input.guildEmojis,
+                    recentReactions = input.recentReactions,
+                ),
             tools = null,
             generationConfig = GeminiInteractionGenerationConfig(maxOutputTokens = REACTION_MAX_OUTPUT_TOKENS),
             background = false,

@@ -10,6 +10,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.toList
+import luna.chatter.emoji.BoundedChannelEmojiCadenceTracker
 import luna.chatter.emoji.ChatterEmojiCatalog
 import luna.chatter.emoji.CustomEmojiVisionResolver
 import luna.chatter.emoji.DefaultChatterEmojiCatalog
@@ -81,6 +82,9 @@ class ChatterPlugin(
         internal set
 
     var emojiCatalog: ChatterEmojiCatalog? = null
+        internal set
+
+    var emojiCadenceTracker: BoundedChannelEmojiCadenceTracker? = null
         internal set
 
     var emojiVisionResolver: CustomEmojiVisionResolver? = null
@@ -288,6 +292,9 @@ class ChatterPlugin(
             }.getOrElse { NoOpChatterEmojiCatalog }
         this.emojiCatalog = catalog
 
+        val cadenceTracker = BoundedChannelEmojiCadenceTracker()
+        this.emojiCadenceTracker = cadenceTracker
+
         val chatterService =
             ChatterService(
                 filter = noiseFilter,
@@ -303,6 +310,7 @@ class ChatterPlugin(
                 personaStateProvider = drift,
                 guildEmojisProvider = ChatterService.defaultGuildEmojisProvider,
                 emojiCatalog = catalog,
+                emojiCadenceTracker = cadenceTracker,
             )
         val finalService = serviceFactory?.invoke(chatterService) ?: chatterService
         this.service = finalService

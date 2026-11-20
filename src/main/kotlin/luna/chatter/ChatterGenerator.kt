@@ -441,6 +441,11 @@ open class ChatterGenerator(
                     )
                     return null
                 }
+                if (ChatterReactionEmojiValidator.isExplicitNoReaction(result.text)) {
+                    logger.debug("ChatterGenerator reaction selection explicitly declined to react (NONE)")
+                    session?.skip(reason = "Reaction selection model declined to react (NONE)")
+                    return null
+                }
                 val normalized = ChatterReactionEmojiValidator.validateAndNormalize(result.text, input.guildEmojis)
                 if (normalized == null) {
                     logger.warn(

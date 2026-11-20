@@ -8,6 +8,7 @@ import luna.core.ai.EmojiSanitizer
  * or verified Discord guild custom emoji (`<:name:id>` / `<a:name:id>`).
  */
 object ChatterReactionEmojiValidator {
+    const val NO_REACTION_SENTINEL: String = "NONE"
     private const val VARIATION_SELECTOR_16 = 0xFE0F
     private const val VARIATION_SELECTOR_15 = 0xFE0E
     private const val ZERO_WIDTH_JOINER = 0x200D
@@ -16,6 +17,11 @@ object ChatterReactionEmojiValidator {
     private const val TAG_CANCEL = 0xE007F
 
     private val CUSTOM_EMOJI_REGEX = Regex("""^<(a?):([A-Za-z0-9_~-]+):(\d+)>$""")
+
+    /**
+     * Returns `true` when the reaction selection model explicitly declined to react using [NO_REACTION_SENTINEL].
+     */
+    fun isExplicitNoReaction(raw: String?): Boolean = raw?.trim()?.equals(NO_REACTION_SENTINEL, ignoreCase = true) == true
 
     /**
      * Validates [raw] and returns either the trimmed single Unicode emoji or the canonical verified

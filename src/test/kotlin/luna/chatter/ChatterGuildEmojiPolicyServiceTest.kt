@@ -165,9 +165,9 @@ class ChatterGuildEmojiPolicyServiceTest {
                     .orEmpty()
             assertContains(promptText, "<:emoji_1:1001>")
             assertContains(promptText, "<a:emoji_2:1002>")
-            assertContains(promptText, "<a:emoji_50:1050>")
-            assertFalse(promptText.contains("broken_emoji"))
-            assertFalse(promptText.contains("emoji_51"), "Guild emojis in prompt must be bounded to 50")
+            assertContains(promptText, "<:emoji_15:1015>")
+            assertFalse(promptText.contains("broken_emoji"), "Unavailable guild emojis must be excluded from reply prompt")
+            assertFalse(promptText.contains("emoji_16"), "Guild emojis in reply prompt must be bounded to 15")
         }
 
     @Test

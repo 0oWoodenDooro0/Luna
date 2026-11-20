@@ -73,9 +73,14 @@ class ChatterGuildEmojiPolicyTest {
             )
         assertContains(withEmojisPrompt, "<:emoji_1:1001>")
         assertContains(withEmojisPrompt, "<a:emoji_2:1002>")
-        assertContains(withEmojisPrompt, "<a:emoji_50:1050>")
-        assertFalse(withEmojisPrompt.contains("emoji_51"), "Prompt guild emojis must be capped at MAX_PROMPT_GUILD_EMOJIS")
+        assertContains(withEmojisPrompt, "<:emoji_15:1015>")
+        assertFalse(withEmojisPrompt.contains("emoji_16"), "Prompt guild emojis for replies must be capped at MAX_REPLY_PROMPT_GUILD_EMOJIS")
         assertContains(withEmojisPrompt, "Unicode")
+
+        val reactionSys = ChatterPromptBuilder.buildReactionSystemInstruction(guildEmojis = sampleEmojis)
+        assertContains(reactionSys, "<:emoji_1:1001>")
+        assertContains(reactionSys, "<a:emoji_50:1050>")
+        assertFalse(reactionSys.contains("emoji_51"), "Reaction guild emojis must be capped at MAX_PROMPT_GUILD_EMOJIS")
 
         val withoutEmojisPrompt =
             ChatterPromptBuilder.buildUserPrompt(
