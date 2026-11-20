@@ -886,7 +886,7 @@ open class ChatterService(
 
     companion object {
         const val DEFAULT_DECISION_MESSAGE_COUNT = 15
-        const val DEFAULT_HISTORY_MESSAGE_COUNT = 15
+        const val DEFAULT_HISTORY_MESSAGE_COUNT = ChatterContextCollector.DEFAULT_HISTORY_MESSAGE_COUNT
         const val DEFAULT_AFTER_MESSAGES_LIMIT = 20
         const val REPLY_THREADING_THRESHOLD = 2
         const val MIN_READING_DELAY_MS = 800L

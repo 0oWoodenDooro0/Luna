@@ -48,7 +48,7 @@ class LunaHost(
     val aiTraceRecorder: AiTraceRecorder
     val errorNotifyConfig: ErrorNotifyConfig
     val ownerErrorNotifier: OwnerErrorNotifier
-    val database: Database = customDatabase ?: initDatabase()
+    val database: Database
 
     var server: EmbeddedServer<NettyApplicationEngine, NettyApplicationEngine.Configuration>? = null
         private set
@@ -88,6 +88,12 @@ class LunaHost(
                 secretConfig = config,
                 dmSender = ownerErrorDmSender,
             )
+
+        val configuredVecPath =
+            config["SQLITE_VEC_EXTENSION_PATH"]?.toString()?.trim()?.takeIf { it.isNotBlank() }
+                ?: config["sqlite.vecExtensionPath"]?.toString()?.trim()?.takeIf { it.isNotBlank() }
+                ?: DEFAULT_SQLITE_VEC_EXTENSION_PATH
+        database = customDatabase ?: initDatabase(vecExtensionPath = configuredVecPath)
 
         // Temporarily attach appender during init audit so pre-ReadyEvent [CONFIG_DRIFT] alerts
         // are captured and buffered without leaving a dangling appender if start() is not called.
