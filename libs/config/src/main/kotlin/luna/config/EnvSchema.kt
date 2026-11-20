@@ -56,34 +56,6 @@ object EnvSchemaAuditor {
             "CLASSPATH",
         )
 
-    val CORE_KNOWN_ALIASES: Map<String, String> =
-        mapOf(
-            "DISCORD_APP_ID" to "DISCORD_CLIENT_ID",
-            "clientId" to "DISCORD_CLIENT_ID",
-            "luna.clientId" to "DISCORD_CLIENT_ID",
-            "botToken" to "DISCORD_TOKEN",
-            "luna.botToken" to "DISCORD_TOKEN",
-            "clientSecret" to "DISCORD_CLIENT_SECRET",
-            "luna.clientSecret" to "DISCORD_CLIENT_SECRET",
-            "port" to "PORT",
-            "luna.port" to "PORT",
-            "MCP_PORT" to "PORT",
-            "mcp.port" to "MCP_PORT",
-            "baseUrl" to "BASE_URL",
-            "luna.baseUrl" to "BASE_URL",
-            "curtly.baseUrl" to "BASE_URL",
-            "curtly.base_url" to "BASE_URL",
-            "CURTLY_BASE_URL" to "BASE_URL",
-            "PLUGINS_CURTLY_BASE_URL" to "BASE_URL",
-            "redirectUri" to "DISCORD_REDIRECT_URI",
-            "REDIRECT_URI" to "DISCORD_REDIRECT_URI",
-            "luna.redirectUri" to "DISCORD_REDIRECT_URI",
-            "dbPath" to "MCP_DB_PATH",
-            "mcp.dbPath" to "MCP_DB_PATH",
-            "publicBaseUrl" to "MCP_PUBLIC_BASE_URL",
-            "mcp.publicBaseUrl" to "MCP_PUBLIC_BASE_URL",
-        )
-
     fun parseDefaultValue(raw: String): String? {
         val trimmed = raw.trim()
         if (trimmed.isEmpty() || trimmed.startsWith("空值")) return null
@@ -228,7 +200,6 @@ object EnvSchemaAuditor {
             EnvVarSchema("AI_TRACE_DIR", isRequired = false, defaultValue = "data/logs/ai", section = 3),
             EnvVarSchema("AI_TRACE_MAX_DAYS", isRequired = false, defaultValue = "14", section = 3),
             EnvVarSchema("AI_TRACE_MAX_TOTAL_MB", isRequired = false, defaultValue = "200", section = 3),
-            EnvVarSchema("PLUGINS_DISABLED", isRequired = false, section = 4),
             EnvVarSchema("PLUGINS_CURTLY_ENABLED", isRequired = false, defaultValue = "true", section = 4),
             EnvVarSchema("PLUGINS_MCP_ENABLED", isRequired = false, defaultValue = "true", section = 4),
             EnvVarSchema("PLUGINS_SOCIAL_PREVIEW_ENABLED", isRequired = false, defaultValue = "true", section = 4),
@@ -265,26 +236,10 @@ object EnvSchemaAuditor {
     fun isRecognizedKey(
         key: String,
         schemaKeys: Set<String>,
-        candidateAliases: Map<String, List<String>> = emptyMap(),
     ): Boolean {
         if (key in schemaKeys) return true
-        if (key in CORE_KNOWN_ALIASES) return true
         if (key in STANDARD_SYSTEM_KEYS) return true
         if (key.startsWith("PLUGINS_") && key.endsWith("_ENABLED")) return true
-        if (key.startsWith("plugins.") && key.endsWith(".enabled")) return true
-        if (key.startsWith("curtly.") || key.startsWith("CURTLY_")) return true
-        if (key.startsWith("summarizer.") || key.startsWith("summary.") || key.startsWith("SUMMARY_")) return true
-        if (key.startsWith("chatter.") || key.startsWith("CHATTER_")) return true
-        if (key.startsWith("gemini.") || key.startsWith("GEMINI_")) return true
-        if (key.startsWith("youtube.") || key.startsWith("YOUTUBE_")) return true
-        if (key.startsWith("undercover.") || key.startsWith("UNDERCOVER_")) return true
-        if (key.startsWith("mcp.") || key.startsWith("MCP_")) return true
-        if (key.startsWith("ai.trace.") || key.startsWith("AI_TRACE_")) return true
-
-        val candidates = candidateAliases[key]
-        if (candidates != null && candidates.any { it in schemaKeys }) {
-            return true
-        }
 
         return false
     }
@@ -294,56 +249,7 @@ object EnvSchemaAuditor {
         config: Map<String, Any?>,
     ): Any? {
         val exact = config[key]
-        if (exact != null && exact.toString().isNotBlank()) return exact
-
-        val aliases =
-            when (key) {
-                "DISCORD_TOKEN" -> listOf("botToken", "luna.botToken")
-                "DISCORD_CLIENT_ID" -> listOf("DISCORD_APP_ID", "clientId", "luna.clientId")
-                "DISCORD_CLIENT_SECRET" -> listOf("clientSecret", "luna.clientSecret")
-                "PORT" -> listOf("port", "luna.port", "MCP_PORT", "mcp.port")
-                "BASE_URL" -> listOf("baseUrl", "curtly.baseUrl", "curtly.base_url", "CURTLY_BASE_URL", "PLUGINS_CURTLY_BASE_URL", "luna.baseUrl")
-                "DISCORD_REDIRECT_URI" -> listOf("redirectUri", "REDIRECT_URI", "luna.redirectUri")
-                "SUMMARY_EMOJI" -> listOf("summarizer.emoji", "summary.emoji")
-                "SUMMARY_MAX_HISTORY_MESSAGES" -> listOf("summary.maxHistoryMessages", "summarizer.maxHistoryMessages")
-                "SUMMARY_INACTIVITY_GAP_MINUTES" -> listOf("summary.inactivityGapMinutes", "summarizer.inactivityGapMinutes")
-                "SUMMARY_MAX_CHARACTER_BUDGET" -> listOf("summary.maxCharacterBudget", "summarizer.maxCharacterBudget")
-                "SUMMARY_MAX_LOOKBACK_MESSAGES" -> listOf("summary.maxLookbackMessages", "summarizer.maxLookbackMessages")
-                "SUMMARY_MAX_IMAGES" -> listOf("summary.maxImages", "summarizer.maxImages")
-                "CHATTER_DEBOUNCE_SECONDS" -> listOf("chatter.debounceSeconds", "chatter.debounce_seconds")
-                "CHATTER_MENTION_DEBOUNCE_SECONDS" -> listOf("chatter.mentionDebounceSeconds", "chatter.mention_debounce_seconds")
-                "CHATTER_DEBOUNCE_MAX_SECONDS" -> listOf("chatter.debounceMaxSeconds", "chatter.debounce_max_seconds")
-                "CHATTER_MAX_INTERRUPTS" -> listOf("chatter.maxInterrupts", "chatter.max_interrupts")
-                "CHATTER_TIMEZONE" -> listOf("chatter.timezone", "chatter.timeZone", "chatter.time_zone")
-                "CHATTER_DRIFT_ENABLED" -> listOf("chatter.driftEnabled", "chatter.drift_enabled")
-                "CHATTER_REACTION_THRESHOLD" -> listOf("chatter.reactionThreshold", "chatter.reaction_threshold")
-                "GEMINI_API_KEY" -> listOf("gemini.apiKey", "gemini.api_key")
-                "GEMINI_MODEL" -> listOf("gemini.model")
-                "GEMINI_BASE_URL" -> listOf("gemini.baseUrl", "gemini.base_url")
-                "YOUTUBE_API_KEY" -> listOf("youtube.apiKey", "youtube.api_key")
-                "MCP_PORT" -> listOf("PORT", "port", "mcp.port")
-                "MCP_DB_PATH" -> listOf("dbPath", "mcp.dbPath")
-                "MCP_PUBLIC_BASE_URL" -> listOf("publicBaseUrl", "mcp.publicBaseUrl")
-                "AI_TRACE_ENABLED" -> listOf("ai.trace.enabled")
-                "AI_TRACE_DIR" -> listOf("ai.trace.dir")
-                "AI_TRACE_MAX_DAYS" -> listOf("ai.trace.maxDays", "ai.trace.max_days")
-                "AI_TRACE_MAX_TOTAL_MB" -> listOf("ai.trace.maxTotalMb", "ai.trace.max_total_mb")
-                else -> emptyList()
-            }
-
-        for (alias in aliases) {
-            val aliasVal = config[alias]
-            if (aliasVal != null && aliasVal.toString().isNotBlank()) return aliasVal
-        }
-
-        for ((alias, canonical) in CORE_KNOWN_ALIASES) {
-            if (canonical == key) {
-                val aliasVal = config[alias]
-                if (aliasVal != null && aliasVal.toString().isNotBlank()) return aliasVal
-            }
-        }
-
-        return null
+        return if (exact != null && exact.toString().isNotBlank()) exact else null
     }
 
     fun auditDrift(
@@ -352,7 +258,6 @@ object EnvSchemaAuditor {
         allSchemaKeys: Set<String> = schema.map { it.name }.toSet(),
         requiredKeys: Set<String>? = null,
         fallbackDefaults: Map<String, Any?> = emptyMap(),
-        candidateAliases: Map<String, List<String>> = emptyMap(),
     ): DriftAuditResult {
         val effectiveRequired = requiredKeys ?: schema.filter { it.isRequired }.map { it.name }.toSet()
         val missingRequired = mutableListOf<String>()
@@ -377,7 +282,7 @@ object EnvSchemaAuditor {
         val unknownKeys = mutableListOf<String>()
         for ((key, value) in config) {
             if (value is Map<*, *>) continue
-            if (!isRecognizedKey(key, allSchemaKeys, candidateAliases)) {
+            if (!isRecognizedKey(key, allSchemaKeys)) {
                 unknownKeys.add(key)
             }
         }

@@ -20,7 +20,7 @@ class TestLunaPlugin : LunaPlugin {
 
     override suspend fun initialize(context: PluginContext) {
         initialized = true
-        recordedConfigValue = context.config<String>("test.greeting")
+        recordedConfigValue = context.env.string("TEST_GREETING")
 
         // Exercise database capability
         transaction(context.database) {

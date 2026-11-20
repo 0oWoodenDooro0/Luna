@@ -1,24 +1,13 @@
 package luna.core
 
 import luna.config.ConfigFinder
+import luna.config.ConfigValidationException
 import luna.config.DotenvParser
+import luna.config.EnvReader
 import luna.config.EnvSchemaAuditor
-import luna.config.PlaceholderResolver
 import luna.config.SecretMasker
-import luna.plugin.DefaultPluginContext
-import org.yaml.snakeyaml.Yaml
-import java.io.ByteArrayInputStream
 import java.io.File
 import java.io.InputStream
-
-/**
- * Dedicated exception thrown when Luna core configuration fails validation at startup.
- * Extends [IllegalStateException] for backwards compatibility and standard runtime contract.
- */
-class ConfigValidationException(
-    message: String,
-    cause: Throwable? = null,
-) : IllegalStateException(message, cause)
 
 internal fun failValidation(message: String): Nothing {
     JsonLogger.error(
@@ -53,7 +42,7 @@ data class LunaCoreConfig(
             failValidation("Missing required configuration: DISCORD_TOKEN must not be blank")
         }
         if (clientId.isBlank()) {
-            failValidation("Missing required configuration: DISCORD_CLIENT_ID (or DISCORD_APP_ID) must not be blank")
+            failValidation("Missing required configuration: DISCORD_CLIENT_ID must not be blank")
         }
         if (clientSecret.isBlank()) {
             failValidation("Missing required configuration: DISCORD_CLIENT_SECRET must not be blank")
@@ -77,91 +66,35 @@ data class LunaCoreConfig(
             return "$appBase/api/auth/discord/callback"
         }
 
-        fun fromMap(config: Map<String, Any?>): LunaCoreConfig {
-            val token =
-                (config["DISCORD_TOKEN"] ?: config["botToken"] ?: config["luna.botToken"])?.toString()
-            if (token.isNullOrBlank()) {
-                failValidation("Missing required configuration: DISCORD_TOKEN must not be blank")
+        fun from(env: EnvReader): LunaCoreConfig {
+            try {
+                val token = env.requiredString("DISCORD_TOKEN")
+                val clientId = env.requiredString("DISCORD_CLIENT_ID")
+                val clientSecret = env.requiredString("DISCORD_CLIENT_SECRET")
+                val port = env.port("PORT", DEFAULT_PORT)
+                val baseUrl = env.string("BASE_URL", DEFAULT_BASE_URL)
+                val redirectUri = env.string("DISCORD_REDIRECT_URI") ?: defaultRedirectUri(baseUrl)
+
+                return LunaCoreConfig(
+                    botToken = token,
+                    port = port,
+                    baseUrl = baseUrl,
+                    clientId = clientId,
+                    clientSecret = clientSecret,
+                    redirectUri = redirectUri,
+                )
+            } catch (e: ConfigValidationException) {
+                failValidation(e.message ?: "Invalid Luna core configuration")
             }
-
-            val clientId =
-                (
-                    config["DISCORD_CLIENT_ID"]
-                        ?: config["DISCORD_APP_ID"]
-                        ?: config["clientId"]
-                        ?: config["luna.clientId"]
-                )?.toString()
-            if (clientId.isNullOrBlank()) {
-                failValidation("Missing required configuration: DISCORD_CLIENT_ID (or DISCORD_APP_ID) must not be blank")
-            }
-
-            val clientSecret =
-                (
-                    config["DISCORD_CLIENT_SECRET"]
-                        ?: config["clientSecret"]
-                        ?: config["luna.clientSecret"]
-                )?.toString()
-            if (clientSecret.isNullOrBlank()) {
-                failValidation("Missing required configuration: DISCORD_CLIENT_SECRET must not be blank")
-            }
-
-            val rawPort = config["PORT"] ?: config["port"] ?: config["luna.port"]
-            val port =
-                when (rawPort) {
-                    null -> {
-                        DEFAULT_PORT
-                    }
-
-                    is Number -> {
-                        rawPort.toInt()
-                    }
-
-                    is String -> {
-                        if (rawPort.isBlank()) {
-                            DEFAULT_PORT
-                        } else {
-                            rawPort.trim().toIntOrNull()
-                                ?: failValidation("Invalid configuration: PORT must be an integer, but got '$rawPort'")
-                        }
-                    }
-
-                    else -> {
-                        rawPort.toString().trim().toIntOrNull()
-                            ?: failValidation("Invalid configuration: PORT must be an integer, but got '$rawPort'")
-                    }
-                }
-            if (port !in 1..65535) {
-                failValidation("Invalid configuration: PORT must be between 1 and 65535, but got: $port")
-            }
-
-            val rawBaseUrl =
-                (config["BASE_URL"] ?: config["baseUrl"] ?: config["curtly.baseUrl"] ?: config["luna.baseUrl"])?.toString()
-            val baseUrl = if (rawBaseUrl.isNullOrBlank()) DEFAULT_BASE_URL else rawBaseUrl
-
-            val rawRedirect =
-                (
-                    config["DISCORD_REDIRECT_URI"]
-                        ?: config["redirectUri"]
-                        ?: config["REDIRECT_URI"]
-                        ?: config["luna.redirectUri"]
-                )?.toString()
-            val redirectUri = if (rawRedirect.isNullOrBlank()) defaultRedirectUri(baseUrl) else rawRedirect
-
-            return LunaCoreConfig(
-                botToken = token,
-                port = port,
-                baseUrl = baseUrl,
-                clientId = clientId,
-                clientSecret = clientSecret,
-                redirectUri = redirectUri,
-            )
         }
+
+        fun fromMap(config: Map<String, Any?>): LunaCoreConfig = from(EnvReader.of(ConfigLoader.toStringMap(config)))
     }
 }
 
 /**
- * Configuration loader implementing layered precedence:
- * application.yml placeholders > System.getenv() > .env file key-values.
+ * Configuration loader implementing two-layer precedence:
+ * System.getenv() > .env file key-values.
  * Parsing, masking, and schema audit are delegated to [luna.config].
  */
 object ConfigLoader {
@@ -206,112 +139,25 @@ object ConfigLoader {
 
     fun findDefaultEnvFile(baseDir: File = File(".")): File? = ConfigFinder.findDefaultEnvFile(baseDir)
 
-    /**
-     * Resolves `${VAR:default}` or `${?VAR}` placeholders in string values against the current config and system environment.
-     */
-    fun resolvePlaceholders(
-        raw: String,
-        config: Map<String, Any?>,
-    ): String = PlaceholderResolver.resolve(raw, config)
+    internal fun toStringMap(config: Map<String, Any?>): Map<String, String> =
+        config.entries.mapNotNull { (key, value) -> value?.toString()?.let { key to it } }.toMap()
 
     /**
-     * Recursively flattens nested YAML maps and resolves placeholders against accumulated config.
-     */
-    fun flattenYaml(
-        prefix: String,
-        map: Map<*, *>,
-        target: MutableMap<String, Any?>,
-    ) {
-        for ((key, value) in map) {
-            val fullKey = if (prefix.isEmpty()) key.toString() else "$prefix.$key"
-            when (value) {
-                is Map<*, *> -> {
-                    target[fullKey] = value
-                    flattenYaml(fullKey, value, target)
-                }
-
-                is String -> {
-                    val resolved = resolvePlaceholders(value, target)
-                    target[fullKey] = resolved
-                }
-
-                else -> {
-                    if (value != null) {
-                        target[fullKey] = value
-                    }
-                }
-            }
-        }
-    }
-
-    /**
-     * Loads configuration across three layers with strict precedence:
-     * application.yml placeholders > System.getenv() > .env file key-values.
+     * Loads configuration across two layers with strict precedence:
+     * System.getenv() > .env file key-values (plus optional overrides).
      */
     fun loadConfig(
         customConfig: Map<String, Any?>? = null,
         envFile: File? = findDefaultEnvFile() ?: File(".env"),
         systemEnv: Map<String, String> = System.getenv(),
-        yamlStreamProvider: (() -> InputStream?)? = null,
-    ): Map<String, Any?> {
-        val config = mutableMapOf<String, Any?>()
-
-        // 1. Ingest .env if present
-        if (envFile != null && envFile.exists() && envFile.isFile) {
-            try {
-                config.putAll(parseDotenv(envFile))
-            } catch (e: Exception) {
-                JsonLogger.error(
-                    layer = "CONFIG",
-                    component = "LunaHost",
-                    operation = "loadConfig",
-                    data = emptyMap<String, Any?>(),
-                    errorMessage = "Failed to parse .env: ${e.message}",
-                )
-            }
-        }
-
-        // 2. Ingest System.getenv()
-        config.putAll(systemEnv)
-
-        // 3. Ingest application.yml
-        val yamlStream: InputStream? =
-            if (yamlStreamProvider != null) {
-                yamlStreamProvider()
-            } else {
-                val yamlFile = File("application.yml")
-                if (yamlFile.exists()) {
-                    yamlFile.inputStream()
-                } else {
-                    Thread.currentThread().contextClassLoader.getResourceAsStream("application.yml")
-                }
-            }
-
-        yamlStream?.use { stream ->
-            try {
-                val yaml = Yaml()
-                val yamlMap = yaml.load<Map<String, Any?>>(stream)
-                if (yamlMap != null) {
-                    flattenYaml("", yamlMap, config)
-                }
-            } catch (e: Exception) {
-                JsonLogger.error(
-                    layer = "CONFIG",
-                    component = "LunaHost",
-                    operation = "loadConfig",
-                    data = emptyMap<String, Any?>(),
-                    errorMessage = "Failed to parse application.yml: ${e.message}",
-                )
-            }
-        }
-
-        // 4. Ingest customConfig overrides if specified
-        if (customConfig != null) {
-            config.putAll(customConfig)
-        }
-
-        return config
-    }
+    ): Map<String, Any?> =
+        EnvReader
+            .load(
+                envFile = envFile,
+                systemEnv = systemEnv,
+                overrides = customConfig?.let(::toStringMap),
+                auditDrift = false,
+            ).toMap()
 
     /**
      * In-memory source loader for deterministic unit testing of precedence layers.
@@ -319,7 +165,6 @@ object ConfigLoader {
     fun loadConfigFromSources(
         dotenvContent: String? = null,
         systemEnv: Map<String, String> = emptyMap(),
-        yamlContent: String? = null,
         customConfig: Map<String, Any?>? = null,
     ): Map<String, Any?> {
         val config = mutableMapOf<String, Any?>()
@@ -327,13 +172,6 @@ object ConfigLoader {
             config.putAll(parseDotenv(dotenvContent))
         }
         config.putAll(systemEnv)
-        if (yamlContent != null) {
-            val yaml = Yaml()
-            val yamlMap = yaml.load<Map<String, Any?>>(ByteArrayInputStream(yamlContent.toByteArray()))
-            if (yamlMap != null) {
-                flattenYaml("", yamlMap, config)
-            }
-        }
         if (customConfig != null) {
             config.putAll(customConfig)
         }
@@ -344,13 +182,12 @@ object ConfigLoader {
      * Loads and validates the core configuration, throwing [ConfigValidationException] if invalid.
      */
     fun loadCoreConfig(customConfig: Map<String, Any?>? = null): LunaCoreConfig {
-        val config = loadConfig(customConfig)
-        auditDrift(config)
-        return LunaCoreConfig.fromMap(config)
+        val env = EnvReader.load(overrides = customConfig?.let(::toStringMap), auditDrift = false)
+        auditDrift(env.toMap())
+        return LunaCoreConfig.from(env)
     }
 
     val STANDARD_SYSTEM_KEYS: Set<String> get() = EnvSchemaAuditor.STANDARD_SYSTEM_KEYS
-    val CORE_KNOWN_ALIASES: Map<String, String> get() = EnvSchemaAuditor.CORE_KNOWN_ALIASES
 
     fun parseDefaultValue(raw: String): String? = EnvSchemaAuditor.parseDefaultValue(raw)
 
@@ -364,12 +201,6 @@ object ConfigLoader {
         key: String,
         schemaKeys: Set<String>,
     ): Boolean = EnvSchemaAuditor.isRecognizedKey(key, schemaKeys)
-
-    fun isRecognizedKey(
-        key: String,
-        schemaKeys: Set<String>,
-        candidateAliases: Map<String, List<String>>,
-    ): Boolean = EnvSchemaAuditor.isRecognizedKey(key, schemaKeys, candidateAliases)
 
     fun resolveVariableValue(
         key: String,
@@ -403,36 +234,6 @@ object ConfigLoader {
                 "DISCORD_REDIRECT_URI" to LunaCoreConfig.defaultRedirectUri(LunaCoreConfig.DEFAULT_BASE_URL),
             )
 
-        val candidateAliases =
-            mapOf(
-                "DISCORD_APP_ID" to listOf("DISCORD_CLIENT_ID"),
-                "clientId" to listOf("DISCORD_CLIENT_ID"),
-                "luna.clientId" to listOf("DISCORD_CLIENT_ID"),
-                "botToken" to listOf("DISCORD_TOKEN"),
-                "luna.botToken" to listOf("DISCORD_TOKEN"),
-                "clientSecret" to listOf("DISCORD_CLIENT_SECRET"),
-                "luna.clientSecret" to listOf("DISCORD_CLIENT_SECRET"),
-                "port" to listOf("PORT"),
-                "luna.port" to listOf("PORT"),
-                "MCP_PORT" to listOf("PORT"),
-                "mcp.port" to listOf("PORT", "MCP_PORT"),
-                "baseUrl" to listOf("BASE_URL"),
-                "luna.baseUrl" to listOf("BASE_URL"),
-                "curtly.baseUrl" to listOf("BASE_URL"),
-                "curtly.base_url" to listOf("BASE_URL"),
-                "CURTLY_BASE_URL" to listOf("BASE_URL"),
-                "PLUGINS_CURTLY_BASE_URL" to listOf("BASE_URL"),
-                "redirectUri" to listOf("DISCORD_REDIRECT_URI"),
-                "REDIRECT_URI" to listOf("DISCORD_REDIRECT_URI"),
-                "luna.redirectUri" to listOf("DISCORD_REDIRECT_URI"),
-                "ai.trace.enabled" to listOf("AI_TRACE_ENABLED"),
-                "ai.trace.dir" to listOf("AI_TRACE_DIR"),
-                "ai.trace.maxDays" to listOf("AI_TRACE_MAX_DAYS"),
-                "ai.trace.max_days" to listOf("AI_TRACE_MAX_DAYS"),
-                "ai.trace.maxTotalMb" to listOf("AI_TRACE_MAX_TOTAL_MB"),
-                "ai.trace.max_total_mb" to listOf("AI_TRACE_MAX_TOTAL_MB"),
-            )
-
         val auditResult =
             EnvSchemaAuditor.auditDrift(
                 config = config,
@@ -440,7 +241,6 @@ object ConfigLoader {
                 allSchemaKeys = schemaKeys,
                 requiredKeys = requiredKeys,
                 fallbackDefaults = fallbackDefaults,
-                candidateAliases = candidateAliases,
             )
 
         if (auditResult.missingRequired.isNotEmpty()) {

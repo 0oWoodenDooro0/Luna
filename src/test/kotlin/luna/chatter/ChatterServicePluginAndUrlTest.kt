@@ -43,15 +43,17 @@ class ChatterServicePluginAndUrlTest {
             every { mockKord.coroutineContext } returns EmptyCoroutineContext
             every { mockKord.events } returns eventsFlow
 
-            val configMap =
-                mapOf(
-                    "GEMINI_API_KEY" to "gemini-secret-key-456",
-                    "CHATTER_DECISION_MODEL" to "gemini-decision-custom",
-                    "CHATTER_DECISION_THRESHOLD" to 0.85,
-                    "CHATTER_DECISION_TIMEOUT_SECONDS" to 15L,
-                    "CHATTER_ALLOWED_CHANNELS" to "111,222",
-                    "CHATTER_COOLDOWN_SECONDS" to 45L,
-                    "CHATTER_GEMINI_MODEL" to "gemini-3.5-flash-test",
+            val env =
+                luna.config.EnvReader.of(
+                    mapOf(
+                        "GEMINI_API_KEY" to "gemini-secret-key-456",
+                        "CHATTER_DECISION_MODEL" to "gemini-decision-custom",
+                        "CHATTER_DECISION_THRESHOLD" to "0.85",
+                        "CHATTER_DECISION_TIMEOUT_SECONDS" to "15",
+                        "CHATTER_ALLOWED_CHANNELS" to "111,222",
+                        "CHATTER_COOLDOWN_SECONDS" to "45",
+                        "CHATTER_GEMINI_MODEL" to "gemini-3.5-flash-test",
+                    ),
                 )
 
             val context =
@@ -59,7 +61,7 @@ class ChatterServicePluginAndUrlTest {
                     kord = mockKord,
                     routing = mockk(relaxed = true),
                     database = mockk(relaxed = true),
-                    configMap = configMap,
+                    env = env,
                 )
 
             val plugin = ChatterPlugin()
@@ -92,11 +94,13 @@ class ChatterServicePluginAndUrlTest {
                     kord = mockKord,
                     routing = mockk(relaxed = true),
                     database = mockk(relaxed = true),
-                    configMap =
-                        mapOf(
-                            "GEMINI_API_KEY" to "gemini-secret-key-456",
-                            "CHATTER_DECISION_INSTRUCTIONS" to "Custom plugin decision instructions for Luna",
-                            "CHATTER_DECISION_MESSAGE_COUNT" to 32,
+                    env =
+                        luna.config.EnvReader.of(
+                            mapOf(
+                                "GEMINI_API_KEY" to "gemini-secret-key-456",
+                                "CHATTER_DECISION_INSTRUCTIONS" to "Custom plugin decision instructions for Luna",
+                                "CHATTER_DECISION_MESSAGE_COUNT" to "32",
+                            ),
                         ),
                 )
 
@@ -115,7 +119,7 @@ class ChatterServicePluginAndUrlTest {
                     kord = mockKord,
                     routing = mockk(relaxed = true),
                     database = mockk(relaxed = true),
-                    configMap = mapOf("GEMINI_API_KEY" to "gemini-secret-key-456"),
+                    env = luna.config.EnvReader.of(mapOf("GEMINI_API_KEY" to "gemini-secret-key-456")),
                 )
 
             val defaultPlugin = ChatterPlugin()
@@ -142,10 +146,12 @@ class ChatterServicePluginAndUrlTest {
                     kord = mockKord,
                     routing = mockk(relaxed = true),
                     database = mockk(relaxed = true),
-                    configMap =
-                        mapOf(
-                            "GEMINI_API_KEY" to "gemini-secret-key-456",
-                            "CHATTER_ENABLED" to false,
+                    env =
+                        luna.config.EnvReader.of(
+                            mapOf(
+                                "GEMINI_API_KEY" to "gemini-secret-key-456",
+                                "CHATTER_ENABLED" to "false",
+                            ),
                         ),
                 )
 
@@ -195,7 +201,7 @@ class ChatterServicePluginAndUrlTest {
                     kord = mockKord,
                     routing = mockk(relaxed = true),
                     database = mockk(relaxed = true),
-                    configMap = mapOf("CHATTER_ENABLED" to true),
+                    env = luna.config.EnvReader.of(mapOf("CHATTER_ENABLED" to "true")),
                 )
 
             val plugin = ChatterPlugin()
@@ -204,6 +210,42 @@ class ChatterServicePluginAndUrlTest {
             assertFalse(plugin.isChatterEnabled)
             assertEquals("", plugin.decisionClient?.config?.apiKey)
             plugin.shutdown()
+        }
+
+    @Test
+    fun `chatter plugin fails fast with ConfigValidationException on invalid enabled, cooldown, allowed channels, or max images`() =
+        runTest {
+            val invalidCases =
+                listOf(
+                    "CHATTER_ENABLED" to "maybe",
+                    "CHATTER_COOLDOWN_SECONDS" to "-1",
+                    "CHATTER_COOLDOWN_SECONDS" to "abc",
+                    "CHATTER_ALLOWED_CHANNELS" to "111,not-a-snowflake",
+                    "CHATTER_ALLOWED_CHANNELS" to "-123",
+                    "SUMMARY_MAX_IMAGES" to "0",
+                    "SUMMARY_MAX_IMAGES" to "abc",
+                )
+            for ((key, value) in invalidCases) {
+                val context =
+                    DefaultPluginContext(
+                        kord = mockk<Kord>(relaxed = true),
+                        routing = mockk(relaxed = true),
+                        database = mockk(relaxed = true),
+                        env =
+                            luna.config.EnvReader.of(
+                                "GEMINI_API_KEY" to "gemini-secret-key-456",
+                                key to value,
+                            ),
+                    )
+                val plugin = ChatterPlugin()
+                val ex =
+                    kotlin.test.assertFailsWith<luna.config.ConfigValidationException>(
+                        "Expected ConfigValidationException for $key=$value",
+                    ) {
+                        plugin.initialize(context)
+                    }
+                assertTrue(ex.message?.contains(key) == true, "Expected error message to mention $key: ${ex.message}")
+            }
         }
 
     @Test
@@ -342,17 +384,19 @@ class ChatterServicePluginAndUrlTest {
                     kord = mockKord,
                     routing = mockk(relaxed = true),
                     database = mockk(relaxed = true),
-                    configMap =
-                        mapOf(
-                            "GEMINI_API_KEY" to "gemini-secret",
-                            "YOUTUBE_API_KEY" to "yt-secret-key",
-                            "SUMMARY_MAX_IMAGES" to 6,
-                            "GEMINI_SEARCH_GROUNDING_ENABLED" to false,
-                            "GEMINI_URL_CONTEXT_ENABLED" to false,
-                            "CHATTER_DEBOUNCE_SECONDS" to 3.0,
-                            "CHATTER_MENTION_DEBOUNCE_SECONDS" to 0.8,
-                            "CHATTER_DEBOUNCE_MAX_SECONDS" to 6.5,
-                            "CHATTER_MAX_INTERRUPTS" to 4,
+                    env =
+                        luna.config.EnvReader.of(
+                            mapOf(
+                                "GEMINI_API_KEY" to "gemini-secret",
+                                "YOUTUBE_API_KEY" to "yt-secret-key",
+                                "SUMMARY_MAX_IMAGES" to "6",
+                                "GEMINI_SEARCH_GROUNDING_ENABLED" to "false",
+                                "GEMINI_URL_CONTEXT_ENABLED" to "false",
+                                "CHATTER_DEBOUNCE_SECONDS" to "3.0",
+                                "CHATTER_MENTION_DEBOUNCE_SECONDS" to "0.8",
+                                "CHATTER_DEBOUNCE_MAX_SECONDS" to "6.5",
+                                "CHATTER_MAX_INTERRUPTS" to "4",
+                            ),
                         ),
                 )
 
@@ -376,7 +420,7 @@ class ChatterServicePluginAndUrlTest {
                     kord = mockKord,
                     routing = mockk(relaxed = true),
                     database = mockk(relaxed = true),
-                    configMap = mapOf("GEMINI_API_KEY" to "gemini-secret"),
+                    env = luna.config.EnvReader.of(mapOf("GEMINI_API_KEY" to "gemini-secret")),
                 )
 
             val defaultPlugin = ChatterPlugin()

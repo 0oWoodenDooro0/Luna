@@ -1,19 +1,17 @@
 package luna.chatter
 
-import dev.kord.core.Kord
-import io.ktor.server.routing.Routing
-import io.mockk.mockk
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+import luna.config.ConfigValidationException
+import luna.config.EnvReader
 import luna.core.ai.ChatImageAttachment
 import luna.core.ai.EmojiSanitizer
 import luna.core.ai.GeminiInteractionTools
 import luna.core.ai.VideoProcessingMode
-import luna.plugin.DefaultPluginContext
-import org.jetbrains.exposed.v1.jdbc.Database
 import kotlin.test.Test
 import kotlin.test.assertContains
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
@@ -30,15 +28,15 @@ class ChatterConfigAndPromptBuilderTest {
     // --- Configuration Tests ---
 
     @Test
-    fun `ChatterConfig resolves from environment prioritizing CHATTER_GEMINI_MODEL`() {
+    fun `ChatterConfig resolves from EnvReader prioritizing CHATTER_GEMINI_MODEL`() {
         val env =
-            mapOf(
+            EnvReader.of(
                 "GEMINI_API_KEY" to "fallback-key",
                 "CHATTER_GEMINI_MODEL" to "models/gemini-custom-chatter",
                 "GEMINI_MODEL" to "gemini-default",
                 "GEMINI_BASE_URL" to "https://custom.gemini.api/v1beta/",
             )
-        val config = ChatterConfig.fromEnv(env)
+        val config = ChatterConfig.from(env)
         assertEquals("fallback-key", config.apiKey)
         assertTrue(config.isConfigured)
         assertEquals("gemini-custom-chatter", config.cleanModel)
@@ -46,14 +44,15 @@ class ChatterConfigAndPromptBuilderTest {
     }
 
     @Test
-    fun `ChatterConfig falls back to generic GEMINI variables when chatter variables are absent`() {
+    fun `ChatterConfig falls back to GEMINI_MODEL when CHATTER_GEMINI_MODEL is unset or blank`() {
         val env =
-            mapOf(
+            EnvReader.of(
                 "GEMINI_API_KEY" to "generic-gemini-key",
+                "CHATTER_GEMINI_MODEL" to "   ",
                 "GEMINI_MODEL" to "gemini-1.5-pro",
                 "GEMINI_BASE_URL" to "https://generativelanguage.googleapis.com/",
             )
-        val config = ChatterConfig.fromEnv(env)
+        val config = ChatterConfig.from(env)
         assertEquals("generic-gemini-key", config.apiKey)
         assertTrue(config.isConfigured)
         assertEquals("gemini-1.5-pro", config.cleanModel)
@@ -61,232 +60,93 @@ class ChatterConfigAndPromptBuilderTest {
     }
 
     @Test
-    fun `ChatterConfig fromPluginContext preserves default official baseUrl when only global BASE_URL is present`() {
-        val context =
-            DefaultPluginContext(
-                kord = mockk<Kord>(relaxed = true),
-                routing = mockk<Routing>(relaxed = true),
-                database = mockk<Database>(relaxed = true),
-                configMap =
-                    mapOf(
-                        "BASE_URL" to "http://localhost:8080/s/",
-                        "GEMINI_API_KEY" to "test-gemini-key",
-                    ),
+    fun `ChatterConfig preserves default official baseUrl when only global BASE_URL is present and ignores legacy keys`() {
+        val env =
+            EnvReader.of(
+                "BASE_URL" to "http://localhost:8080/s/",
+                "GEMINI_API_KEY" to "test-gemini-key",
+                "chatter.model" to "legacy-model",
+                "gemini.baseUrl" to "https://legacy.example.com",
             )
-        val config = ChatterConfig.fromPluginContext(context)
+        val config = ChatterConfig.from(env)
         assertEquals("https://generativelanguage.googleapis.com", config.baseUrl)
         assertEquals("https://generativelanguage.googleapis.com", config.cleanBaseUrl)
+        assertEquals(ChatterConfig.DEFAULT_MODEL, config.model)
         assertTrue(config.searchGroundingEnabled)
     }
 
     @Test
-    fun `ChatterConfig defaults searchGroundingEnabled to true and resolves false across fromEnv, fromConfig, and fromPluginContext`() {
+    fun `ChatterConfig resolves searchGroundingEnabled and urlContextEnabled and fails fast on invalid booleans`() {
         assertTrue(ChatterConfig().searchGroundingEnabled)
-        assertTrue(ChatterConfig.fromEnv(emptyMap()).searchGroundingEnabled)
-
-        val envDisabled = ChatterConfig.fromEnv(mapOf("GEMINI_SEARCH_GROUNDING_ENABLED" to "false"))
-        assertFalse(envDisabled.searchGroundingEnabled)
-
-        val envEnabled = ChatterConfig.fromEnv(mapOf("GEMINI_SEARCH_GROUNDING_ENABLED" to "true"))
-        assertTrue(envEnabled.searchGroundingEnabled)
-
-        val configDisabledEnvKey = ChatterConfig.fromConfig(mapOf("GEMINI_SEARCH_GROUNDING_ENABLED" to false))
-        assertFalse(configDisabledEnvKey.searchGroundingEnabled)
-
-        val configDisabledDotKey = ChatterConfig.fromConfig(mapOf("gemini.searchGroundingEnabled" to "false"))
-        assertFalse(configDisabledDotKey.searchGroundingEnabled)
-
-        val contextDisabled =
-            DefaultPluginContext(
-                kord = mockk<Kord>(relaxed = true),
-                routing = mockk<Routing>(relaxed = true),
-                database = mockk<Database>(relaxed = true),
-                configMap =
-                    mapOf(
-                        "GEMINI_API_KEY" to "test-key",
-                        "GEMINI_SEARCH_GROUNDING_ENABLED" to false,
-                    ),
-            )
-        assertFalse(ChatterConfig.fromPluginContext(contextDisabled).searchGroundingEnabled)
-
-        val contextDotDisabled =
-            DefaultPluginContext(
-                kord = mockk<Kord>(relaxed = true),
-                routing = mockk<Routing>(relaxed = true),
-                database = mockk<Database>(relaxed = true),
-                configMap =
-                    mapOf(
-                        "GEMINI_API_KEY" to "test-key",
-                        "gemini.searchGroundingEnabled" to "false",
-                    ),
-            )
-        assertFalse(ChatterConfig.fromPluginContext(contextDotDisabled).searchGroundingEnabled)
-    }
-
-    @Test
-    fun `ChatterConfig defaults urlContextEnabled to true and resolves across fromEnv, fromConfig, and fromPluginContext with invalid fallback`() {
-        assertTrue(ChatterConfig.DEFAULT_URL_CONTEXT_ENABLED)
         assertTrue(ChatterConfig().urlContextEnabled)
-        assertTrue(ChatterConfig.fromEnv(emptyMap()).urlContextEnabled)
+        assertTrue(ChatterConfig.from(EnvReader.of()).searchGroundingEnabled)
+        assertTrue(ChatterConfig.from(EnvReader.of()).urlContextEnabled)
 
-        assertFalse(ChatterConfig.fromEnv(mapOf("GEMINI_URL_CONTEXT_ENABLED" to "false")).urlContextEnabled)
-        assertFalse(ChatterConfig.fromEnv(mapOf("GEMINI_URL_CONTEXT_ENABLED" to " false ")).urlContextEnabled)
-        assertTrue(ChatterConfig.fromEnv(mapOf("GEMINI_URL_CONTEXT_ENABLED" to "true")).urlContextEnabled)
-        assertTrue(ChatterConfig.fromEnv(mapOf("GEMINI_URL_CONTEXT_ENABLED" to "invalid")).urlContextEnabled)
+        assertFalse(ChatterConfig.from(EnvReader.of("GEMINI_SEARCH_GROUNDING_ENABLED" to "false")).searchGroundingEnabled)
+        assertTrue(ChatterConfig.from(EnvReader.of("GEMINI_SEARCH_GROUNDING_ENABLED" to "true")).searchGroundingEnabled)
+        assertFalse(ChatterConfig.from(EnvReader.of("GEMINI_URL_CONTEXT_ENABLED" to " false ")).urlContextEnabled)
+        assertTrue(ChatterConfig.from(EnvReader.of("GEMINI_URL_CONTEXT_ENABLED" to "true")).urlContextEnabled)
 
-        assertFalse(ChatterConfig.fromConfig(mapOf("GEMINI_URL_CONTEXT_ENABLED" to false)).urlContextEnabled)
-        assertFalse(ChatterConfig.fromConfig(mapOf("GEMINI_URL_CONTEXT_ENABLED" to "false")).urlContextEnabled)
-        assertFalse(ChatterConfig.fromConfig(mapOf("gemini.urlContextEnabled" to false)).urlContextEnabled)
-        assertFalse(ChatterConfig.fromConfig(mapOf("gemini.urlContextEnabled" to " false ")).urlContextEnabled)
-        assertTrue(ChatterConfig.fromConfig(mapOf("GEMINI_URL_CONTEXT_ENABLED" to "invalid")).urlContextEnabled)
-
-        val contextDisabled =
-            DefaultPluginContext(
-                kord = mockk<Kord>(relaxed = true),
-                routing = mockk<Routing>(relaxed = true),
-                database = mockk<Database>(relaxed = true),
-                configMap =
-                    mapOf(
-                        "GEMINI_API_KEY" to "test-key",
-                        "GEMINI_URL_CONTEXT_ENABLED" to false,
-                    ),
-            )
-        assertFalse(ChatterConfig.fromPluginContext(contextDisabled).urlContextEnabled)
-
-        val contextDotDisabled =
-            DefaultPluginContext(
-                kord = mockk<Kord>(relaxed = true),
-                routing = mockk<Routing>(relaxed = true),
-                database = mockk<Database>(relaxed = true),
-                configMap =
-                    mapOf(
-                        "GEMINI_API_KEY" to "test-key",
-                        "gemini.urlContextEnabled" to "false",
-                    ),
-            )
-        assertFalse(ChatterConfig.fromPluginContext(contextDotDisabled).urlContextEnabled)
-
-        val contextInvalidFallback =
-            DefaultPluginContext(
-                kord = mockk<Kord>(relaxed = true),
-                routing = mockk<Routing>(relaxed = true),
-                database = mockk<Database>(relaxed = true),
-                configMap =
-                    mapOf(
-                        "GEMINI_API_KEY" to "test-key",
-                        "GEMINI_URL_CONTEXT_ENABLED" to "not-a-boolean",
-                    ),
-            )
-        assertTrue(ChatterConfig.fromPluginContext(contextInvalidFallback).urlContextEnabled)
+        assertFailsWith<ConfigValidationException> {
+            ChatterConfig.from(EnvReader.of("GEMINI_SEARCH_GROUNDING_ENABLED" to "invalid"))
+        }
+        assertFailsWith<ConfigValidationException> {
+            ChatterConfig.from(EnvReader.of("GEMINI_URL_CONTEXT_ENABLED" to "not-a-boolean"))
+        }
     }
 
     @Test
-    fun `ChatterConfig resolves burst debounce and maxInterrupts defaults and aliases across fromEnv, fromConfig, and fromPluginContext`() {
+    fun `ChatterConfig resolves burst debounce and maxInterrupts defaults and valid overrides`() {
         val defaults = ChatterConfig()
         assertEquals(2.5, defaults.debounceSeconds)
         assertEquals(1.2, defaults.mentionDebounceSeconds)
         assertEquals(7.0, defaults.debounceMaxSeconds)
         assertEquals(2, defaults.maxInterrupts)
 
-        val envDefaults = ChatterConfig.fromEnv(emptyMap())
+        val envDefaults = ChatterConfig.from(EnvReader.of())
         assertEquals(2.5, envDefaults.debounceSeconds)
         assertEquals(1.2, envDefaults.mentionDebounceSeconds)
         assertEquals(7.0, envDefaults.debounceMaxSeconds)
         assertEquals(2, envDefaults.maxInterrupts)
 
         val envCustom =
-            ChatterConfig.fromEnv(
-                mapOf(
+            ChatterConfig.from(
+                EnvReader.of(
                     "CHATTER_DEBOUNCE_SECONDS" to "3.0",
                     "CHATTER_MENTION_DEBOUNCE_SECONDS" to "1.5",
                     "CHATTER_DEBOUNCE_MAX_SECONDS" to "6.5",
-                    "CHATTER_MAX_INTERRUPTS" to "4",
+                    "CHATTER_MAX_INTERRUPTS" to "0",
                 ),
             )
         assertEquals(3.0, envCustom.debounceSeconds)
         assertEquals(1.5, envCustom.mentionDebounceSeconds)
         assertEquals(6.5, envCustom.debounceMaxSeconds)
-        assertEquals(4, envCustom.maxInterrupts)
-
-        val configAliases =
-            ChatterConfig.fromConfig(
-                mapOf(
-                    "chatter.debounceSeconds" to 2.0,
-                    "chatter.mentionDebounceSeconds" to "1.0",
-                    "chatter.debounceMaxSeconds" to 8,
-                    "chatter.maxInterrupts" to 0,
-                ),
-            )
-        assertEquals(2.0, configAliases.debounceSeconds)
-        assertEquals(1.0, configAliases.mentionDebounceSeconds)
-        assertEquals(8.0, configAliases.debounceMaxSeconds)
-        assertEquals(0, configAliases.maxInterrupts)
-
-        val contextAliases =
-            DefaultPluginContext(
-                kord = mockk<Kord>(relaxed = true),
-                routing = mockk<Routing>(relaxed = true),
-                database = mockk<Database>(relaxed = true),
-                configMap =
-                    mapOf(
-                        "chatter.debounce_seconds" to "3.2",
-                        "chatter.mention_debounce_seconds" to 1.4,
-                        "chatter.debounce_max_seconds" to 6.2,
-                        "chatter.max_interrupts" to "3",
-                    ),
-            )
-        val fromCtx = ChatterConfig.fromPluginContext(contextAliases)
-        assertEquals(3.2, fromCtx.debounceSeconds)
-        assertEquals(1.4, fromCtx.mentionDebounceSeconds)
-        assertEquals(6.2, fromCtx.debounceMaxSeconds)
-        assertEquals(3, fromCtx.maxInterrupts)
+        assertEquals(0, envCustom.maxInterrupts)
     }
 
     @Test
-    fun `ChatterConfig clamps out-of-range debounceMaxSeconds to 6-8s and falls back safely on non-positive or invalid values`() {
-        val clamped =
-            ChatterConfig.fromEnv(
-                mapOf(
-                    "CHATTER_DEBOUNCE_MAX_SECONDS" to "2.0",
-                ),
+    fun `ChatterConfig fails fast with ConfigValidationException on out-of-range or invalid debounce and maxInterrupts`() {
+        val invalidCases =
+            listOf(
+                "CHATTER_DEBOUNCE_SECONDS" to "-1.0",
+                "CHATTER_DEBOUNCE_SECONDS" to "0.0",
+                "CHATTER_DEBOUNCE_SECONDS" to "NaN",
+                "CHATTER_MENTION_DEBOUNCE_SECONDS" to "0",
+                "CHATTER_MENTION_DEBOUNCE_SECONDS" to "Infinity",
+                "CHATTER_DEBOUNCE_MAX_SECONDS" to "2.0",
+                "CHATTER_DEBOUNCE_MAX_SECONDS" to "15.0",
+                "CHATTER_DEBOUNCE_MAX_SECONDS" to "0.0",
+                "CHATTER_DEBOUNCE_MAX_SECONDS" to "not-a-number",
+                "CHATTER_MAX_INTERRUPTS" to "-3",
+                "CHATTER_MAX_INTERRUPTS" to "abc",
             )
-        assertEquals(6.0, clamped.debounceMaxSeconds)
-
-        val clampedHigh =
-            ChatterConfig.fromEnv(
-                mapOf(
-                    "CHATTER_DEBOUNCE_MAX_SECONDS" to "15.0",
-                ),
-            )
-        assertEquals(8.0, clampedHigh.debounceMaxSeconds)
-
-        val invalidEnv =
-            ChatterConfig.fromEnv(
-                mapOf(
-                    "CHATTER_DEBOUNCE_SECONDS" to "-1.0",
-                    "CHATTER_MENTION_DEBOUNCE_SECONDS" to "0",
-                    "CHATTER_DEBOUNCE_MAX_SECONDS" to "0.0",
-                    "CHATTER_MAX_INTERRUPTS" to "-3",
-                ),
-            )
-        assertEquals(2.5, invalidEnv.debounceSeconds)
-        assertEquals(1.2, invalidEnv.mentionDebounceSeconds)
-        assertEquals(7.0, invalidEnv.debounceMaxSeconds)
-        assertEquals(2, invalidEnv.maxInterrupts)
-
-        val garbageConfig =
-            ChatterConfig.fromConfig(
-                mapOf(
-                    "CHATTER_DEBOUNCE_SECONDS" to "NaN",
-                    "CHATTER_MENTION_DEBOUNCE_SECONDS" to "Infinity",
-                    "CHATTER_DEBOUNCE_MAX_SECONDS" to "not-a-number",
-                    "CHATTER_MAX_INTERRUPTS" to "abc",
-                ),
-            )
-        assertEquals(2.5, garbageConfig.debounceSeconds)
-        assertEquals(1.2, garbageConfig.mentionDebounceSeconds)
-        assertEquals(7.0, garbageConfig.debounceMaxSeconds)
-        assertEquals(2, garbageConfig.maxInterrupts)
+        for ((key, value) in invalidCases) {
+            val ex =
+                assertFailsWith<ConfigValidationException>("Expected ConfigValidationException for $key=$value") {
+                    ChatterConfig.from(EnvReader.of(key to value))
+                }
+            assertTrue(ex.message?.contains(key) == true, "Expected error message to mention $key: ${ex.message}")
+        }
     }
 
     // --- Prompt Builder & Persona Tests ---

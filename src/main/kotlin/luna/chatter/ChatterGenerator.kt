@@ -34,7 +34,7 @@ import org.slf4j.LoggerFactory
  * and blank responses without layered fallback retries.
  */
 open class ChatterGenerator(
-    val config: ChatterConfig = ChatterConfig.fromEnv(),
+    val config: ChatterConfig = ChatterConfig(),
     private val httpClient: HttpClient = createDefaultHttpClient(),
     private val pollingDelayMs: Long = GeminiInteractionClient.DEFAULT_POLLING_DELAY_MS,
     private val maxPollingAttempts: Int = GeminiInteractionClient.DEFAULT_MAX_POLLING_ATTEMPTS,

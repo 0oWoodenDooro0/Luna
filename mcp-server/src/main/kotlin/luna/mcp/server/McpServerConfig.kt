@@ -1,7 +1,9 @@
 package luna.mcp.server
 
 import luna.config.ConfigFinder
+import luna.config.ConfigValidationException
 import luna.config.DotenvParser
+import luna.config.EnvReader
 import luna.config.EnvSchemaAuditor
 import luna.config.SecretMasker
 import net.logstash.logback.argument.StructuredArguments.kv
@@ -10,16 +12,6 @@ import org.slf4j.LoggerFactory
 import java.io.File
 import java.io.InputStream
 
-/**
- * Dedicated exception thrown when MCP server configuration fails validation at startup.
- * Extends [IllegalStateException] for backwards compatibility and standard runtime contracts.
- */
-class McpConfigValidationException(
-    message: String,
-    cause: Throwable? = null,
-) : IllegalStateException(message, cause)
-
-typealias ConfigValidationException = McpConfigValidationException
 typealias EnvVarSchema = luna.config.EnvVarSchema
 typealias DriftAuditResult = luna.config.DriftAuditResult
 
@@ -38,7 +30,7 @@ data class McpServerConfig(
 
     init {
         if (port !in 1..65535) {
-            throw McpConfigValidationException("Invalid configuration: PORT must be between 1 and 65535, but got: $port")
+            throw ConfigValidationException("Invalid configuration: MCP_PORT must be between 1 and 65535, but got: $port")
         }
     }
 
@@ -128,59 +120,22 @@ data class McpServerConfig(
         fun findDefaultEnvFile(baseDir: File = File(".")): File? = ConfigFinder.findDefaultEnvFile(baseDir)
 
         /**
+         * Builds [McpServerConfig] from a strict [EnvReader] with canonical keys and fail-fast validation.
+         */
+        fun from(env: EnvReader): McpServerConfig =
+            McpServerConfig(
+                port = env.port("MCP_PORT", DEFAULT_PORT),
+                dbPath = env.string("MCP_DB_PATH", DEFAULT_DB_PATH),
+                publicBaseUrl = env.string("MCP_PUBLIC_BASE_URL", DEFAULT_PUBLIC_BASE_URL),
+            )
+
+        /**
          * Builds [McpServerConfig] from a key-value map with canonical defaults and fail-fast validation.
          */
-        fun fromMap(config: Map<String, Any?>): McpServerConfig {
-            val rawPort = config["MCP_PORT"] ?: config["PORT"] ?: config["port"] ?: config["mcp.port"]
-            val port =
-                when (rawPort) {
-                    null -> {
-                        DEFAULT_PORT
-                    }
+        fun fromMap(config: Map<String, Any?>): McpServerConfig = from(EnvReader.of(toStringMap(config)))
 
-                    is Number -> {
-                        rawPort.toInt()
-                    }
-
-                    is String -> {
-                        if (rawPort.isBlank()) {
-                            DEFAULT_PORT
-                        } else {
-                            rawPort.trim().toIntOrNull()
-                                ?: throw McpConfigValidationException(
-                                    "Invalid configuration: MCP_PORT must be an integer, but got: '$rawPort'",
-                                )
-                        }
-                    }
-
-                    else -> {
-                        rawPort.toString().trim().toIntOrNull()
-                            ?: throw McpConfigValidationException(
-                                "Invalid configuration: MCP_PORT must be an integer, but got: '$rawPort'",
-                            )
-                    }
-                }
-
-            if (port !in 1..65535) {
-                throw McpConfigValidationException(
-                    "Invalid configuration: PORT must be between 1 and 65535, but got: $port",
-                )
-            }
-
-            val rawDbPath =
-                (config["MCP_DB_PATH"] ?: config["dbPath"] ?: config["mcp.dbPath"])?.toString()
-            val dbPath = if (rawDbPath.isNullOrBlank()) DEFAULT_DB_PATH else rawDbPath
-
-            val rawBaseUrl =
-                (config["MCP_PUBLIC_BASE_URL"] ?: config["publicBaseUrl"] ?: config["mcp.publicBaseUrl"])?.toString()
-            val publicBaseUrl = if (rawBaseUrl.isNullOrBlank()) DEFAULT_PUBLIC_BASE_URL else rawBaseUrl
-
-            return McpServerConfig(
-                port = port,
-                dbPath = dbPath,
-                publicBaseUrl = publicBaseUrl,
-            )
-        }
+        private fun toStringMap(config: Map<String, Any?>): Map<String, String> =
+            config.entries.mapNotNull { (key, value) -> value?.toString()?.let { key to it } }.toMap()
 
         /**
          * Loads configuration raw key-value map with layered precedence:
@@ -190,17 +145,14 @@ data class McpServerConfig(
             envFile: File? = findDefaultEnvFile(),
             systemEnv: Map<String, String> = System.getenv(),
             customConfig: Map<String, Any?>? = null,
-        ): Map<String, Any?> {
-            val config = mutableMapOf<String, Any?>()
-            if (envFile != null && envFile.exists() && envFile.isFile) {
-                config.putAll(parseDotenv(envFile))
-            }
-            config.putAll(systemEnv)
-            if (customConfig != null) {
-                config.putAll(customConfig)
-            }
-            return config
-        }
+        ): Map<String, Any?> =
+            EnvReader
+                .load(
+                    envFile = envFile,
+                    systemEnv = systemEnv,
+                    overrides = customConfig?.let(::toStringMap),
+                    auditDrift = false,
+                ).toMap()
 
         /**
          * In-memory source loader for deterministic unit testing of precedence layers.
@@ -210,15 +162,15 @@ data class McpServerConfig(
             systemEnv: Map<String, String> = emptyMap(),
             customConfig: Map<String, Any?>? = null,
         ): McpServerConfig {
-            val config = mutableMapOf<String, Any?>()
+            val merged = mutableMapOf<String, String>()
             if (dotenvContent != null) {
-                config.putAll(parseDotenv(dotenvContent))
+                merged.putAll(parseDotenv(dotenvContent))
             }
-            config.putAll(systemEnv)
+            merged.putAll(systemEnv)
             if (customConfig != null) {
-                config.putAll(customConfig)
+                merged.putAll(toStringMap(customConfig))
             }
-            return fromMap(config)
+            return from(EnvReader.of(merged))
         }
 
         /**
@@ -229,13 +181,18 @@ data class McpServerConfig(
             systemEnv: Map<String, String> = System.getenv(),
             customConfig: Map<String, Any?>? = null,
         ): McpServerConfig {
-            val raw = loadRawConfig(envFile, systemEnv, customConfig)
-            auditDrift(raw)
-            return fromMap(raw)
+            val env =
+                EnvReader.load(
+                    envFile = envFile,
+                    systemEnv = systemEnv,
+                    overrides = customConfig?.let(::toStringMap),
+                    auditDrift = false,
+                )
+            auditDrift(env.toMap())
+            return from(env)
         }
 
         val STANDARD_SYSTEM_KEYS: Set<String> get() = EnvSchemaAuditor.STANDARD_SYSTEM_KEYS
-        val CORE_KNOWN_ALIASES: Map<String, String> get() = EnvSchemaAuditor.CORE_KNOWN_ALIASES
 
         fun parseDefaultValue(raw: String): String? = EnvSchemaAuditor.parseDefaultValue(raw)
 
@@ -305,7 +262,7 @@ data class McpServerConfig(
                     kv("data", mapOf("missingRequired" to auditResult.missingRequired)),
                     kv("status", "FAILURE"),
                 )
-                throw McpConfigValidationException(errMsg)
+                throw ConfigValidationException(errMsg)
             }
 
             for ((key, defaultVal) in auditResult.missingOptional) {

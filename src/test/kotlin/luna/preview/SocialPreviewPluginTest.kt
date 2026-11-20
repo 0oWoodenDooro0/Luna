@@ -12,6 +12,7 @@ import io.mockk.every
 import io.mockk.mockk
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.test.runTest
+import luna.config.EnvReader
 import luna.core.Command
 import luna.plugin.DefaultPluginContext
 import org.jetbrains.exposed.v1.jdbc.Database
@@ -209,7 +210,7 @@ class SocialPreviewPluginTest {
                     kord = mockKord,
                     routing = mockk(relaxed = true),
                     database = db,
-                    configMap = mapOf("YOUTUBE_API_KEY" to "test-youtube-api-key"),
+                    env = EnvReader.of("YOUTUBE_API_KEY" to "test-youtube-api-key"),
                 )
 
             val plugin = SocialPreviewPlugin()
@@ -231,6 +232,34 @@ class SocialPreviewPluginTest {
                     kord = mockKord,
                     routing = mockk(relaxed = true),
                     database = db,
+                )
+
+            val plugin = SocialPreviewPlugin()
+            plugin.initialize(context)
+
+            assertEquals(null, plugin.youtubeApiKey)
+            assertNotNull(plugin.peekClient)
+        }
+
+    @Test
+    fun `initialize ignores legacy youtube alias keys and blank YOUTUBE_API_KEY`() =
+        runTest {
+            val db = createTestDb()
+            val eventsFlow = MutableSharedFlow<Event>()
+            val mockKord = createMockKord(eventsFlow)
+
+            val context =
+                DefaultPluginContext(
+                    kord = mockKord,
+                    routing = mockk(relaxed = true),
+                    database = db,
+                    env =
+                        EnvReader.of(
+                            "YOUTUBE_API_KEY" to "   ",
+                            "youtube.apiKey" to "legacy-1",
+                            "youtube.api_key" to "legacy-2",
+                            "social_preview.youtubeApiKey" to "legacy-3",
+                        ),
                 )
 
             val plugin = SocialPreviewPlugin()

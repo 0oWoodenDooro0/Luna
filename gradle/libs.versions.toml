@@ -10,7 +10,6 @@ logstash-logback = "9.0"
 jackson-core = "3.1.0"
 exposed = "1.1.1"
 sqlite = "3.51.1.0"
-snakeyaml = "2.5"
 kord = "0.19.0-SNAPSHOT"
 h2 = "2.3.232"
 mockk = "1.14.9"
@@ -44,7 +43,6 @@ jackson-core = { module = "tools.jackson.core:jackson-core", version.ref = "jack
 exposed-core = { module = "org.jetbrains.exposed:exposed-core", version.ref = "exposed" }
 exposed-jdbc = { module = "org.jetbrains.exposed:exposed-jdbc", version.ref = "exposed" }
 sqlite-jdbc = { module = "org.xerial:sqlite-jdbc", version.ref = "sqlite" }
-snakeyaml = { module = "org.yaml:snakeyaml", version.ref = "snakeyaml" }
 kord-core = { module = "dev.kord:kord-core", version.ref = "kord" }
 
 h2 = { module = "com.h2database:h2", version.ref = "h2" }

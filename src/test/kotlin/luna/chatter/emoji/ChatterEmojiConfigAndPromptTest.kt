@@ -1,15 +1,11 @@
 package luna.chatter.emoji
 
 import dev.kord.common.entity.Snowflake
-import dev.kord.core.Kord
-import io.ktor.server.routing.Routing
-import io.mockk.mockk
 import luna.chatter.ChatterConfig
 import luna.chatter.ChatterInput
 import luna.chatter.ChatterPromptBuilder
 import luna.chatter.GuildCustomEmoji
-import luna.plugin.DefaultPluginContext
-import org.jetbrains.exposed.v1.jdbc.Database
+import luna.config.EnvReader
 import kotlin.test.Test
 import kotlin.test.assertContains
 import kotlin.test.assertEquals
@@ -23,8 +19,8 @@ class ChatterEmojiConfigAndPromptTest {
         assertNull(ChatterConfig().cleanEmojiVisionModel)
 
         val noFallbackEnv =
-            ChatterConfig.fromEnv(
-                mapOf(
+            ChatterConfig.from(
+                EnvReader.of(
                     "GEMINI_API_KEY" to "test-key",
                     "CHATTER_GEMINI_MODEL" to "gemini-chat-model",
                     "GEMINI_MODEL" to "gemini-default-model",
@@ -34,8 +30,8 @@ class ChatterEmojiConfigAndPromptTest {
         assertNull(noFallbackEnv.cleanEmojiVisionModel)
 
         val blankEnv =
-            ChatterConfig.fromEnv(
-                mapOf(
+            ChatterConfig.from(
+                EnvReader.of(
                     "CHATTER_EMOJI_VISION_MODEL" to "   ",
                     "CHATTER_GEMINI_MODEL" to "gemini-chat-model",
                     "GEMINI_MODEL" to "gemini-default-model",
@@ -44,58 +40,21 @@ class ChatterEmojiConfigAndPromptTest {
         assertNull(blankEnv.emojiVisionModel)
 
         val configuredEnv =
-            ChatterConfig.fromEnv(
-                mapOf(
+            ChatterConfig.from(
+                EnvReader.of(
                     "CHATTER_EMOJI_VISION_MODEL" to " models/gemini-2.5-flash ",
                 ),
             )
         assertEquals("gemini-2.5-flash", configuredEnv.emojiVisionModel)
         assertEquals("gemini-2.5-flash", configuredEnv.cleanEmojiVisionModel)
 
-        val noFallbackConfig =
-            ChatterConfig.fromConfig(
-                mapOf(
-                    "CHATTER_GEMINI_MODEL" to "gemini-chat-model",
-                    "GEMINI_MODEL" to "gemini-default-model",
-                    "CHATTER_EMOJI_VISION_MODEL" to "  ",
-                ),
-            )
-        assertNull(noFallbackConfig.emojiVisionModel)
-
-        val configuredAliasConfig =
-            ChatterConfig.fromConfig(
-                mapOf(
+        val legacyIgnored =
+            ChatterConfig.from(
+                EnvReader.of(
                     "chatter.emojiVisionModel" to "models/gemini-2.5-flash-lite",
                 ),
             )
-        assertEquals("gemini-2.5-flash-lite", configuredAliasConfig.emojiVisionModel)
-
-        val contextNoFallback =
-            DefaultPluginContext(
-                kord = mockk<Kord>(relaxed = true),
-                routing = mockk<Routing>(relaxed = true),
-                database = mockk<Database>(relaxed = true),
-                configMap =
-                    mapOf(
-                        "GEMINI_API_KEY" to "test-key",
-                        "CHATTER_GEMINI_MODEL" to "gemini-chat-model",
-                        "GEMINI_MODEL" to "gemini-default-model",
-                    ),
-            )
-        assertNull(ChatterConfig.fromPluginContext(contextNoFallback).emojiVisionModel)
-
-        val contextConfigured =
-            DefaultPluginContext(
-                kord = mockk<Kord>(relaxed = true),
-                routing = mockk<Routing>(relaxed = true),
-                database = mockk<Database>(relaxed = true),
-                configMap =
-                    mapOf(
-                        "GEMINI_API_KEY" to "test-key",
-                        "CHATTER_EMOJI_VISION_MODEL" to "models/gemini-2.5-flash",
-                    ),
-            )
-        assertEquals("gemini-2.5-flash", ChatterConfig.fromPluginContext(contextConfigured).emojiVisionModel)
+        assertNull(legacyIgnored.emojiVisionModel)
     }
 
     @Test

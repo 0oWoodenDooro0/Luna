@@ -397,21 +397,26 @@ fun checkEnvExampleParity(projectRoot: File): List<String> {
     if (mainRoots.isEmpty()) return listOf("At least one src/main/kotlin directory must exist")
 
     val codebaseKeys = mutableSetOf<String>()
-    val configBracketRegex = Regex("""\bconfig\[\s*["']([A-Z][A-Z0-9_]+)["']\s*\]""")
-    val pluginContextRegex = Regex("""context\.config(?:<[^>]+>)?\s*\(\s*["']([A-Z][A-Z0-9_]+)["']""")
     val sysEnvRegex = Regex("""System\.getenv\s*\(\s*["']([A-Z][A-Z0-9_]+)["']\s*\)""")
-    val envBracketRegex = Regex("""\benv\[\s*["']([A-Z][A-Z0-9_]+)["']\s*\]""")
-    val lookupReadRegex = Regex("""\bread(?:String|Int|Long|Double|Boolean)\s*\(\s*lookup\s*,\s*["']([A-Z][A-Z0-9_]+)["']""")
+    val envReaderSingleKeyRegex =
+        Regex(
+            """\b(?:env|envReader)\s*\.\s*(?:string|requiredString|int|long|double|boolean|csv|port)\s*\(\s*["']([A-Z][A-Z0-9_]+)["']""",
+        )
+    val envReaderFirstStringRegex = Regex("""\b(?:env|envReader)\s*\.\s*firstString\s*\(([^)]*)\)""")
+    val keyLiteralRegex = Regex("""["']([A-Z][A-Z0-9_]+)["']""")
     val pluginNameRegex = Regex("""override\s+val\s+name\s*:\s*String\s*=\s*["']([^"']+)["']""")
 
     mainRoots.forEach { root ->
         root.walkTopDown().filter { it.extension == "kt" }.forEach { file ->
             val content = file.readText()
-            configBracketRegex.findAll(content).forEach { codebaseKeys.add(it.groupValues[1]) }
-            pluginContextRegex.findAll(content).forEach { codebaseKeys.add(it.groupValues[1]) }
             sysEnvRegex.findAll(content).forEach { codebaseKeys.add(it.groupValues[1]) }
-            envBracketRegex.findAll(content).forEach { codebaseKeys.add(it.groupValues[1]) }
-            lookupReadRegex.findAll(content).forEach { codebaseKeys.add(it.groupValues[1]) }
+            envReaderSingleKeyRegex.findAll(content).forEach { codebaseKeys.add(it.groupValues[1]) }
+            envReaderFirstStringRegex.findAll(content).forEach { callMatch ->
+                val keyArgs = callMatch.groupValues[1].substringBefore("default")
+                keyLiteralRegex.findAll(keyArgs).forEach { keyMatch ->
+                    codebaseKeys.add(keyMatch.groupValues[1])
+                }
+            }
 
             if (content.contains(": LunaPlugin") || content.contains(": luna.plugin.LunaPlugin")) {
                 pluginNameRegex.find(content)?.let { match ->

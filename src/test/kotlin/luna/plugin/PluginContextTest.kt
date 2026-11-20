@@ -3,326 +3,77 @@ package luna.plugin
 import dev.kord.core.Kord
 import io.ktor.server.routing.Routing
 import io.mockk.mockk
+import luna.config.ConfigValidationException
+import luna.config.EnvReader
+import luna.core.ai.AiTraceConfig
 import org.jetbrains.exposed.v1.jdbc.Database
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.assertThrows
 import kotlin.test.assertEquals
-import kotlin.test.assertNull
 
 class PluginContextTest {
     private fun createTestDb(): Database = mockk(relaxed = true)
 
-    private fun createContext(configMap: Map<String, Any?> = emptyMap()): DefaultPluginContext =
+    private fun createContext(env: EnvReader = EnvReader.of()): DefaultPluginContext =
         DefaultPluginContext(
             kord = mockk<Kord>(relaxed = true),
             routing = mockk<Routing>(relaxed = true),
             database = createTestDb(),
-            configMap = configMap,
+            env = env,
         )
 
     @Test
-    fun `resolves exact key when present in config map`() {
-        val context = createContext(mapOf("curtly.baseUrl" to "https://exact.example.com/s/"))
+    fun `DefaultPluginContext defaults to empty EnvReader and exposes typed env accessors`() {
+        val defaultContext = createContext()
+        assertEquals(8080, defaultContext.env.port("PORT", 8080))
+        assertEquals(false, defaultContext.env.boolean("CHATTER_ENABLED", false))
 
-        assertEquals("https://exact.example.com/s/", context.config("curtly.baseUrl", "default"))
-        assertEquals("https://exact.example.com/s/", context.config("curtly.baseUrl", String::class.java))
-    }
-
-    @Test
-    fun `resolves uppercase snake case key when exact dotted key is absent`() {
-        val context = createContext(mapOf("CURTLY_BASE_URL" to "https://upper.example.com/s/"))
-
-        assertEquals("https://upper.example.com/s/", context.config("curtly.baseUrl", "default"))
-        assertEquals("https://upper.example.com/s/", context.config<String>("curtly.baseUrl"))
-    }
-
-    @Test
-    fun `resolves lowercase dotted snake case key when exact key is absent`() {
-        val context = createContext(mapOf("curtly.base_url" to "https://lower-snake.example.com/s/"))
-
-        assertEquals("https://lower-snake.example.com/s/", context.config("curtly.baseUrl", "default"))
-    }
-
-    @Test
-    fun `resolves plugins prefix uppercase key when exact and direct upper snake are absent`() {
-        val context = createContext(mapOf("PLUGINS_CURTLY_BASE_URL" to "https://plugins.example.com/s/"))
-
-        assertEquals("https://plugins.example.com/s/", context.config("curtly.baseUrl", "default"))
-        assertEquals("https://plugins.example.com/s/", context.config<String>("curtly.baseUrl"))
-    }
-
-    @Test
-    fun `resolves simple property name uppercase when namespace prefix is absent`() {
-        val context = createContext(mapOf("BASE_URL" to "https://global.example.com/s/"))
-
-        assertEquals("https://global.example.com/s/", context.config("curtly.baseUrl", "default"))
-    }
-
-    @Test
-    fun `does not resolve global BASE_URL for external service namespaces`() {
-        val context = createContext(mapOf("BASE_URL" to "https://global.example.com/s/"))
-
-        assertEquals("default", context.config("gemini.baseUrl", "default"))
-        assertNull(context.config<String>("gemini.baseUrl"))
-        assertEquals("default", context.config("chatter.baseUrl", "default"))
-        assertNull(context.config<String>("chatter.baseUrl"))
-    }
-
-    @Test
-    fun `resolves summarizer alias to summary uppercase key`() {
-        val context = createContext(mapOf("SUMMARY_EMOJI" to "✨"))
-
-        assertEquals("✨", context.config("summarizer.emoji", "📝"))
-        assertEquals("✨", context.config("summary.emoji", "📝"))
-        assertEquals("✨", context.config<String>("summarizer.emoji"))
-    }
-
-    @Test
-    fun `respects precedence order from exact key down to simple property`() {
-        val allConfig =
-            mapOf(
-                "curtly.baseUrl" to "https://1-exact.com/s/",
-                "CURTLY_BASE_URL" to "https://2-upper.com/s/",
-                "PLUGINS_CURTLY_BASE_URL" to "https://3-plugins.com/s/",
-                "BASE_URL" to "https://4-simple.com/s/",
-            )
-
-        val context1 = createContext(allConfig)
-        assertEquals("https://1-exact.com/s/", context1.config("curtly.baseUrl", "default"))
-
-        val withoutExact = allConfig - "curtly.baseUrl"
-        val context2 = createContext(withoutExact)
-        assertEquals("https://2-upper.com/s/", context2.config("curtly.baseUrl", "default"))
-
-        val withoutUpper = withoutExact - "CURTLY_BASE_URL"
-        val context3 = createContext(withoutUpper)
-        assertEquals("https://3-plugins.com/s/", context3.config("curtly.baseUrl", "default"))
-
-        val withoutPlugins = withoutUpper - "PLUGINS_CURTLY_BASE_URL"
-        val context4 = createContext(withoutPlugins)
-        assertEquals("https://4-simple.com/s/", context4.config("curtly.baseUrl", "default"))
-    }
-
-    @Test
-    fun `converts typed values safely across supported primitive wrapper types`() {
-        val context =
+        val configuredContext =
             createContext(
-                mapOf(
-                    "server.port" to "8080",
-                    "server.timeoutMs" to "5000",
-                    "server.ratio" to "0.75",
-                    "server.enabled" to "true",
-                    "server.name" to 12345,
+                EnvReader.of(
+                    mapOf(
+                        "PORT" to "9090",
+                        "BASE_URL" to "https://example.com",
+                        "CHATTER_ENABLED" to "true",
+                    ),
                 ),
             )
-
-        assertEquals(8080, context.config("server.port", 3000))
-        assertEquals(5000L, context.config("server.timeoutMs", 1000L))
-        assertEquals(0.75, context.config("server.ratio", 1.0))
-        assertEquals(true, context.config("server.enabled", false))
-        assertEquals("12345", context.config("server.name", "default"))
-
-        // Reified without default
-        assertEquals(8080, context.config<Int>("server.port"))
-        assertEquals(5000L, context.config<Long>("server.timeoutMs"))
-        assertEquals(0.75, context.config<Double>("server.ratio"))
-        assertEquals(true, context.config<Boolean>("server.enabled"))
+        assertEquals(9090, configuredContext.env.port("PORT", 8080))
+        assertEquals("https://example.com", configuredContext.env.string("BASE_URL"))
+        assertEquals(true, configuredContext.env.boolean("CHATTER_ENABLED", false))
     }
 
     @Test
-    fun `falls back to default value when key does not exist`() {
-        val context = createContext(emptyMap())
+    fun `AiTraceConfig from EnvReader resolves canonical keys and fails fast on non-positive bounds`() {
+        val defaults = AiTraceConfig.from(createContext().env)
+        assertEquals(true, defaults.enabled)
+        assertEquals("data/logs/ai", defaults.dir)
+        assertEquals(14, defaults.maxDays)
+        assertEquals(200, defaults.maxTotalMb)
 
-        assertEquals("fallback", context.config("nonexistent.str", "fallback"))
-        assertEquals(42, context.config("nonexistent.int", 42))
-        assertEquals(100L, context.config("nonexistent.long", 100L))
-        assertEquals(3.14, context.config("nonexistent.double", 3.14))
-        assertEquals(true, context.config("nonexistent.bool", true))
-
-        assertNull(context.config<String>("nonexistent.str"))
-    }
-
-    @Test
-    fun `falls back to default value when key is blank or whitespace only`() {
-        val context = createContext(mapOf("" to "empty", "   " to "blank", "valid.key" to "value"))
-
-        assertEquals("default", context.config("", "default"))
-        assertEquals("default", context.config("   ", "default"))
-        assertEquals("default", context.config("\t\n", "default"))
-
-        assertNull(context.config<String>(""))
-        assertNull(context.config<String>("   "))
-    }
-
-    @Test
-    fun `falls back to default value when integer parsing fails without throwing`() {
-        val context = createContext(mapOf("app.port" to "not-a-valid-integer"))
-
-        assertEquals(8080, context.config("app.port", 8080))
-        assertNull(context.config<Int>("app.port"))
-    }
-
-    @Test
-    fun `falls back to default value when long parsing fails without throwing`() {
-        val context = createContext(mapOf("app.timeout" to "invalid-long"))
-
-        assertEquals(3000L, context.config("app.timeout", 3000L))
-        assertNull(context.config<Long>("app.timeout"))
-    }
-
-    @Test
-    fun `falls back to default value when double parsing fails without throwing`() {
-        val context = createContext(mapOf("app.ratio" to "invalid-double"))
-
-        assertEquals(1.5, context.config("app.ratio", 1.5))
-        assertNull(context.config<Double>("app.ratio"))
-    }
-
-    @Test
-    fun `falls back to default value when boolean parsing fails without throwing`() {
-        val context = createContext(mapOf("app.debug" to "not-a-boolean"))
-
-        assertEquals(false, context.config("app.debug", false))
-        assertEquals(true, context.config("app.debug", true))
-        assertNull(context.config<Boolean>("app.debug"))
-    }
-
-    @Test
-    fun `falls back to default value when value in map is explicit null`() {
-        val context = createContext(mapOf("app.nullProperty" to null))
-
-        assertEquals("default", context.config("app.nullProperty", "default"))
-        assertNull(context.config<String>("app.nullProperty"))
-    }
-
-    @Test
-    fun `supports java primitive type classes directly`() {
-        val context =
-            createContext(
-                mapOf(
-                    "intVal" to 42,
-                    "longVal" to 999L,
-                    "doubleVal" to 2.5,
-                    "boolVal" to true,
-                ),
+        val configured =
+            AiTraceConfig.from(
+                createContext(
+                    EnvReader.of(
+                        mapOf(
+                            "AI_TRACE_ENABLED" to "false",
+                            "AI_TRACE_DIR" to "/tmp/ai-trace",
+                            "AI_TRACE_MAX_DAYS" to "7",
+                            "AI_TRACE_MAX_TOTAL_MB" to "64",
+                        ),
+                    ),
+                ).env,
             )
+        assertEquals(false, configured.enabled)
+        assertEquals("/tmp/ai-trace", configured.dir)
+        assertEquals(7, configured.maxDays)
+        assertEquals(64, configured.maxTotalMb)
 
-        assertEquals(42, context.config("intVal", Int::class.javaPrimitiveType!!))
-        assertEquals(999L, context.config("longVal", Long::class.javaPrimitiveType!!))
-        assertEquals(2.5, context.config("doubleVal", Double::class.javaPrimitiveType!!))
-        assertEquals(true, context.config("boolVal", Boolean::class.javaPrimitiveType!!))
-    }
-
-    @Test
-    fun `dual namespace lookup works with custom configResolver lambda`() {
-        val storage = mapOf("PLUGINS_TEST_URL" to "https://custom-resolver.com")
-        val context =
-            DefaultPluginContext(
-                kord = mockk<Kord>(relaxed = true),
-                routing = mockk<Routing>(relaxed = true),
-                database = createTestDb(),
-                configResolver = { key, _ -> storage[key] },
-            )
-
-        assertEquals("https://custom-resolver.com", context.config("test.url", "default"))
-    }
-
-    @Test
-    fun `plugin context interface provides default config implementation`() {
-        val customContext =
-            object : PluginContext {
-                override val kord: Kord = mockk(relaxed = true)
-                override val routing: Routing = mockk(relaxed = true)
-                override val database: Database = createTestDb()
-
-                @Suppress("UNCHECKED_CAST")
-                override fun <T> config(
-                    key: String,
-                    clazz: Class<T>,
-                ): T? = if (key == "known") "value" as? T else null
-            }
-
-        assertEquals("value", customContext.config("known", "fallback"))
-        assertEquals("fallback", customContext.config("unknown", "fallback"))
-        assertEquals(luna.core.ai.NoOpAiTraceRecorder, customContext.aiTraceRecorder)
-    }
-
-    @Test
-    fun `AiTraceConfig resolves dual-namespace keys from PluginContext`() {
-        val envContext =
-            createContext(
-                mapOf(
-                    "AI_TRACE_ENABLED" to "false",
-                    "AI_TRACE_DIR" to "/tmp/ai-env",
-                    "AI_TRACE_MAX_DAYS" to "30",
-                    "AI_TRACE_MAX_TOTAL_MB" to "512",
-                ),
-            )
-        val fromEnv =
-            luna.core.ai.AiTraceConfig
-                .fromPluginContext(envContext)
-        assertEquals(false, fromEnv.enabled)
-        assertEquals("/tmp/ai-env", fromEnv.dir)
-        assertEquals(30, fromEnv.maxDays)
-        assertEquals(512, fromEnv.maxTotalMb)
-
-        val dottedContext =
-            createContext(
-                mapOf(
-                    "ai.trace.enabled" to true,
-                    "ai.trace.dir" to "/tmp/ai-dotted",
-                    "ai.trace.maxDays" to 21,
-                    "ai.trace.maxTotalMb" to 100,
-                ),
-            )
-        val fromDotted =
-            luna.core.ai.AiTraceConfig
-                .fromPluginContext(dottedContext)
-        assertEquals(true, fromDotted.enabled)
-        assertEquals("/tmp/ai-dotted", fromDotted.dir)
-        assertEquals(21, fromDotted.maxDays)
-        assertEquals(100, fromDotted.maxTotalMb)
-    }
-
-    @Test
-    fun `AiTraceConfig fromPluginContext resolves snake_case dotted aliases max_days and max_total_mb and bounds`() {
-        val exactLookupValues =
-            mapOf(
-                "ai.trace.enabled" to "false",
-                "ai.trace.dir" to "/tmp/ai-snake",
-                "ai.trace.max_days" to "9",
-                "ai.trace.max_total_mb" to "75",
-            )
-        val exactContext =
-            object : PluginContext {
-                override val kord: Kord = mockk(relaxed = true)
-                override val routing: Routing = mockk(relaxed = true)
-                override val database: Database = mockk(relaxed = true)
-
-                override fun <T> config(
-                    key: String,
-                    clazz: Class<T>,
-                ): T? = exactLookupValues[key]?.let { if (clazz.isInstance(it)) clazz.cast(it) else null }
-            }
-
-        val resolved =
-            luna.core.ai.AiTraceConfig
-                .fromPluginContext(exactContext)
-        assertEquals(false, resolved.enabled)
-        assertEquals("/tmp/ai-snake", resolved.dir)
-        assertEquals(9, resolved.maxDays)
-        assertEquals(75, resolved.maxTotalMb)
-
-        val invalidBoundsContext =
-            createContext(
-                mapOf(
-                    "ai.trace.max_days" to 0,
-                    "ai.trace.max_total_mb" to -5,
-                ),
-            )
-        val bounded =
-            luna.core.ai.AiTraceConfig
-                .fromPluginContext(invalidBoundsContext)
-        assertEquals(14, bounded.maxDays)
-        assertEquals(200, bounded.maxTotalMb)
+        assertThrows<ConfigValidationException> {
+            AiTraceConfig.from(EnvReader.of(mapOf("AI_TRACE_MAX_DAYS" to "0")))
+        }
+        assertThrows<ConfigValidationException> {
+            AiTraceConfig.from(EnvReader.of(mapOf("AI_TRACE_MAX_TOTAL_MB" to "-5")))
+        }
     }
 }

@@ -4,6 +4,8 @@ import ch.qos.logback.classic.Level
 import ch.qos.logback.classic.Logger
 import ch.qos.logback.classic.spi.ILoggingEvent
 import ch.qos.logback.core.read.ListAppender
+import luna.config.ConfigValidationException
+import luna.config.EnvReader
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertThrows
 import org.junit.jupiter.api.io.TempDir
@@ -44,7 +46,7 @@ class McpServerConfigTest {
     }
 
     @Test
-    fun `falls back to alternative property key names`() {
+    fun `ignores legacy alternative property key names and uses defaults`() {
         val map =
             mapOf(
                 "port" to 8085,
@@ -54,21 +56,30 @@ class McpServerConfigTest {
 
         val config = McpServerConfig.fromMap(map)
 
-        assertEquals(8085, config.port)
-        assertEquals("./custom/urls.db", config.dbPath)
-        assertEquals("https://alt.example.com", config.publicBaseUrl)
+        assertEquals(McpServerConfig.DEFAULT_PORT, config.port)
+        assertEquals(McpServerConfig.DEFAULT_DB_PATH, config.dbPath)
+        assertEquals(McpServerConfig.DEFAULT_PUBLIC_BASE_URL, config.publicBaseUrl)
+    }
+
+    @Test
+    fun `uses default 8081 when only PORT is set and MCP_PORT is unset`() {
+        val config = McpServerConfig.from(EnvReader.of("PORT" to "9999"))
+        assertEquals(8081, config.port)
     }
 
     @Test
     fun `validates port boundary lower and upper limits`() {
-        assertThrows<McpConfigValidationException> {
+        assertThrows<ConfigValidationException> {
             McpServerConfig(port = 0)
         }
-        assertThrows<McpConfigValidationException> {
+        assertThrows<ConfigValidationException> {
             McpServerConfig(port = -8081)
         }
-        assertThrows<McpConfigValidationException> {
+        assertThrows<ConfigValidationException> {
             McpServerConfig(port = 70000)
+        }
+        assertThrows<ConfigValidationException> {
+            McpServerConfig.from(EnvReader.of("MCP_PORT" to "70000"))
         }
 
         val minConfig = McpServerConfig(port = 1)
@@ -79,12 +90,12 @@ class McpServerConfigTest {
 
     @Test
     fun `throws when port string cannot be converted to integer`() {
-        val map = mapOf("MCP_PORT" to "not-a-number")
         val ex =
-            assertThrows<McpConfigValidationException> {
-                McpServerConfig.fromMap(map)
+            assertThrows<ConfigValidationException> {
+                McpServerConfig.from(EnvReader.of("MCP_PORT" to "not-a-number"))
             }
-        assertTrue(ex.message!!.contains("MCP_PORT must be an integer"))
+        assertTrue(ex.message!!.contains("MCP_PORT"), "Exception must name MCP_PORT")
+        assertTrue(ex.message!!.contains("integer"), "Exception must mention expected integer type")
     }
 
     @Test
@@ -247,7 +258,7 @@ class McpServerConfigTest {
             """.trimIndent()
 
         val exSchema =
-            assertThrows<McpConfigValidationException> {
+            assertThrows<ConfigValidationException> {
                 McpServerConfig.auditDrift(
                     emptyMap(),
                     envExampleContent = customSchemaWithRequired,
@@ -327,29 +338,36 @@ class McpServerConfigTest {
         mcpLogger.addAppender(listAppender)
 
         try {
-            val mapWithAliases =
+            val canonicalMap =
                 mapOf(
-                    "PORT" to 8081, // alias for MCP_PORT
-                    "dbPath" to "./.data/luna.db", // alias for MCP_DB_PATH
-                    "publicBaseUrl" to "https://woodendoor.website", // alias for MCP_PUBLIC_BASE_URL
-                    "curtly.baseUrl" to "https://woodendoor.website/s/", // cross-module alias
-                    "BASE_URL" to "https://woodendoor.website/s/", // cross-module alias
-                    "DISCORD_CLIENT_ID" to "cli-123", // host alias
-                    "DISCORD_APP_ID" to "app-123", // host alias
+                    "MCP_PORT" to 8081,
+                    "MCP_DB_PATH" to "./.data/luna.db",
+                    "MCP_PUBLIC_BASE_URL" to "https://woodendoor.website",
+                    "BASE_URL" to "https://woodendoor.website/s/",
+                    "DISCORD_CLIENT_ID" to "cli-123",
                 )
 
-            val result = McpServerConfig.auditDrift(mapWithAliases)
+            val result = McpServerConfig.auditDrift(canonicalMap)
 
             assertTrue(
                 result.unknownKeys.isEmpty(),
-                "Recognized aliases must not produce unknown drift keys, but got: ${result.unknownKeys}",
+                "Canonical keys must not produce unknown drift keys, but got: ${result.unknownKeys}",
             )
 
             val warnEvents =
                 listAppender.list.filter { event ->
                     event.level == Level.WARN && event.formattedMessage.contains("[CONFIG_DRIFT]")
                 }
-            assertTrue(warnEvents.isEmpty(), "No [CONFIG_DRIFT] warning should be emitted for recognized aliases")
+            assertTrue(warnEvents.isEmpty(), "No [CONFIG_DRIFT] warning should be emitted for canonical keys")
+
+            val legacyAliasResult =
+                McpServerConfig.auditDrift(
+                    mapOf(
+                        "curtly.baseUrl" to "https://woodendoor.website/s/",
+                        "DISCORD_APP_ID" to "app-123",
+                    ),
+                )
+            assertEquals(listOf("curtly.baseUrl", "DISCORD_APP_ID"), legacyAliasResult.unknownKeys)
         } finally {
             mcpLogger.detachAppender(listAppender)
         }

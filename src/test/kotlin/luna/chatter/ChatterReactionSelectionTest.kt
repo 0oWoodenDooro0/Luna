@@ -59,32 +59,21 @@ class ChatterReactionSelectionTest {
         }
 
     @Test
-    fun `ChatterConfig resolves CHATTER_REACTION_THRESHOLD defaults, aliases, clamping, and invalid fallback`() {
+    fun `ChatterConfig resolves CHATTER_REACTION_THRESHOLD defaults and fails fast on out-of-range or invalid values`() {
         val defaults = ChatterConfig()
         assertEquals(0.45, defaults.reactionThreshold)
         assertEquals(0.45, defaults.normalizedReactionThreshold)
 
-        assertEquals(0.45, ChatterConfig.fromEnv(emptyMap()).reactionThreshold)
-        assertEquals(0.55, ChatterConfig.fromEnv(mapOf("CHATTER_REACTION_THRESHOLD" to "0.55")).reactionThreshold)
-        assertEquals(0.0, ChatterConfig.fromEnv(mapOf("CHATTER_REACTION_THRESHOLD" to "-0.25")).reactionThreshold)
-        assertEquals(1.0, ChatterConfig.fromEnv(mapOf("CHATTER_REACTION_THRESHOLD" to "1.75")).reactionThreshold)
-        assertEquals(0.0, ChatterConfig.fromEnv(mapOf("CHATTER_REACTION_THRESHOLD" to "0.0")).reactionThreshold)
-        assertEquals(1.0, ChatterConfig.fromEnv(mapOf("CHATTER_REACTION_THRESHOLD" to "1.0")).reactionThreshold)
-        assertEquals(0.45, ChatterConfig.fromEnv(mapOf("CHATTER_REACTION_THRESHOLD" to "not-a-number")).reactionThreshold)
-        assertEquals(0.45, ChatterConfig.fromEnv(mapOf("CHATTER_REACTION_THRESHOLD" to "NaN")).reactionThreshold)
+        assertEquals(0.45, ChatterConfig.from(luna.config.EnvReader.of()).reactionThreshold)
+        assertEquals(0.55, ChatterConfig.from(luna.config.EnvReader.of("CHATTER_REACTION_THRESHOLD" to "0.55")).reactionThreshold)
+        assertEquals(0.0, ChatterConfig.from(luna.config.EnvReader.of("CHATTER_REACTION_THRESHOLD" to "0.0")).reactionThreshold)
+        assertEquals(1.0, ChatterConfig.from(luna.config.EnvReader.of("CHATTER_REACTION_THRESHOLD" to "1.0")).reactionThreshold)
 
-        assertEquals(0.62, ChatterConfig.fromConfig(mapOf("chatter.reactionThreshold" to 0.62)).reactionThreshold)
-        assertEquals(0.38, ChatterConfig.fromConfig(mapOf("chatter.reaction_threshold" to "0.38")).reactionThreshold)
-        assertEquals(1.0, ChatterConfig.fromConfig(mapOf("chatter.reactionThreshold" to 2.0)).reactionThreshold)
-
-        val context =
-            DefaultPluginContext(
-                kord = mockk<Kord>(relaxed = true),
-                routing = mockk<Routing>(relaxed = true),
-                database = mockk<Database>(relaxed = true),
-                configMap = mapOf("chatter.reactionThreshold" to "0.52"),
-            )
-        assertEquals(0.52, ChatterConfig.fromPluginContext(context).reactionThreshold)
+        for (bad in listOf("-0.25", "1.75", "not-a-number", "NaN")) {
+            kotlin.test.assertFailsWith<luna.config.ConfigValidationException> {
+                ChatterConfig.from(luna.config.EnvReader.of("CHATTER_REACTION_THRESHOLD" to bad))
+            }
+        }
 
         assertEquals(0.0, ChatterConfig(reactionThreshold = -0.1).normalizedReactionThreshold)
         assertEquals(1.0, ChatterConfig(reactionThreshold = 1.4).normalizedReactionThreshold)

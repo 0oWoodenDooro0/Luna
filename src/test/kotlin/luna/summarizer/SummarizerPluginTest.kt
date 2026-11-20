@@ -14,10 +14,13 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.test.runTest
+import luna.config.ConfigValidationException
+import luna.config.EnvReader
 import luna.plugin.DefaultPluginContext
 import org.jetbrains.exposed.v1.jdbc.Database
 import org.junit.jupiter.api.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
@@ -43,7 +46,7 @@ class SummarizerPluginTest {
                     kord = mockKord,
                     routing = mockRouting,
                     database = testDb,
-                    configMap = emptyMap(),
+                    env = EnvReader.of(),
                 )
 
             val plugin = SummarizerPlugin()
@@ -73,17 +76,17 @@ class SummarizerPluginTest {
             val mockRouting = mockk<Routing>(relaxed = true)
             val testDb = createTestDb()
 
-            val configMap =
-                mapOf(
+            val env =
+                EnvReader.of(
                     "GEMINI_API_KEY" to "custom-gemini-key",
                     "SUMMARY_EMOJI" to "⭐",
                     "GEMINI_MODEL" to "gemini-1.5-pro",
                     "YOUTUBE_API_KEY" to "custom-youtube-key",
-                    "SUMMARY_MAX_HISTORY_MESSAGES" to 30,
-                    "SUMMARY_INACTIVITY_GAP_MINUTES" to 20L,
-                    "SUMMARY_MAX_CHARACTER_BUDGET" to 15000,
-                    "SUMMARY_MAX_LOOKBACK_MESSAGES" to 15,
-                    "SUMMARY_MAX_IMAGES" to 5,
+                    "SUMMARY_MAX_HISTORY_MESSAGES" to "30",
+                    "SUMMARY_INACTIVITY_GAP_MINUTES" to "20",
+                    "SUMMARY_MAX_CHARACTER_BUDGET" to "15000",
+                    "SUMMARY_MAX_LOOKBACK_MESSAGES" to "15",
+                    "SUMMARY_MAX_IMAGES" to "5",
                 )
 
             val context =
@@ -91,7 +94,7 @@ class SummarizerPluginTest {
                     kord = mockKord,
                     routing = mockRouting,
                     database = testDb,
-                    configMap = configMap,
+                    env = env,
                 )
 
             val plugin = SummarizerPlugin()
@@ -110,7 +113,7 @@ class SummarizerPluginTest {
         }
 
     @Test
-    fun `initializes with clamped lookback limit when configured value exceeds upper bound or is non positive`() =
+    fun `throws ConfigValidationException when SUMMARY_MAX_LOOKBACK_MESSAGES is out of range or non numeric`() =
         runTest {
             val listenerJob = Job()
             val testScope = CoroutineScope(Dispatchers.Unconfined + listenerJob)
@@ -120,35 +123,25 @@ class SummarizerPluginTest {
             val mockRouting = mockk<Routing>(relaxed = true)
             val testDb = createTestDb()
 
-            // Out-of-bounds high value (50) clamped to 20
-            val highContext =
-                DefaultPluginContext(
-                    kord = mockKord,
-                    routing = mockRouting,
-                    database = testDb,
-                    configMap = mapOf("SUMMARY_MAX_LOOKBACK_MESSAGES" to 50),
-                )
-            val highPlugin = SummarizerPlugin()
-            highPlugin.initialize(highContext)
-            assertEquals(ConversationSliceCollector.DEFAULT_MAX_LOOKBACK_MESSAGES, highPlugin.maxLookbackMessages)
-
-            // Non-positive value (-5) clamped to 1
-            val lowContext =
-                DefaultPluginContext(
-                    kord = mockKord,
-                    routing = mockRouting,
-                    database = testDb,
-                    configMap = mapOf("SUMMARY_MAX_LOOKBACK_MESSAGES" to -5),
-                )
-            val lowPlugin = SummarizerPlugin()
-            lowPlugin.initialize(lowContext)
-            assertEquals(1, lowPlugin.maxLookbackMessages)
+            for (invalid in listOf("50", "0", "-5", "abc")) {
+                val context =
+                    DefaultPluginContext(
+                        kord = mockKord,
+                        routing = mockRouting,
+                        database = testDb,
+                        env = EnvReader.of("SUMMARY_MAX_LOOKBACK_MESSAGES" to invalid),
+                    )
+                val plugin = SummarizerPlugin()
+                assertFailsWith<ConfigValidationException> {
+                    plugin.initialize(context)
+                }
+            }
 
             listenerJob.cancel()
         }
 
     @Test
-    fun `falls back to defaults when budget and images configurations are non positive`() =
+    fun `throws ConfigValidationException when summary numeric configurations are non positive, out of range, or non numeric`() =
         runTest {
             val listenerJob = Job()
             val testScope = CoroutineScope(Dispatchers.Unconfined + listenerJob)
@@ -158,28 +151,32 @@ class SummarizerPluginTest {
             val mockRouting = mockk<Routing>(relaxed = true)
             val testDb = createTestDb()
 
-            val negativeConfig =
-                mapOf(
-                    "SUMMARY_MAX_IMAGES" to -10,
-                    "SUMMARY_MAX_CHARACTER_BUDGET" to -500,
-                    "SUMMARY_INACTIVITY_GAP_MINUTES" to -15L,
-                    "SUMMARY_MAX_HISTORY_MESSAGES" to 999,
+            val invalidCases =
+                listOf(
+                    "SUMMARY_MAX_IMAGES" to "-10",
+                    "SUMMARY_MAX_IMAGES" to "0",
+                    "SUMMARY_MAX_CHARACTER_BUDGET" to "-500",
+                    "SUMMARY_MAX_CHARACTER_BUDGET" to "0",
+                    "SUMMARY_INACTIVITY_GAP_MINUTES" to "-15",
+                    "SUMMARY_INACTIVITY_GAP_MINUTES" to "not-a-number",
+                    "SUMMARY_MAX_HISTORY_MESSAGES" to "999",
+                    "SUMMARY_MAX_HISTORY_MESSAGES" to "0",
+                    "SUMMARY_MAX_HISTORY_MESSAGES" to "abc",
                 )
-            val context =
-                DefaultPluginContext(
-                    kord = mockKord,
-                    routing = mockRouting,
-                    database = testDb,
-                    configMap = negativeConfig,
-                )
-            val plugin = SummarizerPlugin()
-            plugin.initialize(context)
 
-            assertEquals(ConversationSliceCollector.DEFAULT_MAX_IMAGES, plugin.maxImages)
-            assertEquals(ConversationSliceCollector.DEFAULT_MAX_CHARACTER_BUDGET, plugin.maxCharacterBudget)
-            assertEquals(ConversationSliceCollector.DEFAULT_INACTIVITY_GAP, plugin.inactivityGap)
-            // History limit clamped to upper bound of 100
-            assertEquals(100, plugin.maxHistoryMessages)
+            for ((key, value) in invalidCases) {
+                val context =
+                    DefaultPluginContext(
+                        kord = mockKord,
+                        routing = mockRouting,
+                        database = testDb,
+                        env = EnvReader.of(key to value),
+                    )
+                val plugin = SummarizerPlugin()
+                assertFailsWith<ConfigValidationException> {
+                    plugin.initialize(context)
+                }
+            }
 
             listenerJob.cancel()
         }
@@ -223,7 +220,7 @@ class SummarizerPluginTest {
                     kord = mockKord,
                     routing = mockRouting,
                     database = testDb,
-                    configMap = mapOf("SUMMARY_EMOJI" to "📝"),
+                    env = EnvReader.of("SUMMARY_EMOJI" to "📝"),
                 )
 
             plugin.initialize(context)
@@ -287,7 +284,7 @@ class SummarizerPluginTest {
                     kord = mockKord,
                     routing = mockk(relaxed = true),
                     database = createTestDb(),
-                    configMap = mapOf("GEMINI_API_KEY" to "test-key"),
+                    env = EnvReader.of("GEMINI_API_KEY" to "test-key"),
                     aiTraceRecorder = recorder,
                 )
 
@@ -303,7 +300,7 @@ class SummarizerPluginTest {
     }
 
     @Test
-    fun `initialize resolves GEMINI_URL_CONTEXT_ENABLED and gemini dot urlContextEnabled into GeminiConfig with invalid fallback`() =
+    fun `initialize resolves GEMINI_URL_CONTEXT_ENABLED and GEMINI_SEARCH_GROUNDING_ENABLED strictly and ignores legacy aliases`() =
         runTest {
             val listenerJob = Job()
             val testScope = CoroutineScope(Dispatchers.Unconfined + listenerJob)
@@ -313,7 +310,7 @@ class SummarizerPluginTest {
             val mockRouting = mockk<Routing>(relaxed = true)
             val testDb = createTestDb()
 
-            suspend fun captureConfig(configMap: Map<String, Any?>): GeminiConfig {
+            suspend fun captureConfig(env: EnvReader): GeminiConfig {
                 var captured: GeminiConfig? = null
                 val plugin =
                     SummarizerPlugin(
@@ -327,21 +324,72 @@ class SummarizerPluginTest {
                         kord = mockKord,
                         routing = mockRouting,
                         database = testDb,
-                        configMap = configMap,
+                        env = env,
                     )
                 plugin.initialize(context)
                 return assertNotNull(captured)
             }
 
-            assertTrue(captureConfig(emptyMap()).urlContextEnabled)
-            assertFalse(captureConfig(mapOf("GEMINI_URL_CONTEXT_ENABLED" to false)).urlContextEnabled)
-            assertFalse(captureConfig(mapOf("GEMINI_URL_CONTEXT_ENABLED" to " false ")).urlContextEnabled)
-            assertFalse(captureConfig(mapOf("gemini.urlContextEnabled" to false)).urlContextEnabled)
-            assertFalse(captureConfig(mapOf("gemini.urlContextEnabled" to "false")).urlContextEnabled)
-            assertTrue(captureConfig(mapOf("GEMINI_URL_CONTEXT_ENABLED" to "true")).urlContextEnabled)
+            assertTrue(captureConfig(EnvReader.of()).urlContextEnabled)
+            assertTrue(captureConfig(EnvReader.of()).searchGroundingEnabled)
+            assertFalse(captureConfig(EnvReader.of("GEMINI_URL_CONTEXT_ENABLED" to " false ")).urlContextEnabled)
+            assertFalse(captureConfig(EnvReader.of("GEMINI_SEARCH_GROUNDING_ENABLED" to "FALSE")).searchGroundingEnabled)
+            assertTrue(captureConfig(EnvReader.of("GEMINI_URL_CONTEXT_ENABLED" to "true")).urlContextEnabled)
 
-            // Negative boundary: invalid value falls back to default true
-            assertTrue(captureConfig(mapOf("GEMINI_URL_CONTEXT_ENABLED" to "invalid")).urlContextEnabled)
+            // Legacy dotted aliases are ignored
+            assertTrue(captureConfig(EnvReader.of("gemini.urlContextEnabled" to "false")).urlContextEnabled)
+            assertTrue(captureConfig(EnvReader.of("gemini.searchGroundingEnabled" to "false")).searchGroundingEnabled)
+
+            // Negative boundary: non-boolean value fails fast
+            assertFailsWith<ConfigValidationException> {
+                captureConfig(EnvReader.of("GEMINI_URL_CONTEXT_ENABLED" to "invalid"))
+            }
+            assertFailsWith<ConfigValidationException> {
+                captureConfig(EnvReader.of("GEMINI_SEARCH_GROUNDING_ENABLED" to "yes"))
+            }
+
+            listenerJob.cancel()
+        }
+
+    @Test
+    fun `initialize normalizes GEMINI_MODEL and GEMINI_BASE_URL and ignores legacy summary aliases`() =
+        runTest {
+            val listenerJob = Job()
+            val testScope = CoroutineScope(Dispatchers.Unconfined + listenerJob)
+            val mockKord = mockk<Kord>(relaxed = true)
+            every { mockKord.events } returns MutableSharedFlow()
+            every { mockKord.coroutineContext } returns testScope.coroutineContext
+            val mockRouting = mockk<Routing>(relaxed = true)
+            val testDb = createTestDb()
+
+            var captured: GeminiConfig? = null
+            val plugin =
+                SummarizerPlugin(
+                    summarizerFactory = { cfg ->
+                        captured = cfg
+                        mockk(relaxed = true)
+                    },
+                )
+            plugin.initialize(
+                DefaultPluginContext(
+                    kord = mockKord,
+                    routing = mockRouting,
+                    database = testDb,
+                    env =
+                        EnvReader.of(
+                            "GEMINI_MODEL" to "  models/gemini-2.5-pro  ",
+                            "GEMINI_BASE_URL" to "  https://proxy.example.com/v1beta/  ",
+                            "summary.maxHistoryMessages" to "12",
+                            "summary.emoji" to "🚀",
+                        ),
+                ),
+            )
+
+            val cfg = assertNotNull(captured)
+            assertEquals("gemini-2.5-pro", cfg.model)
+            assertEquals("https://proxy.example.com", cfg.baseUrl)
+            assertEquals(ConversationSliceCollector.DEFAULT_MAX_HISTORY_MESSAGES, plugin.maxHistoryMessages)
+            assertEquals(SummaryService.DEFAULT_EMOJI, plugin.configuredEmoji)
 
             listenerJob.cancel()
         }

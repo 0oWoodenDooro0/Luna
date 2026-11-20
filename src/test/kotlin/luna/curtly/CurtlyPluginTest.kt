@@ -13,6 +13,7 @@ import io.ktor.server.testing.testApplication
 import io.mockk.coVerify
 import io.mockk.mockk
 import kotlinx.coroutines.runBlocking
+import luna.config.EnvReader
 import luna.curtly.engine.ClickLogsEntries
 import luna.curtly.engine.UrlEntries
 import luna.plugin.DefaultPluginContext
@@ -46,7 +47,7 @@ class CurtlyPluginTest {
                             kord = mockKord,
                             routing = this,
                             database = testDb,
-                            configMap = mapOf("curtly.baseUrl" to "https://short.test/s/"),
+                            env = EnvReader.of("BASE_URL" to "https://short.test/s/"),
                         )
 
                     runBlocking {
@@ -103,9 +104,9 @@ class CurtlyPluginTest {
                             kord = mockKord,
                             routing = this,
                             database = testDb,
-                            configMap =
-                                mapOf(
-                                    "curtly.baseUrl" to "https://short.test/s/",
+                            env =
+                                EnvReader.of(
+                                    "BASE_URL" to "https://short.test/s/",
                                     "DISCORD_CLIENT_ID" to "test-client-id-123",
                                     "DISCORD_CLIENT_SECRET" to "test-client-secret-456",
                                     "DISCORD_REDIRECT_URI" to "https://oauth.test/callback",
@@ -127,5 +128,53 @@ class CurtlyPluginTest {
             assertNotNull(location)
             assertTrue(location.contains("client_id=test-client-id-123"))
             assertTrue(location.contains("redirect_uri=https%3A%2F%2Foauth.test%2Fcallback"))
+        }
+
+    @Test
+    fun `curtly plugin ignores legacy alias keys`() =
+        testApplication {
+            val mockKord = mockk<Kord>(relaxed = true)
+            val testDb = createTestDb()
+            val plugin = CurtlyPlugin()
+
+            application {
+                routing {
+                    val context =
+                        DefaultPluginContext(
+                            kord = mockKord,
+                            routing = this,
+                            database = testDb,
+                            env =
+                                EnvReader.of(
+                                    "curtly.baseUrl" to "https://legacy.test/s/",
+                                    "DISCORD_APP_ID" to "legacy-app-id",
+                                    "curtly.discordClientId" to "legacy-client-id",
+                                    "discord.clientId" to "legacy-discord-id",
+                                    "curtly.redirectUri" to "https://legacy.test/callback",
+                                ),
+                        )
+
+                    runBlocking {
+                        plugin.initialize(context)
+                    }
+                }
+            }
+
+            startApplication()
+
+            val shortenApiRes =
+                client.post("/api/shorten") {
+                    contentType(ContentType.Application.Json)
+                    setBody("""{"longUrl":"https://kotlinlang.org","customKey":"legacy-check"}""")
+                }
+            assertEquals(HttpStatusCode.OK, shortenApiRes.status)
+            assertTrue(
+                shortenApiRes.bodyAsText().contains("http://localhost:8080/s/legacy-check"),
+                "Expected default BASE_URL when only legacy curtly.baseUrl is set",
+            )
+
+            val noFollowClient = createClient { followRedirects = false }
+            val loginRes = noFollowClient.get("/api/auth/discord/login")
+            assertEquals(HttpStatusCode.InternalServerError, loginRes.status)
         }
 }

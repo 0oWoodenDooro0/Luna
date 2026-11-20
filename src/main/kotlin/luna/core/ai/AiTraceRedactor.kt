@@ -5,6 +5,7 @@ import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import luna.config.EnvReader
 import luna.config.SecretMasker
 
 /**
@@ -153,6 +154,8 @@ class AiTraceRedactor(
             Regex("""(authorization\s*[:=]\s*["']?Bearer\s+)([^"'\s,;}\]]+)""", RegexOption.IGNORE_CASE)
 
         fun sanitizeEndpoint(endpoint: String): String = QUERY_KEY_REGEX.replace(endpoint) { "${it.groupValues[1]}$MASK" }
+
+        fun from(env: EnvReader): AiTraceRedactor = fromConfig(env.toMap())
 
         fun fromConfig(config: Map<String, Any?>): AiTraceRedactor {
             val secrets = mutableListOf<String>()

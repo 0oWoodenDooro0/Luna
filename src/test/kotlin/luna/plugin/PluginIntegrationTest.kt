@@ -8,6 +8,7 @@ import io.ktor.server.routing.routing
 import io.ktor.server.testing.testApplication
 import io.mockk.mockk
 import kotlinx.coroutines.runBlocking
+import luna.config.EnvReader
 import org.jetbrains.exposed.v1.jdbc.Database
 import org.jetbrains.exposed.v1.jdbc.selectAll
 import org.jetbrains.exposed.v1.jdbc.transactions.transaction
@@ -55,7 +56,7 @@ class PluginIntegrationTest {
                             kord = mockKord,
                             routing = this,
                             database = testDb,
-                            configMap = mapOf("test.greeting" to "Integration Greetings from Config"),
+                            env = EnvReader.of(mapOf("TEST_GREETING" to "Integration Greetings from Config")),
                         )
 
                     runBlocking {

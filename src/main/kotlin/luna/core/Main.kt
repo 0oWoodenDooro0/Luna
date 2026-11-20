@@ -18,6 +18,7 @@ import io.ktor.server.sessions.Sessions
 import io.ktor.server.sessions.cookie
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.runBlocking
+import luna.config.EnvReader
 import luna.core.ai.AiTraceConfig
 import luna.core.ai.AiTraceRecorder
 import luna.core.ai.JsonlAiTraceRecorder
@@ -42,7 +43,7 @@ class LunaHost(
     private val kordFactory: ((String) -> Kord)? = null,
     private val ownerErrorDmSender: (suspend (Snowflake, String) -> Unit)? = null,
 ) {
-    val config: Map<String, Any?>
+    val env: EnvReader
     val coreConfig: LunaCoreConfig
     val aiTraceConfig: AiTraceConfig
     val aiTraceRecorder: AiTraceRecorder
@@ -65,44 +66,38 @@ class LunaHost(
     private var readyListenerJob: Job? = null
 
     init {
-        val loaded = customConfig ?: ConfigLoader.loadConfig()
+        env =
+            if (customConfig != null) {
+                EnvReader.of(ConfigLoader.toStringMap(customConfig))
+            } else {
+                EnvReader.load(auditDrift = false)
+            }
         // Fail-fast validation against LunaCoreConfig data model
-        coreConfig = LunaCoreConfig.fromMap(loaded)
+        coreConfig = LunaCoreConfig.from(env)
 
-        // Ensure active core config is represented in the unified config map
-        val unified = loaded.toMutableMap()
-        unified.putIfAbsent("PORT", coreConfig.port)
-        unified.putIfAbsent("DISCORD_TOKEN", coreConfig.botToken)
-        unified.putIfAbsent("DISCORD_CLIENT_ID", coreConfig.clientId)
-        unified.putIfAbsent("DISCORD_CLIENT_SECRET", coreConfig.clientSecret)
-        unified.putIfAbsent("BASE_URL", coreConfig.baseUrl)
-        unified.putIfAbsent("DISCORD_REDIRECT_URI", coreConfig.redirectUri)
-        config = unified
-
-        aiTraceConfig = AiTraceConfig.fromMap(config)
-        aiTraceRecorder = JsonlAiTraceRecorder.fromConfig(aiTraceConfig, config)
-        errorNotifyConfig = ErrorNotifyConfig.fromMap(config)
+        aiTraceConfig = AiTraceConfig.from(env)
+        aiTraceRecorder = JsonlAiTraceRecorder.fromConfig(aiTraceConfig, env)
+        errorNotifyConfig = ErrorNotifyConfig.from(env)
         ownerErrorNotifier =
             OwnerErrorNotifier(
                 config = errorNotifyConfig,
-                secretConfig = config,
+                env = env,
                 dmSender = ownerErrorDmSender,
             )
 
         val configuredVecPath =
-            config["SQLITE_VEC_EXTENSION_PATH"]?.toString()?.trim()?.takeIf { it.isNotBlank() }
-                ?: config["sqlite.vecExtensionPath"]?.toString()?.trim()?.takeIf { it.isNotBlank() }
-                ?: DEFAULT_SQLITE_VEC_EXTENSION_PATH
+            env.string("SQLITE_VEC_EXTENSION_PATH") ?: DEFAULT_SQLITE_VEC_EXTENSION_PATH
         database = customDatabase ?: initDatabase(vecExtensionPath = configuredVecPath)
 
         // Temporarily attach appender during init audit so pre-ReadyEvent [CONFIG_DRIFT] alerts
         // are captured and buffered without leaving a dangling appender if start() is not called.
         attachOwnerErrorAppender()
         try {
+            val rawConfig = env.toMap()
             // Run startup drift audit to fail fast on missing required variables and report drift
-            ConfigLoader.auditDrift(loaded)
+            ConfigLoader.auditDrift(rawConfig)
             // Startup audit log emitting active configuration with secrets masked
-            ConfigLoader.auditLog(config)
+            ConfigLoader.auditLog(rawConfig)
         } catch (t: Throwable) {
             runBlocking { ownerErrorNotifier.flushAndClose() }
             throw t
@@ -146,14 +141,14 @@ class LunaHost(
         ownerErrorNotifier.bindKord(kordClient)
         registerReadyListener(kordClient)
 
-        // 3. Build DefaultPluginContext providing kord, routing, database, configuration, and AI trace recorder
+        // 3. Build DefaultPluginContext providing kord, routing, database, AI trace recorder, and EnvReader
         val context =
             DefaultPluginContext(
                 kord = kordClient,
                 routing = routing,
                 database = database,
-                configMap = config,
                 aiTraceRecorder = aiTraceRecorder,
+                env = env,
             )
         this.pluginContext = context
 

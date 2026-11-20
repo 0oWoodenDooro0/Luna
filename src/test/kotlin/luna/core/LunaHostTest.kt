@@ -79,8 +79,8 @@ class LunaHostTest {
     fun testConfigLoading() {
         val config = LunaHost.loadConfig()
         assertNotNull(config)
-        // Verify application.yml flattened keys exist
-        assertTrue(config.containsKey("curtly.baseUrl"))
+        // application.yml is no longer loaded in host bootstrap
+        assertFalse(config.containsKey("curtly.baseUrl"), "Host bootstrap must not load application.yml keys")
     }
 
     @Test

@@ -53,7 +53,7 @@ class ChatterAiTraceServiceTest {
                 kord = mockKord,
                 routing = mockk(relaxed = true),
                 database = mockk(relaxed = true),
-                configMap = mapOf("GEMINI_API_KEY" to "plugin-gemini-key"),
+                env = luna.config.EnvReader.of(mapOf("GEMINI_API_KEY" to "plugin-gemini-key")),
                 aiTraceRecorder = recorder,
             )
 
@@ -90,7 +90,7 @@ class ChatterAiTraceServiceTest {
                     kord = mockKord,
                     routing = mockk(relaxed = true),
                     database = mockk(relaxed = true),
-                    configMap = mapOf("GEMINI_API_KEY" to "k"),
+                    env = luna.config.EnvReader.of(mapOf("GEMINI_API_KEY" to "k")),
                 )
 
             plugin.initialize(context)

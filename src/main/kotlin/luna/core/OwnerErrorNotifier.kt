@@ -18,6 +18,7 @@ import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
+import luna.config.EnvReader
 import luna.config.SecretMasker
 import net.logstash.logback.marker.SingleFieldAppendingMarker
 import org.slf4j.LoggerFactory
@@ -38,13 +39,13 @@ import java.util.concurrent.atomic.AtomicReference
  */
 class OwnerErrorNotifier(
     val config: ErrorNotifyConfig,
-    secretConfig: Map<String, Any?> = emptyMap(),
+    env: EnvReader = EnvReader.of(emptyMap()),
     eventFilter: ErrorEventFilter? = null,
     rateLimiter: AlertRateLimiter? = null,
     private val startupBuffer: StartupAlertBuffer = BoundedStartupAlertBuffer(),
     private val queueCapacity: Int = DEFAULT_QUEUE_CAPACITY,
     private val clock: Clock = Clock.systemUTC(),
-    private val redactor: OwnerErrorRedactor = OwnerErrorRedactor.fromConfig(secretConfig),
+    private val redactor: OwnerErrorRedactor = OwnerErrorRedactor.from(env),
     dispatcher: CoroutineDispatcher? = null,
     private val dmSender: (suspend (Snowflake, String) -> Unit)? = null,
 ) {

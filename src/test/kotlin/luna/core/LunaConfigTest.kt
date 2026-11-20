@@ -4,6 +4,8 @@ import ch.qos.logback.classic.Level
 import ch.qos.logback.classic.Logger
 import ch.qos.logback.classic.spi.ILoggingEvent
 import ch.qos.logback.core.read.ListAppender
+import luna.config.ConfigValidationException
+import luna.config.EnvReader
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertThrows
 import org.slf4j.LoggerFactory
@@ -62,14 +64,40 @@ class LunaConfigTest {
     }
 
     @Test
-    fun `succeeds when client id is missing but discord app id fallback is present`() {
+    fun `rejects legacy client id aliases when DISCORD_CLIENT_ID is missing`() {
         val map =
             validBaseMap().apply {
                 remove("DISCORD_CLIENT_ID")
                 put("DISCORD_APP_ID", "app_id_999")
+                put("clientId", "client_id_999")
+                put("luna.clientId", "luna_client_id_999")
             }
-        val config = LunaCoreConfig.fromMap(map)
-        assertEquals("app_id_999", config.clientId)
+        val ex =
+            assertThrows<ConfigValidationException> {
+                LunaCoreConfig.fromMap(map)
+            }
+        assertTrue(ex.message!!.contains("DISCORD_CLIENT_ID"), "Exception must name DISCORD_CLIENT_ID")
+    }
+
+    @Test
+    fun `LunaCoreConfig from EnvReader loads canonical keys and ignores legacy aliases`() {
+        val env =
+            EnvReader.of(
+                "DISCORD_TOKEN" to "tok_123",
+                "DISCORD_CLIENT_ID" to "cid_456",
+                "DISCORD_CLIENT_SECRET" to "sec_789",
+                "PORT" to "9090",
+                "BASE_URL" to "https://luna.example.com/s/",
+                "curtly.baseUrl" to "https://ignored.example.com/s/",
+                "REDIRECT_URI" to "https://ignored.callback",
+            )
+        val config = LunaCoreConfig.from(env)
+        assertEquals("tok_123", config.botToken)
+        assertEquals("cid_456", config.clientId)
+        assertEquals("sec_789", config.clientSecret)
+        assertEquals(9090, config.port)
+        assertEquals("https://luna.example.com/s/", config.baseUrl)
+        assertEquals("https://luna.example.com/api/auth/discord/callback", config.redirectUri)
     }
 
     @Test
@@ -182,73 +210,14 @@ class LunaConfigTest {
     }
 
     @Test
-    fun `precedence resolution where yaml placeholder resolves system env over dotenv`() {
-        val dotenv =
-            """
-            BASE_URL=http://dotenv.local:8080
-            """.trimIndent()
-        val systemEnv =
-            mapOf(
-                "BASE_URL" to "http://env.local:8080",
-            )
-        val yaml =
-            """
-            curtly:
-              baseUrl: "${'$'}{BASE_URL:http://default:8080}"
-            """.trimIndent()
+    fun `loadConfig stops loading application yml and uses two-layer env hierarchy`() {
         val loaded =
-            ConfigLoader.loadConfigFromSources(
-                dotenvContent = dotenv,
-                systemEnv = systemEnv,
-                yamlContent = yaml,
+            ConfigLoader.loadConfig(
+                envFile = null,
+                systemEnv = mapOf("BASE_URL" to "http://env.local:8080"),
             )
-
-        assertEquals("http://env.local:8080", loaded["curtly.baseUrl"])
-    }
-
-    @Test
-    fun `precedence resolution where yaml placeholder resolves dotenv when system env absent`() {
-        val dotenv =
-            """
-            BASE_URL=http://dotenv.local:8080
-            """.trimIndent()
-        val yaml =
-            """
-            curtly:
-              baseUrl: "${'$'}{BASE_URL:http://default:8080}"
-            """.trimIndent()
-        val loaded =
-            ConfigLoader.loadConfigFromSources(
-                dotenvContent = dotenv,
-                systemEnv = emptyMap(),
-                yamlContent = yaml,
-            )
-
-        assertEquals("http://dotenv.local:8080", loaded["curtly.baseUrl"])
-    }
-
-    @Test
-    fun `precedence resolution where explicit yaml value overrides env and dotenv`() {
-        val dotenv =
-            """
-            PORT=7000
-            """.trimIndent()
-        val systemEnv =
-            mapOf(
-                "PORT" to "8000",
-            )
-        val yaml =
-            """
-            PORT: 9000
-            """.trimIndent()
-        val loaded =
-            ConfigLoader.loadConfigFromSources(
-                dotenvContent = dotenv,
-                systemEnv = systemEnv,
-                yamlContent = yaml,
-            )
-
-        assertEquals(9000, loaded["PORT"])
+        assertEquals("http://env.local:8080", loaded["BASE_URL"])
+        assertEquals(null, loaded["curtly.baseUrl"])
     }
 
     @Test
@@ -410,39 +379,52 @@ class LunaConfigTest {
     }
 
     @Test
-    fun `audit drift does not emit false drift warnings for recognized alias keys and dual namespace properties`() {
+    fun `audit drift recognizes canonical keys and flags removed legacy alias keys as unknown`() {
         val jsonLogger = LoggerFactory.getLogger("JSON_LOGGER") as Logger
         val listAppender = ListAppender<ILoggingEvent>()
         listAppender.start()
         jsonLogger.addAppender(listAppender)
 
         try {
-            val configWithAliases =
+            val canonicalConfig =
                 mutableMapOf<String, Any?>(
                     "DISCORD_TOKEN" to "token_val",
-                    "DISCORD_APP_ID" to "app_id_val", // alias for DISCORD_CLIENT_ID
-                    "clientSecret" to "secret_val", // alias for DISCORD_CLIENT_SECRET
-                    "port" to 8080, // alias for PORT
-                    "MCP_PORT" to 8081, // cross-subproject alias
-                    "curtly.baseUrl" to "https://short.custom/s/", // dual-namespace plugin key
-                    "summarizer.emoji" to "✨", // dual-namespace plugin key
-                    "summary.maxHistoryMessages" to 60, // dual-namespace plugin key
-                    "gemini.apiKey" to "ai_key", // dual-namespace plugin key
-                    "PLUGINS_CURTLY_ENABLED" to "true", // plugin lifecycle toggle
+                    "DISCORD_CLIENT_ID" to "app_id_val",
+                    "DISCORD_CLIENT_SECRET" to "secret_val",
+                    "PORT" to 8080,
+                    "MCP_PORT" to 8081,
+                    "BASE_URL" to "https://short.custom/s/",
+                    "SUMMARY_EMOJI" to "✨",
+                    "SUMMARY_MAX_HISTORY_MESSAGES" to 60,
+                    "GEMINI_API_KEY" to "ai_key",
+                    "PLUGINS_CURTLY_ENABLED" to "true",
                 )
 
-            val result = ConfigLoader.auditDrift(configWithAliases)
+            val result = ConfigLoader.auditDrift(canonicalConfig)
 
             assertTrue(
                 result.unknownKeys.isEmpty(),
-                "Aliases and dual-namespace keys must not produce unknown drift keys, but got: ${result.unknownKeys}",
+                "Canonical keys must not produce unknown drift keys, but got: ${result.unknownKeys}",
             )
 
             val warnEvents =
                 listAppender.list.filter { event ->
                     event.level == Level.WARN && event.formattedMessage.contains("[CONFIG_DRIFT]")
                 }
-            assertTrue(warnEvents.isEmpty(), "No [CONFIG_DRIFT] warning should be emitted for recognized aliases")
+            assertTrue(warnEvents.isEmpty(), "No [CONFIG_DRIFT] warning should be emitted for canonical keys")
+
+            val legacyResult =
+                ConfigLoader.auditDrift(
+                    validBaseMap().apply {
+                        put("curtly.baseUrl", "https://short.custom/s/")
+                        put("DISCORD_APP_ID", "app_id_val")
+                        put("PLUGINS_CURTLY_BASE_URL", "https://short.custom/s/")
+                    },
+                )
+            assertEquals(
+                listOf("curtly.baseUrl", "DISCORD_APP_ID", "PLUGINS_CURTLY_BASE_URL"),
+                legacyResult.unknownKeys,
+            )
         } finally {
             jsonLogger.detachAppender(listAppender)
         }
@@ -475,22 +457,24 @@ class LunaConfigTest {
     }
 
     @Test
-    fun `AiTraceConfig resolves defaults and overrides from map without secret masking`() {
+    fun `AiTraceConfig resolves defaults and overrides via EnvReader and fails fast on invalid inputs`() {
         val defaults =
             luna.core.ai.AiTraceConfig
-                .fromMap(emptyMap())
+                .from(EnvReader.of(emptyMap()))
         assertEquals(true, defaults.enabled)
         assertEquals("data/logs/ai", defaults.dir)
         assertEquals(14, defaults.maxDays)
         assertEquals(200, defaults.maxTotalMb)
 
         val configured =
-            luna.core.ai.AiTraceConfig.fromMap(
-                mapOf(
-                    "AI_TRACE_ENABLED" to "false",
-                    "AI_TRACE_DIR" to "/var/log/luna-ai",
-                    "AI_TRACE_MAX_DAYS" to "7",
-                    "AI_TRACE_MAX_TOTAL_MB" to "50",
+            luna.core.ai.AiTraceConfig.from(
+                EnvReader.of(
+                    mapOf(
+                        "AI_TRACE_ENABLED" to "false",
+                        "AI_TRACE_DIR" to "/var/log/luna-ai",
+                        "AI_TRACE_MAX_DAYS" to "7",
+                        "AI_TRACE_MAX_TOTAL_MB" to "50",
+                    ),
                 ),
             )
         assertEquals(false, configured.enabled)
@@ -498,32 +482,21 @@ class LunaConfigTest {
         assertEquals(7, configured.maxDays)
         assertEquals(50, configured.maxTotalMb)
 
-        // Negative boundary: non-positive numbers fall back to defaults
-        val invalidBounds =
-            luna.core.ai.AiTraceConfig.fromMap(
-                mapOf(
-                    "AI_TRACE_MAX_DAYS" to "0",
-                    "AI_TRACE_MAX_TOTAL_MB" to "-10",
-                ),
-            )
-        assertEquals(14, invalidBounds.maxDays)
-        assertEquals(200, invalidBounds.maxTotalMb)
+        // Negative boundary: non-positive or non-numeric values fail fast with ConfigValidationException
+        org.junit.jupiter.api.Assertions.assertThrows(ConfigValidationException::class.java) {
+            luna.core.ai.AiTraceConfig
+                .from(EnvReader.of(mapOf("AI_TRACE_MAX_DAYS" to "0")))
+        }
+        org.junit.jupiter.api.Assertions.assertThrows(ConfigValidationException::class.java) {
+            luna.core.ai.AiTraceConfig
+                .from(EnvReader.of(mapOf("AI_TRACE_MAX_TOTAL_MB" to "-10")))
+        }
+        org.junit.jupiter.api.Assertions.assertThrows(ConfigValidationException::class.java) {
+            luna.core.ai.AiTraceConfig
+                .from(EnvReader.of(mapOf("AI_TRACE_ENABLED" to "yes")))
+        }
 
-        val snakeAliases =
-            luna.core.ai.AiTraceConfig.fromMap(
-                mapOf(
-                    "ai.trace.enabled" to false,
-                    "ai.trace.dir" to "/tmp/ai-map-snake",
-                    "ai.trace.max_days" to 10,
-                    "ai.trace.max_total_mb" to 80,
-                ),
-            )
-        assertEquals(false, snakeAliases.enabled)
-        assertEquals("/tmp/ai-map-snake", snakeAliases.dir)
-        assertEquals(10, snakeAliases.maxDays)
-        assertEquals(80, snakeAliases.maxTotalMb)
-
-        // Verify drift audit recognizes AI_TRACE_* and ai.trace.* and does not mask them
+        // Verify drift audit recognizes AI_TRACE_* and does not mask them
         val audit =
             ConfigLoader.auditDrift(
                 validBaseMap().apply {
@@ -531,15 +504,14 @@ class LunaConfigTest {
                     put("AI_TRACE_DIR", "data/logs/ai")
                     put("AI_TRACE_MAX_DAYS", "14")
                     put("AI_TRACE_MAX_TOTAL_MB", "200")
-                    put("ai.trace.enabled", "true")
                 },
             )
-        assertTrue(audit.unknownKeys.isEmpty(), "AI_TRACE_* and ai.trace.* must be recognized, got unknown=${audit.unknownKeys}")
+        assertTrue(audit.unknownKeys.isEmpty(), "AI_TRACE_* must be recognized, got unknown=${audit.unknownKeys}")
         assertEquals("data/logs/ai", audit.activeConfig["AI_TRACE_DIR"])
     }
 
     @Test
-    fun `audit drift does not emit false drift warnings for flattened application yml containers or container runtime keys`() {
+    fun `audit drift does not emit false drift warnings for container runtime keys`() {
         val loaded =
             ConfigLoader.loadConfigFromSources(
                 dotenvContent =
@@ -553,16 +525,11 @@ class LunaConfigTest {
                         "JAVA_VERSION" to "jdk-17.0.14+7",
                         "LANGUAGE" to "en_US:en",
                     ),
-                yamlContent =
-                    """
-                    curtly:
-                      baseUrl: "${'$'}{BASE_URL:http://localhost:8080}"
-                    """.trimIndent(),
             )
         val result = ConfigLoader.auditDrift(loaded)
         assertTrue(
             result.unknownKeys.isEmpty(),
-            "Flattened YAML container keys and container runtime keys must not trigger drift, got ${result.unknownKeys}",
+            "Container runtime keys must not trigger drift, got ${result.unknownKeys}",
         )
     }
 }
