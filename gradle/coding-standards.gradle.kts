@@ -402,6 +402,12 @@ fun checkEnvExampleParity(projectRoot: File): List<String> {
     val sysEnvRegex = Regex("""System\.getenv\s*\(\s*["']([A-Z][A-Z0-9_]+)["']\s*\)""")
     val envBracketRegex = Regex("""\benv\[\s*["']([A-Z][A-Z0-9_]+)["']\s*\]""")
     val lookupReadRegex = Regex("""\bread(?:String|Int|Long|Double|Boolean)\s*\(\s*lookup\s*,\s*["']([A-Z][A-Z0-9_]+)["']""")
+    val envReaderSingleKeyRegex =
+        Regex(
+            """\b(?:env|envReader)\s*\.\s*(?:string|requiredString|int|long|double|boolean|csv|port)\s*\(\s*["']([A-Z][A-Z0-9_]+)["']""",
+        )
+    val envReaderFirstStringRegex = Regex("""\b(?:env|envReader)\s*\.\s*firstString\s*\(([^)]*)\)""")
+    val keyLiteralRegex = Regex("""["']([A-Z][A-Z0-9_]+)["']""")
     val pluginNameRegex = Regex("""override\s+val\s+name\s*:\s*String\s*=\s*["']([^"']+)["']""")
 
     mainRoots.forEach { root ->
@@ -412,6 +418,13 @@ fun checkEnvExampleParity(projectRoot: File): List<String> {
             sysEnvRegex.findAll(content).forEach { codebaseKeys.add(it.groupValues[1]) }
             envBracketRegex.findAll(content).forEach { codebaseKeys.add(it.groupValues[1]) }
             lookupReadRegex.findAll(content).forEach { codebaseKeys.add(it.groupValues[1]) }
+            envReaderSingleKeyRegex.findAll(content).forEach { codebaseKeys.add(it.groupValues[1]) }
+            envReaderFirstStringRegex.findAll(content).forEach { callMatch ->
+                val keyArgs = callMatch.groupValues[1].substringBefore("default")
+                keyLiteralRegex.findAll(keyArgs).forEach { keyMatch ->
+                    codebaseKeys.add(keyMatch.groupValues[1])
+                }
+            }
 
             if (content.contains(": LunaPlugin") || content.contains(": luna.plugin.LunaPlugin")) {
                 pluginNameRegex.find(content)?.let { match ->

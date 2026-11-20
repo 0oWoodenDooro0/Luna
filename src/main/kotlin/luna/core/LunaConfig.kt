@@ -13,12 +13,10 @@ import java.io.InputStream
 
 /**
  * Dedicated exception thrown when Luna core configuration fails validation at startup.
- * Extends [IllegalStateException] for backwards compatibility and standard runtime contract.
+ * Promoted to [luna.config.ConfigValidationException] in `:libs:config` and aliased here
+ * for backwards compatibility during incremental migration.
  */
-class ConfigValidationException(
-    message: String,
-    cause: Throwable? = null,
-) : IllegalStateException(message, cause)
+typealias ConfigValidationException = luna.config.ConfigValidationException
 
 internal fun failValidation(message: String): Nothing {
     JsonLogger.error(

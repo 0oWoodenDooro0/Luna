@@ -3,6 +3,7 @@ package luna.plugin
 import dev.kord.core.Kord
 import io.ktor.server.routing.Routing
 import io.mockk.mockk
+import luna.config.EnvReader
 import org.jetbrains.exposed.v1.jdbc.Database
 import org.junit.jupiter.api.Test
 import kotlin.test.assertEquals
@@ -324,5 +325,24 @@ class PluginContextTest {
                 .fromPluginContext(invalidBoundsContext)
         assertEquals(14, bounded.maxDays)
         assertEquals(200, bounded.maxTotalMb)
+    }
+
+    @Test
+    fun `PluginContext exposes env reader while preserving legacy configMap compatibility`() {
+        val explicitEnvContext =
+            DefaultPluginContext(
+                kord = mockk(relaxed = true),
+                routing = mockk(relaxed = true),
+                database = createTestDb(),
+                env = EnvReader.of(mapOf("PORT" to "9090", "CHATTER_ENABLED" to "true")),
+            )
+
+        assertEquals(9090, explicitEnvContext.env.port("PORT", 8080))
+        assertEquals(true, explicitEnvContext.env.boolean("CHATTER_ENABLED", false))
+
+        val mapBackedContext = createContext(mapOf("PORT" to 8181, "BASE_URL" to "https://example.com"))
+        assertEquals(8181, mapBackedContext.env.port("PORT", 8080))
+        assertEquals("https://example.com", mapBackedContext.env.string("BASE_URL"))
+        assertEquals(8181, mapBackedContext.config("PORT", 8080))
     }
 }
