@@ -115,17 +115,17 @@ class ChatterNoiseFilterStickerAndGifTest {
             assertEquals("Alice", res1.speakerName)
             assertEquals("[貼圖: blob_wave]", res1.content)
             assertTrue(filter.isContextMessage(pngStickerMsg))
-            assertEquals(ChatMessage("Alice", "[貼圖: blob_wave]"), filter.toChatMessageOrNull(pngStickerMsg))
+            assertEquals(ChatMessage("Alice", "[貼圖: blob_wave]", authorId = "101"), filter.toChatMessageOrNull(pngStickerMsg))
 
             val res2 = filter.evaluate(lottieStickerMsg)
             assertIs<ChatterFilterResult.Allowed>(res2)
             assertEquals("[貼圖: sparkle]", res2.content)
-            assertEquals(ChatMessage("Bob", "[貼圖: sparkle]"), filter.toChatMessageOrNull(lottieStickerMsg))
+            assertEquals(ChatMessage("Bob", "[貼圖: sparkle]", authorId = "102"), filter.toChatMessageOrNull(lottieStickerMsg))
 
             val res3 = filter.evaluate(unnamedLottieMsg)
             assertIs<ChatterFilterResult.Allowed>(res3)
             assertEquals("[貼圖]", res3.content)
-            assertEquals(ChatMessage("Charlie", "[貼圖]"), filter.toChatMessageOrNull(unnamedLottieMsg))
+            assertEquals(ChatMessage("Charlie", "[貼圖]", authorId = "103"), filter.toChatMessageOrNull(unnamedLottieMsg))
         }
 
     @Test
@@ -157,7 +157,7 @@ class ChatterNoiseFilterStickerAndGifTest {
             assertIs<ChatterFilterResult.Allowed>(resTenor)
             assertEquals("[GIF]", resTenor.content)
             assertTrue(filter.isContextMessage(tenorMsg))
-            assertEquals(ChatMessage("Dave", "[GIF]"), filter.toChatMessageOrNull(tenorMsg))
+            assertEquals(ChatMessage("Dave", "[GIF]", authorId = "201"), filter.toChatMessageOrNull(tenorMsg))
 
             val resGiphy = filter.evaluate(giphyMsg)
             assertIs<ChatterFilterResult.Allowed>(resGiphy)

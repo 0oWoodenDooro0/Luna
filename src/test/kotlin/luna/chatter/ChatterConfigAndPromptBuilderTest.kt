@@ -307,6 +307,27 @@ class ChatterConfigAndPromptBuilderTest {
     }
 
     @Test
+    fun `ChatterPromptBuilder formats speaker headers with uid and BOT badge when metadata is present`() {
+        val messages =
+            listOf(
+                ChatMessage(author = "Alice", content = "大家早安", authorId = "123456", isBot = false),
+                ChatMessage(author = "NewsBot", content = "今日頭條", authorId = "789012", isBot = true),
+                ChatMessage(author = "Luna", content = "早安呀", authorId = "999999", isBot = false),
+            )
+
+        val formatted = ChatterPromptBuilder.formatTranscript(messages)
+        assertEquals(
+            "Alice (uid:123456): 大家早安\n" +
+                "NewsBot [BOT] (uid:789012): 今日頭條\n" +
+                "Luna (uid:999999): 早安呀",
+            formatted,
+        )
+        assertEquals("Alice (uid:123456)", ChatterPromptBuilder.formatSpeakerHeader("Alice", "123456", isBot = false))
+        assertEquals("NewsBot [BOT] (uid:789012)", ChatterPromptBuilder.formatSpeakerHeader("NewsBot", "789012", isBot = true))
+        assertEquals("Luna (uid:999999)", ChatterPromptBuilder.formatSpeakerHeader("Luna", "999999", isBot = false))
+    }
+
+    @Test
     fun `ChatterPromptBuilder buildInteractionRequest embeds video image text inputs, tools, max_output_tokens without temperature`() {
         val input =
             ChatterInput(

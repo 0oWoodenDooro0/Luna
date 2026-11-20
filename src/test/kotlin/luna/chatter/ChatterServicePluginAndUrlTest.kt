@@ -453,9 +453,12 @@ class ChatterServicePluginAndUrlTest {
                 fixture.decisionClient.decide(
                     match { transcript ->
                         !transcript.contains("Turn 1\n") &&
-                            transcript.contains("[User2]: Turn 2") &&
-                            transcript.contains("[User20]: Turn 20") &&
-                            transcript.contains("[TriggerUser]: Latest turn")
+                            transcript.contains("User2") &&
+                            transcript.contains("Turn 2") &&
+                            transcript.contains("User20") &&
+                            transcript.contains("Turn 20") &&
+                            transcript.contains("TriggerUser") &&
+                            transcript.contains("Latest turn")
                     },
                     any(),
                     any(),

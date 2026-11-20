@@ -371,6 +371,34 @@ docker run -d \
 
 ---
 
+### GCP `e2-micro`（1 GB RAM）低記憶體最佳化與 2 GB Swap 設定
+
+Luna 的官方 Docker 映像檔已預設針對低記憶體環境進行最佳化：
+- **JVM 記憶體上限**：`JAVA_TOOL_OPTIONS="-Xmx384m -XX:+UseSerialGC"`（可在執行容器時透過 `-e JAVA_TOOL_OPTIONS=...` 覆寫）。
+- **SQLite 記憶體控制**：資料庫啟動時套用 `PRAGMA cache_size=-8000`（8 MB 快取上限）與 `PRAGMA mmap_size=0`（停用記憶體映射），並內建 `/app/lib/vec0.so`（`sqlite-vec`）供長期記憶向量檢索使用。
+
+若您將 Luna 部署於 **GCP `e2-micro`（1 GB RAM）** 等低記憶體主機，建議在**宿主機（Host）**設定 **2 GB Swap**，避免容器在尖峰流量或同時執行 Gradle / Docker 映像檔更新時觸發 OOM Killer：
+
+```bash
+# 1. 建立 2 GB Swap 檔案並設定權限
+sudo fallocate -l 2G /swapfile
+sudo chmod 600 /swapfile
+sudo mkswap /swapfile
+sudo swapon /swapfile
+
+# 2. 設定開機自動掛載
+echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
+
+# 3. 調整 vm.swappiness=20（降低平時對 Swap 的依賴，僅在記憶體壓力時啟用）
+sudo sysctl vm.swappiness=20
+echo 'vm.swappiness=20' | sudo tee -a /etc/sysctl.conf
+
+# 4. 驗證 Swap 狀態
+free -h && swapon --show
+```
+
+---
+
 ### 方法 C：本機直接執行（需要 Java JDK 17+）
 
 若不想使用 Docker，也可直接透過 Gradle 執行：

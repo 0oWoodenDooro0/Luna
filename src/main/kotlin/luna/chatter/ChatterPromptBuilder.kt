@@ -1,5 +1,6 @@
 package luna.chatter
 
+import luna.chatter.memory.ChatterMemoryToolHandler
 import luna.core.ai.EmojiSanitizer
 import luna.core.ai.GeminiInteractionClient
 import luna.core.ai.GeminiInteractionGenerationConfig
@@ -35,7 +36,7 @@ object ChatterPromptBuilder {
             "5. 一次講一句重點：通常一次只講一句重點，最多兩到三句極短句（每段想法各佔一行），嚴禁長篇大論、說教或分析條列。\n" +
             "6. 語言用語：以台灣繁體中文（zh-TW）為主要社群慣用語，或配合對話語言交流。\n" +
             "7. 嚴格禁用 AI 套話與開場白：輸出中絕對嚴禁使用任何制式、官方或機械化的 AI 助理開場白或套話（例如「身為一個 AI」、「很高興為您服務」、「有什麼我可以幫忙的嗎」等），請直接切入話題搭話。\n" +
-            "8. 對話脈絡理解：對話紀錄中標註了各發言者的名稱（例如 [使用者]: 內容）。請根據上下文脈絡隨性自然地搭話。\n" +
+            "8. 對話脈絡理解：對話紀錄中標註了各發言者的名稱與識別碼（例如 使用者 (uid:123456): 內容 或 機器人 [BOT] (uid:789012): 內容）。請根據上下文脈絡隨性自然地搭話。\n" +
             "9. 順應最新話鋒：發言時只順著聊天紀錄最新、當前正在進行的話題接話，切勿回頭去回覆或挖掘紀錄更早之前已經結束的舊句子。\n" +
             "10. 多模態與連結內容理解：若對話中附帶圖片（標記為 [附帶圖片 N]）、YouTube 影片、社群連結內容（[連結內容: ...]）或一般公開網頁連結" +
             "（可透過 url_context 工具讀取網頁內容），請自然融入視覺畫面、影片重點或網頁資訊來搭話或回應，但仍維持口語簡短的聊天節奏，不可變成制式摘要。\n" +
@@ -43,26 +44,58 @@ object ChatterPromptBuilder {
             "絕對禁止輸出「TL;DR:」、「核心重點:」、「參與者觀點:」、「社群觀點:」、「名詞與事實查核:」等制式摘要標題，" +
             "也絕對不可附上 Markdown 網址列表、參考來源網址清單或任何引用來源標註。"
 
-    fun buildSystemInstruction(): String = buildSystemInstruction(personaState = null)
+    const val MEMORY_TOOL_INSTRUCTION: String =
+        "\n\n12. 長期記憶搜尋（search_long_term_memory）：\n" +
+            "- 近期約 10 分鐘的對話已在上下文中。一般日常閒聊或當下對話已足夠接話時，請勿呼叫此工具，直接回覆即可。\n" +
+            "- 僅當話題明確涉及更早之前的使用者偏好、個人經歷、或頻道歷史背景時，才呼叫 search_long_term_memory。\n" +
+            "- 查詢語句（query）請將代名詞（「他」「她」「那個」「上次那件事」）改寫為獨立具體的關鍵字或語意描述。\n" +
+            "- 查詢特定成員時請從對話紀錄中的 (uid:<id>) 取得 Snowflake ID 作為 target_user_id；" +
+            "若使用 scope=\"both\" 且省略 target_user_id，會預設查詢當前發話者的長期記憶與頻道記憶。"
 
-    fun buildSystemInstruction(personaState: PersonaState?): String {
+    fun buildSystemInstruction(): String = buildSystemInstruction(personaState = null, memoryToolsEnabled = false)
+
+    fun buildSystemInstruction(
+        personaState: PersonaState?,
+        memoryToolsEnabled: Boolean = false,
+    ): String {
+        val base =
+            if (memoryToolsEnabled) {
+                SYSTEM_INSTRUCTION + MEMORY_TOOL_INSTRUCTION
+            } else {
+                SYSTEM_INSTRUCTION
+            }
         if (personaState == null ||
             !personaState.driftEnabled ||
             personaState.circadianPeriod == null ||
             personaState.mood == null
         ) {
-            return SYSTEM_INSTRUCTION
+            return base
         }
-        return "$SYSTEM_INSTRUCTION\n\n" +
+        return "$base\n\n" +
             "目前社群時間與你的狀態：\n" +
             "- 本地時間：${personaState.formattedWeekday} ${personaState.formattedTime}（${personaState.timezone}）\n" +
             "- 時段狀態（${personaState.circadianPeriod.label}）：${personaState.circadianPeriod.promptCue}\n" +
             "- 心情與精力（${personaState.mood.label}）：${personaState.mood.promptCue}"
     }
 
+    fun formatSpeakerHeader(
+        author: String,
+        authorId: String? = null,
+        isBot: Boolean = false,
+    ): String {
+        val cleanId = authorId?.trim()?.takeIf { it.isNotEmpty() }
+        return when {
+            cleanId != null && isBot -> "$author [BOT] (uid:$cleanId)"
+            cleanId != null -> "$author (uid:$cleanId)"
+            isBot -> "$author [BOT]"
+            else -> "[$author]"
+        }
+    }
+
     fun formatTranscript(messages: List<ChatMessage>): String =
         messages.joinToString("\n") { msg ->
-            "[${msg.author}]: ${msg.content.trim()}"
+            val header = formatSpeakerHeader(msg.author, msg.authorId, msg.isBot)
+            "$header: ${msg.content.trim()}"
         }
 
     fun buildUserPrompt(transcript: String): String = buildUserPrompt(ChatterInput(transcript = transcript))
@@ -114,6 +147,7 @@ object ChatterPromptBuilder {
     fun buildTools(
         config: ChatterConfig,
         webUrls: List<String>,
+        includeMemoryTool: Boolean = false,
     ): List<GeminiInteractionTool> =
         buildList {
             if (config.urlContextEnabled && webUrls.isNotEmpty()) {
@@ -121,6 +155,9 @@ object ChatterPromptBuilder {
             }
             if (config.searchGroundingEnabled) {
                 add(GeminiInteractionTools.GOOGLE_SEARCH)
+            }
+            if (includeMemoryTool) {
+                add(ChatterMemoryToolHandler.TOOL_DECLARATION)
             }
         }
 
@@ -130,6 +167,7 @@ object ChatterPromptBuilder {
         tools: List<GeminiInteractionTool> = emptyList(),
         videoProcessingMode: VideoProcessingMode = VideoProcessingMode.STATIC,
         background: Boolean = false,
+        memoryToolsEnabled: Boolean = false,
     ): GeminiInteractionRequest {
         val inputs =
             GeminiInteractionClient.buildMultimodalInputs(
@@ -142,7 +180,7 @@ object ChatterPromptBuilder {
         return GeminiInteractionRequest(
             model = model.trim().removePrefix("models/"),
             input = inputs,
-            systemInstruction = buildSystemInstruction(input.personaState),
+            systemInstruction = buildSystemInstruction(input.personaState, memoryToolsEnabled = memoryToolsEnabled),
             tools = tools.takeIf { it.isNotEmpty() },
             generationConfig = GeminiInteractionGenerationConfig(maxOutputTokens = MAX_OUTPUT_TOKENS),
             background = background,

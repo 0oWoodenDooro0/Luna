@@ -463,6 +463,11 @@ open class ChatterService(
                         roundBudget = emojiRoundBudget,
                     )
 
+                val authorId =
+                    runCatching { message.author?.id }.getOrNull()
+                        ?: runCatching { message.data.author.id }.getOrNull()
+                val guildId = runCatching { message.data.guildId.value }.getOrNull()
+
                 val chatterInput =
                     replyContext
                         .toChatterInput(isDirectMention = isDirectMention)
@@ -470,6 +475,9 @@ open class ChatterService(
                             transcript = preparedEmojis.transcript,
                             personaState = personaState,
                             guildEmojis = preparedEmojis.guildEmojis,
+                            guildId = guildId?.toString(),
+                            channelId = message.channelId.toString(),
+                            authorId = authorId?.toString(),
                         )
 
                 // Calls chatterGenerator.generateReply(chatterInput) while reading simulation runs concurrently
@@ -878,7 +886,7 @@ open class ChatterService(
 
     companion object {
         const val DEFAULT_DECISION_MESSAGE_COUNT = 15
-        const val DEFAULT_HISTORY_MESSAGE_COUNT = 15
+        const val DEFAULT_HISTORY_MESSAGE_COUNT = ChatterContextCollector.DEFAULT_HISTORY_MESSAGE_COUNT
         const val DEFAULT_AFTER_MESSAGES_LIMIT = 20
         const val REPLY_THREADING_THRESHOLD = 2
         const val MIN_READING_DELAY_MS = 800L

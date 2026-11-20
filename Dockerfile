@@ -36,12 +36,27 @@ RUN ./gradlew jar :mcp-server:installDist --no-daemon
 
 # Stage 2: Runtime stage
 FROM eclipse-temurin:17-jre-jammy
+ARG TARGETARCH
+ARG SQLITE_VEC_VERSION=0.1.9
 WORKDIR /app
 
 # Create non-root user and data directories
 RUN useradd -m -u 1000 luna && \
-    mkdir -p /app/data /app/.data && \
+    mkdir -p /app/data /app/.data /app/lib && \
     chown -R luna:luna /app
+
+# Install architecture-matched sqlite-vec loadable extension with checksum verification
+RUN set -eux; \
+    case "${TARGETARCH:-amd64}" in \
+        amd64) ARCH="x86_64"; SHA256="b959baa1d8dc88861b1edb337b8587178cdcb12d60b4998f9d10b6a82052d5d7" ;; \
+        arm64) ARCH="aarch64"; SHA256="ea03d39541e478fab5974253c461e1cb5d77742f69e40cf96e3fad5bc309a37c" ;; \
+        *) echo "Unsupported TARGETARCH: ${TARGETARCH}" >&2; exit 1 ;; \
+    esac; \
+    curl -fsSL "https://github.com/asg017/sqlite-vec/releases/download/v${SQLITE_VEC_VERSION}/sqlite-vec-${SQLITE_VEC_VERSION}-loadable-linux-${ARCH}.tar.gz" -o /tmp/sqlite-vec.tar.gz; \
+    echo "${SHA256}  /tmp/sqlite-vec.tar.gz" | sha256sum -c -; \
+    tar -xzf /tmp/sqlite-vec.tar.gz -C /app/lib vec0.so; \
+    rm -f /tmp/sqlite-vec.tar.gz; \
+    chown -R luna:luna /app/lib && chmod 0755 /app/lib && chmod 0644 /app/lib/vec0.so
 
 # Copy fat jar and mcp-server from builder stage
 COPY --from=builder --chown=luna:luna /app/build/libs/Luna-*.jar /app/Luna.jar
@@ -50,6 +65,9 @@ COPY --chown=luna:luna .env.example /app/.env.example
 COPY --chown=luna:luna scripts/ /app/scripts/
 
 RUN chmod +x /app/scripts/*.sh
+
+ENV JAVA_TOOL_OPTIONS="-Xmx384m -XX:+UseSerialGC"
+ENV SQLITE_VEC_EXTENSION_PATH="/app/lib/vec0.so"
 
 USER luna
 

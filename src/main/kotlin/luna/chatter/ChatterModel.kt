@@ -34,10 +34,14 @@ data class GuildCustomEmoji(
  *
  * @property author Username or nickname of the message speaker.
  * @property content Textual content of the message.
+ * @property authorId Optional Discord user snowflake ID string for speaker attribution.
+ * @property isBot Whether the speaker is a third-party Discord bot (`[BOT]` badge; false for Luna and humans).
  */
 data class ChatMessage(
     val author: String,
     val content: String,
+    val authorId: String? = null,
+    val isBot: Boolean = false,
 )
 
 /**
@@ -54,6 +58,9 @@ data class ChatMessage(
  * @property webUrls Deduplicated general public web URLs in the dialogue window (up to 20) for `url_context`.
  * @property personaState Optional active `Circadian Persona Drift` state injected into the system instruction.
  * @property guildEmojis Available custom emojis from the target Discord guild for reaction/custom emoji verification.
+ * @property guildId Optional Discord guild Snowflake ID for guild-isolated `Long-Term Memory` retrieval.
+ * @property channelId Optional Discord channel Snowflake ID for channel-scoped `Long-Term Memory` retrieval.
+ * @property authorId Optional triggering author Snowflake ID for default `target_user_id` in `scope="both"`.
  */
 data class ChatterInput(
     val transcript: String,
@@ -67,4 +74,7 @@ data class ChatterInput(
     val webUrls: List<String> = emptyList(),
     val personaState: PersonaState? = null,
     val guildEmojis: List<GuildCustomEmoji> = emptyList(),
+    val guildId: String? = null,
+    val channelId: String? = null,
+    val authorId: String? = null,
 )
