@@ -14,7 +14,6 @@ import luna.curtly.engine.ExposedUrlStorage
 import luna.curtly.engine.UrlStorage
 import luna.plugin.LunaPlugin
 import luna.plugin.PluginContext
-import luna.plugin.config
 
 class CurtlyPlugin(
     private val customStorage: UrlStorage? = null,
@@ -24,12 +23,7 @@ class CurtlyPlugin(
     override val name: String = "curtly"
 
     override suspend fun initialize(context: PluginContext) {
-        val rawBaseUrl =
-            context.config<String>("curtly.baseUrl")
-                ?: context.config<String>("curtly.baseurl")
-                ?: context.config<String>("BASE_URL")
-                ?: context.config<String>("baseUrl")
-                ?: "http://localhost:8080/s/"
+        val rawBaseUrl = context.env.string("BASE_URL", "http://localhost:8080/s/")
 
         val baseUrl =
             if (!rawBaseUrl.contains("/s")) {
@@ -38,23 +32,11 @@ class CurtlyPlugin(
                 rawBaseUrl
             }
 
-        val redirectUri =
-            context.config<String>("DISCORD_REDIRECT_URI")?.takeIf { it.isNotBlank() }
-                ?: context.config<String>("curtly.redirectUri")?.takeIf { it.isNotBlank() }
-                ?: context.config<String>("curtly.redirect_uri")?.takeIf { it.isNotBlank() }
+        val redirectUri = context.env.string("DISCORD_REDIRECT_URI")
 
-        val discordClientId =
-            context.config<String>("DISCORD_CLIENT_ID")?.takeIf { it.isNotBlank() }
-                ?: context.config<String>("DISCORD_APP_ID")?.takeIf { it.isNotBlank() }
-                ?: context.config<String>("curtly.discordClientId")?.takeIf { it.isNotBlank() }
-                ?: context.config<String>("discord.clientId")?.takeIf { it.isNotBlank() }
-                ?: ""
+        val discordClientId = context.env.string("DISCORD_CLIENT_ID", "")
 
-        val discordClientSecret =
-            context.config<String>("DISCORD_CLIENT_SECRET")?.takeIf { it.isNotBlank() }
-                ?: context.config<String>("curtly.discordClientSecret")?.takeIf { it.isNotBlank() }
-                ?: context.config<String>("discord.clientSecret")?.takeIf { it.isNotBlank() }
-                ?: ""
+        val discordClientSecret = context.env.string("DISCORD_CLIENT_SECRET", "")
 
         // 1. Initialize URL & analytics tables in SQLite via context.database
         val storage = customStorage ?: ExposedUrlStorage(database = context.database, autoCreateTable = true)

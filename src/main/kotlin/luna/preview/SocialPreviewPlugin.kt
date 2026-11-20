@@ -19,7 +19,6 @@ import luna.core.Command
 import luna.core.JsonLogger
 import luna.plugin.LunaPlugin
 import luna.plugin.PluginContext
-import luna.plugin.config
 
 internal fun safeScope(kord: Kord): CoroutineScope {
     val hasValidContext =
@@ -57,11 +56,7 @@ class SocialPreviewPlugin(
         val storage = PreviewSettingsStorage(context.database)
         settingsStorage = storage
 
-        val apiKey =
-            context.config<String>("YOUTUBE_API_KEY")?.takeIf { it.isNotBlank() }
-                ?: context.config<String>("youtube.apiKey")?.takeIf { it.isNotBlank() }
-                ?: context.config<String>("youtube.api_key")?.takeIf { it.isNotBlank() }
-                ?: context.config<String>("social_preview.youtubeApiKey")?.takeIf { it.isNotBlank() }
+        val apiKey = context.env.string("YOUTUBE_API_KEY")
         this.youtubeApiKey = apiKey
 
         val command = commandFactory(storage)

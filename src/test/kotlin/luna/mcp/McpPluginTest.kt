@@ -10,6 +10,7 @@ import io.mockk.every
 import io.mockk.mockk
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.test.runTest
+import luna.config.EnvReader
 import luna.core.Command
 import luna.mcp.data.McpWebhookRecord
 import luna.plugin.DefaultPluginContext
@@ -151,5 +152,43 @@ class McpPluginTest {
             eventsFlow.emit(event)
 
             coVerify(exactly = 0) { mockClientCommand.handle(any()) }
+        }
+
+    @Test
+    fun `initialize reads MCP_PUBLIC_BASE_URL from EnvReader and falls back to default when unset or blank`() =
+        runTest {
+            val db = createTestDb()
+            val mockKord = createMockKord(MutableSharedFlow())
+            var capturedBaseUrl: String? = null
+
+            val configuredPlugin =
+                McpPlugin(clientCommandFactory = { _, _, baseUrl ->
+                    capturedBaseUrl = baseUrl
+                    mockk(relaxed = true)
+                })
+            configuredPlugin.initialize(
+                DefaultPluginContext(
+                    kord = mockKord,
+                    routing = mockk(relaxed = true),
+                    database = db,
+                    env = EnvReader.of("MCP_PUBLIC_BASE_URL" to "  https://mcp.example.com  "),
+                ),
+            )
+            assertEquals("https://mcp.example.com", capturedBaseUrl)
+
+            val blankPlugin =
+                McpPlugin(clientCommandFactory = { _, _, baseUrl ->
+                    capturedBaseUrl = baseUrl
+                    mockk(relaxed = true)
+                })
+            blankPlugin.initialize(
+                DefaultPluginContext(
+                    kord = mockKord,
+                    routing = mockk(relaxed = true),
+                    database = db,
+                    env = EnvReader.of("MCP_PUBLIC_BASE_URL" to "   "),
+                ),
+            )
+            assertEquals(McpClientCommand.DEFAULT_PUBLIC_BASE_URL, capturedBaseUrl)
         }
 }

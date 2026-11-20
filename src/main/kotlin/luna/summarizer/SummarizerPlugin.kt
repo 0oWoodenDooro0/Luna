@@ -3,7 +3,6 @@ package luna.summarizer
 import luna.core.ai.SocialPeekFactory
 import luna.plugin.LunaPlugin
 import luna.plugin.PluginContext
-import luna.plugin.config
 import org.slf4j.LoggerFactory
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.minutes
@@ -51,66 +50,58 @@ class SummarizerPlugin(
         internal set
 
     override suspend fun initialize(context: PluginContext) {
-        val apiKey =
-            context.config<String>("GEMINI_API_KEY")
-                ?: context.config<String>("gemini.apiKey")
-                ?: context.config<String>("gemini.api_key")
-                ?: ""
+        val apiKey = context.env.string("GEMINI_API_KEY", "")
 
-        val rawModel =
-            context.config<String>("GEMINI_MODEL")?.takeIf { it.isNotBlank() }
-                ?: context.config<String>("gemini.model")?.takeIf { it.isNotBlank() }
-                ?: GeminiConfig.DEFAULT_MODEL
-        val model = rawModel.trim().removePrefix("models/")
+        val model =
+            context.env
+                .string("GEMINI_MODEL", GeminiConfig.DEFAULT_MODEL)
+                .removePrefix("models/")
 
-        val rawBaseUrl =
-            context.config<String>("GEMINI_BASE_URL")?.takeIf { it.isNotBlank() }
-                ?: context.config<String>("gemini.baseUrl")?.takeIf { it.isNotBlank() }
-                ?: GeminiConfig.DEFAULT_BASE_URL
-        val baseUrl = rawBaseUrl.trim().trimEnd('/').removeSuffix("/v1beta")
+        val baseUrl =
+            context.env
+                .string("GEMINI_BASE_URL", GeminiConfig.DEFAULT_BASE_URL)
+                .trimEnd('/')
+                .removeSuffix("/v1beta")
 
-        val emoji =
-            context.config<String>("SUMMARY_EMOJI")?.takeIf { it.isNotBlank() }
-                ?: context.config<String>("summary.emoji")?.takeIf { it.isNotBlank() }
-                ?: SummaryService.DEFAULT_EMOJI
+        val emoji = context.env.string("SUMMARY_EMOJI", SummaryService.DEFAULT_EMOJI)
 
-        val youtubeApiKey =
-            context.config<String>("YOUTUBE_API_KEY")?.takeIf { it.isNotBlank() }
-                ?: context.config<String>("youtube.apiKey")?.takeIf { it.isNotBlank() }
-                ?: context.config<String>("youtube.api_key")?.takeIf { it.isNotBlank() }
+        val youtubeApiKey = context.env.string("YOUTUBE_API_KEY")
 
         val historyLimit =
-            context.config<Int>("SUMMARY_MAX_HISTORY_MESSAGES")?.coerceIn(1, 100)
-                ?: context.config<Int>("summary.maxHistoryMessages")?.coerceIn(1, 100)
-                ?: ConversationSliceCollector.resolveMaxHistoryMessages()
-
-        val inactivityGapMinutes =
-            context.config<Long>("SUMMARY_INACTIVITY_GAP_MINUTES")
-                ?: context.config<Int>("SUMMARY_INACTIVITY_GAP_MINUTES")?.toLong()
-                ?: context.config<Long>("summary.inactivityGapMinutes")
-                ?: context.config<Int>("summary.inactivityGapMinutes")?.toLong()
+            context.env.int(
+                "SUMMARY_MAX_HISTORY_MESSAGES",
+                ConversationSliceCollector.DEFAULT_MAX_HISTORY_MESSAGES,
+                1..100,
+            )
 
         val gap =
-            if (inactivityGapMinutes != null && inactivityGapMinutes > 0) {
-                inactivityGapMinutes.minutes
-            } else {
-                ConversationSliceCollector.resolveInactivityGap()
-            }
+            context.env
+                .long(
+                    "SUMMARY_INACTIVITY_GAP_MINUTES",
+                    ConversationSliceCollector.DEFAULT_INACTIVITY_GAP.inWholeMinutes,
+                    1L..Long.MAX_VALUE,
+                ).minutes
 
         val characterBudget =
-            context.config<Int>("SUMMARY_MAX_CHARACTER_BUDGET")?.takeIf { it > 0 }
-                ?: context.config<Int>("summary.maxCharacterBudget")?.takeIf { it > 0 }
-                ?: ConversationSliceCollector.resolveMaxCharacterBudget()
+            context.env.int(
+                "SUMMARY_MAX_CHARACTER_BUDGET",
+                ConversationSliceCollector.DEFAULT_MAX_CHARACTER_BUDGET,
+                1..Int.MAX_VALUE,
+            )
 
         val lookbackLimit =
-            context.config<Int>("SUMMARY_MAX_LOOKBACK_MESSAGES")?.coerceIn(1, ConversationSliceCollector.DEFAULT_MAX_LOOKBACK_MESSAGES)
-                ?: context.config<Int>("summary.maxLookbackMessages")?.coerceIn(1, ConversationSliceCollector.DEFAULT_MAX_LOOKBACK_MESSAGES)
-                ?: ConversationSliceCollector.resolveMaxLookbackMessages()
+            context.env.int(
+                "SUMMARY_MAX_LOOKBACK_MESSAGES",
+                ConversationSliceCollector.DEFAULT_MAX_LOOKBACK_MESSAGES,
+                1..ConversationSliceCollector.DEFAULT_MAX_LOOKBACK_MESSAGES,
+            )
 
         val imagesLimit =
-            context.config<Int>("SUMMARY_MAX_IMAGES")?.takeIf { it > 0 }
-                ?: context.config<Int>("summary.maxImages")?.takeIf { it > 0 }
-                ?: ConversationSliceCollector.resolveMaxImages()
+            context.env.int(
+                "SUMMARY_MAX_IMAGES",
+                ConversationSliceCollector.DEFAULT_MAX_IMAGES,
+                1..Int.MAX_VALUE,
+            )
 
         this.configuredEmoji = emoji
         this.maxHistoryMessages = historyLimit
@@ -120,18 +111,16 @@ class SummarizerPlugin(
         this.maxImages = imagesLimit
 
         val searchGrounding =
-            context.config<Boolean>("GEMINI_SEARCH_GROUNDING_ENABLED")
-                ?: context.config<String>("GEMINI_SEARCH_GROUNDING_ENABLED")?.toBooleanStrictOrNull()
-                ?: context.config<Boolean>("gemini.searchGroundingEnabled")
-                ?: context.config<String>("gemini.searchGroundingEnabled")?.toBooleanStrictOrNull()
-                ?: GeminiConfig.DEFAULT_SEARCH_GROUNDING_ENABLED
+            context.env.boolean(
+                "GEMINI_SEARCH_GROUNDING_ENABLED",
+                GeminiConfig.DEFAULT_SEARCH_GROUNDING_ENABLED,
+            )
 
         val urlContext =
-            context.config<Boolean>("GEMINI_URL_CONTEXT_ENABLED")
-                ?: context.config<String>("GEMINI_URL_CONTEXT_ENABLED")?.trim()?.toBooleanStrictOrNull()
-                ?: context.config<Boolean>("gemini.urlContextEnabled")
-                ?: context.config<String>("gemini.urlContextEnabled")?.trim()?.toBooleanStrictOrNull()
-                ?: GeminiConfig.DEFAULT_URL_CONTEXT_ENABLED
+            context.env.boolean(
+                "GEMINI_URL_CONTEXT_ENABLED",
+                GeminiConfig.DEFAULT_URL_CONTEXT_ENABLED,
+            )
 
         val geminiConfig =
             GeminiConfig(
