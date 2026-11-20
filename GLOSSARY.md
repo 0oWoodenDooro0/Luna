@@ -37,7 +37,7 @@ The history traversal algorithm that walks backward from the reaction target mes
 _Avoid_: Reverse history search, boundary walk, message scraper
 
 **Dialogue Noise Filter**:
-The preprocessing stage that purges slash commands, custom emojis, system events, and ambient third-party bots from a conversation slice while preserving short human conversational turns and media attachments.
+The preprocessing stage that purges slash commands, custom emojis, and system events from a conversation slice—and ambient third-party bots in `Summary Pipeline`—while preserving short human conversational turns and media attachments (whereas `Chatter Pipeline` retains third-party bot messages as visible context).
 _Avoid_: Sanitizer, text cleaner, regex scrubber
 
 **Adaptive Video Processing**:
@@ -179,4 +179,28 @@ _Avoid_: Emoji caption, emote tag, emoji dictionary
 **Emoji Usage Ranking**:
 The per-guild rolling frequency window over message occurrences and reactions used by the `Chatter Pipeline` to prioritize which guild custom emojis enter the bounded prompt selection pool ahead of deterministic backfill.
 _Avoid_: Emoji leaderboard, popular emotes, top-50 cache
+
+**Working Memory Window**:
+The recency- and count-bounded short-term dialogue history assembled for `Chatter Pipeline` context—retaining third-party bot messages and resolved `Reply Reference Chaining`—aligned with the recency exclusion boundary of `Long-Term Memory`.
+_Avoid_: STM buffer, chat cache, sliding log
+
+**Long-Term Memory**:
+The guild-isolated store of persistent `Atomic Fact` records scoped to an individual user or channel within `Chatter Pipeline`, queried on demand rather than unconditionally pre-injected into every reply.
+_Avoid_: LTM dump, user profile DB, RAG store
+
+**Atomic Fact**:
+A self-contained, pronoun-resolved factual statement distilled from channel dialogue capturing a user preference, core fact, or historical event without relying on surrounding messages for meaning.
+_Avoid_: Memory snippet, chat summary, factoid
+
+**Memory Distillation**:
+The asynchronous background workflow that extracts `Atomic Fact` records from unprocessed channel dialogue once inactivity or batch thresholds are reached, reconciling new facts against existing `Long-Term Memory` via insert, update, or delete operations.
+_Avoid_: Memory scraper, chat cron, background summarizer
+
+**Distillation Cursor**:
+The per-channel watermark recording the latest Discord message ID already processed by `Memory Distillation`, enabling incremental history fetching without persisting raw chat logs.
+_Avoid_: Message offset, sync checkpoint, log pointer
+
+**Agentic Memory Retrieval**:
+The model-driven tool invocation inside `Chatter Pipeline` reply generation that searches `Long-Term Memory` on demand with context-rewritten queries, hybrid lexical-semantic ranking, recency exclusion, and bounded turn and timeout guardrails.
+_Avoid_: Pre-prompt RAG, memory injection, auto-recall
 
