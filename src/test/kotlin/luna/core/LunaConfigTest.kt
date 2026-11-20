@@ -398,6 +398,7 @@ class LunaConfigTest {
                     "SUMMARY_MAX_HISTORY_MESSAGES" to 60,
                     "GEMINI_API_KEY" to "ai_key",
                     "PLUGINS_CURTLY_ENABLED" to "true",
+                    "JAVA_TOOL_OPTIONS" to "-Xmx384m -XX:+UseSerialGC",
                 )
 
             val result = ConfigLoader.auditDrift(canonicalConfig)

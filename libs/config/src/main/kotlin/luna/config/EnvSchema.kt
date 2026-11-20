@@ -43,6 +43,7 @@ object EnvSchemaAuditor {
             "LC_CTYPE",
             "JAVA_HOME",
             "JAVA_VERSION",
+            "JAVA_TOOL_OPTIONS",
             "LANGUAGE",
             "HOSTNAME",
             "SHLVL",
