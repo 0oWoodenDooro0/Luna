@@ -28,6 +28,7 @@ import org.jetbrains.exposed.v1.jdbc.Database
 import org.slf4j.LoggerFactory
 import java.io.File
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * LunaHost central runtime container and infrastructure orchestrator.
@@ -282,23 +283,67 @@ class LunaHost(
     }
 
     companion object {
-        fun initDatabase(dbPath: String = ".data/luna.db"): Database {
+        const val DEFAULT_SQLITE_VEC_EXTENSION_PATH = "/app/lib/vec0.so"
+        private val logger = LoggerFactory.getLogger(LunaHost::class.java)
+
+        fun initDatabase(
+            dbPath: String = ".data/luna.db",
+            vecExtensionPath: String? = DEFAULT_SQLITE_VEC_EXTENSION_PATH,
+        ): Database {
             val file = File(dbPath)
             file.parentFile?.mkdirs()
+            val warnedVecUnavailable = AtomicBoolean(false)
             return Database.connect(
-                "jdbc:sqlite:$dbPath",
+                "jdbc:sqlite:$dbPath?enable_load_extension=true",
                 driver = "org.sqlite.JDBC",
                 setupConnection = { connection ->
                     val meta = connection.metaData
-                    val isSqlite = meta.databaseProductName.contains("SQLite", ignoreCase = true) || (meta.url?.startsWith("jdbc:sqlite") == true)
+                    val isSqlite =
+                        meta.databaseProductName.contains("SQLite", ignoreCase = true) ||
+                            (meta.url?.startsWith("jdbc:sqlite") == true)
                     if (isSqlite) {
                         connection.createStatement().use { stmt ->
                             stmt.execute("PRAGMA journal_mode=WAL;")
                             stmt.execute("PRAGMA busy_timeout=5000;")
+                            stmt.execute("PRAGMA cache_size=-8000;")
+                            stmt.execute("PRAGMA mmap_size=0;")
                         }
+                        loadSqliteVecExtensionFailOpen(connection, vecExtensionPath, warnedVecUnavailable)
                     }
                 },
             )
+        }
+
+        private fun loadSqliteVecExtensionFailOpen(
+            connection: java.sql.Connection,
+            vecExtensionPath: String?,
+            warnedVecUnavailable: AtomicBoolean,
+        ) {
+            val normalizedPath = vecExtensionPath?.trim()?.takeIf { it.isNotEmpty() } ?: return
+            val extFile = File(normalizedPath)
+            if (!extFile.exists()) {
+                if (warnedVecUnavailable.compareAndSet(false, true)) {
+                    logger.warn(
+                        "sqlite-vec extension not found at '{}'; continuing without native vector search (Fail-Open)",
+                        normalizedPath,
+                    )
+                }
+                return
+            }
+            runCatching {
+                connection.prepareStatement("SELECT load_extension(?)").use { ps ->
+                    ps.setString(1, extFile.absolutePath)
+                    ps.execute()
+                }
+            }.onFailure { error ->
+                if (warnedVecUnavailable.compareAndSet(false, true)) {
+                    logger.warn(
+                        "Failed to load sqlite-vec extension from '{}'; continuing without native vector search (Fail-Open): {}",
+                        normalizedPath,
+                        error.message,
+                    )
+                }
+            }
         }
 
         fun loadConfig(): Map<String, Any?> = ConfigLoader.loadConfig()
