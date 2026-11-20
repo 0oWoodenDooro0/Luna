@@ -179,6 +179,7 @@ class ConfigTest {
             mapOf(
                 "DISCORD_TOKEN" to "tok",
                 "JAVA_VERSION" to "jdk-17.0.14+7",
+                "JAVA_TOOL_OPTIONS" to "-Xmx384m -XX:+UseSerialGC",
                 "LANGUAGE" to "en_US:en",
                 "PLUGINS_DISABLED" to "undercover",
                 "curtly.baseUrl" to "http://localhost:8080",
@@ -190,6 +191,10 @@ class ConfigTest {
         assertFalse(
             result.unknownKeys.contains("JAVA_VERSION"),
             "JAVA_VERSION must not be flagged as unknown, got ${result.unknownKeys}",
+        )
+        assertFalse(
+            result.unknownKeys.contains("JAVA_TOOL_OPTIONS"),
+            "JAVA_TOOL_OPTIONS must not be flagged as unknown, got ${result.unknownKeys}",
         )
         assertFalse(
             result.unknownKeys.contains("LANGUAGE"),
