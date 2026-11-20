@@ -1,6 +1,7 @@
 package luna.core.ai
 
 import kotlinx.serialization.ExperimentalSerializationApi
+import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
@@ -9,6 +10,9 @@ import kotlinx.serialization.json.JsonElement
 enum class AiTracePipeline {
     SUMMARY,
     CHATTER,
+
+    @SerialName("chatter_memory_distill")
+    CHATTER_MEMORY_DISTILL,
 }
 
 @Serializable
@@ -49,6 +53,8 @@ enum class AiAttemptStage {
     CHATTER_TOOL_CONTINUATION,
     REACTION_SELECT,
     AGENTIC_VIDEO,
+    MEMORY_DISTILL_EXTRACT,
+    MEMORY_DISTILL_RECONCILE,
 }
 
 @Serializable
