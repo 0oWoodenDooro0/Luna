@@ -122,7 +122,7 @@ class BoundedStartupAlertBufferTest {
                                 ),
                             environment = "staging",
                         ),
-                    secretConfig = mapOf("DISCORD_TOKEN" to "secret-startup-token-xyz"),
+                    env = luna.config.EnvReader.of(mapOf("DISCORD_TOKEN" to "secret-startup-token-xyz")),
                     eventFilter = ErrorEventFilter { it.severity == ErrorAlertSeverity.WARN || it.severity == ErrorAlertSeverity.ERROR },
                     rateLimiter =
                         AlertRateLimiter { event ->

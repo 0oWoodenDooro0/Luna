@@ -136,7 +136,7 @@ class OwnerErrorNotifierTest {
             val notifier =
                 OwnerErrorNotifier(
                     config = ErrorNotifyConfig(recipientUserIds = listOf(Snowflake(123uL)), environment = "staging"),
-                    secretConfig = secretConfig,
+                    env = luna.config.EnvReader.of(secretConfig),
                     startupBuffer = ImmediateReadyStartupAlertBuffer,
                     clock = fixedClock,
                     dmSender = { userId, content -> delivered.add(userId to content) },
@@ -511,7 +511,7 @@ class OwnerErrorNotifierTest {
             val notifier =
                 OwnerErrorNotifier(
                     config = ErrorNotifyConfig(recipientUserIds = listOf(Snowflake(42uL)), cooldownSeconds = 1),
-                    secretConfig = mapOf("GEMINI_API_KEY" to "AIzaSyFallbackSecret999"),
+                    env = luna.config.EnvReader.of(mapOf("GEMINI_API_KEY" to "AIzaSyFallbackSecret999")),
                     startupBuffer = ImmediateReadyStartupAlertBuffer,
                     clock = fixedClock,
                     dmSender = { userId, content -> delivered.add(userId to content) },

@@ -200,7 +200,6 @@ object EnvSchemaAuditor {
             EnvVarSchema("AI_TRACE_DIR", isRequired = false, defaultValue = "data/logs/ai", section = 3),
             EnvVarSchema("AI_TRACE_MAX_DAYS", isRequired = false, defaultValue = "14", section = 3),
             EnvVarSchema("AI_TRACE_MAX_TOTAL_MB", isRequired = false, defaultValue = "200", section = 3),
-            EnvVarSchema("PLUGINS_DISABLED", isRequired = false, section = 4),
             EnvVarSchema("PLUGINS_CURTLY_ENABLED", isRequired = false, defaultValue = "true", section = 4),
             EnvVarSchema("PLUGINS_MCP_ENABLED", isRequired = false, defaultValue = "true", section = 4),
             EnvVarSchema("PLUGINS_SOCIAL_PREVIEW_ENABLED", isRequired = false, defaultValue = "true", section = 4),
@@ -237,16 +236,10 @@ object EnvSchemaAuditor {
     fun isRecognizedKey(
         key: String,
         schemaKeys: Set<String>,
-        candidateAliases: Map<String, List<String>> = emptyMap(),
     ): Boolean {
         if (key in schemaKeys) return true
         if (key in STANDARD_SYSTEM_KEYS) return true
         if (key.startsWith("PLUGINS_") && key.endsWith("_ENABLED")) return true
-
-        val candidates = candidateAliases[key]
-        if (candidates != null && candidates.any { it in schemaKeys }) {
-            return true
-        }
 
         return false
     }
@@ -265,7 +258,6 @@ object EnvSchemaAuditor {
         allSchemaKeys: Set<String> = schema.map { it.name }.toSet(),
         requiredKeys: Set<String>? = null,
         fallbackDefaults: Map<String, Any?> = emptyMap(),
-        candidateAliases: Map<String, List<String>> = emptyMap(),
     ): DriftAuditResult {
         val effectiveRequired = requiredKeys ?: schema.filter { it.isRequired }.map { it.name }.toSet()
         val missingRequired = mutableListOf<String>()
@@ -290,7 +282,7 @@ object EnvSchemaAuditor {
         val unknownKeys = mutableListOf<String>()
         for ((key, value) in config) {
             if (value is Map<*, *>) continue
-            if (!isRecognizedKey(key, allSchemaKeys, candidateAliases)) {
+            if (!isRecognizedKey(key, allSchemaKeys)) {
                 unknownKeys.add(key)
             }
         }

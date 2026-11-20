@@ -202,12 +202,6 @@ object ConfigLoader {
         schemaKeys: Set<String>,
     ): Boolean = EnvSchemaAuditor.isRecognizedKey(key, schemaKeys)
 
-    fun isRecognizedKey(
-        key: String,
-        schemaKeys: Set<String>,
-        candidateAliases: Map<String, List<String>>,
-    ): Boolean = EnvSchemaAuditor.isRecognizedKey(key, schemaKeys, candidateAliases)
-
     fun resolveVariableValue(
         key: String,
         config: Map<String, Any?>,

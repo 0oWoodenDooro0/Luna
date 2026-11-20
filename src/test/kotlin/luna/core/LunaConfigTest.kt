@@ -457,22 +457,24 @@ class LunaConfigTest {
     }
 
     @Test
-    fun `AiTraceConfig resolves defaults and overrides from map without secret masking`() {
+    fun `AiTraceConfig resolves defaults and overrides via EnvReader and fails fast on invalid inputs`() {
         val defaults =
             luna.core.ai.AiTraceConfig
-                .fromMap(emptyMap())
+                .from(EnvReader.of(emptyMap()))
         assertEquals(true, defaults.enabled)
         assertEquals("data/logs/ai", defaults.dir)
         assertEquals(14, defaults.maxDays)
         assertEquals(200, defaults.maxTotalMb)
 
         val configured =
-            luna.core.ai.AiTraceConfig.fromMap(
-                mapOf(
-                    "AI_TRACE_ENABLED" to "false",
-                    "AI_TRACE_DIR" to "/var/log/luna-ai",
-                    "AI_TRACE_MAX_DAYS" to "7",
-                    "AI_TRACE_MAX_TOTAL_MB" to "50",
+            luna.core.ai.AiTraceConfig.from(
+                EnvReader.of(
+                    mapOf(
+                        "AI_TRACE_ENABLED" to "false",
+                        "AI_TRACE_DIR" to "/var/log/luna-ai",
+                        "AI_TRACE_MAX_DAYS" to "7",
+                        "AI_TRACE_MAX_TOTAL_MB" to "50",
+                    ),
                 ),
             )
         assertEquals(false, configured.enabled)
@@ -480,30 +482,19 @@ class LunaConfigTest {
         assertEquals(7, configured.maxDays)
         assertEquals(50, configured.maxTotalMb)
 
-        // Negative boundary: non-positive numbers fall back to defaults
-        val invalidBounds =
-            luna.core.ai.AiTraceConfig.fromMap(
-                mapOf(
-                    "AI_TRACE_MAX_DAYS" to "0",
-                    "AI_TRACE_MAX_TOTAL_MB" to "-10",
-                ),
-            )
-        assertEquals(14, invalidBounds.maxDays)
-        assertEquals(200, invalidBounds.maxTotalMb)
-
-        val snakeAliases =
-            luna.core.ai.AiTraceConfig.fromMap(
-                mapOf(
-                    "ai.trace.enabled" to false,
-                    "ai.trace.dir" to "/tmp/ai-map-snake",
-                    "ai.trace.max_days" to 10,
-                    "ai.trace.max_total_mb" to 80,
-                ),
-            )
-        assertEquals(false, snakeAliases.enabled)
-        assertEquals("/tmp/ai-map-snake", snakeAliases.dir)
-        assertEquals(10, snakeAliases.maxDays)
-        assertEquals(80, snakeAliases.maxTotalMb)
+        // Negative boundary: non-positive or non-numeric values fail fast with ConfigValidationException
+        org.junit.jupiter.api.Assertions.assertThrows(ConfigValidationException::class.java) {
+            luna.core.ai.AiTraceConfig
+                .from(EnvReader.of(mapOf("AI_TRACE_MAX_DAYS" to "0")))
+        }
+        org.junit.jupiter.api.Assertions.assertThrows(ConfigValidationException::class.java) {
+            luna.core.ai.AiTraceConfig
+                .from(EnvReader.of(mapOf("AI_TRACE_MAX_TOTAL_MB" to "-10")))
+        }
+        org.junit.jupiter.api.Assertions.assertThrows(ConfigValidationException::class.java) {
+            luna.core.ai.AiTraceConfig
+                .from(EnvReader.of(mapOf("AI_TRACE_ENABLED" to "yes")))
+        }
 
         // Verify drift audit recognizes AI_TRACE_* and does not mask them
         val audit =

@@ -683,7 +683,7 @@ class JsonlAiTraceRecorder internal constructor(
 
         fun fromConfig(
             traceConfig: AiTraceConfig,
-            fullConfig: Map<String, Any?> = emptyMap(),
+            env: luna.config.EnvReader = luna.config.EnvReader.of(emptyMap()),
             clock: Clock = Clock.systemUTC(),
             emitCorrelationLog: Boolean = true,
         ): AiTraceRecorder {
@@ -692,7 +692,7 @@ class JsonlAiTraceRecorder internal constructor(
                 traceDir = Paths.get(traceConfig.dir),
                 maxDays = traceConfig.maxDays,
                 maxTotalBytes = traceConfig.maxTotalMb.toLong() * 1024L * 1024L,
-                redactor = AiTraceRedactor.fromConfig(fullConfig),
+                redactor = AiTraceRedactor.from(env),
                 clock = clock,
                 emitCorrelationLog = emitCorrelationLog,
             )

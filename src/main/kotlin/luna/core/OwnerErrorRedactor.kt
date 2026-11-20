@@ -1,5 +1,6 @@
 package luna.core
 
+import luna.config.EnvReader
 import luna.config.SecretMasker
 
 /**
@@ -62,6 +63,8 @@ class OwnerErrorRedactor(
                 """\b([a-z0-9_.]*(?:token|secret|password|api_?key))\s*([=:])\s*(["']?)([^\s"',;}\]]+)\3""",
                 RegexOption.IGNORE_CASE,
             )
+
+        fun from(env: EnvReader): OwnerErrorRedactor = fromConfig(env.toMap())
 
         fun fromConfig(config: Map<String, Any?>): OwnerErrorRedactor {
             val secrets = mutableListOf<String>()

@@ -141,7 +141,8 @@ class ConfigTest {
         assertTrue(EnvSchemaAuditor.isRecognizedKey("AI_TRACE_ENABLED", fallbackKeys))
         assertTrue(EnvSchemaAuditor.isRecognizedKey("PLUGINS_CHATTER_ENABLED", fallbackKeys))
 
-        // Legacy aliases must NOT be recognized
+        // Legacy aliases and removed keys must NOT be recognized
+        assertFalse(EnvSchemaAuditor.isRecognizedKey("PLUGINS_DISABLED", fallbackKeys))
         assertFalse(EnvSchemaAuditor.isRecognizedKey("ai.trace.enabled", fallbackKeys))
         assertFalse(EnvSchemaAuditor.isRecognizedKey("chatter.debounceSeconds", fallbackKeys))
         assertFalse(EnvSchemaAuditor.isRecognizedKey("curtly.baseUrl", fallbackKeys))
@@ -161,6 +162,7 @@ class ConfigTest {
                 "DISCORD_TOKEN" to "tok",
                 "JAVA_VERSION" to "jdk-17.0.14+7",
                 "LANGUAGE" to "en_US:en",
+                "PLUGINS_DISABLED" to "undercover",
                 "curtly.baseUrl" to "http://localhost:8080",
                 "DISCORD_APP_ID" to "legacy-app-id",
                 "PLUGINS_CURTLY_BASE_URL" to "http://localhost:8080",
@@ -176,7 +178,7 @@ class ConfigTest {
             "LANGUAGE must not be flagged as unknown, got ${result.unknownKeys}",
         )
         assertEquals(
-            listOf("curtly.baseUrl", "DISCORD_APP_ID", "PLUGINS_CURTLY_BASE_URL", "legacy.unknownKey"),
+            listOf("PLUGINS_DISABLED", "curtly.baseUrl", "DISCORD_APP_ID", "PLUGINS_CURTLY_BASE_URL", "legacy.unknownKey"),
             result.unknownKeys,
         )
     }

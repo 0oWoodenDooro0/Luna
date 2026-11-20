@@ -44,7 +44,6 @@ class LunaHost(
     private val ownerErrorDmSender: (suspend (Snowflake, String) -> Unit)? = null,
 ) {
     val env: EnvReader
-    val config: Map<String, Any?>
     val coreConfig: LunaCoreConfig
     val aiTraceConfig: AiTraceConfig
     val aiTraceRecorder: AiTraceRecorder
@@ -76,24 +75,13 @@ class LunaHost(
         // Fail-fast validation against LunaCoreConfig data model
         coreConfig = LunaCoreConfig.from(env)
 
-        // Ensure active core config is represented in the unified config map
-        val loaded = env.toMap()
-        val unified = loaded.toMutableMap<String, Any?>()
-        unified.putIfAbsent("PORT", coreConfig.port)
-        unified.putIfAbsent("DISCORD_TOKEN", coreConfig.botToken)
-        unified.putIfAbsent("DISCORD_CLIENT_ID", coreConfig.clientId)
-        unified.putIfAbsent("DISCORD_CLIENT_SECRET", coreConfig.clientSecret)
-        unified.putIfAbsent("BASE_URL", coreConfig.baseUrl)
-        unified.putIfAbsent("DISCORD_REDIRECT_URI", coreConfig.redirectUri)
-        config = unified
-
         aiTraceConfig = AiTraceConfig.from(env)
-        aiTraceRecorder = JsonlAiTraceRecorder.fromConfig(aiTraceConfig, config)
+        aiTraceRecorder = JsonlAiTraceRecorder.fromConfig(aiTraceConfig, env)
         errorNotifyConfig = ErrorNotifyConfig.from(env)
         ownerErrorNotifier =
             OwnerErrorNotifier(
                 config = errorNotifyConfig,
-                secretConfig = config,
+                env = env,
                 dmSender = ownerErrorDmSender,
             )
 
@@ -105,10 +93,11 @@ class LunaHost(
         // are captured and buffered without leaving a dangling appender if start() is not called.
         attachOwnerErrorAppender()
         try {
+            val rawConfig = env.toMap()
             // Run startup drift audit to fail fast on missing required variables and report drift
-            ConfigLoader.auditDrift(loaded)
+            ConfigLoader.auditDrift(rawConfig)
             // Startup audit log emitting active configuration with secrets masked
-            ConfigLoader.auditLog(config)
+            ConfigLoader.auditLog(rawConfig)
         } catch (t: Throwable) {
             runBlocking { ownerErrorNotifier.flushAndClose() }
             throw t

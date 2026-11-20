@@ -22,41 +22,6 @@ data class AiTraceConfig(
         const val DEFAULT_MAX_DAYS = 14
         const val DEFAULT_MAX_TOTAL_MB = 200
 
-        fun fromMap(config: Map<String, Any?>): AiTraceConfig {
-            val enabled =
-                parseBoolean(config["AI_TRACE_ENABLED"])
-                    ?: parseBoolean(config["ai.trace.enabled"])
-                    ?: DEFAULT_ENABLED
-
-            val dir =
-                parseNonBlankString(config["AI_TRACE_DIR"])
-                    ?: parseNonBlankString(config["ai.trace.dir"])
-                    ?: DEFAULT_DIR
-
-            val maxDays =
-                (
-                    parseInt(config["AI_TRACE_MAX_DAYS"])
-                        ?: parseInt(config["ai.trace.maxDays"])
-                        ?: parseInt(config["ai.trace.max_days"])
-                )?.takeIf { it > 0 }
-                    ?: DEFAULT_MAX_DAYS
-
-            val maxTotalMb =
-                (
-                    parseInt(config["AI_TRACE_MAX_TOTAL_MB"])
-                        ?: parseInt(config["ai.trace.maxTotalMb"])
-                        ?: parseInt(config["ai.trace.max_total_mb"])
-                )?.takeIf { it > 0 }
-                    ?: DEFAULT_MAX_TOTAL_MB
-
-            return AiTraceConfig(
-                enabled = enabled,
-                dir = dir,
-                maxDays = maxDays,
-                maxTotalMb = maxTotalMb,
-            )
-        }
-
         fun from(env: EnvReader): AiTraceConfig =
             AiTraceConfig(
                 enabled = env.boolean("AI_TRACE_ENABLED", DEFAULT_ENABLED),
@@ -64,21 +29,5 @@ data class AiTraceConfig(
                 maxDays = env.int("AI_TRACE_MAX_DAYS", DEFAULT_MAX_DAYS, 1..Int.MAX_VALUE),
                 maxTotalMb = env.int("AI_TRACE_MAX_TOTAL_MB", DEFAULT_MAX_TOTAL_MB, 1..Int.MAX_VALUE),
             )
-
-        private fun parseNonBlankString(raw: Any?): String? = (raw as? String)?.trim()?.ifBlank { null }
-
-        private fun parseBoolean(raw: Any?): Boolean? =
-            when (raw) {
-                is Boolean -> raw
-                is String -> raw.trim().toBooleanStrictOrNull()
-                else -> null
-            }
-
-        private fun parseInt(raw: Any?): Int? =
-            when (raw) {
-                is Number -> raw.toInt()
-                is String -> raw.trim().toIntOrNull()
-                else -> null
-            }
     }
 }
