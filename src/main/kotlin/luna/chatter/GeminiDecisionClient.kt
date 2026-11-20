@@ -47,7 +47,7 @@ import java.net.SocketTimeoutException
  * once with text-only input before failing closed.
  */
 open class GeminiDecisionClient(
-    val config: ChatterDecisionConfig = ChatterDecisionConfig.fromEnv(),
+    val config: ChatterDecisionConfig = ChatterDecisionConfig(),
     private val httpClient: HttpClient = createDefaultHttpClient(config.timeoutMillis),
     val defaultInstructions: String = config.instructions,
     val traceRecorder: AiTraceRecorder = NoOpAiTraceRecorder,

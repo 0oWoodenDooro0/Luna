@@ -149,17 +149,17 @@ class ChatterSilentReactionConcurrencyAndPluginTest {
     }
 
     @Test
-    fun `ChatterPlugin wires CHATTER_REACTION_THRESHOLD and aliases cleanly to ChatterGenerator`() =
+    fun `ChatterPlugin wires CHATTER_REACTION_THRESHOLD cleanly to ChatterGenerator`() =
         runTest {
             val context =
                 DefaultPluginContext(
                     kord = mockk<Kord>(relaxed = true),
                     routing = mockk<Routing>(relaxed = true),
                     database = mockk<Database>(relaxed = true),
-                    configMap =
-                        mapOf(
+                    env =
+                        luna.config.EnvReader.of(
                             "GEMINI_API_KEY" to "plugin-key",
-                            "chatter.reactionThreshold" to "0.52",
+                            "CHATTER_REACTION_THRESHOLD" to "0.52",
                         ),
                 )
             val plugin = ChatterPlugin()
