@@ -1,5 +1,6 @@
 package luna.chatter
 
+import luna.chatter.memory.ChatterMemoryToolHandler
 import luna.core.ai.EmojiSanitizer
 import luna.core.ai.GeminiInteractionClient
 import luna.core.ai.GeminiInteractionGenerationConfig
@@ -43,17 +44,34 @@ object ChatterPromptBuilder {
             "絕對禁止輸出「TL;DR:」、「核心重點:」、「參與者觀點:」、「社群觀點:」、「名詞與事實查核:」等制式摘要標題，" +
             "也絕對不可附上 Markdown 網址列表、參考來源網址清單或任何引用來源標註。"
 
-    fun buildSystemInstruction(): String = buildSystemInstruction(personaState = null)
+    const val MEMORY_TOOL_INSTRUCTION: String =
+        "\n\n12. 長期記憶搜尋（search_long_term_memory）：\n" +
+            "- 近期約 10 分鐘的對話已在上下文中。一般日常閒聊或當下對話已足夠接話時，請勿呼叫此工具，直接回覆即可。\n" +
+            "- 僅當話題明確涉及更早之前的使用者偏好、個人經歷、或頻道歷史背景時，才呼叫 search_long_term_memory。\n" +
+            "- 查詢語句（query）請將代名詞（「他」「她」「那個」「上次那件事」）改寫為獨立具體的關鍵字或語意描述。\n" +
+            "- 查詢特定成員時請從對話紀錄中的 (uid:<id>) 取得 Snowflake ID 作為 target_user_id；" +
+            "若使用 scope=\"both\" 且省略 target_user_id，會預設查詢當前發話者的長期記憶與頻道記憶。"
 
-    fun buildSystemInstruction(personaState: PersonaState?): String {
+    fun buildSystemInstruction(): String = buildSystemInstruction(personaState = null, memoryToolsEnabled = false)
+
+    fun buildSystemInstruction(
+        personaState: PersonaState?,
+        memoryToolsEnabled: Boolean = false,
+    ): String {
+        val base =
+            if (memoryToolsEnabled) {
+                SYSTEM_INSTRUCTION + MEMORY_TOOL_INSTRUCTION
+            } else {
+                SYSTEM_INSTRUCTION
+            }
         if (personaState == null ||
             !personaState.driftEnabled ||
             personaState.circadianPeriod == null ||
             personaState.mood == null
         ) {
-            return SYSTEM_INSTRUCTION
+            return base
         }
-        return "$SYSTEM_INSTRUCTION\n\n" +
+        return "$base\n\n" +
             "目前社群時間與你的狀態：\n" +
             "- 本地時間：${personaState.formattedWeekday} ${personaState.formattedTime}（${personaState.timezone}）\n" +
             "- 時段狀態（${personaState.circadianPeriod.label}）：${personaState.circadianPeriod.promptCue}\n" +
@@ -129,6 +147,7 @@ object ChatterPromptBuilder {
     fun buildTools(
         config: ChatterConfig,
         webUrls: List<String>,
+        includeMemoryTool: Boolean = false,
     ): List<GeminiInteractionTool> =
         buildList {
             if (config.urlContextEnabled && webUrls.isNotEmpty()) {
@@ -136,6 +155,9 @@ object ChatterPromptBuilder {
             }
             if (config.searchGroundingEnabled) {
                 add(GeminiInteractionTools.GOOGLE_SEARCH)
+            }
+            if (includeMemoryTool) {
+                add(ChatterMemoryToolHandler.TOOL_DECLARATION)
             }
         }
 
@@ -145,6 +167,7 @@ object ChatterPromptBuilder {
         tools: List<GeminiInteractionTool> = emptyList(),
         videoProcessingMode: VideoProcessingMode = VideoProcessingMode.STATIC,
         background: Boolean = false,
+        memoryToolsEnabled: Boolean = false,
     ): GeminiInteractionRequest {
         val inputs =
             GeminiInteractionClient.buildMultimodalInputs(
@@ -157,7 +180,7 @@ object ChatterPromptBuilder {
         return GeminiInteractionRequest(
             model = model.trim().removePrefix("models/"),
             input = inputs,
-            systemInstruction = buildSystemInstruction(input.personaState),
+            systemInstruction = buildSystemInstruction(input.personaState, memoryToolsEnabled = memoryToolsEnabled),
             tools = tools.takeIf { it.isNotEmpty() },
             generationConfig = GeminiInteractionGenerationConfig(maxOutputTokens = MAX_OUTPUT_TOKENS),
             background = background,
