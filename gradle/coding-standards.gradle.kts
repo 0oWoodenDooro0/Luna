@@ -326,7 +326,7 @@ fun checkJvmLegalTestNames(projectRoot: File): List<String> {
     if (testRoots.isEmpty()) return listOf("At least one src/test/kotlin directory must exist")
 
     val violations = mutableListOf<String>()
-    val illegalChars = listOf('<', '>', ':', '"', '/', '\\', '|', '?', '*')
+    val illegalChars = listOf('<', '>', ':', '"', '/', '\\', '|', '?', '*', '.', ';', '[', ']')
     val testNameRegex = Regex("""fun\s+`([^`]+)`\s*\(""")
 
     testRoots.forEach { root ->
@@ -401,6 +401,7 @@ fun checkEnvExampleParity(projectRoot: File): List<String> {
     val pluginContextRegex = Regex("""context\.config(?:<[^>]+>)?\s*\(\s*["']([A-Z][A-Z0-9_]+)["']""")
     val sysEnvRegex = Regex("""System\.getenv\s*\(\s*["']([A-Z][A-Z0-9_]+)["']\s*\)""")
     val envBracketRegex = Regex("""\benv\[\s*["']([A-Z][A-Z0-9_]+)["']\s*\]""")
+    val lookupReadRegex = Regex("""\bread(?:String|Int|Long|Double|Boolean)\s*\(\s*lookup\s*,\s*["']([A-Z][A-Z0-9_]+)["']""")
     val pluginNameRegex = Regex("""override\s+val\s+name\s*:\s*String\s*=\s*["']([^"']+)["']""")
 
     mainRoots.forEach { root ->
@@ -410,6 +411,7 @@ fun checkEnvExampleParity(projectRoot: File): List<String> {
             pluginContextRegex.findAll(content).forEach { codebaseKeys.add(it.groupValues[1]) }
             sysEnvRegex.findAll(content).forEach { codebaseKeys.add(it.groupValues[1]) }
             envBracketRegex.findAll(content).forEach { codebaseKeys.add(it.groupValues[1]) }
+            lookupReadRegex.findAll(content).forEach { codebaseKeys.add(it.groupValues[1]) }
 
             if (content.contains(": LunaPlugin") || content.contains(": luna.plugin.LunaPlugin")) {
                 pluginNameRegex.find(content)?.let { match ->
@@ -642,6 +644,59 @@ fun checkDiagnosticBooleanAssertions(projectRoot: File): List<String> {
     return violations
 }
 
+fun checkMainSourceLineLimit(projectRoot: File): List<String> {
+    val defaultMaxLines = 600
+    val baselineFile = File(projectRoot, "gradle/coding-standards-main-lines-baseline.txt")
+    if (!baselineFile.exists()) {
+        return listOf(
+            "[Rule 10: main-source-line-limit] Baseline file missing: gradle/coding-standards-main-lines-baseline.txt",
+        )
+    }
+
+    val baseline = mutableMapOf<String, Int>()
+    baselineFile.useLines { lines ->
+        lines.forEachIndexed { idx, raw ->
+            val trimmed = raw.trim()
+            if (trimmed.isEmpty() || trimmed.startsWith("#")) return@forEachIndexed
+            val sep = trimmed.lastIndexOf('=')
+            if (sep <= 0 || sep == trimmed.length - 1) {
+                throw GradleException(
+                    "Invalid baseline entry at gradle/coding-standards-main-lines-baseline.txt:${idx + 1}: '$trimmed'",
+                )
+            }
+            val path = trimmed.substring(0, sep).trim()
+            val maxAllowed =
+                trimmed.substring(sep + 1).trim().toIntOrNull()
+                    ?: throw GradleException(
+                        "Invalid line count at gradle/coding-standards-main-lines-baseline.txt:${idx + 1}: '$trimmed'",
+                    )
+            baseline[path] = maxAllowed
+        }
+    }
+
+    val mainRoots = findKotlinSourceRoots(projectRoot, "main")
+    if (mainRoots.isEmpty()) return listOf("At least one src/main/kotlin directory must exist")
+
+    val violations = mutableListOf<String>()
+    mainRoots.forEach { root ->
+        root
+            .walkTopDown()
+            .filter { it.isFile && it.extension == "kt" }
+            .forEach { file ->
+                val relPath = file.relativeTo(projectRoot).path.replace('\\', '/')
+                val lineCount = file.useLines { it.count() }
+                val maxAllowed = baseline[relPath] ?: defaultMaxLines
+                if (lineCount > maxAllowed) {
+                    violations.add(
+                        "[Rule 10: main-source-line-limit] $relPath: $lineCount lines exceeds limit $maxAllowed. " +
+                            "Extract cohesive collaborators per CODING_STANDARDS.md §4.",
+                    )
+                }
+            }
+    }
+    return violations
+}
+
 val codingStandardsRoot = project.projectDir.canonicalFile
 
 tasks.register("lintCodingStandards") {
@@ -660,6 +715,7 @@ tasks.register("lintCodingStandards") {
                 addAll(checkNoCrossPluginImports(codingStandardsRoot))
                 addAll(checkTestSuiteLineLimit(codingStandardsRoot))
                 addAll(checkDiagnosticBooleanAssertions(codingStandardsRoot))
+                addAll(checkMainSourceLineLimit(codingStandardsRoot))
             }
 
         if (violations.isNotEmpty()) {
@@ -668,6 +724,6 @@ tasks.register("lintCodingStandards") {
                     violations.joinToString("\n\n"),
             )
         }
-        logger.lifecycle("lintCodingStandards: all 9 rules passed.")
+        logger.lifecycle("lintCodingStandards: all 10 rules passed.")
     }
 }

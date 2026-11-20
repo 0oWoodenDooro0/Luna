@@ -128,6 +128,9 @@ triggerMessage.reply {
 
 // Fetch messages posted after a trigger message
 val after = message.channel.getMessagesAfter(message.id, limit = 20).toList()
+
+// Resolve a MessageChannel by Snowflake ID (no getChannelOfOrNull / getChannelOrNull in Kord 0.19.0-SNAPSHOT)
+val channel = runCatching { kord.getChannelOf<MessageChannel>(channelId) }.getOrNull()
 ```
 
 ### Reactions (`ReactionEmoji`, `Message.addReaction`)
