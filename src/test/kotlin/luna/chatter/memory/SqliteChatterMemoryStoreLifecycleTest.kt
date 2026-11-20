@@ -252,4 +252,57 @@ class SqliteChatterMemoryStoreLifecycleTest {
         assertTrue(store.deleteOwnedUserMemory(userMem.id, guildId = "guild-1", userId = "user-1"), "Owner should be able to delete own user memory")
         assertTrue(store.listUserMemories("guild-1", "user-1").isEmpty(), "Deleted memory should no longer appear in list")
     }
+
+    @Test
+    fun `maxUpdatedAtMs overrides relative recencyExcludeMinutes and buildVectorSearchSql pre-filters memory_id`() {
+        val clock = MutableClock(Instant.parse("2026-01-01T10:05:00Z"))
+        val store = createStore(clock)
+
+        store.insertMemory(
+            guildId = "guild-1",
+            scope = MemoryScope.USER,
+            targetUserId = "user-1",
+            channelId = "chan-1",
+            content = "Alice likes pour-over coffee.",
+        )
+
+        clock.advanceMinutes(6) // 10:11 (within default 10m recency window)
+        val hitsWithDynamicBoundary =
+            store.search(
+                guildId = "guild-1",
+                channelId = "chan-1",
+                queryText = "pour-over",
+                scope = SearchScope.USER,
+                targetUserId = "user-1",
+                recencyExcludeMinutes = 10,
+                maxUpdatedAtMs = Instant.parse("2026-01-01T10:11:00Z").toEpochMilli(),
+            )
+        assertEquals(1, hitsWithDynamicBoundary.size)
+
+        val hitsBeforeDistill =
+            store.search(
+                guildId = "guild-1",
+                channelId = "chan-1",
+                queryText = "pour-over",
+                scope = SearchScope.USER,
+                targetUserId = "user-1",
+                recencyExcludeMinutes = 10,
+                maxUpdatedAtMs = Instant.parse("2026-01-01T10:00:00Z").toEpochMilli(),
+            )
+        assertTrue(hitsBeforeDistill.isEmpty(), "Memory updated after maxUpdatedAtMs must be excluded")
+
+        val sql =
+            SqliteChatterMemoryStore.buildVectorSearchSql(
+                scopeClause = "(m.scope = 'user' AND m.target_user_id = ?)",
+                hasRecencyFilter = true,
+            )
+        assertTrue(
+            sql.contains("v.memory_id IN (") && sql.contains("m2.guild_id = ?") && sql.contains("m2.target_user_id = ?"),
+            "Vector KNN query must pre-filter memory_id by guild and scope before ranking: $sql",
+        )
+        assertTrue(
+            sql.contains("AND m2.updated_at <= ?"),
+            "Vector KNN pre-filter subquery must include recency filter when enabled: $sql",
+        )
+    }
 }

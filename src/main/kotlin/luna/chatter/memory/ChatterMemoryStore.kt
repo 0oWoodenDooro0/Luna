@@ -60,6 +60,7 @@ interface ChatterMemoryStore {
         targetUserId: String? = null,
         limit: Int = 5,
         recencyExcludeMinutes: Int? = null,
+        maxUpdatedAtMs: Long? = null,
         scoreCutoff: Double? = null,
         updateLastAccessed: Boolean = true,
     ): List<ChatterMemorySearchHit>

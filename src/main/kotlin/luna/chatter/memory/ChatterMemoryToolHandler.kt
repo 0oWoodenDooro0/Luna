@@ -37,6 +37,7 @@ open class ChatterMemoryToolHandler(
         guildId: String?,
         channelId: String?,
         defaultAuthorId: String?,
+        workingMemoryStartMs: Long? = null,
     ): String {
         val cleanGuildId = guildId?.trim()?.takeIf { it.isNotEmpty() }
         if (cleanGuildId == null) {
@@ -82,6 +83,12 @@ open class ChatterMemoryToolHandler(
         return try {
             withTimeout(config.toolTimeoutMs) {
                 val queryEmbedding = embeddingClient.embedQuery(query)
+                val effectiveMaxUpdatedAtMs =
+                    if (config.recencyExcludeMinutes > 0L) {
+                        workingMemoryStartMs
+                    } else {
+                        null
+                    }
                 val hits =
                     memoryStore.search(
                         guildId = cleanGuildId,
@@ -92,6 +99,7 @@ open class ChatterMemoryToolHandler(
                         targetUserId = resolvedTargetUserId,
                         limit = limit,
                         recencyExcludeMinutes = config.recencyExcludeMinutes.toInt(),
+                        maxUpdatedAtMs = effectiveMaxUpdatedAtMs,
                         scoreCutoff = config.scoreCutoff,
                         updateLastAccessed = true,
                     )

@@ -324,6 +324,7 @@ open class ChatterGenerator(
                             guildId = effectiveInput.guildId,
                             channelId = effectiveInput.channelId,
                             defaultAuthorId = effectiveInput.authorId,
+                            workingMemoryStartMs = effectiveInput.workingMemoryStartMs,
                         )
                     }
 

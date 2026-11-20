@@ -38,14 +38,14 @@ class ChatterWorkingMemoryWindowTest {
     }
 
     @Test
-    fun `collectDecisionContext and collectReplyContext exclude messages older than 10m and cap at 15 and 30`() =
+    fun `collectDecisionContext and collectReplyContext exclude messages before inactivity gap and cap at 15 and 30`() =
         runTest {
             val staleMsg =
                 createMockMessage(
                     id = 1L,
                     username = "StaleUser",
                     content = "Multi-day old message",
-                    timestamp = anchorTime - 15.minutes,
+                    timestamp = anchorTime - 25.minutes,
                 )
             val boundaryInMsg =
                 createMockMessage(
@@ -68,18 +68,57 @@ class ChatterWorkingMemoryWindowTest {
             val collector = ChatterContextCollector(noiseFilter = filter, peekResolver = { null })
 
             val decision = collector.collectDecisionContext(allMessages)
-            assertFalse(decision.transcript.contains("Multi-day old message"), "Decision window should exclude stale >10m message")
+            assertFalse(decision.transcript.contains("Multi-day old message"), "Decision window should exclude stale message beyond inactivity gap")
             assertFalse(decision.transcript.contains("Exactly 10m ago"), "Decision window should cap at 15 newest messages")
             assertFalse(decision.transcript.contains("Recent turn 17\n"), "Decision window should drop turn 17 when 18..32 fill 15 slots")
             assertTrue(decision.transcript.contains("User18 (uid:118): Recent turn 18"), "Decision window should include turn 18")
             assertTrue(decision.transcript.contains("User32 (uid:132): Recent turn 32"), "Decision window should include latest turn 32")
 
             val reply = collector.collectReplyContext(allMessages)
-            assertFalse(reply.transcript.contains("Multi-day old message"), "Reply window should exclude stale >10m message")
+            assertFalse(reply.transcript.contains("Multi-day old message"), "Reply window should exclude stale message beyond inactivity gap")
             assertFalse(reply.transcript.contains("Exactly 10m ago"), "Reply window should cap at 30 newest messages")
             assertFalse(reply.transcript.contains("Recent turn 2\n"), "Reply window should drop turn 2 when 3..32 fill 30 slots")
             assertTrue(reply.transcript.contains("User3 (uid:103): Recent turn 3"), "Reply window should include turn 3")
             assertTrue(reply.transcript.contains("User32 (uid:132): Recent turn 32"), "Reply window should include latest turn 32")
+            assertEquals(recentMsgs[2].timestamp.toEpochMilliseconds(), reply.oldestWindowTimestampMs)
+        }
+
+    @Test
+    fun `inactivity gap backtracking keeps continuous dialogue beyond 10m up to max lookback cap`() =
+        runTest {
+            val beyondCap =
+                createMockMessage(
+                    id = 1L,
+                    username = "OldCap",
+                    content = "Continuous but beyond 60m cap",
+                    timestamp = anchorTime - 65.minutes,
+                )
+            val continuousMsgs =
+                listOf(55, 47, 39, 31, 23, 15, 7, 0).mapIndexed { idx, minutesAgo ->
+                    createMockMessage(
+                        id = 10L + idx,
+                        username = "Talker$idx",
+                        content = "Turn at -${minutesAgo}m",
+                        timestamp = anchorTime - minutesAgo.minutes,
+                    )
+                }
+
+            val collector = ChatterContextCollector(noiseFilter = filter, peekResolver = { null })
+            val reply = collector.collectReplyContext(listOf(beyondCap) + continuousMsgs)
+
+            assertFalse(
+                reply.transcript.contains("Continuous but beyond 60m cap"),
+                "Messages older than the 60-minute max lookback cap must be excluded even if gaps are <= 10m",
+            )
+            assertTrue(
+                reply.transcript.contains("Turn at -55m"),
+                "Continuous conversation with <= 10m gaps within 60m should remain intact",
+            )
+            assertTrue(
+                reply.transcript.contains("Turn at -23m"),
+                "Mid-conversation turns older than 10m should remain intact when adjacent gaps are <= 10m",
+            )
+            assertEquals((anchorTime - 55.minutes).toEpochMilliseconds(), reply.oldestWindowTimestampMs)
         }
 
     @Test

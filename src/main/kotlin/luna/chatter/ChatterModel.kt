@@ -62,6 +62,8 @@ data class ChatMessage(
  * @property channelId Optional Discord channel Snowflake ID for channel-scoped `Long-Term Memory` retrieval.
  * @property authorId Optional triggering author Snowflake ID for default `target_user_id` in `scope="both"`.
  * @property recentReactions Optional list of recently delivered reaction emojis in the target channel for reaction diversity.
+ * @property workingMemoryStartMs Optional epoch-millisecond timestamp of the oldest message in the current `Working Memory Window`,
+ * used to dynamically align `Long-Term Memory` recency exclusion without a distillation gap.
  */
 data class ChatterInput(
     val transcript: String,
@@ -79,4 +81,5 @@ data class ChatterInput(
     val channelId: String? = null,
     val authorId: String? = null,
     val recentReactions: List<String> = emptyList(),
+    val workingMemoryStartMs: Long? = null,
 )

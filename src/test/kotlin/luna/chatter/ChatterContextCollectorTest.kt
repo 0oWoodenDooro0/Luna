@@ -276,7 +276,7 @@ class ChatterContextCollectorTest {
     fun `collectDecisionContext resolves external reply references up to maxExternalReferences while keeping SocialPeek disabled`() =
         runTest {
             val botSelfId = Snowflake(9999L)
-            val ext1 = createMockMessage(id = 5001L, username = "ExtAlice", content = "B".repeat(50))
+            val ext1 = createMockMessage(id = 5001L, username = "ExtAlice", content = "B".repeat(150))
             val ext2 = createMockMessage(id = 5002L, username = "ExtBob", content = "Earlier question")
             val ext3 = createMockMessage(id = 5003L, username = "ExtCharlie", content = "Target thread message")
             val ext4 = createMockMessage(id = 5004L, username = "ExtDave", content = "Fourth external beyond cap")
@@ -319,7 +319,7 @@ class ChatterContextCollectorTest {
                     kordSelfId = botSelfId,
                 )
 
-            val expectedExcerpt1 = "B".repeat(37) + "..."
+            val expectedExcerpt1 = "B".repeat(ChatterContextCollector.MAX_REPLY_EXCERPT_LENGTH - 3) + "..."
             assertFalse(peekCalled)
             assertTrue(result.transcript.contains("U1 (uid:5101) 回覆 ExtAlice (uid:5001)「$expectedExcerpt1」: Reply 1"))
             assertTrue(result.transcript.contains("U2 (uid:5102) 回覆 ExtBob (uid:5002)「Earlier question」: Reply 2"))

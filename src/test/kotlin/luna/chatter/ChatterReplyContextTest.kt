@@ -30,9 +30,9 @@ class ChatterReplyContextTest {
     }
 
     @Test
-    fun `collectReplyContext keeps last 15 filtered messages and resolves up to 3 external reply references with 40 char excerpt`() =
+    fun `collectReplyContext keeps last 15 filtered messages and resolves up to 3 external reply references with bounded excerpt`() =
         runTest {
-            val ext1 = createMockMessage(id = 1001L, username = "ExtAlice", content = "A".repeat(60))
+            val ext1 = createMockMessage(id = 1001L, username = "ExtAlice", content = "A".repeat(150))
             val ext2 = createMockMessage(id = 1002L, username = "ExtBob", content = "Short external context")
             val ext3 = createMockMessage(id = 1003L, username = "ExtCharlie", content = "Third external msg")
             val ext4 = createMockMessage(id = 1004L, username = "ExtDave", content = "Fourth external msg beyond cap")
@@ -75,7 +75,7 @@ class ChatterReplyContextTest {
 
             assertFalse(result.transcript.contains("Too old beyond 15"))
             assertFalse(result.transcript.contains("NoiseBot"))
-            val expectedExcerpt = "A".repeat(37) + "..."
+            val expectedExcerpt = "A".repeat(ChatterContextCollector.MAX_REPLY_EXCERPT_LENGTH - 3) + "..."
             assertTrue(result.transcript.contains("U1 (uid:2001) 回覆 ExtAlice (uid:1001)「$expectedExcerpt」: Reply to ext1"))
             assertTrue(result.transcript.contains("U2 (uid:2002) 回覆 ExtBob (uid:1002)「Short external context」: Reply to ext2"))
             assertTrue(result.transcript.contains("U3 (uid:2003) 回覆 ExtCharlie (uid:1003)「Third external msg」: Reply to ext3"))
