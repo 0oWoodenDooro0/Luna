@@ -1,7 +1,10 @@
 package luna.plugin
 
+import io.mockk.every
 import io.mockk.mockk
 import kotlinx.coroutines.test.runTest
+import luna.config.ConfigValidationException
+import luna.config.EnvReader
 import org.junit.jupiter.api.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
@@ -117,7 +120,10 @@ class PluginLoaderTest {
                 }
 
             val loader = PluginLoader(plugins = listOf(brokenPlugin))
-            val context = mockk<PluginContext>(relaxed = true)
+            val context =
+                mockk<PluginContext>(relaxed = true) {
+                    every { env } returns EnvReader.of()
+                }
 
             val exception =
                 assertFailsWith<IllegalStateException> {
@@ -127,7 +133,7 @@ class PluginLoaderTest {
         }
 
     @Test
-    fun `plugin loader skips disabled plugins when configured via plugins dot name dot enabled false`() =
+    fun `plugin loader ignores removed plugins dot name dot enabled key`() =
         runTest {
             var initialized = false
             val plugin =
@@ -149,12 +155,12 @@ class PluginLoaderTest {
                 )
 
             loader.initializePlugins(context)
-            assertFalse(initialized, "Disabled plugin should not be initialized")
-            assertEquals(0, loader.plugins.size, "Disabled plugin should be removed from active plugins")
+            assertTrue(initialized, "Removed dotted key plugins.optional-plugin.enabled must be ignored")
+            assertEquals(1, loader.plugins.size)
         }
 
     @Test
-    fun `plugin loader skips disabled plugins when listed in plugins dot disabled`() =
+    fun `plugin loader ignores removed plugins dot disabled key`() =
         runTest {
             var initialized = false
             val plugin =
@@ -176,12 +182,12 @@ class PluginLoaderTest {
                 )
 
             loader.initializePlugins(context)
-            assertFalse(initialized, "Plugin listed in plugins.disabled should not be initialized")
-            assertEquals(0, loader.plugins.size)
+            assertTrue(initialized, "Removed key plugins.disabled must be ignored")
+            assertEquals(1, loader.plugins.size)
         }
 
     @Test
-    fun `plugin loader skips disabled plugins when configured via PLUGINS_DISABLED env variable`() =
+    fun `plugin loader ignores removed PLUGINS_DISABLED env variable`() =
         runTest {
             var initialized = false
             val plugin =
@@ -203,8 +209,8 @@ class PluginLoaderTest {
                 )
 
             loader.initializePlugins(context)
-            assertFalse(initialized, "Plugin listed in PLUGINS_DISABLED should not be initialized")
-            assertEquals(0, loader.plugins.size)
+            assertTrue(initialized, "Removed key PLUGINS_DISABLED must be ignored")
+            assertEquals(1, loader.plugins.size)
         }
 
     @Test
@@ -226,11 +232,67 @@ class PluginLoaderTest {
                     kord = mockk(relaxed = true),
                     routing = mockk(relaxed = true),
                     database = mockk(relaxed = true),
-                    configMap = mapOf("PLUGINS_SOCIAL_PREVIEW_ENABLED" to "false"),
+                    env = EnvReader.of("PLUGINS_SOCIAL_PREVIEW_ENABLED" to "false"),
                 )
 
             loader.initializePlugins(context)
             assertFalse(initialized, "Plugin disabled via PLUGINS_SOCIAL_PREVIEW_ENABLED should not be initialized")
             assertEquals(0, loader.plugins.size)
+        }
+
+    @Test
+    fun `plugin loader enables plugins by default when PLUGINS_NAME_ENABLED is blank`() =
+        runTest {
+            var initialized = false
+            val plugin =
+                object : LunaPlugin {
+                    override val name: String = "social-preview"
+
+                    override suspend fun initialize(context: PluginContext) {
+                        initialized = true
+                    }
+                }
+
+            val loader = PluginLoader(plugins = listOf(plugin))
+            val context =
+                DefaultPluginContext(
+                    kord = mockk(relaxed = true),
+                    routing = mockk(relaxed = true),
+                    database = mockk(relaxed = true),
+                    env = EnvReader.of("PLUGINS_SOCIAL_PREVIEW_ENABLED" to "   "),
+                )
+
+            loader.initializePlugins(context)
+            assertTrue(initialized, "Blank PLUGINS_SOCIAL_PREVIEW_ENABLED should default to enabled")
+            assertEquals(1, loader.plugins.size)
+        }
+
+    @Test
+    fun `plugin loader fails fast with ConfigValidationException on non-boolean PLUGINS_NAME_ENABLED`() =
+        runTest {
+            val plugin =
+                object : LunaPlugin {
+                    override val name: String = "social-preview"
+
+                    override suspend fun initialize(context: PluginContext) {}
+                }
+
+            val loader = PluginLoader(plugins = listOf(plugin))
+            val context =
+                DefaultPluginContext(
+                    kord = mockk(relaxed = true),
+                    routing = mockk(relaxed = true),
+                    database = mockk(relaxed = true),
+                    env = EnvReader.of("PLUGINS_SOCIAL_PREVIEW_ENABLED" to "yes"),
+                )
+
+            val ex =
+                assertFailsWith<ConfigValidationException> {
+                    loader.initializePlugins(context)
+                }
+            assertTrue(
+                ex.message!!.contains("PLUGINS_SOCIAL_PREVIEW_ENABLED"),
+                "Exception message must name PLUGINS_SOCIAL_PREVIEW_ENABLED, got: ${ex.message}",
+            )
         }
 }

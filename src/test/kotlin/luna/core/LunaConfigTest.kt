@@ -4,6 +4,7 @@ import ch.qos.logback.classic.Level
 import ch.qos.logback.classic.Logger
 import ch.qos.logback.classic.spi.ILoggingEvent
 import ch.qos.logback.core.read.ListAppender
+import luna.config.EnvReader
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertThrows
 import org.slf4j.LoggerFactory
@@ -62,14 +63,40 @@ class LunaConfigTest {
     }
 
     @Test
-    fun `succeeds when client id is missing but discord app id fallback is present`() {
+    fun `rejects legacy client id aliases when DISCORD_CLIENT_ID is missing`() {
         val map =
             validBaseMap().apply {
                 remove("DISCORD_CLIENT_ID")
                 put("DISCORD_APP_ID", "app_id_999")
+                put("clientId", "client_id_999")
+                put("luna.clientId", "luna_client_id_999")
             }
-        val config = LunaCoreConfig.fromMap(map)
-        assertEquals("app_id_999", config.clientId)
+        val ex =
+            assertThrows<ConfigValidationException> {
+                LunaCoreConfig.fromMap(map)
+            }
+        assertTrue(ex.message!!.contains("DISCORD_CLIENT_ID"), "Exception must name DISCORD_CLIENT_ID")
+    }
+
+    @Test
+    fun `LunaCoreConfig from EnvReader loads canonical keys and ignores legacy aliases`() {
+        val env =
+            EnvReader.of(
+                "DISCORD_TOKEN" to "tok_123",
+                "DISCORD_CLIENT_ID" to "cid_456",
+                "DISCORD_CLIENT_SECRET" to "sec_789",
+                "PORT" to "9090",
+                "BASE_URL" to "https://luna.example.com/s/",
+                "curtly.baseUrl" to "https://ignored.example.com/s/",
+                "REDIRECT_URI" to "https://ignored.callback",
+            )
+        val config = LunaCoreConfig.from(env)
+        assertEquals("tok_123", config.botToken)
+        assertEquals("cid_456", config.clientId)
+        assertEquals("sec_789", config.clientSecret)
+        assertEquals(9090, config.port)
+        assertEquals("https://luna.example.com/s/", config.baseUrl)
+        assertEquals("https://luna.example.com/api/auth/discord/callback", config.redirectUri)
     }
 
     @Test
@@ -182,73 +209,14 @@ class LunaConfigTest {
     }
 
     @Test
-    fun `precedence resolution where yaml placeholder resolves system env over dotenv`() {
-        val dotenv =
-            """
-            BASE_URL=http://dotenv.local:8080
-            """.trimIndent()
-        val systemEnv =
-            mapOf(
-                "BASE_URL" to "http://env.local:8080",
-            )
-        val yaml =
-            """
-            curtly:
-              baseUrl: "${'$'}{BASE_URL:http://default:8080}"
-            """.trimIndent()
+    fun `loadConfig stops loading application yml and uses two-layer env hierarchy`() {
         val loaded =
-            ConfigLoader.loadConfigFromSources(
-                dotenvContent = dotenv,
-                systemEnv = systemEnv,
-                yamlContent = yaml,
+            ConfigLoader.loadConfig(
+                envFile = null,
+                systemEnv = mapOf("BASE_URL" to "http://env.local:8080"),
             )
-
-        assertEquals("http://env.local:8080", loaded["curtly.baseUrl"])
-    }
-
-    @Test
-    fun `precedence resolution where yaml placeholder resolves dotenv when system env absent`() {
-        val dotenv =
-            """
-            BASE_URL=http://dotenv.local:8080
-            """.trimIndent()
-        val yaml =
-            """
-            curtly:
-              baseUrl: "${'$'}{BASE_URL:http://default:8080}"
-            """.trimIndent()
-        val loaded =
-            ConfigLoader.loadConfigFromSources(
-                dotenvContent = dotenv,
-                systemEnv = emptyMap(),
-                yamlContent = yaml,
-            )
-
-        assertEquals("http://dotenv.local:8080", loaded["curtly.baseUrl"])
-    }
-
-    @Test
-    fun `precedence resolution where explicit yaml value overrides env and dotenv`() {
-        val dotenv =
-            """
-            PORT=7000
-            """.trimIndent()
-        val systemEnv =
-            mapOf(
-                "PORT" to "8000",
-            )
-        val yaml =
-            """
-            PORT: 9000
-            """.trimIndent()
-        val loaded =
-            ConfigLoader.loadConfigFromSources(
-                dotenvContent = dotenv,
-                systemEnv = systemEnv,
-                yamlContent = yaml,
-            )
-
-        assertEquals(9000, loaded["PORT"])
+        assertEquals("http://env.local:8080", loaded["BASE_URL"])
+        assertEquals(null, loaded["curtly.baseUrl"])
     }
 
     @Test
@@ -539,7 +507,7 @@ class LunaConfigTest {
     }
 
     @Test
-    fun `audit drift does not emit false drift warnings for flattened application yml containers or container runtime keys`() {
+    fun `audit drift does not emit false drift warnings for container runtime keys`() {
         val loaded =
             ConfigLoader.loadConfigFromSources(
                 dotenvContent =
@@ -553,16 +521,11 @@ class LunaConfigTest {
                         "JAVA_VERSION" to "jdk-17.0.14+7",
                         "LANGUAGE" to "en_US:en",
                     ),
-                yamlContent =
-                    """
-                    curtly:
-                      baseUrl: "${'$'}{BASE_URL:http://localhost:8080}"
-                    """.trimIndent(),
             )
         val result = ConfigLoader.auditDrift(loaded)
         assertTrue(
             result.unknownKeys.isEmpty(),
-            "Flattened YAML container keys and container runtime keys must not trigger drift, got ${result.unknownKeys}",
+            "Container runtime keys must not trigger drift, got ${result.unknownKeys}",
         )
     }
 }

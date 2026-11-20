@@ -50,7 +50,7 @@ class PluginLoader(
     /**
      * Initializes all discovered plugins with the provided [context].
      * Discovers plugins via [loadPlugins] if not already loaded.
-     * Skips plugins that are disabled via configuration (e.g. `plugins.<name>.enabled: false` or `plugins.disabled`).
+     * Skips plugins that are disabled via configuration (e.g. `PLUGINS_<NAME>_ENABLED=false`).
      */
     suspend fun initializePlugins(context: PluginContext) {
         if (!discovered) {
@@ -99,28 +99,7 @@ class PluginLoader(
         context: PluginContext,
     ): Boolean {
         val envKey = "PLUGINS_${plugin.name.replace('-', '_').uppercase()}_ENABLED"
-        val specificEnabled =
-            runCatching {
-                context.config<Boolean>("plugins.${plugin.name}.enabled")
-                    ?: context.config<String>("plugins.${plugin.name}.enabled")?.toBooleanStrictOrNull()
-                    ?: context.config<Boolean>(envKey)
-                    ?: context.config<String>(envKey)?.toBooleanStrictOrNull()
-                    ?: context.config<Boolean>("plugins.${plugin.name}")
-                    ?: context.config<String>("plugins.${plugin.name}")?.toBooleanStrictOrNull()
-            }.getOrNull()
-        if (specificEnabled == false) return false
-
-        val disabledList =
-            runCatching {
-                (
-                    context.config<String>("plugins.disabled")
-                        ?: context.config<String>("PLUGINS_DISABLED")
-                )?.split(",")
-                    ?.map { it.trim().lowercase() }
-            }.getOrNull() ?: emptyList()
-        if (plugin.name.lowercase() in disabledList) return false
-
-        return true
+        return context.env.boolean(envKey, default = true)
     }
 
     /**

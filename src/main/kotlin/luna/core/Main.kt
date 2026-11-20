@@ -18,6 +18,7 @@ import io.ktor.server.sessions.Sessions
 import io.ktor.server.sessions.cookie
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.runBlocking
+import luna.config.EnvReader
 import luna.core.ai.AiTraceConfig
 import luna.core.ai.AiTraceRecorder
 import luna.core.ai.JsonlAiTraceRecorder
@@ -42,6 +43,7 @@ class LunaHost(
     private val kordFactory: ((String) -> Kord)? = null,
     private val ownerErrorDmSender: (suspend (Snowflake, String) -> Unit)? = null,
 ) {
+    val env: EnvReader
     val config: Map<String, Any?>
     val coreConfig: LunaCoreConfig
     val aiTraceConfig: AiTraceConfig
@@ -65,12 +67,18 @@ class LunaHost(
     private var readyListenerJob: Job? = null
 
     init {
-        val loaded = customConfig ?: ConfigLoader.loadConfig()
+        env =
+            if (customConfig != null) {
+                EnvReader.of(ConfigLoader.toStringMap(customConfig))
+            } else {
+                EnvReader.load(auditDrift = false)
+            }
         // Fail-fast validation against LunaCoreConfig data model
-        coreConfig = LunaCoreConfig.fromMap(loaded)
+        coreConfig = LunaCoreConfig.from(env)
 
         // Ensure active core config is represented in the unified config map
-        val unified = loaded.toMutableMap()
+        val loaded = env.toMap()
+        val unified = loaded.toMutableMap<String, Any?>()
         unified.putIfAbsent("PORT", coreConfig.port)
         unified.putIfAbsent("DISCORD_TOKEN", coreConfig.botToken)
         unified.putIfAbsent("DISCORD_CLIENT_ID", coreConfig.clientId)
@@ -90,9 +98,7 @@ class LunaHost(
             )
 
         val configuredVecPath =
-            config["SQLITE_VEC_EXTENSION_PATH"]?.toString()?.trim()?.takeIf { it.isNotBlank() }
-                ?: config["sqlite.vecExtensionPath"]?.toString()?.trim()?.takeIf { it.isNotBlank() }
-                ?: DEFAULT_SQLITE_VEC_EXTENSION_PATH
+            env.string("SQLITE_VEC_EXTENSION_PATH") ?: DEFAULT_SQLITE_VEC_EXTENSION_PATH
         database = customDatabase ?: initDatabase(vecExtensionPath = configuredVecPath)
 
         // Temporarily attach appender during init audit so pre-ReadyEvent [CONFIG_DRIFT] alerts
@@ -154,6 +160,7 @@ class LunaHost(
                 database = database,
                 configMap = config,
                 aiTraceRecorder = aiTraceRecorder,
+                env = env,
             )
         this.pluginContext = context
 
