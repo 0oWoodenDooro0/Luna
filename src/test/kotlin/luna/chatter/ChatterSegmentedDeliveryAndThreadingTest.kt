@@ -379,7 +379,7 @@ class ChatterSegmentedDeliveryAndThreadingTest {
                     kord = mockKord,
                     routing = mockk(relaxed = true),
                     database = mockk(relaxed = true),
-                    configMap = mapOf("GEMINI_API_KEY" to "test-key"),
+                    env = luna.config.EnvReader.of(mapOf("GEMINI_API_KEY" to "test-key")),
                 )
 
             val plugin = ChatterPlugin()

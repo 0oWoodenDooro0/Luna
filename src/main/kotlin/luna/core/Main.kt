@@ -87,9 +87,9 @@ class LunaHost(
         unified.putIfAbsent("DISCORD_REDIRECT_URI", coreConfig.redirectUri)
         config = unified
 
-        aiTraceConfig = AiTraceConfig.fromMap(config)
+        aiTraceConfig = AiTraceConfig.from(env)
         aiTraceRecorder = JsonlAiTraceRecorder.fromConfig(aiTraceConfig, config)
-        errorNotifyConfig = ErrorNotifyConfig.fromMap(config)
+        errorNotifyConfig = ErrorNotifyConfig.from(env)
         ownerErrorNotifier =
             OwnerErrorNotifier(
                 config = errorNotifyConfig,
@@ -152,13 +152,12 @@ class LunaHost(
         ownerErrorNotifier.bindKord(kordClient)
         registerReadyListener(kordClient)
 
-        // 3. Build DefaultPluginContext providing kord, routing, database, configuration, and AI trace recorder
+        // 3. Build DefaultPluginContext providing kord, routing, database, AI trace recorder, and EnvReader
         val context =
             DefaultPluginContext(
                 kord = kordClient,
                 routing = routing,
                 database = database,
-                configMap = config,
                 aiTraceRecorder = aiTraceRecorder,
                 env = env,
             )

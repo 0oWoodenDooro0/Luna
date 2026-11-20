@@ -1,6 +1,7 @@
 package luna.core
 
 import dev.kord.common.entity.Snowflake
+import luna.config.EnvReader
 import org.slf4j.LoggerFactory
 
 /**
@@ -21,6 +22,18 @@ data class ErrorNotifyConfig(
     companion object {
         const val DEFAULT_COOLDOWN_SECONDS = 300
         private val logger = LoggerFactory.getLogger(ErrorNotifyConfig::class.java)
+
+        fun from(env: EnvReader): ErrorNotifyConfig {
+            val recipientUserIds = parseRecipientIds(env.csv("ERROR_NOTIFY_DISCORD_USER_IDS"))
+            val environment = env.string("ERROR_NOTIFY_ENV")
+            val cooldownSeconds = parseCooldownSeconds(env.string("ERROR_NOTIFY_COOLDOWN_SECONDS"))
+
+            return ErrorNotifyConfig(
+                recipientUserIds = recipientUserIds,
+                environment = environment,
+                cooldownSeconds = cooldownSeconds,
+            )
+        }
 
         fun fromMap(config: Map<String, Any?>): ErrorNotifyConfig {
             val recipientUserIds = parseRecipientIds(config["ERROR_NOTIFY_DISCORD_USER_IDS"])

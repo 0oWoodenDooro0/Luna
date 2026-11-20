@@ -21,7 +21,7 @@ class PluginLoaderTest {
                     override val name: String = "plugin-a"
 
                     override suspend fun initialize(context: PluginContext) {
-                        events.add("init-a:${context.config<String>("env")}")
+                        events.add("init-a:${context.env.string("ENV")}")
                     }
 
                     override suspend fun start() {
@@ -58,7 +58,7 @@ class PluginLoaderTest {
                     kord = mockk(relaxed = true),
                     routing = mockk(relaxed = true),
                     database = mockk(relaxed = true),
-                    configMap = mapOf("env" to "test"),
+                    env = EnvReader.of(mapOf("ENV" to "test")),
                 )
 
             loader.initializePlugins(context)
@@ -151,7 +151,7 @@ class PluginLoaderTest {
                     kord = mockk(relaxed = true),
                     routing = mockk(relaxed = true),
                     database = mockk(relaxed = true),
-                    configMap = mapOf("plugins.optional-plugin.enabled" to false),
+                    env = EnvReader.of(mapOf("plugins.optional-plugin.enabled" to "false")),
                 )
 
             loader.initializePlugins(context)
@@ -178,7 +178,7 @@ class PluginLoaderTest {
                     kord = mockk(relaxed = true),
                     routing = mockk(relaxed = true),
                     database = mockk(relaxed = true),
-                    configMap = mapOf("plugins.disabled" to "feature-y, feature-x, feature-z"),
+                    env = EnvReader.of(mapOf("plugins.disabled" to "feature-y, feature-x, feature-z")),
                 )
 
             loader.initializePlugins(context)
@@ -205,7 +205,7 @@ class PluginLoaderTest {
                     kord = mockk(relaxed = true),
                     routing = mockk(relaxed = true),
                     database = mockk(relaxed = true),
-                    configMap = mapOf("PLUGINS_DISABLED" to "undercover, social-preview"),
+                    env = EnvReader.of(mapOf("PLUGINS_DISABLED" to "undercover, social-preview")),
                 )
 
             loader.initializePlugins(context)

@@ -4,6 +4,7 @@ import ch.qos.logback.classic.Level
 import ch.qos.logback.classic.Logger
 import ch.qos.logback.classic.spi.ILoggingEvent
 import ch.qos.logback.core.read.ListAppender
+import luna.config.ConfigValidationException
 import luna.config.EnvReader
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertThrows
@@ -378,39 +379,52 @@ class LunaConfigTest {
     }
 
     @Test
-    fun `audit drift does not emit false drift warnings for recognized alias keys and dual namespace properties`() {
+    fun `audit drift recognizes canonical keys and flags removed legacy alias keys as unknown`() {
         val jsonLogger = LoggerFactory.getLogger("JSON_LOGGER") as Logger
         val listAppender = ListAppender<ILoggingEvent>()
         listAppender.start()
         jsonLogger.addAppender(listAppender)
 
         try {
-            val configWithAliases =
+            val canonicalConfig =
                 mutableMapOf<String, Any?>(
                     "DISCORD_TOKEN" to "token_val",
-                    "DISCORD_APP_ID" to "app_id_val", // alias for DISCORD_CLIENT_ID
-                    "clientSecret" to "secret_val", // alias for DISCORD_CLIENT_SECRET
-                    "port" to 8080, // alias for PORT
-                    "MCP_PORT" to 8081, // cross-subproject alias
-                    "curtly.baseUrl" to "https://short.custom/s/", // dual-namespace plugin key
-                    "summarizer.emoji" to "✨", // dual-namespace plugin key
-                    "summary.maxHistoryMessages" to 60, // dual-namespace plugin key
-                    "gemini.apiKey" to "ai_key", // dual-namespace plugin key
-                    "PLUGINS_CURTLY_ENABLED" to "true", // plugin lifecycle toggle
+                    "DISCORD_CLIENT_ID" to "app_id_val",
+                    "DISCORD_CLIENT_SECRET" to "secret_val",
+                    "PORT" to 8080,
+                    "MCP_PORT" to 8081,
+                    "BASE_URL" to "https://short.custom/s/",
+                    "SUMMARY_EMOJI" to "✨",
+                    "SUMMARY_MAX_HISTORY_MESSAGES" to 60,
+                    "GEMINI_API_KEY" to "ai_key",
+                    "PLUGINS_CURTLY_ENABLED" to "true",
                 )
 
-            val result = ConfigLoader.auditDrift(configWithAliases)
+            val result = ConfigLoader.auditDrift(canonicalConfig)
 
             assertTrue(
                 result.unknownKeys.isEmpty(),
-                "Aliases and dual-namespace keys must not produce unknown drift keys, but got: ${result.unknownKeys}",
+                "Canonical keys must not produce unknown drift keys, but got: ${result.unknownKeys}",
             )
 
             val warnEvents =
                 listAppender.list.filter { event ->
                     event.level == Level.WARN && event.formattedMessage.contains("[CONFIG_DRIFT]")
                 }
-            assertTrue(warnEvents.isEmpty(), "No [CONFIG_DRIFT] warning should be emitted for recognized aliases")
+            assertTrue(warnEvents.isEmpty(), "No [CONFIG_DRIFT] warning should be emitted for canonical keys")
+
+            val legacyResult =
+                ConfigLoader.auditDrift(
+                    validBaseMap().apply {
+                        put("curtly.baseUrl", "https://short.custom/s/")
+                        put("DISCORD_APP_ID", "app_id_val")
+                        put("PLUGINS_CURTLY_BASE_URL", "https://short.custom/s/")
+                    },
+                )
+            assertEquals(
+                listOf("curtly.baseUrl", "DISCORD_APP_ID", "PLUGINS_CURTLY_BASE_URL"),
+                legacyResult.unknownKeys,
+            )
         } finally {
             jsonLogger.detachAppender(listAppender)
         }
@@ -491,7 +505,7 @@ class LunaConfigTest {
         assertEquals(10, snakeAliases.maxDays)
         assertEquals(80, snakeAliases.maxTotalMb)
 
-        // Verify drift audit recognizes AI_TRACE_* and ai.trace.* and does not mask them
+        // Verify drift audit recognizes AI_TRACE_* and does not mask them
         val audit =
             ConfigLoader.auditDrift(
                 validBaseMap().apply {
@@ -499,10 +513,9 @@ class LunaConfigTest {
                     put("AI_TRACE_DIR", "data/logs/ai")
                     put("AI_TRACE_MAX_DAYS", "14")
                     put("AI_TRACE_MAX_TOTAL_MB", "200")
-                    put("ai.trace.enabled", "true")
                 },
             )
-        assertTrue(audit.unknownKeys.isEmpty(), "AI_TRACE_* and ai.trace.* must be recognized, got unknown=${audit.unknownKeys}")
+        assertTrue(audit.unknownKeys.isEmpty(), "AI_TRACE_* must be recognized, got unknown=${audit.unknownKeys}")
         assertEquals("data/logs/ai", audit.activeConfig["AI_TRACE_DIR"])
     }
 

@@ -3,6 +3,7 @@ package luna.plugin
 import dev.kord.core.Kord
 import io.ktor.server.routing.Routing
 import io.mockk.mockk
+import luna.config.EnvReader
 import org.jetbrains.exposed.v1.jdbc.Database
 import org.junit.jupiter.api.Test
 import kotlin.test.assertEquals
@@ -16,11 +17,13 @@ class PluginContractTest {
         val mockRouting = mockk<Routing>(relaxed = true)
         val testDb = mockk<Database>(relaxed = true)
 
-        val configMap =
-            mapOf(
-                "app.name" to "LunaTest",
-                "plugin.timeout" to 42,
-                "feature.enabled" to true,
+        val env =
+            EnvReader.of(
+                mapOf(
+                    "APP_NAME" to "LunaTest",
+                    "PLUGIN_TIMEOUT" to "42",
+                    "FEATURE_ENABLED" to "true",
+                ),
             )
 
         val context =
@@ -28,24 +31,19 @@ class PluginContractTest {
                 kord = mockKord,
                 routing = mockRouting,
                 database = testDb,
-                configMap = configMap,
+                env = env,
             )
 
         assertEquals(mockKord, context.kord)
         assertEquals(mockRouting, context.routing)
         assertEquals(testDb, context.database)
 
-        assertEquals("LunaTest", context.config("app.name", String::class.java))
-        assertEquals(42, context.config("plugin.timeout", Int::class.javaObjectType))
-        assertEquals(true, context.config("feature.enabled", Boolean::class.javaObjectType))
-
-        // Reified accessor extension
-        assertEquals("LunaTest", context.config<String>("app.name"))
-        assertEquals(42, context.config<Int>("plugin.timeout"))
-        assertEquals(true, context.config<Boolean>("feature.enabled"))
+        assertEquals("LunaTest", context.env.string("APP_NAME"))
+        assertEquals(42, context.env.int("PLUGIN_TIMEOUT", 0))
+        assertEquals(true, context.env.boolean("FEATURE_ENABLED", false))
 
         // Missing key returns null
-        assertNull(context.config<String>("nonexistent.key"))
+        assertNull(context.env.string("NONEXISTENT_KEY"))
     }
 
     @Test

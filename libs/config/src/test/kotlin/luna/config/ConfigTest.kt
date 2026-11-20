@@ -66,18 +66,6 @@ class ConfigTest {
     }
 
     @Test
-    fun `PlaceholderResolver resolves variables and defaults`() {
-        val config = mapOf("HOST" to "api.luna.com", "PORT" to "8080")
-
-        assertEquals("api.luna.com", PlaceholderResolver.resolve("\${HOST}", config))
-        assertEquals("api.luna.com", PlaceholderResolver.resolve("\${?HOST}", config))
-        assertEquals("8080", PlaceholderResolver.resolve("\${PORT:9000}", config))
-        assertEquals("fallback", PlaceholderResolver.resolve("\${MISSING:fallback}", config))
-        assertEquals("http://api.luna.com:8080/v1", PlaceholderResolver.resolve("http://\${HOST}:\${PORT}/v1", config))
-        assertEquals("plain text", PlaceholderResolver.resolve("plain text", config))
-    }
-
-    @Test
     fun `EnvSchemaAuditor parses schema and executes drift audit`() {
         val schemaContent =
             """
@@ -135,110 +123,34 @@ class ConfigTest {
     }
 
     @Test
-    fun `EnvSchemaAuditor recognizes AI_TRACE keys and ai trace aliases`() {
-        val fallbackKeys = EnvSchemaAuditor.defaultFallbackSchema().map { it.name }.toSet()
+    fun `EnvSchemaAuditor recognizes canonical schema keys and PLUGINS_NAME_ENABLED only`() {
+        val fallbackSchema = EnvSchemaAuditor.defaultFallbackSchema()
+        val fallbackKeys = fallbackSchema.map { it.name }.toSet()
         assertTrue(fallbackKeys.contains("AI_TRACE_ENABLED"))
         assertTrue(fallbackKeys.contains("AI_TRACE_DIR"))
         assertTrue(fallbackKeys.contains("AI_TRACE_MAX_DAYS"))
         assertTrue(fallbackKeys.contains("AI_TRACE_MAX_TOTAL_MB"))
-
-        assertTrue(EnvSchemaAuditor.isRecognizedKey("AI_TRACE_ENABLED", fallbackKeys))
-        assertTrue(EnvSchemaAuditor.isRecognizedKey("ai.trace.enabled", fallbackKeys))
-        assertTrue(EnvSchemaAuditor.isRecognizedKey("ai.trace.dir", fallbackKeys))
-        assertTrue(EnvSchemaAuditor.isRecognizedKey("ai.trace.maxDays", fallbackKeys))
-        assertTrue(EnvSchemaAuditor.isRecognizedKey("ai.trace.maxTotalMb", fallbackKeys))
-
-        val aliasConfig =
-            mapOf(
-                "ai.trace.enabled" to "false",
-                "ai.trace.dir" to "/tmp/traces",
-                "ai.trace.maxDays" to "7",
-                "ai.trace.maxTotalMb" to "64",
-            )
-        assertEquals("false", EnvSchemaAuditor.resolveVariableValue("AI_TRACE_ENABLED", aliasConfig))
-        assertEquals("/tmp/traces", EnvSchemaAuditor.resolveVariableValue("AI_TRACE_DIR", aliasConfig))
-        assertEquals("7", EnvSchemaAuditor.resolveVariableValue("AI_TRACE_MAX_DAYS", aliasConfig))
-        assertEquals("64", EnvSchemaAuditor.resolveVariableValue("AI_TRACE_MAX_TOTAL_MB", aliasConfig))
-    }
-
-    @Test
-    fun `EnvSchemaAuditor recognizes CHATTER debounce keys and chatter aliases`() {
-        val fallbackKeys = EnvSchemaAuditor.defaultFallbackSchema().map { it.name }.toSet()
         assertTrue(fallbackKeys.contains("CHATTER_DEBOUNCE_SECONDS"))
         assertTrue(fallbackKeys.contains("CHATTER_MENTION_DEBOUNCE_SECONDS"))
         assertTrue(fallbackKeys.contains("CHATTER_DEBOUNCE_MAX_SECONDS"))
         assertTrue(fallbackKeys.contains("CHATTER_MAX_INTERRUPTS"))
-
-        assertTrue(EnvSchemaAuditor.isRecognizedKey("CHATTER_DEBOUNCE_SECONDS", fallbackKeys))
-        assertTrue(EnvSchemaAuditor.isRecognizedKey("chatter.debounceSeconds", fallbackKeys))
-        assertTrue(EnvSchemaAuditor.isRecognizedKey("chatter.mentionDebounceSeconds", fallbackKeys))
-        assertTrue(EnvSchemaAuditor.isRecognizedKey("chatter.debounceMaxSeconds", fallbackKeys))
-        assertTrue(EnvSchemaAuditor.isRecognizedKey("chatter.maxInterrupts", fallbackKeys))
-
-        val aliasConfig =
-            mapOf(
-                "chatter.debounceSeconds" to "2.5",
-                "chatter.mentionDebounceSeconds" to "1.2",
-                "chatter.debounceMaxSeconds" to "7.0",
-                "chatter.maxInterrupts" to "2",
-            )
-        assertEquals("2.5", EnvSchemaAuditor.resolveVariableValue("CHATTER_DEBOUNCE_SECONDS", aliasConfig))
-        assertEquals("1.2", EnvSchemaAuditor.resolveVariableValue("CHATTER_MENTION_DEBOUNCE_SECONDS", aliasConfig))
-        assertEquals("7.0", EnvSchemaAuditor.resolveVariableValue("CHATTER_DEBOUNCE_MAX_SECONDS", aliasConfig))
-        assertEquals("2", EnvSchemaAuditor.resolveVariableValue("CHATTER_MAX_INTERRUPTS", aliasConfig))
-    }
-
-    @Test
-    fun `EnvSchemaAuditor recognizes CHATTER_TIMEZONE, CHATTER_DRIFT_ENABLED, and chatter aliases`() {
-        val fallbackKeys = EnvSchemaAuditor.defaultFallbackSchema().map { it.name }.toSet()
         assertTrue(fallbackKeys.contains("CHATTER_TIMEZONE"))
         assertTrue(fallbackKeys.contains("CHATTER_DRIFT_ENABLED"))
+        assertTrue(fallbackKeys.contains("CHATTER_REACTION_THRESHOLD"))
 
-        assertTrue(EnvSchemaAuditor.isRecognizedKey("CHATTER_TIMEZONE", fallbackKeys))
-        assertTrue(EnvSchemaAuditor.isRecognizedKey("CHATTER_DRIFT_ENABLED", fallbackKeys))
-        assertTrue(EnvSchemaAuditor.isRecognizedKey("chatter.timezone", fallbackKeys))
-        assertTrue(EnvSchemaAuditor.isRecognizedKey("chatter.driftEnabled", fallbackKeys))
+        assertTrue(EnvSchemaAuditor.isRecognizedKey("AI_TRACE_ENABLED", fallbackKeys))
+        assertTrue(EnvSchemaAuditor.isRecognizedKey("PLUGINS_CHATTER_ENABLED", fallbackKeys))
 
-        val aliasConfig =
-            mapOf(
-                "chatter.timezone" to "Asia/Tokyo",
-                "chatter.driftEnabled" to "false",
-            )
-        assertEquals("Asia/Tokyo", EnvSchemaAuditor.resolveVariableValue("CHATTER_TIMEZONE", aliasConfig))
-        assertEquals("false", EnvSchemaAuditor.resolveVariableValue("CHATTER_DRIFT_ENABLED", aliasConfig))
+        // Legacy aliases must NOT be recognized
+        assertFalse(EnvSchemaAuditor.isRecognizedKey("ai.trace.enabled", fallbackKeys))
+        assertFalse(EnvSchemaAuditor.isRecognizedKey("chatter.debounceSeconds", fallbackKeys))
+        assertFalse(EnvSchemaAuditor.isRecognizedKey("curtly.baseUrl", fallbackKeys))
+        assertFalse(EnvSchemaAuditor.isRecognizedKey("DISCORD_APP_ID", fallbackKeys))
+        assertFalse(EnvSchemaAuditor.isRecognizedKey("PLUGINS_CURTLY_BASE_URL", fallbackKeys))
     }
 
     @Test
-    fun `EnvSchemaAuditor recognizes CHATTER_REACTION_THRESHOLD and chatter aliases`() {
-        val fallbackSchema = EnvSchemaAuditor.defaultFallbackSchema()
-        val reactionSchema = fallbackSchema.firstOrNull { it.name == "CHATTER_REACTION_THRESHOLD" }
-        assertNotNull(reactionSchema)
-        assertFalse(reactionSchema.isRequired)
-        assertEquals("0.45", reactionSchema.defaultValue)
-
-        val fallbackKeys = fallbackSchema.map { it.name }.toSet()
-        assertTrue(EnvSchemaAuditor.isRecognizedKey("CHATTER_REACTION_THRESHOLD", fallbackKeys))
-        assertTrue(EnvSchemaAuditor.isRecognizedKey("chatter.reactionThreshold", fallbackKeys))
-        assertTrue(EnvSchemaAuditor.isRecognizedKey("chatter.reaction_threshold", fallbackKeys))
-
-        assertEquals(
-            "0.55",
-            EnvSchemaAuditor.resolveVariableValue(
-                "CHATTER_REACTION_THRESHOLD",
-                mapOf("chatter.reactionThreshold" to "0.55"),
-            ),
-        )
-        assertEquals(
-            "0.35",
-            EnvSchemaAuditor.resolveVariableValue(
-                "CHATTER_REACTION_THRESHOLD",
-                mapOf("chatter.reaction_threshold" to "0.35"),
-            ),
-        )
-    }
-
-    @Test
-    fun `EnvSchemaAuditor ignores Docker system env keys and nested container maps while flagging unknown leaf keys`() {
+    fun `EnvSchemaAuditor ignores Docker system env keys while flagging removed legacy alias keys as unknown`() {
         val fallbackSchema = EnvSchemaAuditor.defaultFallbackSchema()
         val timeoutSchema = fallbackSchema.firstOrNull { it.name == "CHATTER_DECISION_TIMEOUT_SECONDS" }
         assertNotNull(timeoutSchema)
@@ -249,8 +161,9 @@ class ConfigTest {
                 "DISCORD_TOKEN" to "tok",
                 "JAVA_VERSION" to "jdk-17.0.14+7",
                 "LANGUAGE" to "en_US:en",
-                "curtly" to mapOf("baseUrl" to "http://localhost:8080"),
                 "curtly.baseUrl" to "http://localhost:8080",
+                "DISCORD_APP_ID" to "legacy-app-id",
+                "PLUGINS_CURTLY_BASE_URL" to "http://localhost:8080",
                 "legacy.unknownKey" to "stale",
             )
         val result = EnvSchemaAuditor.auditDrift(config, fallbackSchema)
@@ -262,10 +175,9 @@ class ConfigTest {
             result.unknownKeys.contains("LANGUAGE"),
             "LANGUAGE must not be flagged as unknown, got ${result.unknownKeys}",
         )
-        assertFalse(
-            result.unknownKeys.contains("curtly"),
-            "Nested map container key 'curtly' must not be flagged as unknown, got ${result.unknownKeys}",
+        assertEquals(
+            listOf("curtly.baseUrl", "DISCORD_APP_ID", "PLUGINS_CURTLY_BASE_URL", "legacy.unknownKey"),
+            result.unknownKeys,
         )
-        assertEquals(listOf("legacy.unknownKey"), result.unknownKeys)
     }
 }

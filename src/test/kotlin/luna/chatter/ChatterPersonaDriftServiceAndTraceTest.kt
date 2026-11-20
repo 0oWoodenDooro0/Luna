@@ -304,11 +304,13 @@ class ChatterPersonaDriftServiceAndTraceTest {
                 kord = mockKord,
                 routing = mockk(relaxed = true),
                 database = mockk(relaxed = true),
-                configMap =
-                    mapOf(
-                        "GEMINI_API_KEY" to "plugin-gemini-key",
-                        "CHATTER_TIMEZONE" to "Asia/Tokyo",
-                        "CHATTER_DRIFT_ENABLED" to "false",
+                env =
+                    luna.config.EnvReader.of(
+                        mapOf(
+                            "GEMINI_API_KEY" to "plugin-gemini-key",
+                            "CHATTER_TIMEZONE" to "Asia/Tokyo",
+                            "CHATTER_DRIFT_ENABLED" to "false",
+                        ),
                     ),
                 aiTraceRecorder = recorder,
             )

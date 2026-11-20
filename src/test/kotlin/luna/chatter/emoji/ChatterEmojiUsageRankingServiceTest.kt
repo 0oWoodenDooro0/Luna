@@ -442,10 +442,12 @@ class ChatterEmojiUsageRankingServiceTest {
                     kord = mockk(relaxed = true),
                     routing = mockk(relaxed = true),
                     database = db,
-                    configMap =
-                        mapOf(
-                            "GEMINI_API_KEY" to "test-key",
-                            "CHATTER_ENABLED" to "false",
+                    env =
+                        luna.config.EnvReader.of(
+                            mapOf(
+                                "GEMINI_API_KEY" to "test-key",
+                                "CHATTER_ENABLED" to "false",
+                            ),
                         ),
                 )
 

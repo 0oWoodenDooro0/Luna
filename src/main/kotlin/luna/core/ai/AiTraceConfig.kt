@@ -1,7 +1,6 @@
 package luna.core.ai
 
-import luna.plugin.PluginContext
-import luna.plugin.config
+import luna.config.EnvReader
 
 /**
  * Configuration for dedicated JSONL AI Trace diagnostic logging.
@@ -58,22 +57,12 @@ data class AiTraceConfig(
             )
         }
 
-        fun fromPluginContext(context: PluginContext): AiTraceConfig =
-            fromMap(
-                mapOf(
-                    "AI_TRACE_ENABLED" to (context.config<Boolean>("AI_TRACE_ENABLED") ?: context.config<String>("AI_TRACE_ENABLED")),
-                    "ai.trace.enabled" to (context.config<Boolean>("ai.trace.enabled") ?: context.config<String>("ai.trace.enabled")),
-                    "AI_TRACE_DIR" to context.config<String>("AI_TRACE_DIR"),
-                    "ai.trace.dir" to context.config<String>("ai.trace.dir"),
-                    "AI_TRACE_MAX_DAYS" to (context.config<Int>("AI_TRACE_MAX_DAYS") ?: context.config<String>("AI_TRACE_MAX_DAYS")),
-                    "ai.trace.maxDays" to (context.config<Int>("ai.trace.maxDays") ?: context.config<String>("ai.trace.maxDays")),
-                    "ai.trace.max_days" to (context.config<Int>("ai.trace.max_days") ?: context.config<String>("ai.trace.max_days")),
-                    "AI_TRACE_MAX_TOTAL_MB" to
-                        (context.config<Int>("AI_TRACE_MAX_TOTAL_MB") ?: context.config<String>("AI_TRACE_MAX_TOTAL_MB")),
-                    "ai.trace.maxTotalMb" to (context.config<Int>("ai.trace.maxTotalMb") ?: context.config<String>("ai.trace.maxTotalMb")),
-                    "ai.trace.max_total_mb" to
-                        (context.config<Int>("ai.trace.max_total_mb") ?: context.config<String>("ai.trace.max_total_mb")),
-                ),
+        fun from(env: EnvReader): AiTraceConfig =
+            AiTraceConfig(
+                enabled = env.boolean("AI_TRACE_ENABLED", DEFAULT_ENABLED),
+                dir = env.string("AI_TRACE_DIR", DEFAULT_DIR),
+                maxDays = env.int("AI_TRACE_MAX_DAYS", DEFAULT_MAX_DAYS, 1..Int.MAX_VALUE),
+                maxTotalMb = env.int("AI_TRACE_MAX_TOTAL_MB", DEFAULT_MAX_TOTAL_MB, 1..Int.MAX_VALUE),
             )
 
         private fun parseNonBlankString(raw: Any?): String? = (raw as? String)?.trim()?.ifBlank { null }

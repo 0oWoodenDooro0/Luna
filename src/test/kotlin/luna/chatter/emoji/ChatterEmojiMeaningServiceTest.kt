@@ -367,10 +367,12 @@ class ChatterEmojiMeaningServiceTest {
                     kord = mockKord,
                     routing = mockk(relaxed = true),
                     database = db,
-                    configMap =
-                        mapOf(
-                            "GEMINI_API_KEY" to "test-key",
-                            "CHATTER_EMOJI_VISION_MODEL" to "gemini-2.5-flash",
+                    env =
+                        luna.config.EnvReader.of(
+                            mapOf(
+                                "GEMINI_API_KEY" to "test-key",
+                                "CHATTER_EMOJI_VISION_MODEL" to "gemini-2.5-flash",
+                            ),
                         ),
                 )
 

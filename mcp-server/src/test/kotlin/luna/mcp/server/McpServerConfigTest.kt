@@ -338,29 +338,36 @@ class McpServerConfigTest {
         mcpLogger.addAppender(listAppender)
 
         try {
-            val mapWithAliases =
+            val canonicalMap =
                 mapOf(
-                    "PORT" to 8081, // alias for MCP_PORT
-                    "dbPath" to "./.data/luna.db", // alias for MCP_DB_PATH
-                    "publicBaseUrl" to "https://woodendoor.website", // alias for MCP_PUBLIC_BASE_URL
-                    "curtly.baseUrl" to "https://woodendoor.website/s/", // cross-module alias
-                    "BASE_URL" to "https://woodendoor.website/s/", // cross-module alias
-                    "DISCORD_CLIENT_ID" to "cli-123", // host alias
-                    "DISCORD_APP_ID" to "app-123", // host alias
+                    "MCP_PORT" to 8081,
+                    "MCP_DB_PATH" to "./.data/luna.db",
+                    "MCP_PUBLIC_BASE_URL" to "https://woodendoor.website",
+                    "BASE_URL" to "https://woodendoor.website/s/",
+                    "DISCORD_CLIENT_ID" to "cli-123",
                 )
 
-            val result = McpServerConfig.auditDrift(mapWithAliases)
+            val result = McpServerConfig.auditDrift(canonicalMap)
 
             assertTrue(
                 result.unknownKeys.isEmpty(),
-                "Recognized aliases must not produce unknown drift keys, but got: ${result.unknownKeys}",
+                "Canonical keys must not produce unknown drift keys, but got: ${result.unknownKeys}",
             )
 
             val warnEvents =
                 listAppender.list.filter { event ->
                     event.level == Level.WARN && event.formattedMessage.contains("[CONFIG_DRIFT]")
                 }
-            assertTrue(warnEvents.isEmpty(), "No [CONFIG_DRIFT] warning should be emitted for recognized aliases")
+            assertTrue(warnEvents.isEmpty(), "No [CONFIG_DRIFT] warning should be emitted for canonical keys")
+
+            val legacyAliasResult =
+                McpServerConfig.auditDrift(
+                    mapOf(
+                        "curtly.baseUrl" to "https://woodendoor.website/s/",
+                        "DISCORD_APP_ID" to "app-123",
+                    ),
+                )
+            assertEquals(listOf("curtly.baseUrl", "DISCORD_APP_ID"), legacyAliasResult.unknownKeys)
         } finally {
             mcpLogger.detachAppender(listAppender)
         }

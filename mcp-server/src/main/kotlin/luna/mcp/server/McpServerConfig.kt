@@ -193,7 +193,6 @@ data class McpServerConfig(
         }
 
         val STANDARD_SYSTEM_KEYS: Set<String> get() = EnvSchemaAuditor.STANDARD_SYSTEM_KEYS
-        val CORE_KNOWN_ALIASES: Map<String, String> get() = EnvSchemaAuditor.CORE_KNOWN_ALIASES
 
         fun parseDefaultValue(raw: String): String? = EnvSchemaAuditor.parseDefaultValue(raw)
 
