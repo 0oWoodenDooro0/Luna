@@ -76,12 +76,12 @@ class ChatterReplyContextTest {
             assertFalse(result.transcript.contains("Too old beyond 15"))
             assertFalse(result.transcript.contains("NoiseBot"))
             val expectedExcerpt = "A".repeat(37) + "..."
-            assertTrue(result.transcript.contains("[U1 回覆 ExtAlice「$expectedExcerpt」]: Reply to ext1"))
-            assertTrue(result.transcript.contains("[U2 回覆 ExtBob「Short external context」]: Reply to ext2"))
-            assertTrue(result.transcript.contains("[U3 回覆 ExtCharlie「Third external msg」]: Reply to ext3"))
-            assertTrue(result.transcript.contains("[U4]: Reply to ext4"))
+            assertTrue(result.transcript.contains("U1 (uid:2001) 回覆 ExtAlice (uid:1001)「$expectedExcerpt」: Reply to ext1"))
+            assertTrue(result.transcript.contains("U2 (uid:2002) 回覆 ExtBob (uid:1002)「Short external context」: Reply to ext2"))
+            assertTrue(result.transcript.contains("U3 (uid:2003) 回覆 ExtCharlie (uid:1003)「Third external msg」: Reply to ext3"))
+            assertTrue(result.transcript.contains("U4 (uid:2004): Reply to ext4"))
             assertFalse(result.transcript.contains("回覆 ExtDave"))
-            assertTrue(result.transcript.contains("[U16]: Replying in window"))
+            assertTrue(result.transcript.contains("U16 (uid:2016): Replying in window"))
             assertFalse(result.transcript.contains("回覆 U6"))
         }
 
@@ -172,8 +172,8 @@ class ChatterReplyContextTest {
             assertNull(result.videoUri)
             assertNull(result.videoDurationSeconds)
 
-            assertTrue(result.transcript.contains("[Bob]: Earlier link https://example.com/old-article"))
-            assertTrue(result.transcript.contains("[Charlie]: Check this thread https://www.threads.net/@alice/post/123?x=1"))
+            assertTrue(result.transcript.contains("Bob (uid:4001): Earlier link https://example.com/old-article"))
+            assertTrue(result.transcript.contains("Charlie (uid:4002): Check this thread https://www.threads.net/@alice/post/123?x=1"))
             assertTrue(result.transcript.contains("Kotlin Multiplatform Updates"))
             assertTrue(result.transcript.contains("Compose Multiplatform for iOS is now stable!"))
             assertTrue(result.transcript.contains("Finally stable!"))
@@ -248,7 +248,7 @@ class ChatterReplyContextTest {
                 assertNull(degradedOnThrow.postContent)
                 assertTrue(degradedOnThrow.comments.isEmpty())
                 assertTrue(degradedOnThrow.webUrls.isEmpty())
-                assertTrue(degradedOnThrow.transcript.contains("[Alice]: Read $socialUrl"))
+                assertTrue(degradedOnThrow.transcript.contains("Alice (uid:5001): Read $socialUrl"))
                 assertTrue(degradedOnThrow.transcript.contains("[連結預覽: Fallback Embed Title - Fallback embed snippet]"))
                 assertTrue(
                     listAppender.list.any {

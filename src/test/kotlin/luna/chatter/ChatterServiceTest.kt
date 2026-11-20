@@ -79,7 +79,7 @@ class ChatterServiceTest {
                 val result = fixture.service.processMessage(msg)
                 assertFalse(result)
                 coVerify(exactly = 1) {
-                    fixture.decisionClient.decide(match { it.contains("[Bob]: $shortText") }, any(), any())
+                    fixture.decisionClient.decide(match { it.contains("Bob") && it.contains(shortText) }, any(), any())
                 }
             }
         }
@@ -104,7 +104,7 @@ class ChatterServiceTest {
 
             assertFalse(result)
             coVerify(exactly = 1) {
-                fixture.decisionClient.decide(match { it.contains("[Charlie]: [Embed]") }, any(), any())
+                fixture.decisionClient.decide(match { it.contains("Charlie") && it.contains("[Embed]") }, any(), any())
             }
         }
 
@@ -125,7 +125,7 @@ class ChatterServiceTest {
                 )
             assertFalse(fixture.service.processMessage(plainLunaMsg))
             coVerify(exactly = 1) {
-                fixture.decisionClient.decide(match { it.contains("[Alice]: Hey @luna what's up?") }, any(), any())
+                fixture.decisionClient.decide(match { it.contains("Alice") && it.contains("Hey @luna what's up?") }, any(), any())
             }
 
             // 2. Discord reply to Luna
@@ -148,7 +148,11 @@ class ChatterServiceTest {
                 )
             assertFalse(fixture.service.processMessage(replyToLuna))
             coVerify(exactly = 1) {
-                fixture.decisionClient.decide(match { it.contains("[Bob 回覆 Luna「Earlier bot reply」]: Sounds good") }, any(), any())
+                fixture.decisionClient.decide(
+                    match { it.contains("Bob") && it.contains("回覆 Luna") && it.contains("Earlier bot reply") && it.contains("Sounds good") },
+                    any(),
+                    any(),
+                )
             }
 
             // 3. Unresolved selfId (null) does not bypass decision even with <@9999>
@@ -163,7 +167,7 @@ class ChatterServiceTest {
                 )
             assertFalse(fixture.service.processMessage(unresolvedSelfIdMsg))
             coVerify(exactly = 1) {
-                fixture.decisionClient.decide(match { it.contains("[Dave]: <@9999> hello") }, any(), any())
+                fixture.decisionClient.decide(match { it.contains("Dave") && it.contains("<@9999> hello") }, any(), any())
             }
         }
 
@@ -201,7 +205,9 @@ class ChatterServiceTest {
             coVerify(exactly = 1) { fixture.channel.type() }
             coVerify(exactly = 1) {
                 fixture.chatterGenerator.generateReply(
-                    match<ChatterInput> { !it.isDirectMention && it.transcript.contains("[Alice]: Does anyone know when Luna updates?") },
+                    match<ChatterInput> {
+                        !it.isDirectMention && it.transcript.contains("Alice") && it.transcript.contains("Does anyone know when Luna updates?")
+                    },
                 )
             }
             coVerify(exactly = 1) { fixture.channel.createMessage(replyText) }

@@ -10,6 +10,7 @@ import dev.kord.core.entity.Message
 import dev.kord.core.entity.User
 import io.mockk.every
 import io.mockk.mockk
+import kotlin.time.Instant
 
 internal fun createMockAttachment(
     url: String,
@@ -47,6 +48,7 @@ internal fun createMockMessage(
     embeds: List<Embed> = emptyList(),
     referencedMessage: Message? = null,
     kordUnavailable: Boolean = false,
+    timestamp: Instant? = null,
 ): Message {
     val resolvedAuthorId = authorId ?: webhookId ?: Snowflake(id)
     val author = mockk<User>()
@@ -79,5 +81,8 @@ internal fun createMockMessage(
     every { message.mentionedUserIds } returns emptySet()
     every { message.referencedMessage } returns referencedMessage
     every { message.messageReference } returns null
+    if (timestamp != null) {
+        every { message.timestamp } returns timestamp
+    }
     return message
 }

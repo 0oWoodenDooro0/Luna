@@ -11,6 +11,7 @@ import luna.core.ai.ContextUrlClassifier
 import luna.core.ai.DiscordMediaEmbedExtractor
 import luna.core.ai.SocialPeekFactory
 import org.slf4j.LoggerFactory
+import kotlin.time.Duration.Companion.minutes
 
 /**
  * Lightweight context payload passed to Gemini Decisions API (`gemini-decision-1`).
@@ -75,6 +76,7 @@ open class ChatterContextCollector(
                 }
         }.getOrNull()
     },
+    val historyWindowMinutes: Long = DEFAULT_HISTORY_WINDOW_MINUTES,
 ) {
     private val logger = LoggerFactory.getLogger(ChatterContextCollector::class.java)
 
@@ -97,7 +99,8 @@ open class ChatterContextCollector(
             return ChatterDecisionContext(transcript = "", images = emptyList())
         }
 
-        val window = filtered.takeLast(decisionMessageCount.coerceAtLeast(1))
+        val recent = filterByRecencyWindow(filtered)
+        val window = recent.takeLast(decisionMessageCount.coerceAtLeast(1))
         val imagesByMessage =
             ChatImageAttachmentExtractor.selectChronologicalImages(
                 messages = window,
@@ -149,7 +152,8 @@ open class ChatterContextCollector(
             return PreparedChatterContext(transcript = "")
         }
 
-        val window = filtered.takeLast(historyMessageCount.coerceAtLeast(1))
+        val recent = filterByRecencyWindow(filtered)
+        val window = recent.takeLast(historyMessageCount.coerceAtLeast(1))
         val imagesByMessage =
             ChatImageAttachmentExtractor.selectChronologicalImages(
                 messages = window,
@@ -274,6 +278,17 @@ open class ChatterContextCollector(
         )
     }
 
+    internal fun filterByRecencyWindow(messages: List<Message>): List<Message> {
+        if (messages.isEmpty()) return emptyList()
+        val effectiveWindowMinutes = historyWindowMinutes.coerceAtLeast(MIN_HISTORY_WINDOW_MINUTES)
+        val anchorTimestamp = runCatching { messages.last().timestamp }.getOrNull() ?: return messages
+        val cutoff = anchorTimestamp - effectiveWindowMinutes.minutes
+        return messages.filter { msg ->
+            val msgTimestamp = runCatching { msg.timestamp }.getOrNull()
+            msgTimestamp == null || msgTimestamp >= cutoff
+        }
+    }
+
     internal suspend fun resolveExternalReplyReferences(
         messages: List<Message>,
         maxExternalReferences: Int = DEFAULT_MAX_EXTERNAL_REFERENCES,
@@ -388,11 +403,18 @@ open class ChatterContextCollector(
     ): List<String> {
         var imageIndex = 1
         return messages.map { msg ->
-            val baseAuthor = resolveAuthorName(msg, kordSelfId)
+            val speaker = resolveSpeakerMetadata(msg, kordSelfId)
+            val baseHeader = ChatterPromptBuilder.formatSpeakerHeader(speaker.name, speaker.authorId, speaker.isThirdPartyBot)
             val refMsg = replyReferencesByMessage[msg.id]
-            val author =
+            val turnHeader =
                 if (refMsg != null) {
-                    val refAuthor = resolveAuthorName(refMsg, kordSelfId)
+                    val refSpeaker = resolveSpeakerMetadata(refMsg, kordSelfId)
+                    val refHeader =
+                        ChatterPromptBuilder.formatSpeakerHeader(
+                            refSpeaker.name,
+                            refSpeaker.authorId,
+                            refSpeaker.isThirdPartyBot,
+                        )
                     val rawContent = refMsg.content.trim().replace("\n", " ")
                     val excerpt =
                         if (rawContent.length > MAX_REPLY_EXCERPT_LENGTH) {
@@ -400,9 +422,9 @@ open class ChatterContextCollector(
                         } else {
                             rawContent
                         }
-                    "$baseAuthor 回覆 $refAuthor「$excerpt」"
+                    "$baseHeader 回覆 $refHeader「$excerpt」"
                 } else {
-                    baseAuthor
+                    baseHeader
                 }
 
             val stickerText = DiscordMediaEmbedExtractor.formatStickerAnnotations(msg)
@@ -439,7 +461,7 @@ open class ChatterContextCollector(
                     ChatterNoiseFilter.resolveBlankMessagePlaceholder(msg).orEmpty()
                 }
 
-            if (body.isEmpty()) "[$author]:" else "[$author]: $body"
+            if (body.isEmpty()) "$turnHeader:" else "$turnHeader: $body"
         }
     }
 
@@ -466,25 +488,40 @@ open class ChatterContextCollector(
         return previews.joinToString(" ")
     }
 
+    private data class SpeakerMetadata(
+        val name: String,
+        val authorId: String?,
+        val isThirdPartyBot: Boolean,
+    )
+
+    private fun resolveSpeakerMetadata(
+        message: Message,
+        kordSelfId: Snowflake? = null,
+    ): SpeakerMetadata {
+        val resolvedSelfId = kordSelfId ?: runCatching { message.kord.selfId }.getOrNull()
+        val authorId =
+            runCatching { message.author?.id }.getOrNull()
+                ?: runCatching { message.data.author.id }.getOrNull()
+        val isLunaBot = resolvedSelfId != null && authorId == resolvedSelfId
+        val name = if (isLunaBot) "Luna" else noiseFilter.extractSpeakerName(message)
+        val isThirdPartyBot = !isLunaBot && (runCatching { message.author?.isBot }.getOrNull() == true)
+        return SpeakerMetadata(
+            name = name,
+            authorId = authorId?.toString(),
+            isThirdPartyBot = isThirdPartyBot,
+        )
+    }
+
     internal fun resolveAuthorName(
         message: Message,
         kordSelfId: Snowflake? = null,
-    ): String {
-        val resolvedSelfId = kordSelfId ?: runCatching { message.kord.selfId }.getOrNull()
-        if (resolvedSelfId != null) {
-            val authorId =
-                runCatching { message.author?.id }.getOrNull()
-                    ?: runCatching { message.data.author.id }.getOrNull()
-            if (authorId == resolvedSelfId) {
-                return "Luna"
-            }
-        }
-        return noiseFilter.extractSpeakerName(message)
-    }
+    ): String = resolveSpeakerMetadata(message, kordSelfId).name
 
     companion object {
         const val DEFAULT_DECISION_MESSAGE_COUNT = 15
-        const val DEFAULT_HISTORY_MESSAGE_COUNT = 15
+        const val DEFAULT_HISTORY_MESSAGE_COUNT = 30
+        const val DEFAULT_HISTORY_WINDOW_MINUTES = 10L
+        const val MIN_HISTORY_WINDOW_MINUTES = 1L
         const val DEFAULT_MAX_DECISION_IMAGES = 3
         const val DEFAULT_MAX_IMAGES = 10
         const val DEFAULT_MAX_EXTERNAL_REFERENCES = 3

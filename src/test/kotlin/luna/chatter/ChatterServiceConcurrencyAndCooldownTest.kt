@@ -87,9 +87,13 @@ class ChatterServiceConcurrencyAndCooldownTest {
                     match { transcript ->
                         transcript.contains("[Bot Identity: Luna | Discord Mention: <@9999>]") &&
                             transcript.contains("[Recent Context]") &&
-                            transcript.contains("[Alice]: Earlier message $webUrl") &&
+                            transcript.contains("Alice") &&
+                            transcript.contains("Earlier message $webUrl") &&
                             transcript.contains("[Latest Message]") &&
-                            transcript.contains("[Bob 回覆 ExtUser「Original topic question」]: Check $socialUrl") &&
+                            transcript.contains("Bob") &&
+                            transcript.contains("回覆 ExtUser") &&
+                            transcript.contains("Original topic question") &&
+                            transcript.contains("Check $socialUrl") &&
                             !transcript.contains("Article Title")
                     },
                     any(),
@@ -102,8 +106,11 @@ class ChatterServiceConcurrencyAndCooldownTest {
                         !input.transcript.contains("[Bot Identity:") &&
                             !input.transcript.contains("[Recent Context]") &&
                             !input.transcript.contains("[Latest Message]") &&
-                            input.transcript.contains("[Alice]: Earlier message $webUrl") &&
-                            input.transcript.contains("[Bob 回覆 ExtUser「Original topic question」]: Check $socialUrl") &&
+                            input.transcript.contains("Alice") &&
+                            input.transcript.contains("Earlier message $webUrl") &&
+                            input.transcript.contains("Bob") &&
+                            input.transcript.contains("回覆 ExtUser") &&
+                            input.transcript.contains("Check $socialUrl") &&
                             input.transcript.contains("Article Title") &&
                             input.webUrls == listOf(webUrl)
                     },

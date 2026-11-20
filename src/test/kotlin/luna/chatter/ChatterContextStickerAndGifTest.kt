@@ -187,12 +187,12 @@ class ChatterContextStickerAndGifTest {
                 result.images.map { it.url },
             )
             assertFalse(result.images.any { it.url.contains("702") || it.url.contains("703") })
-            assertTrue(result.transcript.contains("[Alice]: old pic"))
-            assertTrue(result.transcript.contains("[Bob]: [貼圖: wave] [附帶圖片 1: wave.png]"))
-            assertTrue(result.transcript.contains("[Charlie]: laughing [貼圖: lottie_laugh]"))
-            assertTrue(result.transcript.contains("[Dave]: [貼圖]"))
-            assertTrue(result.transcript.contains("[Eve]: [GIF] [附帶圖片 2: cat-jam.png]"))
-            assertTrue(result.transcript.contains("[Frank]: mood [GIF: Party Parrot] [附帶圖片 3: giphy.gif]"))
+            assertTrue(result.transcript.contains("Alice (uid:1): old pic"))
+            assertTrue(result.transcript.contains("Bob (uid:2): [貼圖: wave] [附帶圖片 1: wave.png]"))
+            assertTrue(result.transcript.contains("Charlie (uid:3): laughing [貼圖: lottie_laugh]"))
+            assertTrue(result.transcript.contains("Dave (uid:4): [貼圖]"))
+            assertTrue(result.transcript.contains("Eve (uid:5): [GIF] [附帶圖片 2: cat-jam.png]"))
+            assertTrue(result.transcript.contains("Frank (uid:6): mood [GIF: Party Parrot] [附帶圖片 3: giphy.gif]"))
         }
 
     @Test
@@ -260,12 +260,12 @@ class ChatterContextStickerAndGifTest {
             assertTrue(prepared.imageAttachments.any { it.url == "https://cdn.discordapp.com/stickers/900.gif" })
 
             // Evicted s1 still retains its sticker annotation in transcript
-            assertTrue(prepared.transcript.contains("[User1]: [貼圖: s1]"))
+            assertTrue(prepared.transcript.contains("User1 (uid:101): [貼圖: s1]"))
             assertFalse(prepared.transcript.contains("s1.png"))
-            assertTrue(prepared.transcript.contains("[User2]: [貼圖: s2] [附帶圖片 1: s2.png]"))
-            assertTrue(prepared.transcript.contains("[LottieUser]: [貼圖: sparkle]"))
-            assertTrue(prepared.transcript.contains("[GifUser]: https://tenor.com/view/cat-jam-123 [GIF] [附帶圖片 9: cat-jam.gif]"))
-            assertTrue(prepared.transcript.contains("[GifStickerUser]: [貼圖: party_gif] [附帶圖片 10: party_gif.gif]"))
+            assertTrue(prepared.transcript.contains("User2 (uid:102): [貼圖: s2] [附帶圖片 1: s2.png]"))
+            assertTrue(prepared.transcript.contains("LottieUser (uid:110): [貼圖: sparkle]"))
+            assertTrue(prepared.transcript.contains("GifUser (uid:111): https://tenor.com/view/cat-jam-123 [GIF] [附帶圖片 9: cat-jam.gif]"))
+            assertTrue(prepared.transcript.contains("GifStickerUser (uid:112): [貼圖: party_gif] [附帶圖片 10: party_gif.gif]"))
 
             // Captured Tenor embed URL is excluded from webUrls so url_context isn't invoked needlessly
             assertNull(prepared.primaryUrl)
@@ -303,11 +303,11 @@ class ChatterContextStickerAndGifTest {
             val reply = collector.collectReplyContext(listOf(videoOnlyTenor, unknownStickerMsg))
 
             assertTrue(decision.images.isEmpty())
-            assertTrue(decision.transcript.contains("[Alice]: [GIF]"))
-            assertTrue(decision.transcript.contains("[Bob]: [貼圖: unknown_fmt]"))
+            assertTrue(decision.transcript.contains("Alice (uid:201): [GIF]"))
+            assertTrue(decision.transcript.contains("Bob (uid:202): [貼圖: unknown_fmt]"))
 
             assertTrue(reply.imageAttachments.isEmpty())
-            assertTrue(reply.transcript.contains("[Alice]: [GIF]"))
-            assertTrue(reply.transcript.contains("[Bob]: [貼圖: unknown_fmt]"))
+            assertTrue(reply.transcript.contains("Alice (uid:201): [GIF]"))
+            assertTrue(reply.transcript.contains("Bob (uid:202): [貼圖: unknown_fmt]"))
         }
 }
