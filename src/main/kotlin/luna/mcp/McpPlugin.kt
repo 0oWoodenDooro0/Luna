@@ -47,7 +47,7 @@ class McpPlugin(
         val webhookRepo = McpWebhookRepository(context.database)
         webhookRepository = webhookRepo
 
-        val baseUrl = context.config("MCP_PUBLIC_BASE_URL", McpClientCommand.DEFAULT_PUBLIC_BASE_URL)
+        val baseUrl = context.env.string("MCP_PUBLIC_BASE_URL", McpClientCommand.DEFAULT_PUBLIC_BASE_URL)
 
         val mcpCommand = clientCommandFactory(clientRepo, webhookRepo, baseUrl)
         clientCommand = mcpCommand
