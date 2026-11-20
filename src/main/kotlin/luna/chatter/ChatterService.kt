@@ -21,6 +21,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.launch
+import luna.chatter.emoji.BoundedChannelEmojiCadenceTracker
 import luna.chatter.emoji.ChatterEmojiCatalog
 import luna.chatter.emoji.EmojiVisionTurnBudget
 import luna.chatter.emoji.NoOpChatterEmojiCatalog
@@ -79,6 +80,7 @@ open class ChatterService(
     val guildEmojisProvider: suspend (message: Message) -> List<GuildCustomEmoji> = defaultGuildEmojisProvider,
     val reactionSender: (suspend (message: Message, emoji: ReactionEmoji) -> Unit)? = null,
     val emojiCatalog: ChatterEmojiCatalog = NoOpChatterEmojiCatalog,
+    val emojiCadenceTracker: BoundedChannelEmojiCadenceTracker = BoundedChannelEmojiCadenceTracker(),
 ) {
     private val logger = LoggerFactory.getLogger(ChatterService::class.java)
 
@@ -185,9 +187,7 @@ open class ChatterService(
         }
 
         val channelId = message.channelId
-        val authorId =
-            runCatching { message.author?.id }.getOrNull()
-                ?: runCatching { message.data.author.id }.getOrNull()
+        val authorId = resolveAuthorId(message)
 
         return burstCoordinator.executeWithDebounce(
             channelId = channelId,
@@ -289,14 +289,7 @@ open class ChatterService(
                 reactionThreshold = reactionThreshold,
             )
 
-            val rawReadingDelayMs = randomProvider(MIN_READING_DELAY_MS, MAX_READING_DELAY_MS)
-            val readingDelayMs =
-                if (rawReadingDelayMs < 0L) {
-                    logger.warn("Negative reading delay '{}ms' returned by randomProvider; clamping to 0ms", rawReadingDelayMs)
-                    0L
-                } else {
-                    rawReadingDelayMs
-                }
+            val readingDelayMs = sampleNonNegativeDelay(MIN_READING_DELAY_MS, MAX_READING_DELAY_MS, "reading delay")
 
             val readingJob =
                 launch {
@@ -455,17 +448,18 @@ open class ChatterService(
                     return@coroutineScope false
                 }
 
+                val allowReplyEmojis = emojiCadenceTracker.shouldAllowReplyCustomEmojis(message.channelId)
                 val preparedEmojis =
                     prepareGuildPromptEmojis(
                         message = message,
                         transcript = replyContext.transcript,
                         fallbackDescription = "degrading to emoji-free text reply",
                         roundBudget = emojiRoundBudget,
+                        limit = ChatterPromptBuilder.MAX_REPLY_PROMPT_GUILD_EMOJIS,
+                        includeGuildPool = allowReplyEmojis,
                     )
 
-                val authorId =
-                    runCatching { message.author?.id }.getOrNull()
-                        ?: runCatching { message.data.author.id }.getOrNull()
+                val authorId = resolveAuthorId(message)
                 val guildId = runCatching { message.data.guildId.value }.getOrNull()
 
                 val chatterInput =
@@ -561,6 +555,7 @@ open class ChatterService(
 
                 val deliveredOutput = segments.joinToString("\n")
                 cooldownCache.record(message.channelId)
+                emojiCadenceTracker.recordDeliveredReply(message.channelId, deliveredOutput)
                 session.complete(finalOutput = deliveredOutput)
                 logger.info("Chatter sent reply to channel {}: {}", message.channelId, deliveredOutput)
                 true
@@ -581,11 +576,7 @@ open class ChatterService(
         if (segments.isEmpty()) return
 
         val useReplyThreading = shouldUseReplyThreading(triggerMessage, selfId)
-        if (useReplyThreading) {
-            sendReplyMessage(triggerMessage, segments.first())
-        } else {
-            sendChannelMessage(channel, segments.first())
-        }
+        if (useReplyThreading) sendReplyMessage(triggerMessage, segments.first()) else sendChannelMessage(channel, segments.first())
 
         for (index in 1 until segments.size) {
             try {
@@ -593,25 +584,11 @@ open class ChatterService(
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                logger.warn(
-                    "channel.type() call failed before burst segment {} on channel {}: {}",
-                    index + 1,
-                    triggerMessage.channelId,
-                    e.message,
-                )
+                logger.warn("channel.type() call failed before burst segment {} on channel {}: {}", index + 1, triggerMessage.channelId, e.message)
             }
 
-            val rawSegmentDelayMs = randomProvider(MIN_SEGMENT_DELAY_MS, MAX_SEGMENT_DELAY_MS)
-            val segmentDelayMs =
-                if (rawSegmentDelayMs < 0L) {
-                    logger.warn("Negative segment delay '{}ms' returned by randomProvider; clamping to 0ms", rawSegmentDelayMs)
-                    0L
-                } else {
-                    rawSegmentDelayMs
-                }
-            if (segmentDelayMs > 0L) {
-                delay(segmentDelayMs)
-            }
+            val segmentDelayMs = sampleNonNegativeDelay(MIN_SEGMENT_DELAY_MS, MAX_SEGMENT_DELAY_MS, "segment delay")
+            if (segmentDelayMs > 0L) delay(segmentDelayMs)
 
             sendChannelMessage(channel, segments[index])
         }
@@ -644,26 +621,33 @@ open class ChatterService(
         return interveningCount >= REPLY_THREADING_THRESHOLD
     }
 
+    private fun resolveAuthorId(message: Message): Snowflake? =
+        runCatching { message.author?.id }.getOrNull() ?: runCatching { message.data.author.id }.getOrNull()
+
+    private fun sampleNonNegativeDelay(
+        minMs: Long,
+        maxMs: Long,
+        label: String,
+    ): Long {
+        val rawDelayMs = randomProvider(minMs, maxMs)
+        if (rawDelayMs >= 0L) return rawDelayMs
+        logger.warn("Negative {} '{}ms' returned by randomProvider; clamping to 0ms", label, rawDelayMs)
+        return 0L
+    }
+
     private fun isAuthoredByLuna(
         message: Message,
         selfId: Snowflake?,
     ): Boolean {
         val resolvedSelfId = selfId ?: runCatching { message.kord.selfId }.getOrNull() ?: return false
-        val authorId =
-            runCatching { message.author?.id }.getOrNull()
-                ?: runCatching { message.data.author.id }.getOrNull()
-        return authorId == resolvedSelfId
+        return resolveAuthorId(message) == resolvedSelfId
     }
 
     private suspend fun sendChannelMessage(
         channel: MessageChannelBehavior,
         content: String,
     ) {
-        if (messageSender != null) {
-            messageSender.invoke(channel, content)
-        } else {
-            channel.createMessage(content)
-        }
+        if (messageSender != null) messageSender.invoke(channel, content) else channel.createMessage(content)
     }
 
     private suspend fun sendReplyMessage(
@@ -700,12 +684,7 @@ open class ChatterService(
                 return emptyList()
             }
         if (guildEmojis.isEmpty()) {
-            logger.debug(
-                "No guild custom emojis available for message {} in channel {}; {}",
-                message.id,
-                message.channelId,
-                fallbackDescription,
-            )
+            logger.debug("No guild custom emojis available for message {} in channel {}; {}", message.id, message.channelId, fallbackDescription)
         }
         return guildEmojis
     }
@@ -715,35 +694,25 @@ open class ChatterService(
         transcript: String?,
         fallbackDescription: String,
         roundBudget: EmojiVisionTurnBudget,
+        limit: Int = ChatterPromptBuilder.MAX_PROMPT_GUILD_EMOJIS,
+        includeGuildPool: Boolean = true,
     ): PreparedPromptEmojis {
+        if (!includeGuildPool) {
+            logger.debug("Skipping reply guild emoji pool for channel {} due to reply emoji cadence cooldown", message.channelId)
+            val annotatedTranscript = transcript?.let { emojiCatalog.prepareTranscript(transcript = it, roundBudget = roundBudget) }.orEmpty()
+            currentCoroutineContext().ensureActive()
+            return PreparedPromptEmojis(transcript = annotatedTranscript, guildEmojis = emptyList())
+        }
+
         val guildId = runCatching { message.data.guildId.value }.getOrNull()
-        val availableGuildEmojis =
-            resolveGuildEmojis(
-                message = message,
-                fallbackDescription = fallbackDescription,
-            )
+        val availableGuildEmojis = resolveGuildEmojis(message = message, fallbackDescription = fallbackDescription)
         currentCoroutineContext().ensureActive()
 
         val prepared =
             if (transcript != null) {
-                emojiCatalog.preparePromptEmojis(
-                    transcript = transcript,
-                    guildId = guildId,
-                    availableGuildEmojis = availableGuildEmojis,
-                    limit = ChatterPromptBuilder.MAX_PROMPT_GUILD_EMOJIS,
-                    roundBudget = roundBudget,
-                )
+                emojiCatalog.preparePromptEmojis(transcript, guildId, availableGuildEmojis, limit, roundBudget)
             } else {
-                PreparedPromptEmojis(
-                    transcript = "",
-                    guildEmojis =
-                        emojiCatalog.prepareGuildEmojiPool(
-                            guildId = guildId,
-                            availableGuildEmojis = availableGuildEmojis,
-                            limit = ChatterPromptBuilder.MAX_PROMPT_GUILD_EMOJIS,
-                            roundBudget = roundBudget,
-                        ),
-                )
+                PreparedPromptEmojis("", emojiCatalog.prepareGuildEmojiPool(guildId, availableGuildEmojis, limit, roundBudget))
             }
         currentCoroutineContext().ensureActive()
         return prepared
@@ -762,12 +731,19 @@ open class ChatterService(
         markDispatching: () -> Boolean,
         emojiRoundBudget: EmojiVisionTurnBudget,
     ): Boolean {
+        if (emojiCadenceTracker.isReactionOnCooldown(message.channelId)) {
+            logger.debug("Silent reaction skipped for message {} in channel {} due to reaction cooldown", message.id, message.channelId)
+            session.skip(reason = "Silent reaction skipped due to channel reaction cooldown")
+            return false
+        }
+
         val preparedEmojis =
             prepareGuildPromptEmojis(
                 message = message,
                 transcript = null,
                 fallbackDescription = "continuing with Unicode reactions only",
                 roundBudget = emojiRoundBudget,
+                limit = ChatterPromptBuilder.MAX_PROMPT_GUILD_EMOJIS,
             )
 
         val reactionInput =
@@ -777,6 +753,7 @@ open class ChatterService(
                 isDirectMention = false,
                 personaState = personaState,
                 guildEmojis = preparedEmojis.guildEmojis,
+                recentReactions = emojiCadenceTracker.recentReactions(message.channelId),
             )
 
         val selectedEmoji =
@@ -785,26 +762,14 @@ open class ChatterService(
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                logger.warn(
-                    "ChatterGenerator failed during silent reaction selection for message {}: {}",
-                    message.id,
-                    e.message,
-                    e,
-                )
-                session.skip(
-                    reason = "Silent reaction selection failed: ${e.message}",
-                    failureCategory = AiTraceFailureCategory.UNEXPECTED_ERROR,
-                )
+                logger.warn("ChatterGenerator failed during silent reaction selection for message {}: {}", message.id, e.message, e)
+                session.skip(reason = "Silent reaction selection failed: ${e.message}", failureCategory = AiTraceFailureCategory.UNEXPECTED_ERROR)
                 return false
             }
         currentCoroutineContext().ensureActive()
 
         if (selectedEmoji.isNullOrBlank()) {
-            logger.debug(
-                "Silent reaction selection returned no valid emoji for message {} (noul={})",
-                message.id,
-                noul,
-            )
+            logger.debug("Silent reaction selection returned no valid emoji for message {} (noul={})", message.id, noul)
             if (session.currentOutcome() != AiTraceOutcome.SKIPPED) {
                 session.skip(
                     reason =
@@ -818,15 +783,8 @@ open class ChatterService(
 
         val reactionEmoji = ChatterReactionEmojiValidator.toReactionEmoji(selectedEmoji, preparedEmojis.guildEmojis)
         if (reactionEmoji == null) {
-            logger.warn(
-                "Silent reaction emoji '{}' failed post-selection Discord conversion for message {}",
-                selectedEmoji,
-                message.id,
-            )
-            session.skip(
-                reason = "Silent reaction emoji failed validation before Discord dispatch",
-                failureCategory = AiTraceFailureCategory.PARSE_ERROR,
-            )
+            logger.warn("Silent reaction emoji '{}' failed post-selection Discord conversion for message {}", selectedEmoji, message.id)
+            session.skip(reason = "Silent reaction emoji failed validation before Discord dispatch", failureCategory = AiTraceFailureCategory.PARSE_ERROR)
             return false
         }
 
@@ -843,25 +801,15 @@ open class ChatterService(
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
-            logger.warn(
-                "Failed to add silent reaction '{}' to message {} in channel {}: {}",
-                selectedEmoji,
-                message.id,
-                message.channelId,
-                e.message,
-                e,
-            )
-            session.skip(
-                reason = "Failed to add Discord reaction: ${e.message}",
-                failureCategory = AiTraceFailureCategory.UNEXPECTED_ERROR,
-            )
+            logger.warn("Failed to add silent reaction '{}' to message {} in channel {}: {}", selectedEmoji, message.id, message.channelId, e.message, e)
+            session.skip(reason = "Failed to add Discord reaction: ${e.message}", failureCategory = AiTraceFailureCategory.UNEXPECTED_ERROR)
             return false
         }
 
+        emojiCadenceTracker.recordDeliveredReaction(message.channelId, selectedEmoji)
         session.complete(finalOutput = selectedEmoji)
         logger.info(
-            "Chatter added silent reaction {} to message {} in channel {} " +
-                "(noul={}, confidence={}, reactionThreshold={}, effectiveThreshold={})",
+            "Chatter added silent reaction {} to message {} in channel {} (noul={}, confidence={}, reactionThreshold={}, effectiveThreshold={})",
             selectedEmoji,
             message.id,
             message.channelId,
@@ -877,11 +825,7 @@ open class ChatterService(
         message: Message,
         emoji: ReactionEmoji,
     ) {
-        if (reactionSender != null) {
-            reactionSender.invoke(message, emoji)
-        } else {
-            message.addReaction(emoji)
-        }
+        if (reactionSender != null) reactionSender.invoke(message, emoji) else message.addReaction(emoji)
     }
 
     companion object {
