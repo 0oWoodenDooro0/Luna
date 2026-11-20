@@ -142,12 +142,30 @@ class ConfigTest {
         assertTrue(EnvSchemaAuditor.isRecognizedKey("PLUGINS_CHATTER_ENABLED", fallbackKeys))
 
         // Legacy aliases and removed keys must NOT be recognized
-        assertFalse(EnvSchemaAuditor.isRecognizedKey("PLUGINS_DISABLED", fallbackKeys))
-        assertFalse(EnvSchemaAuditor.isRecognizedKey("ai.trace.enabled", fallbackKeys))
-        assertFalse(EnvSchemaAuditor.isRecognizedKey("chatter.debounceSeconds", fallbackKeys))
-        assertFalse(EnvSchemaAuditor.isRecognizedKey("curtly.baseUrl", fallbackKeys))
-        assertFalse(EnvSchemaAuditor.isRecognizedKey("DISCORD_APP_ID", fallbackKeys))
-        assertFalse(EnvSchemaAuditor.isRecognizedKey("PLUGINS_CURTLY_BASE_URL", fallbackKeys))
+        assertFalse(
+            EnvSchemaAuditor.isRecognizedKey("PLUGINS_DISABLED", fallbackKeys),
+            "Removed key PLUGINS_DISABLED should not be recognized",
+        )
+        assertFalse(
+            EnvSchemaAuditor.isRecognizedKey("ai.trace.enabled", fallbackKeys),
+            "Legacy alias ai.trace.enabled should not be recognized",
+        )
+        assertFalse(
+            EnvSchemaAuditor.isRecognizedKey("chatter.debounceSeconds", fallbackKeys),
+            "Legacy alias chatter.debounceSeconds should not be recognized",
+        )
+        assertFalse(
+            EnvSchemaAuditor.isRecognizedKey("curtly.baseUrl", fallbackKeys),
+            "Legacy alias curtly.baseUrl should not be recognized",
+        )
+        assertFalse(
+            EnvSchemaAuditor.isRecognizedKey("DISCORD_APP_ID", fallbackKeys),
+            "Legacy alias DISCORD_APP_ID should not be recognized",
+        )
+        assertFalse(
+            EnvSchemaAuditor.isRecognizedKey("PLUGINS_CURTLY_BASE_URL", fallbackKeys),
+            "Legacy alias PLUGINS_CURTLY_BASE_URL should not be recognized",
+        )
     }
 
     @Test
