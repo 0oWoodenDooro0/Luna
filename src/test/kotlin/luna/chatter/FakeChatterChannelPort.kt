@@ -65,6 +65,12 @@ internal class FakeChatterChannelPort : ChatterChannelPort {
             override val anchorMessageId: Snowflake,
             override val virtualTimeMs: Long,
         ) : ChannelEvent
+
+        data class ListedApplicationEmojis(
+            override val channelId: Snowflake,
+            override val anchorMessageId: Snowflake,
+            override val virtualTimeMs: Long,
+        ) : ChannelEvent
     }
 
     data class SentMessage(
@@ -97,6 +103,7 @@ internal class FakeChatterChannelPort : ChatterChannelPort {
     var historyMessages: List<Message> = emptyList()
     var afterMessages: List<Message> = emptyList()
     var guildEmojis: List<GuildEmoji> = emptyList()
+    var applicationEmojis: List<GuildCustomEmoji> = emptyList()
 
     var historyError: Throwable? = null
     var afterMessagesError: Throwable? = null
@@ -105,6 +112,7 @@ internal class FakeChatterChannelPort : ChatterChannelPort {
     var replyError: Throwable? = null
     var reactionError: Throwable? = null
     var guildEmojisError: Throwable? = null
+    var applicationEmojisError: Throwable? = null
 
     var onFetchBefore: (suspend (anchor: Message, limit: Int) -> List<Message>)? = null
     var onFetchAfter: (suspend (anchor: Message, limit: Int) -> List<Message>)? = null
@@ -113,6 +121,7 @@ internal class FakeChatterChannelPort : ChatterChannelPort {
     var onReplyTo: (suspend (target: Message, content: String) -> Unit)? = null
     var onAddReaction: (suspend (target: Message, emoji: ReactionEmoji) -> Unit)? = null
     var onListGuildCustomEmojis: (suspend (anchor: Message) -> List<GuildEmoji>)? = null
+    var onListApplicationEmojis: (suspend (anchor: Message) -> List<GuildCustomEmoji>)? = null
 
     private val lock = Any()
     private val _events = mutableListOf<ChannelEvent>()
@@ -242,6 +251,16 @@ internal class FakeChatterChannelPort : ChatterChannelPort {
         guildEmojisError?.let { throw it }
         val source = onListGuildCustomEmojis?.invoke(anchor) ?: guildEmojis
         return source.filter { it.isAvailable && !it.name.isNullOrBlank() }
+    }
+
+    override suspend fun listApplicationEmojis(anchor: Message): List<GuildCustomEmoji> {
+        val timeMs = currentVirtualTimeMs()
+        synchronized(lock) {
+            _events += ChannelEvent.ListedApplicationEmojis(anchor.channelId, anchor.id, timeMs)
+        }
+        applicationEmojisError?.let { throw it }
+        val source = onListApplicationEmojis?.invoke(anchor) ?: applicationEmojis
+        return source.filter { it.name.isNotBlank() }
     }
 
     private suspend fun currentVirtualTimeMs(): Long = currentCoroutineContext()[TestCoroutineScheduler]?.currentTime ?: 0L

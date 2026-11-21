@@ -105,6 +105,8 @@ interface ChatterEmojiCatalog {
         guildId: Snowflake?,
         emojis: List<GuildCustomEmoji>,
     ) {}
+
+    suspend fun preScanApplicationEmojis(emojis: List<GuildCustomEmoji>) {}
 }
 
 /**
@@ -321,6 +323,15 @@ class DefaultChatterEmojiCatalog(
         resolveOrSyncMetadata(
             targets = targets,
             contextLabel = "pre-scan guild $guildId",
+            useRoundTimeout = false,
+        )
+    }
+
+    override suspend fun preScanApplicationEmojis(emojis: List<GuildCustomEmoji>) {
+        if (emojis.isEmpty()) return
+        resolveOrSyncMetadata(
+            targets = toVisionTargets(emojis),
+            contextLabel = "pre-scan application emojis",
             useRoundTimeout = false,
         )
     }
