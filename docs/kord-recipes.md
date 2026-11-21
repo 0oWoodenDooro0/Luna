@@ -156,6 +156,18 @@ val availableEmojis = guild?.emojis?.toList().orEmpty()
 kord.on<EmojisUpdateEvent> { cache.invalidate(guildId) } // event.emojis holds updated GuildEmoji set
 ```
 
+### Application Emojis (`Kord.emojis`)
+```kotlin
+import dev.kord.core.entity.ApplicationEmoji
+import kotlinx.coroutines.flow.toList
+
+// Fetches bot-owned Discord Application Emojis via REST; ApplicationEmoji implements CustomEmoji
+// Fields: id (Snowflake), name (String?), isAnimated (Boolean), isAvailable (Boolean)
+val appEmojis: List<ApplicationEmoji> = kord.emojis.toList()
+    .filter { it.isAvailable && !it.name.isNullOrBlank() }
+// No Discord gateway event exists for Application Emoji updates — cache with a TTL instead of event invalidation.
+```
+
 ### Stickers & Embeds (`Message.stickers`, `MessageStickerType`, `Embed`)
 ```kotlin
 import dev.kord.common.entity.MessageStickerType
