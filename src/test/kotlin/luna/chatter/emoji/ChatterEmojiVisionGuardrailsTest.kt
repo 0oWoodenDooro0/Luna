@@ -37,6 +37,7 @@ import luna.chatter.ChatterDecisionConfig
 import luna.chatter.ChatterGenerator
 import luna.chatter.ChatterNoiseFilter
 import luna.chatter.ChatterService
+import luna.chatter.FakeChatterChannelPort
 import luna.chatter.GeminiDecisionClient
 import luna.chatter.PersonaState
 import luna.chatter.PersonaStateProvider
@@ -116,6 +117,7 @@ class ChatterEmojiVisionGuardrailsTest {
     private fun createChatterService(
         httpClient: HttpClient,
         catalog: ChatterEmojiCatalog,
+        channelPort: FakeChatterChannelPort = FakeChatterChannelPort(),
     ): ChatterService {
         val cooldownCache = BoundedChannelCooldownCache(timeSource = { 100_000L })
         return ChatterService(
@@ -130,13 +132,10 @@ class ChatterEmojiVisionGuardrailsTest {
                     config = ChatterConfig(apiKey = "secret-key", emojiVisionModel = "gemini-2.5-flash"),
                     httpClient = httpClient,
                 ),
-            cooldownCache = cooldownCache,
-            historyFetcher = { _, _ -> emptyList() },
-            messageSender = { _, _ -> mockk(relaxed = true) },
+            channelPort = channelPort,
             contextCollector = ChatterContextCollector(ChatterNoiseFilter(), peekResolver = { null }),
             burstCoordinator = BoundedChannelBurstCoordinator(debounceMs = 1L, mentionDebounceMs = 1L, maxDebounceMs = 10L),
             randomProvider = { _, _ -> 0L },
-            afterMessagesFetcher = { _, _ -> emptyList() },
             personaStateProvider = fixedPersonaProvider(),
             emojiCatalog = catalog,
         )
@@ -257,17 +256,14 @@ class ChatterEmojiVisionGuardrailsTest {
                         clock = clock,
                     )
                 val catalog = DefaultChatterEmojiCatalog(meaningRepository = repo, visionResolver = visionResolver, clock = clock)
-                val service = createChatterService(httpClient, catalog)
-
-                val mockGuild =
-                    mockk<Guild>(relaxed = true).apply {
-                        every { id } returns Snowflake(4005L)
-                        every { emojis } returns flowOf(guildEmoji(1005L, "sigh"))
+                val channelPort =
+                    FakeChatterChannelPort().apply {
+                        guildEmojis = listOf(guildEmoji(1005L, "sigh"))
                     }
+                val service = createChatterService(httpClient, catalog, channelPort)
 
                 val msg1 = ChatterAiTraceTestSupport.createMockMessage(id = 2005L, channelId = 3005L, content = "<:sigh:1005> 唉")
-                coEvery { msg1.getGuildOrNull() } returns mockGuild
-                assertTrue(service.handleMessage(msg1), "Expected first message turn to complete despite vision failure")
+                assertTrue(service.processMessage(msg1), "Expected first message turn to complete despite vision failure")
                 assertEquals(1, visionCalls.get())
                 val failedRecord = repo.findById("1005")
                 assertNotNull(failedRecord)
@@ -282,14 +278,12 @@ class ChatterEmojiVisionGuardrailsTest {
 
                 clock.advanceBySeconds(1800)
                 val msg2 = ChatterAiTraceTestSupport.createMockMessage(id = 2006L, channelId = 3006L, content = "<:sigh:1005> 唉")
-                coEvery { msg2.getGuildOrNull() } returns mockGuild
-                assertTrue(service.handleMessage(msg2), "Expected second message turn to complete during cooldown")
+                assertTrue(service.processMessage(msg2), "Expected second message turn to complete during cooldown")
                 assertEquals(1, visionCalls.get(), "Cooldown window must suppress vision retries")
 
                 clock.advanceBySeconds(1860)
                 val msg3 = ChatterAiTraceTestSupport.createMockMessage(id = 2007L, channelId = 3007L, content = "<:sigh:1005> 唉")
-                coEvery { msg3.getGuildOrNull() } returns mockGuild
-                assertTrue(service.handleMessage(msg3), "Expected third message turn to complete after cooldown expiry")
+                assertTrue(service.processMessage(msg3), "Expected third message turn to complete after cooldown expiry")
                 assertEquals(2, visionCalls.get(), "Vision retries must resume after 1-hour cooldown expires")
                 assertEquals("無奈嘆氣", repo.findById("1005")?.meaning)
                 assertNull(repo.findById("1005")?.failedUntil)
@@ -399,22 +393,20 @@ class ChatterEmojiVisionGuardrailsTest {
                         roundTimeoutMs = 150L,
                     )
                 val catalog = DefaultChatterEmojiCatalog(meaningRepository = repo, visionResolver = timeoutResolver, clock = clock)
-                val service = createChatterService(slowClient, catalog)
-
-                val mockGuild =
-                    mockk<Guild>(relaxed = true).apply {
-                        every { id } returns Snowflake(4008L)
-                        every { emojis } returns flowOf(guildEmoji(8001L, "slow_emoji"))
+                val channelPort =
+                    FakeChatterChannelPort().apply {
+                        guildEmojis = listOf(guildEmoji(8001L, "slow_emoji"))
                     }
+                val service = createChatterService(slowClient, catalog, channelPort)
+
                 val message =
                     ChatterAiTraceTestSupport.createMockMessage(
                         id = 2008L,
                         channelId = 3008L,
                         content = "等一下 <:slow_emoji:8001>",
                     )
-                coEvery { message.getGuildOrNull() } returns mockGuild
 
-                assertTrue(service.handleMessage(message), "Round timeout must degrade gracefully without aborting ChatterService")
+                assertTrue(service.processMessage(message), "Round timeout must degrade gracefully without aborting ChatterService")
                 val replyPrompt = capturedReplyPrompts.single()
                 assertContains(replyPrompt, "<:slow_emoji:8001>")
                 assertFalse(replyPrompt.contains("<:slow_emoji:8001>("), "Timed-out emoji must degrade to bare token")
@@ -525,24 +517,22 @@ class ChatterEmojiVisionGuardrailsTest {
                     roundTimeoutMs = 200L,
                 )
             val catalog = DefaultChatterEmojiCatalog(meaningRepository = repo, visionResolver = resolver, clock = clock)
-            val service = createChatterService(client, catalog)
-
-            val mockGuild =
-                mockk<Guild>(relaxed = true).apply {
-                    every { id } returns Snowflake(4010L)
-                    every { emojis } returns flowOf(guildEmoji(8102L, "guild_slow"))
+            val channelPort =
+                FakeChatterChannelPort().apply {
+                    guildEmojis = listOf(guildEmoji(8102L, "guild_slow"))
                 }
+            val service = createChatterService(client, catalog, channelPort)
+
             val message =
                 ChatterAiTraceTestSupport.createMockMessage(
                     id = 2010L,
                     channelId = 3010L,
                     content = "哈囉 <:ext_slow:8101>",
                 )
-            coEvery { message.getGuildOrNull() } returns mockGuild
 
             val startedAtNanos = System.nanoTime()
             assertTrue(
-                service.handleMessage(message),
+                service.processMessage(message),
                 "Single turn with uncached transcript and guild pool emojis must degrade gracefully",
             )
             val elapsedMs = (System.nanoTime() - startedAtNanos) / 1_000_000L

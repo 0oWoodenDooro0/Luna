@@ -44,6 +44,7 @@ import luna.chatter.ChatterGenerator
 import luna.chatter.ChatterNoiseFilter
 import luna.chatter.ChatterPlugin
 import luna.chatter.ChatterService
+import luna.chatter.FakeChatterChannelPort
 import luna.chatter.GeminiDecisionClient
 import luna.chatter.PersonaState
 import luna.chatter.PersonaStateProvider
@@ -237,7 +238,10 @@ class ChatterEmojiVisionResolutionServiceTest {
                 )
             val catalog = DefaultChatterEmojiCatalog(meaningRepository = repo, visionResolver = visionResolver, clock = clock)
 
-            val sentMessages = CopyOnWriteArrayList<String>()
+            val channelPort =
+                FakeChatterChannelPort().apply {
+                    guildEmojis = listOf(guildEmoji(1001L, "a1"))
+                }
             val service =
                 ChatterService(
                     filter = ChatterNoiseFilter(cooldownCache = BoundedChannelCooldownCache(timeSource = { 100_000L })),
@@ -251,34 +255,22 @@ class ChatterEmojiVisionResolutionServiceTest {
                             config = ChatterConfig(apiKey = "secret-key", model = "gemini-3.5-flash-lite", emojiVisionModel = "gemini-2.5-flash"),
                             httpClient = httpClient,
                         ),
-                    cooldownCache = BoundedChannelCooldownCache(timeSource = { 100_000L }),
-                    historyFetcher = { _, _ -> emptyList() },
-                    messageSender = { _, content ->
-                        sentMessages += content
-                        mockk(relaxed = true)
-                    },
+                    channelPort = channelPort,
                     contextCollector = ChatterContextCollector(ChatterNoiseFilter(), peekResolver = { null }),
                     burstCoordinator = BoundedChannelBurstCoordinator(debounceMs = 1L, mentionDebounceMs = 1L, maxDebounceMs = 10L),
                     randomProvider = { _, _ -> 0L },
-                    afterMessagesFetcher = { _, _ -> emptyList() },
                     personaStateProvider = fixedPersonaProvider(),
                     emojiCatalog = catalog,
                 )
 
-            val mockGuild =
-                mockk<Guild>(relaxed = true).apply {
-                    every { id } returns Snowflake(4001L)
-                    every { emojis } returns flowOf(guildEmoji(1001L, "a1"))
-                }
             val message =
                 ChatterAiTraceTestSupport.createMockMessage(
                     id = 2001L,
                     channelId = 3001L,
                     content = "這波 <:a1:1001> 但有點 <:nitro1:9001>",
                 )
-            coEvery { message.getGuildOrNull() } returns mockGuild
 
-            val result = service.handleMessage(message)
+            val result = service.processMessage(message)
             assertTrue(result, "Expected ChatterService to participate and reply")
 
             val visionBodies =
@@ -319,9 +311,9 @@ class ChatterEmojiVisionResolutionServiceTest {
             assertFalse(replyPrompt.contains("<:nitro1:9001>："), "External Nitro emoji must not enter guild selection pool")
 
             // External Nitro emoji 9001 must still be stripped from delivered reply
-            assertEquals(1, sentMessages.size)
-            assertContains(sentMessages.single(), "<:a1:1001>")
-            assertFalse(sentMessages.single().contains("<:nitro1:9001>"), "External Nitro emoji must be stripped from outgoing reply")
+            assertEquals(1, channelPort.allDeliveredTexts.size)
+            assertContains(channelPort.allDeliveredTexts.single(), "<:a1:1001>")
+            assertFalse(channelPort.allDeliveredTexts.single().contains("<:nitro1:9001>"), "External Nitro emoji must be stripped from outgoing reply")
 
             // Persisted in SQLite
             assertEquals("開心比讚", repo.findById("1001")?.meaning)
@@ -372,7 +364,10 @@ class ChatterEmojiVisionResolutionServiceTest {
                 )
             val catalog = DefaultChatterEmojiCatalog(meaningRepository = repo, visionResolver = visionResolver, clock = clock)
 
-            val sentMessages = CopyOnWriteArrayList<String>()
+            val channelPort =
+                FakeChatterChannelPort().apply {
+                    guildEmojis = listOf(guildEmoji(1001L, "cached"), guildEmoji(1002L, "uncached"))
+                }
             val service =
                 ChatterService(
                     filter = ChatterNoiseFilter(cooldownCache = BoundedChannelCooldownCache(timeSource = { 100_000L })),
@@ -386,34 +381,22 @@ class ChatterEmojiVisionResolutionServiceTest {
                             config = ChatterConfig(apiKey = "secret-key", model = "gemini-3.5-flash-lite", emojiVisionModel = "   "),
                             httpClient = httpClient,
                         ),
-                    cooldownCache = BoundedChannelCooldownCache(timeSource = { 100_000L }),
-                    historyFetcher = { _, _ -> emptyList() },
-                    messageSender = { _, content ->
-                        sentMessages += content
-                        mockk(relaxed = true)
-                    },
+                    channelPort = channelPort,
                     contextCollector = ChatterContextCollector(ChatterNoiseFilter(), peekResolver = { null }),
                     burstCoordinator = BoundedChannelBurstCoordinator(debounceMs = 1L, mentionDebounceMs = 1L, maxDebounceMs = 10L),
                     randomProvider = { _, _ -> 0L },
-                    afterMessagesFetcher = { _, _ -> emptyList() },
                     personaStateProvider = fixedPersonaProvider(),
                     emojiCatalog = catalog,
                 )
 
-            val mockGuild =
-                mockk<Guild>(relaxed = true).apply {
-                    every { id } returns Snowflake(4002L)
-                    every { emojis } returns flowOf(guildEmoji(1001L, "cached"), guildEmoji(1002L, "uncached"))
-                }
             val message =
                 ChatterAiTraceTestSupport.createMockMessage(
                     id = 2002L,
                     channelId = 3002L,
                     content = "看看 <:cached:1001> 跟 <:uncached:1002>",
                 )
-            coEvery { message.getGuildOrNull() } returns mockGuild
 
-            assertTrue(service.handleMessage(message), "Expected ChatterService to handle message when vision model is unset")
+            assertTrue(service.processMessage(message), "Expected ChatterService to handle message when vision model is unset")
 
             val interactionRequests = capturedBodies.filter { (url, _) -> url.contains("/v1beta/interactions") }
             assertEquals(1, interactionRequests.size, "Expected only the reply interaction request and zero vision requests")
@@ -535,6 +518,10 @@ class ChatterEmojiVisionResolutionServiceTest {
                 )
             val catalog = DefaultChatterEmojiCatalog(meaningRepository = repo, visionResolver = visionResolver, clock = clock)
 
+            val channelPort =
+                FakeChatterChannelPort().apply {
+                    guildEmojis = listOf(guildEmoji(1001L, "cheer"))
+                }
             val service =
                 ChatterService(
                     filter = ChatterNoiseFilter(cooldownCache = BoundedChannelCooldownCache(timeSource = { 100_000L })),
@@ -553,31 +540,24 @@ class ChatterEmojiVisionResolutionServiceTest {
                                 ),
                             httpClient = httpClient,
                         ),
-                    cooldownCache = BoundedChannelCooldownCache(timeSource = { 100_000L }),
-                    historyFetcher = { _, _ -> emptyList() },
+                    channelPort = channelPort,
                     contextCollector = ChatterContextCollector(ChatterNoiseFilter(), peekResolver = { null }),
                     burstCoordinator = BoundedChannelBurstCoordinator(debounceMs = 1L, mentionDebounceMs = 1L, maxDebounceMs = 10L),
                     randomProvider = { _, _ -> 0L },
-                    afterMessagesFetcher = { _, _ -> emptyList() },
                     personaStateProvider = fixedPersonaProvider(),
                     emojiCatalog = catalog,
                 )
 
-            val mockGuild =
-                mockk<Guild>(relaxed = true).apply {
-                    every { id } returns Snowflake(4010L)
-                    every { emojis } returns flowOf(guildEmoji(1001L, "cheer"))
-                }
             val message =
                 ChatterAiTraceTestSupport.createMockMessage(
                     id = 2010L,
                     channelId = 3010L,
                     content = "太好笑 <:nitro_lol:9001>",
                 )
-            coEvery { message.getGuildOrNull() } returns mockGuild
-            coEvery { message.addReaction(any<ReactionEmoji>()) } just runs
 
-            assertTrue(service.handleMessage(message), "Expected Silent Reaction Path to handle message")
+            assertTrue(service.processMessage(message), "Expected Silent Reaction Path to handle message")
+            assertEquals(1, channelPort.addedReactions.size, "Expected 1 reaction delivered via FakeChatterChannelPort")
+            assertEquals(0, channelPort.typingCount, "Silent Reaction Path must not trigger typing")
             assertEquals(1, capturedReactionPrompts.size)
             val (reactionSystem, reactionPrompt) = capturedReactionPrompts.single()
             assertContains(reactionPrompt, "<:nitro_lol:9001>(大笑噴茶)")
