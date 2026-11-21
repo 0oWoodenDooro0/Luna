@@ -2,12 +2,8 @@ package luna.chatter
 
 import dev.kord.common.entity.Snowflake
 import dev.kord.core.Kord
-import dev.kord.core.behavior.channel.MessageChannelBehavior
-import dev.kord.core.behavior.channel.createMessage
-import dev.kord.core.behavior.reply
 import dev.kord.core.entity.GuildEmoji
 import dev.kord.core.entity.Message
-import dev.kord.core.entity.ReactionEmoji
 import dev.kord.core.event.guild.EmojisUpdateEvent
 import dev.kord.core.event.message.MessageCreateEvent
 import dev.kord.core.event.message.ReactionAddEvent
@@ -17,7 +13,6 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.currentCoroutineContext
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.launch
@@ -45,52 +40,32 @@ import kotlin.random.Random
  * 2. Coordinating per-channel burst debounce windows and pre-send cancellation via [burstCoordinator].
  * 3. Overlapping silent reading simulation (0.8s–2.0s via [randomProvider]) with participation decision and
  *    routing intermediate scores into the Silent Reaction Path or full reply generation.
- * 4. Triggering `channel.type()` and length-paced typing delay (`min(charCount * 120ms, 4000ms)`) only when non-blank text reply output is ready.
- * 5. Locking dispatch, counting intervening post-trigger messages via [afterMessagesFetcher], delivering up to 3 segmented messages
- *    with asymmetric reply threading via [deliverReply], and refreshing cooldown.
+ * 4. Triggering typing and length-paced typing delay (`min(charCount * 120ms, 4000ms)`) via [channelPort]
+ *    and [ChatterDeliveryEngine] only when non-blank text reply output is ready.
+ * 5. Locking dispatch, counting intervening post-trigger messages via [channelPort], delivering up to 3 segmented messages
+ *    with asymmetric reply threading, and refreshing [filter]'s cooldown cache.
  */
-open class ChatterService(
-    val filter: ChatterNoiseFilter = ChatterNoiseFilter(),
+class ChatterService(
     val decisionClient: GeminiDecisionClient,
     val chatterGenerator: ChatterGenerator,
-    val cooldownCache: BoundedChannelCooldownCache = filter.cooldownCache,
-    val decisionMessageCount: Int = DEFAULT_DECISION_MESSAGE_COUNT,
-    val historyMessageCount: Int = DEFAULT_HISTORY_MESSAGE_COUNT,
-    val historyFetcher: suspend (message: Message, limit: Int) -> List<Message> = { message, limit ->
-        message.channel
-            .getMessagesBefore(message.id, limit = limit)
-            .toList()
-            .reversed()
-    },
-    val messageSender: (suspend (channel: MessageChannelBehavior, content: String) -> Message)? = null,
-    val contextCollector: ChatterContextCollector =
-        ChatterContextCollector(
-            noiseFilter = filter,
-            decisionMessageCount = decisionMessageCount,
-            historyMessageCount = historyMessageCount,
-        ),
+    val filter: ChatterNoiseFilter = ChatterNoiseFilter(),
+    val contextCollector: ChatterContextCollector = ChatterContextCollector(noiseFilter = filter),
+    val channelPort: ChatterChannelPort = KordChatterChannelAdapter,
     val traceRecorder: AiTraceRecorder = NoOpAiTraceRecorder,
     val burstCoordinator: BoundedChannelBurstCoordinator = BoundedChannelBurstCoordinator(),
+    val personaStateProvider: PersonaStateProvider = CircadianPersonaDrift(),
+    val emojiCatalog: ChatterEmojiCatalog = NoOpChatterEmojiCatalog,
+    val emojiCadenceTracker: BoundedChannelEmojiCadenceTracker = BoundedChannelEmojiCadenceTracker(),
     val randomProvider: (minInclusive: Long, maxInclusive: Long) -> Long = { min, max ->
         Random.nextLong(min, max + 1)
     },
-    val afterMessagesFetcher: suspend (message: Message, limit: Int) -> List<Message> = defaultAfterMessagesFetcher,
-    val replySender: (suspend (message: Message, content: String) -> Message)? = null,
-    val personaStateProvider: PersonaStateProvider = CircadianPersonaDrift(),
-    val guildEmojisProvider: suspend (message: Message) -> List<GuildCustomEmoji> = defaultGuildEmojisProvider,
-    val reactionSender: (suspend (message: Message, emoji: ReactionEmoji) -> Unit)? = null,
-    val emojiCatalog: ChatterEmojiCatalog = NoOpChatterEmojiCatalog,
-    val emojiCadenceTracker: BoundedChannelEmojiCadenceTracker = BoundedChannelEmojiCadenceTracker(),
-    val channelPort: ChatterChannelPort? = null,
 ) {
     private val logger = LoggerFactory.getLogger(ChatterService::class.java)
-    private val deliveryEngine: ChatterDeliveryEngine? =
-        channelPort?.let { port ->
-            ChatterDeliveryEngine(
-                channelPort = port,
-                randomProvider = randomProvider,
-            )
-        }
+    private val deliveryEngine =
+        ChatterDeliveryEngine(
+            channelPort = channelPort,
+            randomProvider = randomProvider,
+        )
 
     private data class TriggerSnapshot(
         val selfId: Snowflake?,
@@ -127,7 +102,7 @@ open class ChatterService(
     /**
      * Pre-scans custom emojis across all joined guilds on startup without blocking gateway dispatch.
      */
-    suspend fun preScanStartupGuilds(kord: Kord) {
+    internal suspend fun preScanStartupGuilds(kord: Kord) {
         try {
             coroutineScope {
                 kord.guilds.collect { guild ->
@@ -157,12 +132,12 @@ open class ChatterService(
     /**
      * Handles incoming [MessageCreateEvent].
      */
-    suspend fun onMessageCreate(event: MessageCreateEvent): Boolean = processMessage(event.message)
+    internal suspend fun onMessageCreate(event: MessageCreateEvent): Boolean = processMessage(event.message)
 
     /**
      * Handles incoming [ReactionAddEvent] for custom emoji usage tracking.
      */
-    suspend fun onReactionAdd(event: ReactionAddEvent) {
+    internal suspend fun onReactionAdd(event: ReactionAddEvent) {
         val guildId = event.guildId ?: return
         val selfId = runCatching { event.kord.selfId }.getOrNull()
         if (selfId != null && event.userId == selfId) return
@@ -172,15 +147,10 @@ open class ChatterService(
     /**
      * Handles incoming [EmojisUpdateEvent] for background guild custom emoji pre-scanning.
      */
-    suspend fun onEmojisUpdate(event: EmojisUpdateEvent) {
+    internal suspend fun onEmojisUpdate(event: EmojisUpdateEvent) {
         val availableEmojis = event.emojis.toAvailableGuildCustomEmojis()
         emojiCatalog.preScanGuildEmojis(guildId = event.guildId, emojis = availableEmojis)
     }
-
-    /**
-     * Alias for [processMessage] handling an incoming [Message].
-     */
-    suspend fun handleMessage(message: Message): Boolean = processMessage(message)
 
     /**
      * Core pipeline processing an incoming [Message].
@@ -266,7 +236,8 @@ open class ChatterService(
         session: AiTraceSession,
         markDispatching: () -> Boolean,
     ): Boolean =
-        withOptionalReadingSimulation { readingScope ->
+        deliveryEngine.withReadingSimulation {
+            val readingScope = this
             val baseThreshold = runCatching { decisionClient.config.threshold }.getOrDefault(ChatterDecisionConfig.DEFAULT_THRESHOLD)
             val reactionThreshold = runCatching { chatterGenerator.config.normalizedReactionThreshold }.getOrDefault(ChatterConfig.DEFAULT_REACTION_THRESHOLD)
             val personaState = personaStateProvider.currentState(baseThreshold)
@@ -278,15 +249,10 @@ open class ChatterService(
             )
 
             // 2. Gathers recent messages from channel slice to construct state / history
-            val fetchLimit =
-                if (channelPort != null) {
-                    maxOf(contextCollector.decisionMessageCount, contextCollector.historyMessageCount)
-                } else {
-                    maxOf(decisionMessageCount, historyMessageCount)
-                }
+            val fetchLimit = maxOf(contextCollector.decisionMessageCount, contextCollector.historyMessageCount)
             val previousMessages =
                 try {
-                    if (channelPort != null) channelPort.fetchMessagesBefore(message, fetchLimit) else historyFetcher(message, fetchLimit)
+                    channelPort.fetchMessagesBefore(message, fetchLimit)
                 } catch (e: CancellationException) {
                     throw e
                 } catch (e: Exception) {
@@ -311,7 +277,7 @@ open class ChatterService(
                             AiTraceFailureCategory.CONTEXT_ERROR,
                             "Error collecting decision context for message ${message.id}: ${e.message}",
                         )
-                        return@withOptionalReadingSimulation false
+                        return@withReadingSimulation false
                     }
                 currentCoroutineContext().ensureActive()
                 if (decisionContext.transcript.isBlank() && decisionContext.images.isEmpty()) {
@@ -320,7 +286,7 @@ open class ChatterService(
                         AiTraceFailureCategory.CONTEXT_ERROR,
                         "Assembled decision dialogue state is blank",
                     )
-                    return@withOptionalReadingSimulation false
+                    return@withReadingSimulation false
                 }
 
                 val annotatedDecisionTranscript =
@@ -347,14 +313,14 @@ open class ChatterService(
                             AiTraceFailureCategory.UNEXPECTED_ERROR,
                             "Gemini decision evaluation threw error: ${e.message}",
                         )
-                        return@withOptionalReadingSimulation false
+                        return@withReadingSimulation false
                     }
                 currentCoroutineContext().ensureActive()
 
                 if (!decision.shouldParticipate) {
                     val noul = decision.noul
                     if (noul != null && reactionThreshold < effectiveThreshold && noul >= reactionThreshold) {
-                        return@withOptionalReadingSimulation handleSilentReactionPath(
+                        return@withReadingSimulation handleSilentReactionPath(
                             message = message,
                             guildId = snapshot.guildId,
                             decisionContext = annotatedDecisionContext,
@@ -385,14 +351,11 @@ open class ChatterService(
                                     "reactionThreshold=$reactionThreshold, baseThreshold=$baseThreshold)",
                         )
                     }
-                    return@withOptionalReadingSimulation false
+                    return@withReadingSimulation false
                 }
             } else {
                 logger.info("Direct bot mention detected on message {}; bypassing decision evaluation", message.id)
             }
-
-            // Legacy-only channel lookup; skipped when channelPort is provided
-            val legacyChannel = if (channelPort == null) resolveLegacyChannel(message, session) ?: return@withOptionalReadingSimulation false else null
 
             // Assemble heavy reply context (15 messages, reply chains, images, SocialPeek)
             val replyContext =
@@ -406,7 +369,7 @@ open class ChatterService(
                         AiTraceFailureCategory.CONTEXT_ERROR,
                         "Error collecting reply context for message ${message.id}: ${e.message}",
                     )
-                    return@withOptionalReadingSimulation false
+                    return@withReadingSimulation false
                 }
             currentCoroutineContext().ensureActive()
             if (replyContext.transcript.isBlank() &&
@@ -418,7 +381,7 @@ open class ChatterService(
                     AiTraceFailureCategory.CONTEXT_ERROR,
                     "Reply context is blank and contains no media",
                 )
-                return@withOptionalReadingSimulation false
+                return@withReadingSimulation false
             }
 
             val allowReplyEmojis = emojiCadenceTracker.shouldAllowReplyCustomEmojis(message.channelId)
@@ -457,7 +420,7 @@ open class ChatterService(
                         AiTraceFailureCategory.UNEXPECTED_ERROR,
                         "ChatterGenerator failed to generate reply: ${e.message}",
                     )
-                    return@withOptionalReadingSimulation false
+                    return@withReadingSimulation false
                 }
             currentCoroutineContext().ensureActive()
 
@@ -469,7 +432,7 @@ open class ChatterService(
                         "ChatterGenerator returned blank reply",
                     )
                 }
-                return@withOptionalReadingSimulation false
+                return@withReadingSimulation false
             }
 
             val allowedCustomEmojiIds = preparedEmojis.guildEmojis.map { it.id.toString() }.toSet()
@@ -481,108 +444,36 @@ open class ChatterService(
                     AiTraceFailureCategory.EMPTY_OUTPUT,
                     "ChatterGenerator returned blank segments",
                 )
-                return@withOptionalReadingSimulation false
+                return@withReadingSimulation false
             }
 
-            val engine = deliveryEngine
             val delivered =
                 try {
-                    if (engine != null) {
-                        engine.deliverSegmentedReply(
-                            anchor = message,
-                            segments = segments,
-                            selfId = snapshot.selfId,
-                            readingSimulation = readingScope,
-                            markDispatching = markDispatching,
-                        )
-                    } else {
-                        deliverLegacySegmentedReply(
-                            channel = legacyChannel!!,
-                            message = message,
-                            segments = segments,
-                            selfId = snapshot.selfId,
-                            readingScope = readingScope,
-                            markDispatching = markDispatching,
-                        )
-                    }
+                    deliveryEngine.deliverSegmentedReply(
+                        anchor = message,
+                        segments = segments,
+                        selfId = snapshot.selfId,
+                        readingSimulation = readingScope,
+                        markDispatching = markDispatching,
+                    )
                 } catch (e: CancellationException) {
                     throw e
                 } catch (e: Exception) {
                     logger.error("Failed to send reply to channel {}: {}", message.channelId, e.message, e)
                     session.fail(AiTraceFailureCategory.UNEXPECTED_ERROR, "Failed to deliver Discord reply: ${e.message}")
-                    return@withOptionalReadingSimulation false
+                    return@withReadingSimulation false
                 }
             if (delivered == DeliveryOutcome.CancelledBeforeDispatch) {
                 session.skip(reason = "Cancelled right before dispatch lock in channel ${message.channelId}")
-                return@withOptionalReadingSimulation false
+                return@withReadingSimulation false
             }
 
             val deliveredOutput = segments.joinToString("\n")
-            val effectiveCooldownCache = if (channelPort != null) filter.cooldownCache else cooldownCache
-            effectiveCooldownCache.record(message.channelId)
+            filter.cooldownCache.record(message.channelId)
             emojiCadenceTracker.recordDeliveredReply(message.channelId, deliveredOutput)
             session.complete(finalOutput = deliveredOutput)
             logger.info("Chatter sent reply to channel {}: {}", message.channelId, deliveredOutput)
             true
-        }
-
-    private suspend fun deliverLegacySegmentedReply(
-        channel: MessageChannelBehavior,
-        message: Message,
-        segments: List<String>,
-        selfId: Snowflake?,
-        readingScope: ReadingSimulationScope,
-        markDispatching: () -> Boolean,
-    ): DeliveryOutcome {
-        readingScope.awaitReading()
-        try {
-            channel.type()
-        } catch (e: CancellationException) {
-            throw e
-        } catch (e: Exception) {
-            logger.warn("channel.type() call failed on channel {}: {}", message.channelId, e.message)
-        }
-        currentCoroutineContext().ensureActive()
-        val typingDelayMs = minOf(segments.first().length * TYPING_MS_PER_CHAR, MAX_TYPING_DELAY_MS)
-        if (typingDelayMs > 0L) delay(typingDelayMs)
-        currentCoroutineContext().ensureActive()
-        if (!markDispatching()) return DeliveryOutcome.CancelledBeforeDispatch
-        deliverReply(channel, message, segments, selfId)
-        return DeliveryOutcome.Delivered
-    }
-
-    private suspend fun <T> withOptionalReadingSimulation(block: suspend (ReadingSimulationScope) -> T): T {
-        deliveryEngine?.let { return it.withReadingSimulation { block(this) } }
-        return coroutineScope {
-            val readingDelayMs = sampleNonNegativeDelay(MIN_READING_DELAY_MS, MAX_READING_DELAY_MS, "reading delay")
-            val readingJob = launch { if (readingDelayMs > 0L) delay(readingDelayMs) }
-            val scope =
-                object : ReadingSimulationScope {
-                    override suspend fun awaitReading() {
-                        readingJob.join()
-                        currentCoroutineContext().ensureActive()
-                    }
-                }
-            try {
-                block(scope)
-            } finally {
-                readingJob.cancel()
-            }
-        }
-    }
-
-    private suspend fun resolveLegacyChannel(
-        message: Message,
-        session: AiTraceSession,
-    ): MessageChannelBehavior? =
-        try {
-            message.channel
-        } catch (e: CancellationException) {
-            throw e
-        } catch (e: Exception) {
-            logger.warn("Unable to obtain channel for message {}: {}", message.id, e.message)
-            session.fail(AiTraceFailureCategory.CONTEXT_ERROR, "Unable to obtain channel for message ${message.id}: ${e.message}")
-            null
         }
 
     private fun extractTriggerSnapshot(message: Message): TriggerSnapshot =
@@ -594,105 +485,8 @@ open class ChatterService(
             content = runCatching { message.content }.getOrNull().orEmpty(),
         )
 
-    /**
-     * Clean reply delivery seam for sending segmented dialogue to a Discord channel with asymmetric reply threading.
-     */
-    protected open suspend fun deliverReply(
-        channel: MessageChannelBehavior,
-        triggerMessage: Message,
-        segments: List<String>,
-        selfId: Snowflake? = runCatching { triggerMessage.kord.selfId }.getOrNull(),
-    ) {
-        if (segments.isEmpty()) return
-
-        val useReplyThreading = shouldUseReplyThreading(triggerMessage, selfId)
-        if (useReplyThreading) sendReplyMessage(triggerMessage, segments.first()) else sendChannelMessage(channel, segments.first())
-
-        for (index in 1 until segments.size) {
-            try {
-                channel.type()
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: Exception) {
-                logger.warn("channel.type() call failed before burst segment {} on channel {}: {}", index + 1, triggerMessage.channelId, e.message)
-            }
-
-            val segmentDelayMs = sampleNonNegativeDelay(MIN_SEGMENT_DELAY_MS, MAX_SEGMENT_DELAY_MS, "segment delay")
-            if (segmentDelayMs > 0L) delay(segmentDelayMs)
-
-            sendChannelMessage(channel, segments[index])
-        }
-    }
-
-    private suspend fun shouldUseReplyThreading(
-        triggerMessage: Message,
-        selfId: Snowflake?,
-    ): Boolean {
-        val afterMessages =
-            try {
-                afterMessagesFetcher(triggerMessage, DEFAULT_AFTER_MESSAGES_LIMIT)
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: Exception) {
-                logger.warn(
-                    "Failed to fetch post-trigger messages after {} in channel {}; failing open to createMessage: {}",
-                    triggerMessage.id,
-                    triggerMessage.channelId,
-                    e.message,
-                )
-                return false
-            }
-
-        val resolvedSelfId = selfId ?: runCatching { triggerMessage.kord.selfId }.getOrNull()
-        val interveningCount =
-            afterMessages.count { afterMsg ->
-                afterMsg.id != triggerMessage.id && !isAuthoredByLuna(afterMsg, resolvedSelfId)
-            }
-        return interveningCount >= REPLY_THREADING_THRESHOLD
-    }
-
     private fun resolveAuthorId(message: Message): Snowflake? =
         runCatching { message.author?.id }.getOrNull() ?: runCatching { message.data.author.id }.getOrNull()
-
-    private fun sampleNonNegativeDelay(
-        minMs: Long,
-        maxMs: Long,
-        label: String,
-    ): Long {
-        val rawDelayMs = randomProvider(minMs, maxMs)
-        if (rawDelayMs >= 0L) return rawDelayMs
-        logger.warn("Negative {} '{}ms' returned by randomProvider; clamping to 0ms", label, rawDelayMs)
-        return 0L
-    }
-
-    private fun isAuthoredByLuna(
-        message: Message,
-        selfId: Snowflake?,
-    ): Boolean {
-        val resolvedSelfId = selfId ?: runCatching { message.kord.selfId }.getOrNull() ?: return false
-        return resolveAuthorId(message) == resolvedSelfId
-    }
-
-    private suspend fun sendChannelMessage(
-        channel: MessageChannelBehavior,
-        content: String,
-    ) {
-        if (messageSender != null) messageSender.invoke(channel, content) else channel.createMessage(content)
-    }
-
-    private suspend fun sendReplyMessage(
-        triggerMessage: Message,
-        content: String,
-    ) {
-        if (replySender != null) {
-            replySender.invoke(triggerMessage, content)
-        } else {
-            triggerMessage.reply {
-                this.messageReference = triggerMessage.id
-                this.content = content
-            }
-        }
-    }
 
     private suspend fun resolveGuildEmojis(
         message: Message,
@@ -700,7 +494,7 @@ open class ChatterService(
     ): List<GuildCustomEmoji> {
         val guildEmojis =
             try {
-                if (channelPort != null) channelPort.listGuildCustomEmojis(message).toAvailableGuildCustomEmojis() else guildEmojisProvider(message)
+                channelPort.listGuildCustomEmojis(message).toAvailableGuildCustomEmojis()
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
@@ -822,23 +616,12 @@ open class ChatterService(
 
         val outcome =
             try {
-                val engine = deliveryEngine
-                if (engine != null) {
-                    engine.deliverSilentReaction(
-                        target = message,
-                        emoji = reactionEmoji,
-                        readingSimulation = readingScope,
-                        markDispatching = markDispatching,
-                    )
-                } else {
-                    readingScope.awaitReading()
-                    if (!markDispatching()) {
-                        DeliveryOutcome.CancelledBeforeDispatch
-                    } else {
-                        dispatchReaction(message, reactionEmoji)
-                        DeliveryOutcome.Delivered
-                    }
-                }
+                deliveryEngine.deliverSilentReaction(
+                    target = message,
+                    emoji = reactionEmoji,
+                    readingSimulation = readingScope,
+                    markDispatching = markDispatching,
+                )
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
@@ -866,40 +649,7 @@ open class ChatterService(
         return true
     }
 
-    private suspend fun dispatchReaction(
-        message: Message,
-        emoji: ReactionEmoji,
-    ) {
-        if (reactionSender != null) reactionSender.invoke(message, emoji) else message.addReaction(emoji)
-    }
-
     companion object {
-        const val DEFAULT_DECISION_MESSAGE_COUNT = 15
-        const val DEFAULT_HISTORY_MESSAGE_COUNT = ChatterContextCollector.DEFAULT_HISTORY_MESSAGE_COUNT
-        const val DEFAULT_AFTER_MESSAGES_LIMIT = 20
-        const val REPLY_THREADING_THRESHOLD = 2
-        const val MIN_READING_DELAY_MS = 800L
-        const val MAX_READING_DELAY_MS = 2_000L
-        const val MIN_SEGMENT_DELAY_MS = 700L
-        const val MAX_SEGMENT_DELAY_MS = 1_500L
-        const val TYPING_MS_PER_CHAR = 120L
-        const val MAX_TYPING_DELAY_MS = 4_000L
-
-        val defaultAfterMessagesFetcher: suspend (message: Message, limit: Int) -> List<Message> = { message, limit ->
-            message.channel
-                .getMessagesAfter(message.id, limit = limit)
-                .toList()
-        }
-
-        val defaultGuildEmojisProvider: suspend (message: Message) -> List<GuildCustomEmoji> = { message ->
-            val guild = message.getGuildOrNull()
-            if (guild == null) {
-                emptyList()
-            } else {
-                guild.emojis.toList().toAvailableGuildCustomEmojis()
-            }
-        }
-
         internal fun Iterable<GuildEmoji>.toAvailableGuildCustomEmojis(): List<GuildCustomEmoji> =
             mapNotNull { emoji ->
                 val emojiName = emoji.name?.takeIf { it.isNotBlank() }

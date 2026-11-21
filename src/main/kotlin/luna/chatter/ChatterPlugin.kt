@@ -297,18 +297,13 @@ class ChatterPlugin(
 
         val chatterService =
             ChatterService(
-                filter = noiseFilter,
                 decisionClient = client,
                 chatterGenerator = generator,
-                cooldownCache = cooldown,
-                decisionMessageCount = decisionConfig.decisionMessageCount,
-                historyMessageCount = memoryConfig.historyMessageCount,
+                filter = noiseFilter,
                 contextCollector = collector,
                 traceRecorder = traceRecorder,
                 burstCoordinator = coordinator,
-                afterMessagesFetcher = ChatterService.defaultAfterMessagesFetcher,
                 personaStateProvider = drift,
-                guildEmojisProvider = ChatterService.defaultGuildEmojisProvider,
                 emojiCatalog = catalog,
                 emojiCadenceTracker = cadenceTracker,
             )

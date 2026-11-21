@@ -3,7 +3,7 @@
 libs/socialpeek/src/main/kotlin/dev/socialpeek/resolver/facebook/FacebookResolver.kt=624
 libs/socialpeek/src/main/kotlin/dev/socialpeek/resolver/util/MetaMediaExtractor.kt=655
 src/main/kotlin/luna/chatter/ChatterConfig.kt=625
-src/main/kotlin/luna/chatter/ChatterService.kt=928
+src/main/kotlin/luna/chatter/ChatterService.kt=667
 src/main/kotlin/luna/chatter/memory/SqliteChatterMemoryStore.kt=945
 src/main/kotlin/luna/core/LunaWebPages.kt=1229
 src/main/kotlin/luna/core/ai/AiTraceRecorder.kt=701

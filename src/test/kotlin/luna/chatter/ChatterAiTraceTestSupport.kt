@@ -76,7 +76,6 @@ internal object ChatterAiTraceTestSupport {
                 coEvery { ch.type() } returns Unit
                 coEvery { ch.createMessage(any<String>()) } returns mockk(relaxed = true)
             },
-        channelThrows: Boolean = false,
     ): Message {
         val user =
             mockk<User>().apply {
@@ -123,12 +122,8 @@ internal object ChatterAiTraceTestSupport {
             every { this@apply.mentionedUserIds } returns mentionedUserIds
             every { this@apply.referencedMessage } returns null
             every { this@apply.messageReference } returns null
-            if (channelThrows) {
-                every { this@apply.channel } throws RuntimeException("Channel lookup failed")
-            } else {
-                every { this@apply.channel } returns channel
-                coEvery { this@apply.getChannel() } returns channel
-            }
+            every { this@apply.channel } returns channel
+            coEvery { this@apply.getChannel() } returns channel
         }
     }
 

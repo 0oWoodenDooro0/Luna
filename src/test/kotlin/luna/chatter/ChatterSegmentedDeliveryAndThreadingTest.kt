@@ -350,7 +350,7 @@ class ChatterSegmentedDeliveryAndThreadingTest {
         }
 
     @Test
-    fun `ChatterPlugin wires afterMessagesFetcher to channel getMessagesAfter`() =
+    fun `ChatterPlugin wires ChatterService with KordChatterChannelAdapter`() =
         runTest {
             val mockKord = mockk<Kord>(relaxed = true)
             val eventsFlow = MutableSharedFlow<Event>()
@@ -369,6 +369,8 @@ class ChatterSegmentedDeliveryAndThreadingTest {
             plugin.initialize(context)
 
             val service = assertNotNull(plugin.service)
+            assertEquals(KordChatterChannelAdapter, service.channelPort)
+
             val mockChannel = mockk<MessageChannel>(relaxed = true)
             val triggerMsg = fixture.createMockMessage(id = 700L, channelId = 800L)
             val after1 = fixture.createMockMessage(id = 701L, channelId = 800L, content = "after 1")
@@ -376,7 +378,7 @@ class ChatterSegmentedDeliveryAndThreadingTest {
             every { triggerMsg.channel } returns mockChannel
             every { mockChannel.getMessagesAfter(Snowflake(700L), 10) } returns flowOf(after1, after2)
 
-            val fetched = service.afterMessagesFetcher(triggerMsg, 10)
+            val fetched = service.channelPort.fetchMessagesAfter(triggerMsg, 10)
             assertEquals(listOf(after1, after2), fetched)
 
             plugin.shutdown()
