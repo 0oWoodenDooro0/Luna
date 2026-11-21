@@ -2,7 +2,6 @@ package luna.chatter
 
 import dev.kord.common.entity.MessageType
 import dev.kord.common.entity.Snowflake
-import dev.kord.core.behavior.channel.createMessage
 import dev.kord.core.entity.Embed
 import dev.kord.core.entity.Message
 import dev.kord.core.entity.User
@@ -14,6 +13,7 @@ import kotlinx.coroutines.test.runTest
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
+import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
@@ -50,7 +50,7 @@ class ChatterServiceTest {
 
             assertTrue(result, "Expected processMessage to reply to direct bot mention even during cooldown")
             coVerify(exactly = 0) { fixture.decisionClient.decide(any(), any(), any()) }
-            coVerify(exactly = 1) { fixture.channel.type() }
+            assertEquals(1, fixture.channelPort.typingCount)
             coVerify(exactly = 1) {
                 fixture.chatterGenerator.generateReply(
                     match<ChatterInput> {
@@ -59,7 +59,7 @@ class ChatterServiceTest {
                     },
                 )
             }
-            coVerify(exactly = 1) { fixture.channel.createMessage(replyText) }
+            assertEquals(listOf(replyText), fixture.channelPort.sentMessages.map { it.content })
         }
 
     @Test
@@ -202,7 +202,7 @@ class ChatterServiceTest {
 
             assertTrue(result, "Expected processMessage to return true when reply is successfully sent")
             coVerify(exactly = 1) { fixture.decisionClient.decide(match { it.contains("Alice") && it.contains("Luna updates") }, any(), any()) }
-            coVerify(exactly = 1) { fixture.channel.type() }
+            assertEquals(1, fixture.channelPort.typingCount)
             coVerify(exactly = 1) {
                 fixture.chatterGenerator.generateReply(
                     match<ChatterInput> {
@@ -210,7 +210,7 @@ class ChatterServiceTest {
                     },
                 )
             }
-            coVerify(exactly = 1) { fixture.channel.createMessage(replyText) }
+            assertEquals(listOf(replyText), fixture.channelPort.sentMessages.map { it.content })
             assertTrue(fixture.cooldownCache.isOnCooldown(channelId), "Channel cooldown must be recorded after sending reply")
         }
 
@@ -226,9 +226,12 @@ class ChatterServiceTest {
 
             assertFalse(result, "Expected processMessage to return false when decision client rejects participation")
             coVerify(exactly = 1) { fixture.decisionClient.decide(any(), any(), any()) }
-            coVerify(exactly = 0) { fixture.channel.type() }
+            assertEquals(0, fixture.channelPort.typingCount)
             coVerify(exactly = 0) { fixture.chatterGenerator.generateReply(any<ChatterInput>()) }
-            coVerify(exactly = 0) { fixture.channel.createMessage(any<String>()) }
+            assertTrue(
+                fixture.channelPort.allDeliveredTexts.isEmpty(),
+                "Expected no messages sent when decision client rejects participation",
+            )
             assertFalse(fixture.cooldownCache.isOnCooldown(channelId), "Cooldown should not be recorded when not participating")
         }
 
@@ -243,14 +246,20 @@ class ChatterServiceTest {
 
             val resultNull = fixture.service.processMessage(message)
             assertFalse(resultNull, "Expected failure when Gemini returns null")
-            coVerify(exactly = 0) { fixture.channel.createMessage(any<String>()) }
+            assertTrue(
+                fixture.channelPort.allDeliveredTexts.isEmpty(),
+                "Expected no messages sent when Gemini returns null",
+            )
             assertFalse(fixture.cooldownCache.isOnCooldown(channelId))
 
             // Test Gemini throwing exception
             coEvery { fixture.chatterGenerator.generateReply(any<ChatterInput>()) } throws RuntimeException("Network timeout")
             val resultException = fixture.service.processMessage(message)
             assertFalse(resultException, "Expected graceful failure when Gemini throws exception")
-            coVerify(exactly = 0) { fixture.channel.createMessage(any<String>()) }
+            assertTrue(
+                fixture.channelPort.allDeliveredTexts.isEmpty(),
+                "Expected no messages sent when Gemini throws exception",
+            )
             assertFalse(fixture.cooldownCache.isOnCooldown(channelId))
         }
 }

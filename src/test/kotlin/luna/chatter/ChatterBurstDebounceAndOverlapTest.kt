@@ -2,7 +2,6 @@ package luna.chatter
 
 import dev.kord.common.entity.Snowflake
 import dev.kord.core.Kord
-import dev.kord.core.behavior.channel.createMessage
 import dev.kord.core.event.Event
 import dev.kord.core.event.channel.TypingStartEvent
 import io.mockk.coEvery
@@ -46,28 +45,25 @@ class ChatterBurstDebounceAndOverlapTest {
         runTest {
             val channelId = 900L
             val timeline = mutableListOf<String>()
+            val channelPort =
+                FakeChatterChannelPort().apply {
+                    onTriggerTyping = { timeline.add("type@$currentTime") }
+                    onSendMessage = { _, content -> timeline.add("send:$content@$currentTime") }
+                }
             val service =
                 ChatterService(
                     filter = fixture.filter,
                     decisionClient = fixture.decisionClient,
                     chatterGenerator = fixture.chatterGenerator,
-                    cooldownCache = fixture.cooldownCache,
-                    historyFetcher = { _, _ -> emptyList() },
                     contextCollector = fixture.contextCollector,
+                    channelPort = channelPort,
                     randomProvider = { min, max ->
                         assertEquals(800L, min)
                         assertEquals(2_000L, max)
                         1_600L
                     },
-                    messageSender = { _, content ->
-                        timeline.add("send:$content@$currentTime")
-                        mockk(relaxed = true)
-                    },
                 )
 
-            coEvery { fixture.channel.type() } coAnswers {
-                timeline.add("type@$currentTime")
-            }
             coEvery { fixture.decisionClient.decide(any(), any(), any()) } coAnswers {
                 delay(200L)
                 timeline.add("decide@$currentTime")
@@ -99,12 +95,12 @@ class ChatterBurstDebounceAndOverlapTest {
             advanceTimeBy(600L)
             runCurrent()
             assertEquals(listOf("decide@4700", "generate@5000"), timeline)
-            coVerify(exactly = 0) { fixture.channel.type() }
+            assertEquals(0, channelPort.typingCount)
 
             // Still waiting on reading simulation (1600ms from 4500ms -> 6100ms; currently at 5100ms)
             advanceTimeBy(999L)
             runCurrent()
-            coVerify(exactly = 0) { fixture.channel.type() }
+            assertEquals(0, channelPort.typingCount)
 
             // At 6100ms, both reading and AI have finished -> channel.type() triggers
             advanceTimeBy(1L)
@@ -136,24 +132,21 @@ class ChatterBurstDebounceAndOverlapTest {
         runTest {
             val channelId = 901L
             val timeline = mutableListOf<String>()
+            val channelPort =
+                FakeChatterChannelPort().apply {
+                    onTriggerTyping = { timeline.add("type@$currentTime") }
+                    onSendMessage = { _, _ -> timeline.add("send@$currentTime") }
+                }
             val service =
                 ChatterService(
                     filter = fixture.filter,
                     decisionClient = fixture.decisionClient,
                     chatterGenerator = fixture.chatterGenerator,
-                    cooldownCache = fixture.cooldownCache,
-                    historyFetcher = { _, _ -> emptyList() },
                     contextCollector = fixture.contextCollector,
+                    channelPort = channelPort,
                     randomProvider = { _, _ -> 900L },
-                    messageSender = { _, _ ->
-                        timeline.add("send@$currentTime")
-                        mockk(relaxed = true)
-                    },
                 )
 
-            coEvery { fixture.channel.type() } coAnswers {
-                timeline.add("type@$currentTime")
-            }
             coEvery { fixture.decisionClient.decide(any(), any(), any()) } coAnswers {
                 delay(1_000L)
                 ParticipationDecision(shouldParticipate = true, noul = 0.9)
@@ -168,7 +161,7 @@ class ChatterBurstDebounceAndOverlapTest {
             // Debounce (2500ms) + max(900ms reading, 2200ms AI) = 4700ms
             advanceTimeBy(4_699L)
             runCurrent()
-            coVerify(exactly = 0) { fixture.channel.type() }
+            assertEquals(0, channelPort.typingCount)
 
             advanceTimeBy(1L)
             runCurrent()
@@ -188,14 +181,14 @@ class ChatterBurstDebounceAndOverlapTest {
     @Test
     fun `channel type is never called when decision skips or generate returns null, blank, or throws`() =
         runTest {
+            val channelPort = FakeChatterChannelPort()
             val service =
                 ChatterService(
                     filter = fixture.filter,
                     decisionClient = fixture.decisionClient,
                     chatterGenerator = fixture.chatterGenerator,
-                    cooldownCache = fixture.cooldownCache,
-                    historyFetcher = { _, _ -> emptyList() },
                     contextCollector = fixture.contextCollector,
+                    channelPort = channelPort,
                     randomProvider = { _, _ -> 2_000L },
                 )
 
@@ -216,8 +209,11 @@ class ChatterBurstDebounceAndOverlapTest {
             coEvery { fixture.chatterGenerator.generateReply(any<ChatterInput>()) } throws IllegalStateException("gen boom")
             assertFalse(service.processMessage(fixture.createMockMessage(id = 23L, channelId = 902L, content = "error gen")))
 
-            coVerify(exactly = 0) { fixture.channel.type() }
-            coVerify(exactly = 0) { fixture.channel.createMessage(any<String>()) }
+            assertEquals(0, channelPort.typingCount)
+            assertTrue(
+                channelPort.allDeliveredTexts.isEmpty(),
+                "Expected no messages delivered when decision skips or generator fails",
+            )
             assertFalse(fixture.cooldownCache.isOnCooldown(902L))
         }
 
@@ -228,9 +224,16 @@ class ChatterBurstDebounceAndOverlapTest {
         val recorder = JsonlAiTraceRecorder(traceDir = tempDir, clock = ChatterAiTraceTestSupport.fixedClock)
         val channelId = 903L
         val coordinator = BoundedChannelBurstCoordinator(maxInterrupts = 1)
-        val sentReplies = mutableListOf<String>()
         val enteredTyping1 = CompletableDeferred<Unit>()
         val enteredReading2 = CompletableDeferred<Unit>()
+        val channelPort =
+            FakeChatterChannelPort().apply {
+                onTriggerTyping = {
+                    if (!enteredTyping1.isCompleted) {
+                        enteredTyping1.complete(Unit)
+                    }
+                }
+            }
 
         val mockKord = mockk<Kord>(relaxed = true)
         val eventsFlow = MutableSharedFlow<Event>(extraBufferCapacity = 16)
@@ -242,16 +245,11 @@ class ChatterBurstDebounceAndOverlapTest {
                 filter = fixture.filter,
                 decisionClient = fixture.decisionClient,
                 chatterGenerator = fixture.chatterGenerator,
-                cooldownCache = fixture.cooldownCache,
-                historyFetcher = { _, _ -> emptyList() },
                 contextCollector = fixture.contextCollector,
+                channelPort = channelPort,
                 traceRecorder = recorder,
                 burstCoordinator = coordinator,
                 randomProvider = { _, _ -> 1_000L },
-                messageSender = { _, content ->
-                    sentReplies.add(content)
-                    mockk(relaxed = true)
-                },
             )
 
         val regJob = service.register(mockKord, scope = this)
@@ -270,11 +268,6 @@ class ChatterBurstDebounceAndOverlapTest {
                 "reply-1-long-enough-to-type"
             } else {
                 "reply-2-wins-cap"
-            }
-        }
-        coEvery { fixture.channel.type() } coAnswers {
-            if (!enteredTyping1.isCompleted) {
-                enteredTyping1.complete(Unit)
             }
         }
 
@@ -301,7 +294,7 @@ class ChatterBurstDebounceAndOverlapTest {
         assertFalse(run1.await())
         assertTrue(run2.await())
         assertFalse(run3.await(), "Queued msg-3 should skip after msg-2 records cooldown")
-        assertEquals(listOf("reply-2-wins-cap"), sentReplies)
+        assertEquals(listOf("reply-2-wins-cap"), channelPort.allDeliveredTexts)
 
         val traces = ChatterAiTraceTestSupport.readTraceLines(tempDir)
         assertEquals(2, traces.size, "msg-3 skipped at cooldown precheck should emit no trace")
@@ -323,21 +316,16 @@ class ChatterBurstDebounceAndOverlapTest {
             // 1. Cooldown channel: ambient message rejected before debounce opens
             fixture.cooldownCache.record(cooldownChannel, fixture.simulatedTime)
             val coordinator = BoundedChannelBurstCoordinator()
-            val sentReplies = mutableListOf<String>()
+            val channelPort = FakeChatterChannelPort()
             val service =
                 ChatterService(
                     filter = fixture.filter,
                     decisionClient = fixture.decisionClient,
                     chatterGenerator = fixture.chatterGenerator,
-                    cooldownCache = fixture.cooldownCache,
-                    historyFetcher = { _, _ -> emptyList() },
                     contextCollector = fixture.contextCollector,
+                    channelPort = channelPort,
                     burstCoordinator = coordinator,
                     randomProvider = { _, _ -> 800L },
-                    messageSender = { _, content ->
-                        sentReplies.add(content)
-                        mockk(relaxed = true)
-                    },
                 )
 
             assertFalse(
@@ -396,7 +384,7 @@ class ChatterBurstDebounceAndOverlapTest {
 
             assertFalse(r1.await())
             assertTrue(r3.await())
-            assertEquals(listOf("hi alice"), sentReplies)
+            assertEquals(listOf("hi alice"), channelPort.allDeliveredTexts)
             coVerify(exactly = 0) { fixture.decisionClient.decide(any(), any(), any()) }
             coVerify(exactly = 1) {
                 fixture.chatterGenerator.generateReply(

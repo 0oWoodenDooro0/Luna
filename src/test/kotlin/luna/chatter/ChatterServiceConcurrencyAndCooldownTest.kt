@@ -67,14 +67,17 @@ class ChatterServiceConcurrencyAndCooldownTest {
                     noiseFilter = fixture.filter,
                     peekResolver = { peekPost },
                 )
+            val channelPort =
+                FakeChatterChannelPort().apply {
+                    historyMessages = listOf(prior1)
+                }
             val pipelineService =
                 ChatterService(
                     filter = fixture.filter,
                     decisionClient = fixture.decisionClient,
                     chatterGenerator = fixture.chatterGenerator,
-                    cooldownCache = fixture.cooldownCache,
-                    historyFetcher = { _, _ -> listOf(prior1) },
                     contextCollector = realCollector,
+                    channelPort = channelPort,
                 )
 
             coEvery { fixture.decisionClient.decide(any(), any(), any()) } returns ParticipationDecision(shouldParticipate = true, noul = 0.9)
@@ -123,9 +126,9 @@ class ChatterServiceConcurrencyAndCooldownTest {
         runTest {
             val channelId = 700L
             val otherChannelId = 701L
-            val historyCalls = AtomicInteger(0)
             val traceSessionStarts = AtomicInteger(0)
             val coordinator = BoundedChannelBurstCoordinator()
+            val channelPort = FakeChatterChannelPort()
 
             val countingTraceRecorder =
                 object : AiTraceRecorder {
@@ -150,12 +153,8 @@ class ChatterServiceConcurrencyAndCooldownTest {
                     filter = fixture.filter,
                     decisionClient = fixture.decisionClient,
                     chatterGenerator = fixture.chatterGenerator,
-                    cooldownCache = fixture.cooldownCache,
-                    historyFetcher = { _, _ ->
-                        historyCalls.incrementAndGet()
-                        emptyList()
-                    },
                     contextCollector = fixture.contextCollector,
+                    channelPort = channelPort,
                     traceRecorder = countingTraceRecorder,
                     burstCoordinator = coordinator,
                 )
@@ -176,7 +175,7 @@ class ChatterServiceConcurrencyAndCooldownTest {
             assertTrue(otherChannelRun.await())
 
             // Coalesced channel 700L invoked history/trace/decision once for the winning burst message + 1 for channel 701L
-            assertEquals(2, historyCalls.get())
+            assertEquals(2, channelPort.fetchBeforeRequests.size)
             assertEquals(2, traceSessionStarts.get())
             coVerify(exactly = 2) { fixture.decisionClient.decide(any(), any(), any()) }
             assertFalse(coordinator.isActive(channelId))
@@ -191,19 +190,15 @@ class ChatterServiceConcurrencyAndCooldownTest {
             val channelId = 702L
             val coordinator = BoundedChannelBurstCoordinator()
             val ambientEnteredDecision = CompletableDeferred<Unit>()
-            val historyCalls = AtomicInteger(0)
+            val channelPort = FakeChatterChannelPort()
 
             val guardedService =
                 ChatterService(
                     filter = fixture.filter,
                     decisionClient = fixture.decisionClient,
                     chatterGenerator = fixture.chatterGenerator,
-                    cooldownCache = fixture.cooldownCache,
-                    historyFetcher = { _, _ ->
-                        historyCalls.incrementAndGet()
-                        emptyList()
-                    },
                     contextCollector = fixture.contextCollector,
+                    channelPort = channelPort,
                     burstCoordinator = coordinator,
                 )
 
@@ -241,9 +236,12 @@ class ChatterServiceConcurrencyAndCooldownTest {
             assertEquals(0, coordinator.size)
 
             // Subsequent ambient message proceeds normally after exception cleanup
-            val historyBefore = historyCalls.get()
-            assertFalse(guardedService.processMessage(ambientAfterCleanup))
-            assertEquals(historyBefore + 1, historyCalls.get())
+            val historyBefore = channelPort.fetchBeforeRequests.size
+            assertFalse(
+                guardedService.processMessage(ambientAfterCleanup),
+                "Expected ambientAfterCleanup to be skipped by decision client",
+            )
+            assertEquals(historyBefore + 1, channelPort.fetchBeforeRequests.size)
             assertFalse(coordinator.isActive(channelId))
             assertEquals(0, coordinator.size)
 
@@ -267,9 +265,8 @@ class ChatterServiceConcurrencyAndCooldownTest {
                     filter = fixture.filter,
                     decisionClient = fixture.decisionClient,
                     chatterGenerator = fixture.chatterGenerator,
-                    cooldownCache = fixture.cooldownCache,
-                    historyFetcher = { _, _ -> emptyList() },
                     contextCollector = fixture.contextCollector,
+                    channelPort = FakeChatterChannelPort(),
                     traceRecorder = throwingTraceRecorder,
                     burstCoordinator = coordinator,
                 )
