@@ -2,6 +2,7 @@ package luna.chatter
 
 import dev.kord.common.entity.Snowflake
 import dev.kord.core.behavior.channel.createMessage
+import dev.kord.core.entity.ApplicationEmoji
 import dev.kord.core.entity.Guild
 import dev.kord.core.entity.GuildEmoji
 import dev.kord.core.entity.Message
@@ -13,6 +14,7 @@ import io.mockk.coVerify
 import io.mockk.every
 import io.mockk.mockk
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.runTest
 import org.junit.jupiter.api.Assertions.assertEquals
@@ -28,6 +30,7 @@ abstract class ChatterChannelPortContractTest {
         beforeMessagesNewestFirst: List<Message> = emptyList(),
         afterMessages: List<Message> = emptyList(),
         guildEmojis: List<GuildEmoji>? = emptyList(),
+        applicationEmojis: List<ApplicationEmoji> = emptyList(),
         beforeError: Throwable? = null,
         afterError: Throwable? = null,
         typingError: Throwable? = null,
@@ -35,6 +38,7 @@ abstract class ChatterChannelPortContractTest {
         replyError: Throwable? = null,
         reactionError: Throwable? = null,
         guildEmojisError: Throwable? = null,
+        applicationEmojisError: Throwable? = null,
     ): PortScenario
 
     protected data class PortScenario(
@@ -63,6 +67,19 @@ abstract class ChatterChannelPortContractTest {
         isAvailable: Boolean,
         isAnimated: Boolean = false,
     ): GuildEmoji =
+        mockk {
+            every { this@mockk.id } returns Snowflake(id)
+            every { this@mockk.name } returns name
+            every { this@mockk.isAvailable } returns isAvailable
+            every { this@mockk.isAnimated } returns isAnimated
+        }
+
+    protected fun mockApplicationEmoji(
+        id: Long,
+        name: String?,
+        isAvailable: Boolean,
+        isAnimated: Boolean = false,
+    ): ApplicationEmoji =
         mockk {
             every { this@mockk.id } returns Snowflake(id)
             every { this@mockk.name } returns name
@@ -180,7 +197,32 @@ abstract class ChatterChannelPortContractTest {
         }
 
     @Test
-    fun `all seven operations propagate runtime exceptions and CancellationException unchanged`() =
+    fun `listApplicationEmojis filters unavailable or blank emojis and preserves animation flag`() =
+        runTest {
+            val validStatic = mockApplicationEmoji(11L, "luna_smug", isAvailable = true, isAnimated = false)
+            val validAnimated = mockApplicationEmoji(12L, "luna_spin", isAvailable = true, isAnimated = true)
+            val unavailable = mockApplicationEmoji(13L, "broken_app", isAvailable = false, isAnimated = false)
+            val blank = mockApplicationEmoji(14L, "   ", isAvailable = true, isAnimated = false)
+            val nullName = mockApplicationEmoji(15L, null, isAvailable = true, isAnimated = false)
+
+            val scenario =
+                createScenario(
+                    applicationEmojis = listOf(validStatic, validAnimated, unavailable, blank, nullName),
+                )
+
+            val result = scenario.port.listApplicationEmojis(scenario.anchor)
+
+            assertEquals(
+                listOf(
+                    GuildCustomEmoji(id = Snowflake(11L), name = "luna_smug", isAnimated = false),
+                    GuildCustomEmoji(id = Snowflake(12L), name = "luna_spin", isAnimated = true),
+                ),
+                result,
+            )
+        }
+
+    @Test
+    fun `all eight operations propagate runtime exceptions and CancellationException unchanged`() =
         runTest {
             val beforeErr = IllegalStateException("before boom")
             val afterErr = IllegalStateException("after boom")
@@ -189,6 +231,7 @@ abstract class ChatterChannelPortContractTest {
             val replyErr = IllegalStateException("reply boom")
             val reactionErr = IllegalStateException("reaction boom")
             val emojiErr = IllegalStateException("emoji boom")
+            val appEmojiErr = IllegalStateException("app emoji boom")
 
             assertSame(
                 beforeErr,
@@ -234,10 +277,19 @@ abstract class ChatterChannelPortContractTest {
                     createScenario(guildEmojisError = emojiErr).let { it.port.listGuildCustomEmojis(it.anchor) }
                 },
             )
+            assertSame(
+                appEmojiErr,
+                assertThrows<IllegalStateException> {
+                    createScenario(applicationEmojisError = appEmojiErr).let { it.port.listApplicationEmojis(it.anchor) }
+                },
+            )
 
             val cancelErr = CancellationException("cancel boom")
             assertThrows<CancellationException> {
                 createScenario(sendError = cancelErr).let { it.port.sendMessage(it.anchor, "x") }
+            }
+            assertThrows<CancellationException> {
+                createScenario(applicationEmojisError = cancelErr).let { it.port.listApplicationEmojis(it.anchor) }
             }
         }
 }
@@ -249,6 +301,7 @@ class KordChatterChannelAdapterContractTest : ChatterChannelPortContractTest() {
         beforeMessagesNewestFirst: List<Message>,
         afterMessages: List<Message>,
         guildEmojis: List<GuildEmoji>?,
+        applicationEmojis: List<ApplicationEmoji>,
         beforeError: Throwable?,
         afterError: Throwable?,
         typingError: Throwable?,
@@ -256,6 +309,7 @@ class KordChatterChannelAdapterContractTest : ChatterChannelPortContractTest() {
         replyError: Throwable?,
         reactionError: Throwable?,
         guildEmojisError: Throwable?,
+        applicationEmojisError: Throwable?,
     ): PortScenario {
         val channel = mockk<MessageChannel>(relaxed = true)
         val anchor = mockk<Message>(relaxed = true)
@@ -328,6 +382,12 @@ class KordChatterChannelAdapterContractTest : ChatterChannelPortContractTest() {
             coEvery { anchor.getGuildOrNull() } returns guild
         }
 
+        if (applicationEmojisError != null) {
+            every { anchor.kord.emojis } returns flow { throw applicationEmojisError }
+        } else {
+            every { anchor.kord.emojis } returns flowOf(*applicationEmojis.toTypedArray())
+        }
+
         return PortScenario(
             port = KordChatterChannelAdapter,
             anchor = anchor,
@@ -354,6 +414,7 @@ class FakeChatterChannelPortContractTest : ChatterChannelPortContractTest() {
         beforeMessagesNewestFirst: List<Message>,
         afterMessages: List<Message>,
         guildEmojis: List<GuildEmoji>?,
+        applicationEmojis: List<ApplicationEmoji>,
         beforeError: Throwable?,
         afterError: Throwable?,
         typingError: Throwable?,
@@ -361,12 +422,22 @@ class FakeChatterChannelPortContractTest : ChatterChannelPortContractTest() {
         replyError: Throwable?,
         reactionError: Throwable?,
         guildEmojisError: Throwable?,
+        applicationEmojisError: Throwable?,
     ): PortScenario {
         val fake =
             FakeChatterChannelPort().apply {
                 this.historyMessages = beforeMessagesNewestFirst.reversed()
                 this.afterMessages = afterMessages
                 this.guildEmojis = guildEmojis.orEmpty()
+                this.applicationEmojis =
+                    applicationEmojis.mapNotNull { emoji ->
+                        val emojiName = emoji.name?.takeIf { it.isNotBlank() }
+                        if (emoji.isAvailable && emojiName != null) {
+                            GuildCustomEmoji(id = emoji.id, name = emojiName, isAnimated = emoji.isAnimated)
+                        } else {
+                            null
+                        }
+                    }
                 this.historyError = beforeError
                 this.afterMessagesError = afterError
                 this.typingError = typingError
@@ -374,6 +445,7 @@ class FakeChatterChannelPortContractTest : ChatterChannelPortContractTest() {
                 this.replyError = replyError
                 this.reactionError = reactionError
                 this.guildEmojisError = guildEmojisError
+                this.applicationEmojisError = applicationEmojisError
             }
         val anchor = mockMessage(anchorId.value.toLong(), channelId = channelId.value.toLong())
 

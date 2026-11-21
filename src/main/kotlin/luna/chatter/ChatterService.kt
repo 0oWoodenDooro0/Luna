@@ -2,7 +2,6 @@ package luna.chatter
 
 import dev.kord.common.entity.Snowflake
 import dev.kord.core.Kord
-import dev.kord.core.entity.GuildEmoji
 import dev.kord.core.entity.Message
 import dev.kord.core.event.guild.EmojisUpdateEvent
 import dev.kord.core.event.message.MessageCreateEvent
@@ -16,11 +15,14 @@ import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.launch
+import luna.chatter.emoji.ApplicationEmojiCache
 import luna.chatter.emoji.BoundedChannelEmojiCadenceTracker
 import luna.chatter.emoji.ChatterEmojiCatalog
 import luna.chatter.emoji.EmojiVisionTurnBudget
 import luna.chatter.emoji.NoOpChatterEmojiCatalog
 import luna.chatter.emoji.PreparedPromptEmojis
+import luna.chatter.emoji.preScanStartup
+import luna.chatter.emoji.resolveForMessage
 import luna.core.ai.AiTraceDiscordContext
 import luna.core.ai.AiTraceFailureCategory
 import luna.core.ai.AiTraceOutcome
@@ -59,8 +61,12 @@ class ChatterService(
     val randomProvider: (minInclusive: Long, maxInclusive: Long) -> Long = { min, max ->
         Random.nextLong(min, max + 1)
     },
+    val applicationEmojiCache: ApplicationEmojiCache = ApplicationEmojiCache(),
 ) {
     private val logger = LoggerFactory.getLogger(ChatterService::class.java)
+
+    @Volatile
+    private var backgroundScope: CoroutineScope? = null
     private val deliveryEngine =
         ChatterDeliveryEngine(
             channelPort = channelPort,
@@ -84,20 +90,17 @@ class ChatterService(
     ): Job {
         val parentJob = Job(scope.coroutineContext[Job])
         val listenerScope = CoroutineScope(scope.coroutineContext + parentJob)
-        kord.on<MessageCreateEvent>(scope = listenerScope) {
-            onMessageCreate(this)
-        }
-        kord.on<ReactionAddEvent>(scope = listenerScope) {
-            onReactionAdd(this)
-        }
-        kord.on<EmojisUpdateEvent>(scope = listenerScope) {
-            onEmojisUpdate(this)
-        }
-        listenerScope.launch {
-            preScanStartupGuilds(kord)
-        }
+        backgroundScope = listenerScope
+        parentJob.invokeOnCompletion { if (backgroundScope === listenerScope) backgroundScope = null }
+        kord.on<MessageCreateEvent>(scope = listenerScope) { onMessageCreate(this) }
+        kord.on<ReactionAddEvent>(scope = listenerScope) { onReactionAdd(this) }
+        kord.on<EmojisUpdateEvent>(scope = listenerScope) { onEmojisUpdate(this) }
+        listenerScope.launch { preScanStartupGuilds(kord) }
+        listenerScope.launch { preScanStartupApplicationEmojis(kord) }
         return parentJob
     }
+
+    internal suspend fun preScanStartupApplicationEmojis(kord: Kord) = applicationEmojiCache.preScanStartup(kord, emojiCatalog)
 
     /**
      * Pre-scans custom emojis across all joined guilds on startup without blocking gateway dispatch.
@@ -513,6 +516,12 @@ class ChatterService(
         return guildEmojis
     }
 
+    internal suspend fun resolveApplicationEmojis(
+        message: Message,
+        fallbackDescription: String = "continuing without Application Emojis",
+        preScanScope: CoroutineScope? = backgroundScope,
+    ): List<GuildCustomEmoji> = applicationEmojiCache.resolveForMessage(message, channelPort, emojiCatalog, preScanScope, fallbackDescription)
+
     private suspend fun prepareGuildPromptEmojis(
         message: Message,
         guildId: Snowflake?,
@@ -647,21 +656,5 @@ class ChatterService(
             effectiveThreshold,
         )
         return true
-    }
-
-    companion object {
-        internal fun Iterable<GuildEmoji>.toAvailableGuildCustomEmojis(): List<GuildCustomEmoji> =
-            mapNotNull { emoji ->
-                val emojiName = emoji.name?.takeIf { it.isNotBlank() }
-                if (emoji.isAvailable && emojiName != null) {
-                    GuildCustomEmoji(
-                        id = emoji.id,
-                        name = emojiName,
-                        isAnimated = emoji.isAnimated,
-                    )
-                } else {
-                    null
-                }
-            }
     }
 }
