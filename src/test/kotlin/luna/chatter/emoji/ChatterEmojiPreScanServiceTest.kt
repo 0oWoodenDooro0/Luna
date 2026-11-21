@@ -41,6 +41,7 @@ import luna.chatter.ChatterDecisionConfig
 import luna.chatter.ChatterGenerator
 import luna.chatter.ChatterNoiseFilter
 import luna.chatter.ChatterService
+import luna.chatter.FakeChatterChannelPort
 import luna.chatter.GeminiDecisionClient
 import luna.chatter.PersonaState
 import luna.chatter.PersonaStateProvider
@@ -151,10 +152,10 @@ class ChatterEmojiPreScanServiceTest {
             filter = filter,
             decisionClient = decisionClient,
             chatterGenerator = generator,
+            channelPort = FakeChatterChannelPort(),
             contextCollector = ChatterContextCollector(noiseFilter = filter),
             burstCoordinator = BoundedChannelBurstCoordinator(),
             randomProvider = { _, _ -> 0L },
-            afterMessagesFetcher = { _, _ -> emptyList() },
             personaStateProvider = fixedPersonaProvider(),
             emojiCatalog = catalog,
         )

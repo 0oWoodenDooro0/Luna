@@ -5,7 +5,6 @@ import ch.qos.logback.classic.Logger
 import ch.qos.logback.classic.spi.ILoggingEvent
 import ch.qos.logback.core.read.ListAppender
 import dev.kord.common.entity.Snowflake
-import dev.kord.core.entity.Guild
 import dev.kord.core.entity.GuildEmoji
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.mock.MockEngine
@@ -16,10 +15,8 @@ import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.headersOf
 import io.ktor.serialization.kotlinx.json.json
-import io.mockk.coEvery
 import io.mockk.every
 import io.mockk.mockk
-import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonArray
@@ -120,37 +117,27 @@ class ChatterGuildEmojiPolicyServiceTest {
                             every { isAnimated } returns (idx % 2 == 0)
                         }
                     }
-            val mockGuild =
-                mockk<Guild>(relaxed = true).apply {
-                    every { emojis } returns flowOf(*guildEmojiMocks.toTypedArray())
-                }
-
             val message = ChatterAiTraceTestSupport.createMockMessage(id = 201L, channelId = 301L, content = "大家覺得這波穩嗎")
-            coEvery { message.getGuildOrNull() } returns mockGuild
-
-            val sentMessages = mutableListOf<String>()
+            val channelPort =
+                FakeChatterChannelPort().apply {
+                    guildEmojis = guildEmojiMocks
+                }
             val service =
                 ChatterService(
                     filter = filter,
                     decisionClient = decisionClient,
                     chatterGenerator = chatterGenerator,
-                    cooldownCache = cooldownCache,
-                    historyFetcher = { _, _ -> emptyList() },
-                    messageSender = { _, content ->
-                        sentMessages += content
-                        mockk(relaxed = true)
-                    },
+                    channelPort = channelPort,
                     contextCollector = ChatterContextCollector(noiseFilter = filter, peekResolver = { null }),
                     burstCoordinator = BoundedChannelBurstCoordinator(debounceMs = 1L),
                     randomProvider = { _, _ -> 0L },
-                    afterMessagesFetcher = { _, _ -> emptyList() },
                     personaStateProvider = fixedPersonaProvider(),
                 )
 
-            val handled = service.handleMessage(message)
+            val handled = service.processMessage(message)
 
-            assertTrue(handled)
-            assertEquals(listOf("這波穩了  <:emoji_1:1001> <a:emoji_2:1002>"), sentMessages)
+            assertTrue(handled, "Guild emoji policy message should be handled")
+            assertEquals(listOf("這波穩了  <:emoji_1:1001> <a:emoji_2:1002>"), channelPort.allDeliveredTexts)
 
             val promptText =
                 json
@@ -215,33 +202,28 @@ class ChatterGuildEmojiPolicyServiceTest {
                         httpClient = createClient(mockEngine),
                     )
 
-                // 1. DM / empty guild fallback (getGuildOrNull returns null)
-                val dmMessage = ChatterAiTraceTestSupport.createMockMessage(id = 202L, channelId = 302L, content = "私訊問一下")
-                coEvery { dmMessage.getGuildOrNull() } returns null
-
-                val dmSent = mutableListOf<String>()
+                // 1. DM / empty guild fallback (listGuildCustomEmojis returns empty list)
+                val dmMessage = ChatterAiTraceTestSupport.createMockMessage(id = 202L, channelId = 302L, guildId = null, content = "私訊問一下")
+                val dmChannelPort = FakeChatterChannelPort()
                 val dmService =
                     ChatterService(
                         filter = filter,
                         decisionClient = decisionClient,
                         chatterGenerator = chatterGenerator,
-                        cooldownCache = cooldownCache,
-                        historyFetcher = { _, _ -> emptyList() },
-                        messageSender = { _, content ->
-                            dmSent += content
-                            mockk(relaxed = true)
-                        },
+                        channelPort = dmChannelPort,
                         contextCollector = ChatterContextCollector(noiseFilter = filter, peekResolver = { null }),
                         burstCoordinator = BoundedChannelBurstCoordinator(debounceMs = 1L),
                         randomProvider = { _, _ -> 0L },
-                        afterMessagesFetcher = { _, _ -> emptyList() },
                         personaStateProvider = fixedPersonaProvider(),
                     )
-                assertTrue(dmService.handleMessage(dmMessage))
-                assertEquals(listOf("收到"), dmSent)
-                assertFalse(capturedInteractionBodies[0].contains("可用的伺服器自訂表情"))
+                assertTrue(dmService.processMessage(dmMessage), "DM message should be handled")
+                assertEquals(listOf("收到"), dmChannelPort.allDeliveredTexts)
+                assertFalse(
+                    capturedInteractionBodies[0].contains("可用的伺服器自訂表情"),
+                    "DM prompt must not include guild custom emojis section",
+                )
 
-                // 2. Direct mention when guildEmojisProvider throws exception -> WARN log + safe fallback
+                // 2. Direct mention when listGuildCustomEmojis throws exception -> WARN log + safe fallback
                 val botSelfId = Snowflake(9999L)
                 val mentionMessage =
                     ChatterAiTraceTestSupport.createMockMessage(
@@ -250,28 +232,27 @@ class ChatterGuildEmojiPolicyServiceTest {
                         content = "<@9999> 嗨嗨",
                         mentionedUserIds = setOf(botSelfId),
                     )
-                val failSent = mutableListOf<String>()
+                val failChannelPort =
+                    FakeChatterChannelPort().apply {
+                        guildEmojisError = IllegalStateException("Guild emoji cache miss")
+                    }
                 val failService =
                     ChatterService(
                         filter = filter,
                         decisionClient = decisionClient,
                         chatterGenerator = chatterGenerator,
-                        cooldownCache = cooldownCache,
-                        historyFetcher = { _, _ -> emptyList() },
-                        messageSender = { _, content ->
-                            failSent += content
-                            mockk(relaxed = true)
-                        },
+                        channelPort = failChannelPort,
                         contextCollector = ChatterContextCollector(noiseFilter = filter, peekResolver = { null }),
                         burstCoordinator = BoundedChannelBurstCoordinator(debounceMs = 1L),
                         randomProvider = { _, _ -> 0L },
-                        afterMessagesFetcher = { _, _ -> emptyList() },
                         personaStateProvider = fixedPersonaProvider(),
-                        guildEmojisProvider = { throw IllegalStateException("Guild emoji cache miss") },
                     )
-                assertTrue(failService.handleMessage(mentionMessage))
-                assertEquals(listOf("收到"), failSent)
-                assertFalse(capturedInteractionBodies[1].contains("可用的伺服器自訂表情"))
+                assertTrue(failService.processMessage(mentionMessage), "Failed guild emoji lookup must still deliver reply")
+                assertEquals(listOf("收到"), failChannelPort.allDeliveredTexts)
+                assertFalse(
+                    capturedInteractionBodies[1].contains("可用的伺服器自訂表情"),
+                    "Failed guild emoji lookup must omit guild custom emojis section",
+                )
 
                 val debugLogs = appender.list.filter { it.level == Level.DEBUG }.map { it.formattedMessage }
                 val warnLogs = appender.list.filter { it.level == Level.WARN }.map { it.formattedMessage }

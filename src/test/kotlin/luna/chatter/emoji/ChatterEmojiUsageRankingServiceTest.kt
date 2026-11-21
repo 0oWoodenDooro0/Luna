@@ -41,6 +41,7 @@ import luna.chatter.ChatterGenerator
 import luna.chatter.ChatterNoiseFilter
 import luna.chatter.ChatterPlugin
 import luna.chatter.ChatterService
+import luna.chatter.FakeChatterChannelPort
 import luna.chatter.GeminiDecisionClient
 import luna.chatter.GuildCustomEmoji
 import luna.chatter.PersonaState
@@ -226,20 +227,9 @@ class ChatterEmojiUsageRankingServiceTest {
                         every { isAnimated } returns false
                     }
                 }
-            val guildMock =
-                mockk<Guild>(relaxed = true).apply {
-                    every { id } returns guildId
-                    every { emojis } returns flowOf(*guildEmojiMocks.toTypedArray())
-                }
             val kordMock =
                 mockk<Kord>(relaxed = true).apply {
                     every { this@apply.selfId } returns selfId
-                }
-            val authorMock =
-                mockk<User>(relaxed = true).apply {
-                    every { id } returns Snowflake(101L)
-                    every { isBot } returns false
-                    every { username } returns "Alice"
                 }
 
             fun buildGuildMessage(
@@ -253,11 +243,12 @@ class ChatterEmojiUsageRankingServiceTest {
                         content = content,
                     ).apply {
                         every { data.guildId } returns OptionalSnowflake.Value(guildId)
-                        coEvery { getGuildOrNull() } returns guildMock
                     }
 
-            val deliveredReplies = mutableListOf<String>()
-            val deliveredReactions = mutableListOf<ReactionEmoji>()
+            val channelPort =
+                FakeChatterChannelPort().apply {
+                    guildEmojis = guildEmojiMocks
+                }
 
             val service =
                 ChatterService(
@@ -272,19 +263,10 @@ class ChatterEmojiUsageRankingServiceTest {
                             config = ChatterConfig(apiKey = "secret-key", reactionThreshold = 0.40, emojiVisionModel = null),
                             httpClient = createClient(mockEngine),
                         ),
-                    cooldownCache = cooldownCache,
-                    historyFetcher = { _, _ -> emptyList() },
-                    afterMessagesFetcher = { _, _ -> emptyList() },
+                    channelPort = channelPort,
                     contextCollector = ChatterContextCollector(noiseFilter = filter, peekResolver = { null }),
                     burstCoordinator = BoundedChannelBurstCoordinator(debounceMs = 1L),
                     randomProvider = { _, _ -> 0L },
-                    messageSender = { _, content ->
-                        deliveredReplies += content
-                        mockk(relaxed = true)
-                    },
-                    reactionSender = { _, emoji ->
-                        deliveredReactions += emoji
-                    },
                     personaStateProvider = fixedPersonaProvider(),
                     emojiCatalog = catalog,
                 )
@@ -305,7 +287,7 @@ class ChatterEmojiUsageRankingServiceTest {
             val replyPrompt = extractInteractionUserPrompt(capturedInteractionBodies.last())
             assertContains(replyPrompt, "<:z_hot_55:5055>")
             assertFalse(replyPrompt.contains("<:a_emoji_54:5054>"), "Expected 54th emoji to be outside top-50 pool")
-            assertEquals(listOf("哈哈 <:z_hot_55:5055>"), deliveredReplies)
+            assertEquals(listOf("哈哈 <:z_hot_55:5055>"), channelPort.allDeliveredTexts)
 
             // 3. Silent reaction turn: top-50 pool must also rank z_hot_55 ahead of unused emojis
             cooldownCache.clear()
@@ -315,7 +297,7 @@ class ChatterEmojiUsageRankingServiceTest {
             val reactionBody = capturedInteractionBodies.last()
             assertContains(reactionBody, "<:z_hot_55:5055>")
             assertFalse(reactionBody.contains("<:a_emoji_54:5054>"), "Expected 54th emoji to be outside reaction top-50 pool")
-            assertEquals(1, deliveredReactions.size)
+            assertEquals(1, channelPort.addedReactions.size)
         }
 
     @Test
@@ -371,11 +353,6 @@ class ChatterEmojiUsageRankingServiceTest {
                         every { isAvailable } returns true
                         every { isAnimated } returns false
                     }
-                val guildMock =
-                    mockk<Guild>(relaxed = true).apply {
-                        every { id } returns guildId
-                        every { emojis } returns flowOf(guildEmoji)
-                    }
                 val msg =
                     ChatterAiTraceTestSupport
                         .createMockMessage(
@@ -384,10 +361,12 @@ class ChatterEmojiUsageRankingServiceTest {
                             content = "測試 <:ok_emoji:3001>",
                         ).apply {
                             every { data.guildId } returns OptionalSnowflake.Value(guildId)
-                            coEvery { getGuildOrNull() } returns guildMock
                         }
 
-                val sentReplies = mutableListOf<String>()
+                val channelPort =
+                    FakeChatterChannelPort().apply {
+                        guildEmojis = listOf(guildEmoji)
+                    }
                 val service =
                     ChatterService(
                         filter = filter,
@@ -401,22 +380,16 @@ class ChatterEmojiUsageRankingServiceTest {
                                 config = ChatterConfig(apiKey = "secret-key", emojiVisionModel = null),
                                 httpClient = createClient(mockEngine),
                             ),
-                        cooldownCache = cooldownCache,
-                        historyFetcher = { _, _ -> emptyList() },
-                        afterMessagesFetcher = { _, _ -> emptyList() },
+                        channelPort = channelPort,
                         contextCollector = ChatterContextCollector(noiseFilter = filter, peekResolver = { null }),
                         burstCoordinator = BoundedChannelBurstCoordinator(debounceMs = 1L),
                         randomProvider = { _, _ -> 0L },
-                        messageSender = { _, content ->
-                            sentReplies += content
-                            mockk(relaxed = true)
-                        },
                         personaStateProvider = fixedPersonaProvider(),
                         emojiCatalog = catalog,
                     )
 
                 assertTrue(service.processMessage(msg), "Reply pipeline must succeed even when usage storage throws")
-                assertEquals(listOf("沒問題 <:ok_emoji:3001>"), sentReplies)
+                assertEquals(listOf("沒問題 <:ok_emoji:3001>"), channelPort.allDeliveredTexts)
 
                 val warnings = appender.list.filter { it.level == Level.WARN }.map { it.formattedMessage }
                 assertTrue(

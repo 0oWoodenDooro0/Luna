@@ -35,6 +35,7 @@ import luna.chatter.ChatterGenerator
 import luna.chatter.ChatterNoiseFilter
 import luna.chatter.ChatterPlugin
 import luna.chatter.ChatterService
+import luna.chatter.FakeChatterChannelPort
 import luna.chatter.GeminiDecisionClient
 import luna.chatter.PersonaState
 import luna.chatter.PersonaStateProvider
@@ -179,46 +180,36 @@ class ChatterEmojiMeaningServiceTest {
                     every { isAvailable } returns true
                     every { isAnimated } returns false
                 }
-            val mockGuild =
-                mockk<Guild>(relaxed = true).apply {
-                    every { id } returns Snowflake(777L)
-                    every { emojis } returns flowOf(guildEmojiCached, guildEmojiUncached)
-                }
-
             val message =
                 ChatterAiTraceTestSupport.createMockMessage(
                     id = 201L,
                     channelId = 301L,
                     content = "終於過關 <:guild_happy:1001> <:guild_happy:1001> <a:nitro_hype:9001> <:uncached_ext:5001>",
                 )
-            coEvery { message.getGuildOrNull() } returns mockGuild
 
-            val sentMessages = mutableListOf<String>()
+            val channelPort =
+                FakeChatterChannelPort().apply {
+                    guildEmojis = listOf(guildEmojiCached, guildEmojiUncached)
+                }
             val service =
                 ChatterService(
                     filter = filter,
                     decisionClient = decisionClient,
                     chatterGenerator = chatterGenerator,
-                    cooldownCache = cooldownCache,
-                    historyFetcher = { _, _ -> emptyList() },
-                    messageSender = { _, content ->
-                        sentMessages += content
-                        mockk(relaxed = true)
-                    },
+                    channelPort = channelPort,
                     contextCollector = ChatterContextCollector(noiseFilter = filter, peekResolver = { null }),
                     burstCoordinator = BoundedChannelBurstCoordinator(debounceMs = 1L),
                     randomProvider = { _, _ -> 0L },
-                    afterMessagesFetcher = { _, _ -> emptyList() },
                     personaStateProvider = fixedPersonaProvider(),
                     emojiCatalog = DefaultChatterEmojiCatalog(meaningRepository = repo),
                 )
 
-            val handled = service.handleMessage(message)
+            val handled = service.processMessage(message)
 
             assertTrue(handled, "Expected reply path to handle message")
             assertEquals(
                 listOf("太讚了吧 <:guild_happy:1001>"),
-                sentMessages,
+                channelPort.allDeliveredTexts,
                 "External Nitro emoji must be stripped by Guild Custom Emoji Policy while guild emoji stays",
             )
 
@@ -300,42 +291,35 @@ class ChatterEmojiMeaningServiceTest {
                     every { isAvailable } returns true
                     every { isAnimated } returns false
                 }
-            val mockGuild =
-                mockk<Guild>(relaxed = true).apply {
-                    every { id } returns Snowflake(777L)
-                    every { emojis } returns flowOf(guildEmojiCached, guildEmojiUncached)
-                }
-
             val message =
                 ChatterAiTraceTestSupport.createMockMessage(
                     id = 202L,
                     channelId = 302L,
                     content = "大家一起嗨 <:guild_happy:1001> <a:nitro_hype:9001>",
                 )
-            coEvery { message.getGuildOrNull() } returns mockGuild
 
-            val deliveredReactions = mutableListOf<ReactionEmoji>()
+            val channelPort =
+                FakeChatterChannelPort().apply {
+                    guildEmojis = listOf(guildEmojiCached, guildEmojiUncached)
+                }
             val service =
                 ChatterService(
                     filter = filter,
                     decisionClient = decisionClient,
                     chatterGenerator = chatterGenerator,
-                    cooldownCache = cooldownCache,
-                    historyFetcher = { _, _ -> emptyList() },
+                    channelPort = channelPort,
                     contextCollector = ChatterContextCollector(noiseFilter = filter, peekResolver = { null }),
                     burstCoordinator = BoundedChannelBurstCoordinator(debounceMs = 1L),
                     randomProvider = { _, _ -> 0L },
-                    afterMessagesFetcher = { _, _ -> emptyList() },
                     personaStateProvider = fixedPersonaProvider(),
-                    reactionSender = { _, emoji -> deliveredReactions += emoji },
                     emojiCatalog = DefaultChatterEmojiCatalog(meaningRepository = repo),
                 )
 
-            val handled = service.handleMessage(message)
+            val handled = service.processMessage(message)
 
             assertTrue(handled, "Expected Silent Reaction Path to handle message")
-            assertEquals(1, deliveredReactions.size, "Expected 1 reaction delivered")
-            val customReaction = assertIs<ReactionEmoji.Custom>(deliveredReactions.single())
+            assertEquals(1, channelPort.addedReactions.size, "Expected 1 reaction delivered")
+            val customReaction = assertIs<ReactionEmoji.Custom>(channelPort.addedReactions.single().emoji)
             assertEquals(Snowflake(1001L), customReaction.id)
 
             val reactionBody = capturedInteractionBodies.single()

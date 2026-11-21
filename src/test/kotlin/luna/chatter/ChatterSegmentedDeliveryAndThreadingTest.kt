@@ -6,11 +6,9 @@ import ch.qos.logback.classic.spi.ILoggingEvent
 import ch.qos.logback.core.read.ListAppender
 import dev.kord.common.entity.Snowflake
 import dev.kord.core.Kord
-import dev.kord.core.behavior.channel.createMessage
 import dev.kord.core.entity.channel.MessageChannel
 import dev.kord.core.event.Event
 import io.mockk.coEvery
-import io.mockk.coVerify
 import io.mockk.every
 import io.mockk.mockk
 import kotlinx.coroutines.CompletableDeferred
@@ -52,28 +50,19 @@ class ChatterSegmentedDeliveryAndThreadingTest {
             val lunaMsg2 = fixture.createMockMessage(id = 202L, channelId = 700L, authorId = 9999L, username = "Luna", content = "yo", isBot = true)
             val bobMsg = fixture.createMockMessage(id = 203L, channelId = 700L, authorId = 3001L, username = "Bob", content = "nice")
 
-            val capturedReplies = mutableListOf<String>()
-            val capturedCreates = mutableListOf<String>()
-            coEvery { fixture.channel.createMessage(any<String>()) } coAnswers {
-                capturedCreates.add(firstArg())
-                mockk(relaxed = true)
-            }
-
             // Case A: 0 non-Luna messages (2 Luna messages ignored)
+            val portA =
+                FakeChatterChannelPort().apply {
+                    afterMessages = listOf(lunaMsg1, lunaMsg2)
+                }
             val zeroNonLunaService =
                 ChatterService(
                     filter = fixture.filter,
                     decisionClient = fixture.decisionClient,
                     chatterGenerator = fixture.chatterGenerator,
-                    cooldownCache = fixture.cooldownCache,
-                    historyFetcher = { _, _ -> emptyList() },
-                    afterMessagesFetcher = { _, _ -> listOf(lunaMsg1, lunaMsg2) },
                     contextCollector = fixture.contextCollector,
+                    channelPort = portA,
                     randomProvider = { _, _ -> 800L },
-                    replySender = { _, content ->
-                        capturedReplies.add(content)
-                        mockk(relaxed = true)
-                    },
                 )
             val triggerA =
                 fixture.createMockMessage(
@@ -86,26 +75,29 @@ class ChatterSegmentedDeliveryAndThreadingTest {
                 )
             coEvery { fixture.chatterGenerator.generateReply(any<ChatterInput>()) } returns "zero intervening"
 
-            assertTrue(zeroNonLunaService.processMessage(triggerA))
-            assertEquals(listOf("zero intervening"), capturedCreates)
-            assertTrue(capturedReplies.isEmpty())
+            assertTrue(
+                zeroNonLunaService.processMessage(triggerA),
+                "Expected processMessage to succeed for 0 intervening non-Luna messages",
+            )
+            assertEquals(listOf("zero intervening"), portA.sentMessages.map { it.content })
+            assertTrue(
+                portA.sentReplies.isEmpty(),
+                "Expected no sendReply calls when 0 non-Luna messages intervene",
+            )
 
-            // Case B: 1 non-Luna message (+ 2 Luna messages ignored) -> still createMessage
-            capturedCreates.clear()
+            // Case B: 1 non-Luna message (+ 2 Luna messages ignored) -> still sendMessage
+            val portB =
+                FakeChatterChannelPort().apply {
+                    afterMessages = listOf(lunaMsg1, bobMsg, lunaMsg2)
+                }
             val oneNonLunaService =
                 ChatterService(
                     filter = fixture.filter,
                     decisionClient = fixture.decisionClient,
                     chatterGenerator = fixture.chatterGenerator,
-                    cooldownCache = fixture.cooldownCache,
-                    historyFetcher = { _, _ -> emptyList() },
-                    afterMessagesFetcher = { _, _ -> listOf(lunaMsg1, bobMsg, lunaMsg2) },
                     contextCollector = fixture.contextCollector,
+                    channelPort = portB,
                     randomProvider = { _, _ -> 800L },
-                    replySender = { _, content ->
-                        capturedReplies.add(content)
-                        mockk(relaxed = true)
-                    },
                 )
             val triggerB =
                 fixture.createMockMessage(
@@ -118,9 +110,15 @@ class ChatterSegmentedDeliveryAndThreadingTest {
                 )
             coEvery { fixture.chatterGenerator.generateReply(any<ChatterInput>()) } returns "one intervening"
 
-            assertTrue(oneNonLunaService.processMessage(triggerB))
-            assertEquals(listOf("one intervening"), capturedCreates)
-            assertTrue(capturedReplies.isEmpty())
+            assertTrue(
+                oneNonLunaService.processMessage(triggerB),
+                "Expected processMessage to succeed for 1 intervening non-Luna message",
+            )
+            assertEquals(listOf("one intervening"), portB.sentMessages.map { it.content })
+            assertTrue(
+                portB.sentReplies.isEmpty(),
+                "Expected no sendReply calls when only 1 non-Luna message intervenes",
+            )
         }
 
     @Test
@@ -145,34 +143,26 @@ class ChatterSegmentedDeliveryAndThreadingTest {
                     selfId = botSelfId,
                 )
 
-            coEvery { fixture.channel.type() } coAnswers {
-                timeline.add("type@$currentTime")
-            }
-            coEvery { fixture.channel.createMessage(any<String>()) } coAnswers {
-                timeline.add("create:${firstArg<String>()}@$currentTime")
-                mockk(relaxed = true)
-            }
             coEvery { fixture.chatterGenerator.generateReply(any<ChatterInput>()) } returns
                 "12345\n\n67890\nthird line\nfourth line"
 
-            val repliedTargets = mutableListOf<Snowflake>()
+            val channelPort =
+                FakeChatterChannelPort().apply {
+                    afterMessages = listOf(bobMsg, lunaMsg, carolMsg)
+                    onTriggerTyping = { timeline.add("type@$currentTime") }
+                    onSendMessage = { _, content -> timeline.add("create:$content@$currentTime") }
+                    onReplyTo = { _, content -> timeline.add("reply:$content@$currentTime") }
+                }
             val service =
                 ChatterService(
                     filter = fixture.filter,
                     decisionClient = fixture.decisionClient,
                     chatterGenerator = fixture.chatterGenerator,
-                    cooldownCache = fixture.cooldownCache,
-                    historyFetcher = { _, _ -> emptyList() },
-                    afterMessagesFetcher = { _, _ -> listOf(bobMsg, lunaMsg, carolMsg) },
                     contextCollector = fixture.contextCollector,
+                    channelPort = channelPort,
                     randomProvider = { min, max ->
                         randomCalls.add(min to max)
                         if (min == 800L) 1_000L else 1_100L
-                    },
-                    replySender = { msg, content ->
-                        repliedTargets.add(msg.id)
-                        timeline.add("reply:$content@$currentTime")
-                        mockk(relaxed = true)
                     },
                 )
 
@@ -183,9 +173,9 @@ class ChatterSegmentedDeliveryAndThreadingTest {
             // seg2: type@2800 + 1100ms -> create@3900
             // seg3: type@3900 + 1100ms -> create@5000
             advanceUntilIdle()
-            assertTrue(run.await())
+            assertTrue(run.await(), "Expected processMessage to succeed for segmented reply")
 
-            assertEquals(listOf(Snowflake(300L)), repliedTargets)
+            assertEquals(listOf(Snowflake(300L)), channelPort.sentReplies.map { it.targetMessageId })
             assertEquals(
                 listOf(
                     800L to 2_000L,
@@ -205,13 +195,13 @@ class ChatterSegmentedDeliveryAndThreadingTest {
                 ),
                 timeline,
             )
-            coVerify(exactly = 2) { fixture.channel.createMessage(any<String>()) }
+            assertEquals(2, channelPort.sentMessages.size)
         }
 
     @Test
     fun `post-trigger fetch failure fails open to createMessage with warning log`() =
         runTest {
-            val logger = LoggerFactory.getLogger(ChatterService::class.java) as Logger
+            val logger = LoggerFactory.getLogger(ChatterDeliveryEngine::class.java) as Logger
             val appender = ListAppender<ILoggingEvent>().apply { start() }
             logger.addAppender(appender)
 
@@ -227,12 +217,10 @@ class ChatterSegmentedDeliveryAndThreadingTest {
                         selfId = botSelfId,
                     )
 
-                val capturedCreates = mutableListOf<String>()
-                val capturedReplies = mutableListOf<String>()
-                coEvery { fixture.channel.createMessage(any<String>()) } coAnswers {
-                    capturedCreates.add(firstArg())
-                    mockk(relaxed = true)
-                }
+                val channelPort =
+                    FakeChatterChannelPort().apply {
+                        afterMessagesError = IllegalStateException("Discord API 503")
+                    }
                 coEvery { fixture.chatterGenerator.generateReply(any<ChatterInput>()) } returns "fallback seg1\nfallback seg2"
 
                 val service =
@@ -240,20 +228,20 @@ class ChatterSegmentedDeliveryAndThreadingTest {
                         filter = fixture.filter,
                         decisionClient = fixture.decisionClient,
                         chatterGenerator = fixture.chatterGenerator,
-                        cooldownCache = fixture.cooldownCache,
-                        historyFetcher = { _, _ -> emptyList() },
-                        afterMessagesFetcher = { _, _ -> throw IllegalStateException("Discord API 503") },
                         contextCollector = fixture.contextCollector,
+                        channelPort = channelPort,
                         randomProvider = { _, _ -> 800L },
-                        replySender = { _, content ->
-                            capturedReplies.add(content)
-                            mockk(relaxed = true)
-                        },
                     )
 
-                assertTrue(service.processMessage(trigger))
-                assertEquals(listOf("fallback seg1", "fallback seg2"), capturedCreates)
-                assertTrue(capturedReplies.isEmpty())
+                assertTrue(
+                    service.processMessage(trigger),
+                    "Expected processMessage to fail open when fetchMessagesAfter throws",
+                )
+                assertEquals(listOf("fallback seg1", "fallback seg2"), channelPort.sentMessages.map { it.content })
+                assertTrue(
+                    channelPort.sentReplies.isEmpty(),
+                    "Expected no sendReply calls when fetchMessagesAfter fails open",
+                )
 
                 val warnLogs = appender.list.filter { it.level == Level.WARN }.map { it.formattedMessage }
                 assertTrue(
@@ -270,7 +258,6 @@ class ChatterSegmentedDeliveryAndThreadingTest {
         runTest {
             val channelId = 704L
             val seg1Sent = CompletableDeferred<Unit>()
-            val sentOrder = mutableListOf<String>()
             val botSelfId = Snowflake(9999L)
 
             val trigger1 =
@@ -292,14 +279,14 @@ class ChatterSegmentedDeliveryAndThreadingTest {
                     selfId = botSelfId,
                 )
 
-            coEvery { fixture.channel.createMessage(any<String>()) } coAnswers {
-                val text = firstArg<String>()
-                sentOrder.add(text)
-                if (text == "part1" && !seg1Sent.isCompleted) {
-                    seg1Sent.complete(Unit)
+            val channelPort =
+                FakeChatterChannelPort().apply {
+                    onSendMessage = { _, text ->
+                        if (text == "part1" && !seg1Sent.isCompleted) {
+                            seg1Sent.complete(Unit)
+                        }
+                    }
                 }
-                mockk(relaxed = true)
-            }
             coEvery { fixture.chatterGenerator.generateReply(any<ChatterInput>()) } returnsMany
                 listOf("part1\npart2\npart3", "second-turn")
 
@@ -308,10 +295,8 @@ class ChatterSegmentedDeliveryAndThreadingTest {
                     filter = fixture.filter,
                     decisionClient = fixture.decisionClient,
                     chatterGenerator = fixture.chatterGenerator,
-                    cooldownCache = fixture.cooldownCache,
-                    historyFetcher = { _, _ -> emptyList() },
-                    afterMessagesFetcher = { _, _ -> emptyList() },
                     contextCollector = fixture.contextCollector,
+                    channelPort = channelPort,
                     randomProvider = { _, _ -> 800L },
                 )
 
@@ -322,52 +307,50 @@ class ChatterSegmentedDeliveryAndThreadingTest {
             val secondRun = async { service.processMessage(interruptingTrigger2) }
             advanceTimeBy(400L)
             runCurrent()
-            assertFalse(firstRun.isCompleted)
+            assertFalse(
+                firstRun.isCompleted,
+                "Expected firstRun to still be delivering remaining burst segments",
+            )
 
             advanceUntilIdle()
-            assertTrue(firstRun.await())
-            assertTrue(secondRun.await())
-            assertEquals(listOf("part1", "part2", "part3", "second-turn"), sentOrder)
+            assertTrue(firstRun.await(), "Expected firstRun to complete")
+            assertTrue(secondRun.await(), "Expected secondRun to complete")
+            assertEquals(listOf("part1", "part2", "part3", "second-turn"), channelPort.allDeliveredTexts)
         }
 
     @Test
     fun `ChatterService enforces 2000-character limit with ellipsis on segmented burst payloads`() =
         runTest {
             val channelId = 705L
-            val sentPayloads = mutableListOf<String>()
             val oversizedReply = "${"a".repeat(2020)}\n${"b".repeat(500)}\n${"c".repeat(1200)}\n${"d".repeat(1200)}"
 
             coEvery { fixture.decisionClient.decide(any(), any(), any()) } returns ParticipationDecision(shouldParticipate = true, noul = 0.95)
             coEvery { fixture.chatterGenerator.generateReply(any<ChatterInput>()) } returns oversizedReply
 
+            val channelPort = FakeChatterChannelPort()
             val service =
                 ChatterService(
                     filter = fixture.filter,
                     decisionClient = fixture.decisionClient,
                     chatterGenerator = fixture.chatterGenerator,
-                    cooldownCache = fixture.cooldownCache,
-                    historyFetcher = { _, _ -> emptyList() },
-                    afterMessagesFetcher = { _, _ -> emptyList() },
                     contextCollector = fixture.contextCollector,
+                    channelPort = channelPort,
                     randomProvider = { _, _ -> 800L },
-                    messageSender = { _, content ->
-                        sentPayloads.add(content)
-                        mockk(relaxed = true)
-                    },
                 )
 
             val msg = fixture.createMockMessage(id = 600L, channelId = channelId, content = "long segmented test")
-            assertTrue(service.processMessage(msg))
+            assertTrue(service.processMessage(msg), "Expected processMessage to succeed for oversized reply")
+            val sentPayloads = channelPort.sentMessages.map { it.content }
             assertEquals(3, sentPayloads.size)
             assertEquals(2000, sentPayloads[0].length)
-            assertTrue(sentPayloads[0].endsWith("..."))
+            assertTrue(sentPayloads[0].endsWith("..."), "Expected truncated segment 1 to end with ellipsis")
             assertEquals("b".repeat(500), sentPayloads[1])
             assertEquals(2000, sentPayloads[2].length)
-            assertTrue(sentPayloads[2].endsWith("..."))
+            assertTrue(sentPayloads[2].endsWith("..."), "Expected truncated segment 3 to end with ellipsis")
         }
 
     @Test
-    fun `ChatterPlugin wires afterMessagesFetcher to channel getMessagesAfter`() =
+    fun `ChatterPlugin wires ChatterService with KordChatterChannelAdapter`() =
         runTest {
             val mockKord = mockk<Kord>(relaxed = true)
             val eventsFlow = MutableSharedFlow<Event>()
@@ -386,6 +369,8 @@ class ChatterSegmentedDeliveryAndThreadingTest {
             plugin.initialize(context)
 
             val service = assertNotNull(plugin.service)
+            assertEquals(KordChatterChannelAdapter, service.channelPort)
+
             val mockChannel = mockk<MessageChannel>(relaxed = true)
             val triggerMsg = fixture.createMockMessage(id = 700L, channelId = 800L)
             val after1 = fixture.createMockMessage(id = 701L, channelId = 800L, content = "after 1")
@@ -393,7 +378,7 @@ class ChatterSegmentedDeliveryAndThreadingTest {
             every { triggerMsg.channel } returns mockChannel
             every { mockChannel.getMessagesAfter(Snowflake(700L), 10) } returns flowOf(after1, after2)
 
-            val fetched = service.afterMessagesFetcher(triggerMsg, 10)
+            val fetched = service.channelPort.fetchMessagesAfter(triggerMsg, 10)
             assertEquals(listOf(after1, after2), fetched)
 
             plugin.shutdown()

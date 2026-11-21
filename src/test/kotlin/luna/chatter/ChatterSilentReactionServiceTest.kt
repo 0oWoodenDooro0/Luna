@@ -4,10 +4,8 @@ import ch.qos.logback.classic.Logger
 import ch.qos.logback.classic.spi.ILoggingEvent
 import ch.qos.logback.core.read.ListAppender
 import dev.kord.common.entity.Snowflake
-import dev.kord.core.entity.Guild
 import dev.kord.core.entity.GuildEmoji
 import dev.kord.core.entity.ReactionEmoji
-import dev.kord.core.entity.channel.MessageChannel
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.mock.MockEngine
 import io.ktor.client.engine.mock.respond
@@ -17,11 +15,8 @@ import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.headersOf
 import io.ktor.serialization.kotlinx.json.json
-import io.mockk.coEvery
-import io.mockk.coVerify
 import io.mockk.every
 import io.mockk.mockk
-import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonArray
@@ -127,11 +122,6 @@ class ChatterSilentReactionServiceTest {
                 traceRecorder = recorder,
             )
 
-        val channel =
-            mockk<MessageChannel>(relaxed = true).also { ch ->
-                coEvery { ch.type() } returns Unit
-                coEvery { ch.createMessage(any<String>()) } returns mockk(relaxed = true)
-            }
         val stickerImage =
             ChatterAiTraceTestSupport.createMockImageAttachment(
                 url = "https://cdn.discordapp.com/attachments/1/2/funny.png",
@@ -144,44 +134,42 @@ class ChatterSilentReactionServiceTest {
                 channelId = 201L,
                 content = "大家看這張貓貓圖！",
                 attachments = setOf(stickerImage),
-                channel = channel,
             )
 
-        val sentReplies = mutableListOf<String>()
-        val addedReactions = mutableListOf<ReactionEmoji>()
+        val partyEmoji =
+            mockk<GuildEmoji>(relaxed = true).apply {
+                every { id } returns Snowflake(555666777888L)
+                every { name } returns "party"
+                every { isAvailable } returns true
+                every { isAnimated } returns true
+            }
+        val channelPort =
+            FakeChatterChannelPort().apply {
+                guildEmojis = listOf(partyEmoji)
+            }
         val service =
             ChatterService(
                 filter = filter,
                 decisionClient = decisionClient,
                 chatterGenerator = chatterGenerator,
-                cooldownCache = cooldownCache,
-                historyFetcher = { _, _ -> emptyList() },
-                messageSender = { _, content ->
-                    sentReplies += content
-                    mockk(relaxed = true)
-                },
+                channelPort = channelPort,
                 contextCollector = ChatterContextCollector(noiseFilter = filter, peekResolver = { null }),
                 traceRecorder = recorder,
                 burstCoordinator = BoundedChannelBurstCoordinator(debounceMs = 1L),
                 randomProvider = { min, _ -> min },
-                afterMessagesFetcher = { _, _ -> emptyList() },
                 personaStateProvider = fixedPersonaProvider(effectiveThreshold = 0.82, driftEnabled = true),
-                guildEmojisProvider = {
-                    listOf(GuildCustomEmoji(id = Snowflake(555666777888L), name = "party", isAnimated = true))
-                },
-                reactionSender = { _, emoji -> addedReactions += emoji },
             )
 
-        val result = service.handleMessage(message)
+        val result = service.processMessage(message)
         recorder.flushAndClose()
 
-        assertTrue(result)
+        assertTrue(result, "Silent reaction path should return true")
         assertEquals(
             listOf<ReactionEmoji>(ReactionEmoji.Custom(Snowflake(555666777888L), "party", isAnimated = true)),
-            addedReactions,
+            channelPort.addedReactions.map { it.emoji },
         )
-        assertTrue(sentReplies.isEmpty(), "Silent Reaction Path must not send text replies")
-        coVerify(exactly = 0) { channel.type() }
+        assertTrue(channelPort.allDeliveredTexts.isEmpty(), "Silent Reaction Path must not send text replies")
+        assertEquals(0, channelPort.typingCount)
         assertFalse(cooldownCache.isOnCooldown(Snowflake(201L)), "Silent Reaction Path must not start channel cooldown")
 
         // Verify only 2 HTTP calls: DECISION + REACTION_SELECT (no full CHATTER_GENERATE)
@@ -265,34 +253,30 @@ class ChatterSilentReactionServiceTest {
                     every { isAvailable } returns false
                     every { isAnimated } returns false
                 }
-            val mockGuild =
-                mockk<Guild>(relaxed = true).apply {
-                    every { emojis } returns flowOf(guildEmojiMock, unavailableEmojiMock)
-                }
-
             val message = ChatterAiTraceTestSupport.createMockMessage(id = 102L, channelId = 202L, content = "偷偷看一下")
-            coEvery { message.getGuildOrNull() } returns mockGuild
-            coEvery { message.addReaction(any<ReactionEmoji>()) } returns Unit
+            val channelPort =
+                FakeChatterChannelPort().apply {
+                    guildEmojis = listOf(guildEmojiMock, unavailableEmojiMock)
+                }
 
             val service =
                 ChatterService(
                     filter = filter,
                     decisionClient = decisionClient,
                     chatterGenerator = chatterGenerator,
-                    cooldownCache = cooldownCache,
-                    historyFetcher = { _, _ -> emptyList() },
+                    channelPort = channelPort,
                     contextCollector = ChatterContextCollector(noiseFilter = filter, peekResolver = { null }),
                     burstCoordinator = BoundedChannelBurstCoordinator(debounceMs = 1L),
                     randomProvider = { _, _ -> 0L },
-                    afterMessagesFetcher = { _, _ -> emptyList() },
                     personaStateProvider = fixedPersonaProvider(effectiveThreshold = 0.70),
                 )
 
-            val handled = service.handleMessage(message)
+            val handled = service.processMessage(message)
 
-            assertTrue(handled)
-            coVerify(exactly = 1) { message.addReaction(ReactionEmoji.Unicode("👀")) }
-            assertFalse(cooldownCache.isOnCooldown(Snowflake(202L)))
+            assertTrue(handled, "Boundary reactionThreshold should trigger silent Unicode reaction")
+            assertEquals(listOf<ReactionEmoji>(ReactionEmoji.Unicode("👀")), channelPort.addedReactions.map { it.emoji })
+            assertEquals(0, channelPort.typingCount)
+            assertFalse(cooldownCache.isOnCooldown(Snowflake(202L)), "Unicode reaction must not start channel cooldown")
         }
 
     @Test
@@ -331,23 +315,23 @@ class ChatterSilentReactionServiceTest {
                 httpClient = createClient(mockEngine),
                 traceRecorder = recorder,
             )
-        val reactions = mutableListOf<ReactionEmoji>()
+        val channelPort = FakeChatterChannelPort()
         val service1 =
             ChatterService(
                 filter = filter,
                 decisionClient = decisionClient,
                 chatterGenerator = genStandard,
-                cooldownCache = cooldownCache,
-                historyFetcher = { _, _ -> emptyList() },
+                channelPort = channelPort,
                 contextCollector = ChatterContextCollector(noiseFilter = filter, peekResolver = { null }),
                 traceRecorder = recorder,
                 burstCoordinator = BoundedChannelBurstCoordinator(debounceMs = 1L),
                 randomProvider = { _, _ -> 0L },
-                afterMessagesFetcher = { _, _ -> emptyList() },
                 personaStateProvider = fixedPersonaProvider(effectiveThreshold = 0.70),
-                reactionSender = { _, emoji -> reactions += emoji },
             )
-        assertFalse(service1.handleMessage(ChatterAiTraceTestSupport.createMockMessage(id = 103L, channelId = 203L)))
+        assertFalse(
+            service1.processMessage(ChatterAiTraceTestSupport.createMockMessage(id = 103L, channelId = 203L)),
+            "noul below reactionThreshold must bypass silent reaction",
+        )
 
         // Case 2: reactionThreshold (0.80) >= effectiveThreshold (0.70) with noul = 0.65 -> bypassed
         nextNoul = 0.65
@@ -362,21 +346,21 @@ class ChatterSilentReactionServiceTest {
                 filter = filter,
                 decisionClient = decisionClient,
                 chatterGenerator = genInverted,
-                cooldownCache = cooldownCache,
-                historyFetcher = { _, _ -> emptyList() },
+                channelPort = channelPort,
                 contextCollector = ChatterContextCollector(noiseFilter = filter, peekResolver = { null }),
                 traceRecorder = recorder,
                 burstCoordinator = BoundedChannelBurstCoordinator(debounceMs = 1L),
                 randomProvider = { _, _ -> 0L },
-                afterMessagesFetcher = { _, _ -> emptyList() },
                 personaStateProvider = fixedPersonaProvider(effectiveThreshold = 0.70),
-                reactionSender = { _, emoji -> reactions += emoji },
             )
-        assertFalse(service2.handleMessage(ChatterAiTraceTestSupport.createMockMessage(id = 104L, channelId = 204L)))
+        assertFalse(
+            service2.processMessage(ChatterAiTraceTestSupport.createMockMessage(id = 104L, channelId = 204L)),
+            "Inverted reactionThreshold >= effectiveThreshold must bypass silent reaction",
+        )
         recorder.flushAndClose()
 
         assertTrue(interactionCalls.isEmpty(), "Neither case may call /v1beta/interactions")
-        assertTrue(reactions.isEmpty())
+        assertTrue(channelPort.addedReactions.isEmpty(), "Bypassed cases must not add reactions")
         val traces = ChatterAiTraceTestSupport.readTraceLines(tempDir)
         assertEquals(2, traces.size)
         assertTrue(traces.all { it.outcome == AiTraceOutcome.SKIPPED })
@@ -435,56 +419,66 @@ class ChatterSilentReactionServiceTest {
                     traceRecorder = recorder,
                 )
 
-            val addedReactions = mutableListOf<ReactionEmoji>()
+            val channelPort1 = FakeChatterChannelPort()
             // 1. Reaction API returns HTTP 503 -> no fallback reaction
             val serviceApiFail =
                 ChatterService(
                     filter = filter,
                     decisionClient = decisionClient,
                     chatterGenerator = chatterGenerator,
-                    cooldownCache = cooldownCache,
-                    historyFetcher = { _, _ -> emptyList() },
+                    channelPort = channelPort1,
                     contextCollector = ChatterContextCollector(noiseFilter = filter, peekResolver = { null }),
                     traceRecorder = recorder,
                     burstCoordinator = BoundedChannelBurstCoordinator(debounceMs = 1L),
                     randomProvider = { _, _ -> 0L },
-                    afterMessagesFetcher = { _, _ -> emptyList() },
                     personaStateProvider = fixedPersonaProvider(effectiveThreshold = 0.70),
-                    reactionSender = { _, emoji -> addedReactions += emoji },
                 )
-            assertFalse(serviceApiFail.handleMessage(ChatterAiTraceTestSupport.createMockMessage(id = 105L, channelId = 205L)))
+            assertFalse(
+                serviceApiFail.processMessage(ChatterAiTraceTestSupport.createMockMessage(id = 105L, channelId = 205L)),
+                "Reaction API failure must return false",
+            )
 
-            // 2. Reaction API succeeds, guildEmojisProvider throws (fail-open), reactionSender throws (Missing Permissions)
+            // 2. Reaction API succeeds, guildEmojis throws (fail-open), addReaction throws (Missing Permissions)
             reactionFailMode = false
+            val channelPort2 =
+                FakeChatterChannelPort().apply {
+                    guildEmojisError = IllegalStateException("Guild emojis unavailable")
+                    reactionError = RuntimeException("Missing Add Reactions permission")
+                }
             val serviceSenderFail =
                 ChatterService(
                     filter = filter,
                     decisionClient = decisionClient,
                     chatterGenerator = chatterGenerator,
-                    cooldownCache = cooldownCache,
-                    historyFetcher = { _, _ -> emptyList() },
+                    channelPort = channelPort2,
                     contextCollector = ChatterContextCollector(noiseFilter = filter, peekResolver = { null }),
                     traceRecorder = recorder,
                     burstCoordinator = BoundedChannelBurstCoordinator(debounceMs = 1L),
                     randomProvider = { _, _ -> 0L },
-                    afterMessagesFetcher = { _, _ -> emptyList() },
                     personaStateProvider = fixedPersonaProvider(effectiveThreshold = 0.70),
-                    guildEmojisProvider = { throw IllegalStateException("Guild emojis unavailable") },
-                    reactionSender = { _, _ -> throw RuntimeException("Missing Add Reactions permission") },
                 )
-            assertFalse(serviceSenderFail.handleMessage(ChatterAiTraceTestSupport.createMockMessage(id = 106L, channelId = 206L)))
+            assertFalse(
+                serviceSenderFail.processMessage(ChatterAiTraceTestSupport.createMockMessage(id = 106L, channelId = 206L)),
+                "addReaction failure must return false",
+            )
             recorder.flushAndClose()
 
-            assertTrue(addedReactions.isEmpty())
-            assertFalse(cooldownCache.isOnCooldown(Snowflake(205L)))
-            assertFalse(cooldownCache.isOnCooldown(Snowflake(206L)))
+            assertTrue(channelPort1.addedReactions.isEmpty(), "API failure must not add reactions")
+            assertTrue(channelPort2.addedReactions.isEmpty(), "addReaction failure must not record added reactions")
+            assertEquals(0, channelPort2.typingCount)
+            assertFalse(cooldownCache.isOnCooldown(Snowflake(205L)), "Reaction API failure must not start cooldown")
+            assertFalse(cooldownCache.isOnCooldown(Snowflake(206L)), "addReaction failure must not start cooldown")
 
             val traces = ChatterAiTraceTestSupport.readTraceLines(tempDir)
             assertEquals(2, traces.size)
             assertEquals(AiTraceOutcome.SKIPPED, traces[0].outcome)
             assertEquals(AiTraceFailureCategory.HTTP_ERROR, traces[0].failureCategory)
             assertEquals(AiTraceOutcome.SKIPPED, traces[1].outcome)
-            assertTrue(traces[1].errorSummary.orEmpty().contains("Missing Add Reactions permission"))
+            assertEquals(AiTraceFailureCategory.UNEXPECTED_ERROR, traces[1].failureCategory)
+            assertTrue(
+                traces[1].errorSummary.orEmpty().contains("Missing Add Reactions permission"),
+                "Expected Missing Add Reactions permission in errorSummary",
+            )
 
             val warns = appender.list.filter { it.level.levelStr == "WARN" }.map { it.formattedMessage }
             assertTrue(warns.any { it.contains("guild emojis", ignoreCase = true) })

@@ -3,14 +3,11 @@ package luna.chatter
 import dev.kord.common.entity.MessageType
 import dev.kord.common.entity.Snowflake
 import dev.kord.core.Kord
-import dev.kord.core.behavior.channel.createMessage
 import dev.kord.core.cache.data.MessageData
 import dev.kord.core.cache.data.UserData
 import dev.kord.core.entity.Embed
 import dev.kord.core.entity.Message
 import dev.kord.core.entity.User
-import dev.kord.core.entity.channel.MessageChannel
-import io.mockk.coEvery
 import io.mockk.every
 import io.mockk.mockk
 import luna.core.LunaWebhookRegistry
@@ -21,7 +18,7 @@ internal class ChatterServiceTestSupport {
     lateinit var filter: ChatterNoiseFilter
     lateinit var decisionClient: GeminiDecisionClient
     lateinit var chatterGenerator: ChatterGenerator
-    lateinit var channel: MessageChannel
+    lateinit var channelPort: FakeChatterChannelPort
     lateinit var contextCollector: ChatterContextCollector
     lateinit var service: ChatterService
 
@@ -34,25 +31,20 @@ internal class ChatterServiceTestSupport {
         every { decisionClient.config } returns ChatterDecisionConfig()
         chatterGenerator = mockk(relaxed = true)
         every { chatterGenerator.config } returns ChatterConfig()
-        channel = mockk(relaxed = true)
+        channelPort = FakeChatterChannelPort()
         contextCollector =
             ChatterContextCollector(
                 noiseFilter = filter,
                 peekResolver = { null },
             )
 
-        coEvery { channel.type() } returns Unit
-        coEvery { channel.createMessage(any<String>()) } returns mockk(relaxed = true)
-
         service =
             ChatterService(
                 filter = filter,
                 decisionClient = decisionClient,
                 chatterGenerator = chatterGenerator,
-                cooldownCache = cooldownCache,
-                historyFetcher = { _, _ -> emptyList() },
                 contextCollector = contextCollector,
-                afterMessagesFetcher = { _, _ -> emptyList() },
+                channelPort = channelPort,
                 personaStateProvider = CircadianPersonaDrift(enabled = false),
             )
     }
@@ -116,8 +108,6 @@ internal class ChatterServiceTestSupport {
         every { msg.mentionedUserIds } returns mentionedUserIds
         every { msg.referencedMessage } returns referencedMessage
         every { msg.messageReference } returns null
-        every { msg.channel } returns channel
-        coEvery { msg.getChannel() } returns channel
         return msg
     }
 }
