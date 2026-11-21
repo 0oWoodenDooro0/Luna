@@ -100,17 +100,10 @@ class ChatterService(
         kord.on<MessageCreateEvent>(scope = listenerScope) { onMessageCreate(this) }
         kord.on<ReactionAddEvent>(scope = listenerScope) { onReactionAdd(this) }
         kord.on<EmojisUpdateEvent>(scope = listenerScope) { onEmojisUpdate(this) }
-        listenerScope.launch { preScanStartupGuilds(kord) }
-        listenerScope.launch { preScanStartupApplicationEmojis(kord) }
+        listenerScope.launch { promptEmojiCoordinator.preScanStartupGuilds(kord) }
+        listenerScope.launch { applicationEmojiCache.preScanStartup(kord, emojiCatalog) }
         return parentJob
     }
-
-    internal suspend fun preScanStartupApplicationEmojis(kord: Kord) = applicationEmojiCache.preScanStartup(kord, emojiCatalog)
-
-    /**
-     * Pre-scans custom emojis across all joined guilds on startup without blocking gateway dispatch.
-     */
-    internal suspend fun preScanStartupGuilds(kord: Kord) = promptEmojiCoordinator.preScanStartupGuilds(kord)
 
     /**
      * Handles incoming [MessageCreateEvent].
@@ -481,12 +474,6 @@ class ChatterService(
 
     private fun resolveAuthorId(message: Message): Snowflake? =
         runCatching { message.author?.id }.getOrNull() ?: runCatching { message.data.author.id }.getOrNull()
-
-    internal suspend fun resolveApplicationEmojis(
-        message: Message,
-        fallbackDescription: String = "continuing without Application Emojis",
-        preScanScope: CoroutineScope? = backgroundScope,
-    ): List<GuildCustomEmoji> = applicationEmojiCache.resolveForMessage(message, channelPort, emojiCatalog, preScanScope, fallbackDescription)
 
     private suspend fun handleSilentReactionPath(
         message: Message,

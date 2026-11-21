@@ -444,7 +444,7 @@ class ChatterApplicationEmojiPreScanTest {
                 }
                 assertEquals(setOf("8301"), cache.knownIds())
 
-                val cachedResult = service.resolveApplicationEmojis(anchor)
+                val cachedResult = cache.resolveForMessage(anchor, channelPort, service.emojiCatalog, scope)
                 assertEquals(listOf(emojiExisting), cachedResult)
                 assertTrue(
                     channelPort.events.none { it is FakeChatterChannelPort.ChannelEvent.ListedApplicationEmojis },
@@ -454,7 +454,7 @@ class ChatterApplicationEmojiPreScanTest {
                 channelPort.applicationEmojis = listOf(emojiExisting, emojiNew)
                 clock.advance(Duration.ofMinutes(10))
 
-                val refreshed = service.resolveApplicationEmojis(anchor)
+                val refreshed = cache.resolveForMessage(anchor, channelPort, service.emojiCatalog, scope)
                 assertEquals(listOf(emojiExisting, emojiNew), refreshed)
                 assertTrue(
                     meaningRepo.findMeaningMap(listOf("8302")).isEmpty(),
