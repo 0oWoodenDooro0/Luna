@@ -160,24 +160,28 @@ _Avoid_: Quote fallback, reply ping, thread anchoring
 The multi-turn conversational output cadence that splits a generated `Chatter Pipeline` reply into bounded sequential messages separated by brief typing pauses.
 _Avoid_: Multi-line spam, message chunking, stream split
 
+**Chatter Persona**:
+Luna's distinct conversational personality in `Chatter Pipeline`—a quick-witted, curious, sharp-tongued yet approachable friend who is confident yet occasionally scatterbrained, quick to admit mistakes, mildly thin-skinned when pressed, and naturally helpful without acting like an assistant—modulated by `Circadian Persona Drift` and isolated from `Summary Pipeline`.
+_Avoid_: Bot bio, assistant tone, static system prompt
+
 **Circadian Persona Drift**:
-The transient in-memory modulation of Luna's `Chatter Pipeline` conversational tone and effective `Participation Decision` threshold across local time-of-day periods and periodic mood/energy shifts.
+The transient in-memory modulation of Luna's `Chatter Persona` conversational tone and effective `Participation Decision` threshold across local time-of-day periods and periodic mood/energy shifts.
 _Avoid_: Persistent mood store, sleep mode, static persona
 
 **Silent Reaction Path**:
-The zero-text participation outcome in which `Chatter Pipeline` responds to an intermediate `Participation Decision` probability band by adding a single Discord emoji reaction instead of sending text, failing silently when selection yields no valid emoji.
+The zero-text participation outcome in which `Chatter Pipeline` responds to an intermediate `Participation Decision` probability band by adding a single Discord emoji reaction (preferring bot application emojis, then guild custom emojis, then standard Unicode emojis) instead of sending text, failing silently when selection yields no valid emoji.
 _Avoid_: Fallback reaction pool, emoji spam, reaction bot
 
-**Guild Custom Emoji Policy**:
-The `Chatter Pipeline` formatting and multimodal rule that strips Unicode emojis from generated text while permitting verified custom emojis from the target Discord guild, alongside raster sticker and animated GIF preview ingestion.
-_Avoid_: Global emoji ban, raw emoji passthrough, sticker spam
+**Chatter Custom Emoji Policy**:
+The `Chatter Pipeline` formatting and multimodal rule that strips Unicode emojis from generated text while permitting verified bot application emojis (prioritized) and custom emojis from the target Discord guild, alongside raster sticker and animated GIF preview ingestion.
+_Avoid_: Guild Custom Emoji Policy, Global emoji ban, raw emoji passthrough, sticker spam
 
 **Custom Emoji Meaning**:
-A concise semantic description of a Discord custom emoji derived from its visual appearance and name, cached globally by emoji ID so the `Chatter Pipeline` can interpret both guild and external custom emojis in dialogue and select contextually appropriate guild emojis for replies and the `Silent Reaction Path`.
+A concise semantic description of a Discord custom emoji derived from its visual appearance and name, cached globally by emoji ID so the `Chatter Pipeline` can interpret bot application, guild, and external custom emojis in dialogue and select contextually appropriate application or guild emojis for replies and the `Silent Reaction Path`.
 _Avoid_: Emoji caption, emote tag, emoji dictionary
 
 **Emoji Usage Ranking**:
-The per-guild rolling frequency window over message occurrences and reactions used by the `Chatter Pipeline` to prioritize which guild custom emojis enter the bounded prompt selection pool ahead of deterministic backfill.
+The rolling frequency window over message occurrences and reactions used by the `Chatter Pipeline` to prioritize which bot application emojis (tracked globally) and guild custom emojis (tracked per guild) enter their respective bounded prompt selection pools ahead of deterministic backfill.
 _Avoid_: Emoji leaderboard, popular emotes, top-50 cache
 
 **Working Memory Window**:
