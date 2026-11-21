@@ -152,9 +152,9 @@ class ChatterGuildEmojiPolicyServiceTest {
                     .orEmpty()
             assertContains(promptText, "<:emoji_1:1001>")
             assertContains(promptText, "<a:emoji_2:1002>")
-            assertContains(promptText, "<:emoji_15:1015>")
+            assertContains(promptText, "<a:emoji_10:1010>")
             assertFalse(promptText.contains("broken_emoji"), "Unavailable guild emojis must be excluded from reply prompt")
-            assertFalse(promptText.contains("emoji_16"), "Guild emojis in reply prompt must be bounded to 15")
+            assertFalse(promptText.contains("emoji_11"), "Guild emojis in reply prompt must be bounded to 10")
         }
 
     @Test
@@ -219,7 +219,7 @@ class ChatterGuildEmojiPolicyServiceTest {
                 assertTrue(dmService.processMessage(dmMessage), "DM message should be handled")
                 assertEquals(listOf("收到"), dmChannelPort.allDeliveredTexts)
                 assertFalse(
-                    capturedInteractionBodies[0].contains("可用的伺服器自訂表情"),
+                    capturedInteractionBodies[0].contains("伺服器表情（"),
                     "DM prompt must not include guild custom emojis section",
                 )
 
@@ -250,7 +250,7 @@ class ChatterGuildEmojiPolicyServiceTest {
                 assertTrue(failService.processMessage(mentionMessage), "Failed guild emoji lookup must still deliver reply")
                 assertEquals(listOf("收到"), failChannelPort.allDeliveredTexts)
                 assertFalse(
-                    capturedInteractionBodies[1].contains("可用的伺服器自訂表情"),
+                    capturedInteractionBodies[1].contains("伺服器表情（"),
                     "Failed guild emoji lookup must omit guild custom emojis section",
                 )
 

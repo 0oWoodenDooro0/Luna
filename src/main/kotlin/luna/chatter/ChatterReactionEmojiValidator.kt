@@ -25,11 +25,13 @@ object ChatterReactionEmojiValidator {
 
     /**
      * Validates [raw] and returns either the trimmed single Unicode emoji or the canonical verified
-     * guild custom emoji mention (`<:name:id>` / `<a:name:id>`), or `null` if invalid/unverified.
+     * custom emoji mention (`<:name:id>` / `<a:name:id>`) from [applicationEmojis] or [guildEmojis],
+     * or `null` if invalid/unverified.
      */
     fun validateAndNormalize(
         raw: String?,
         guildEmojis: List<GuildCustomEmoji> = emptyList(),
+        applicationEmojis: List<GuildCustomEmoji> = emptyList(),
     ): String? {
         val trimmed = raw?.trim()?.takeIf { it.isNotEmpty() } ?: return null
 
@@ -38,7 +40,7 @@ object ChatterReactionEmojiValidator {
             val name = customMatch.groupValues[2]
             val id = customMatch.groupValues[3]
             val matched =
-                guildEmojis.firstOrNull { emoji ->
+                (applicationEmojis + guildEmojis).firstOrNull { emoji ->
                     emoji.id.toString() == id && emoji.name == name
                 } ?: return null
             return matched.mention
@@ -53,13 +55,14 @@ object ChatterReactionEmojiValidator {
     fun toReactionEmoji(
         raw: String?,
         guildEmojis: List<GuildCustomEmoji> = emptyList(),
+        applicationEmojis: List<GuildCustomEmoji> = emptyList(),
     ): ReactionEmoji? {
-        val normalized = validateAndNormalize(raw, guildEmojis) ?: return null
+        val normalized = validateAndNormalize(raw, guildEmojis = guildEmojis, applicationEmojis = applicationEmojis) ?: return null
         val customMatch = CUSTOM_EMOJI_REGEX.matchEntire(normalized)
         if (customMatch != null) {
             val name = customMatch.groupValues[2]
             val id = customMatch.groupValues[3]
-            return guildEmojis
+            return (applicationEmojis + guildEmojis)
                 .firstOrNull { it.id.toString() == id && it.name == name }
                 ?.toReactionEmoji()
         }
