@@ -2,6 +2,7 @@ package luna.chatter
 
 import dev.kord.core.behavior.channel.createMessage
 import dev.kord.core.behavior.reply
+import dev.kord.core.entity.CustomEmoji
 import dev.kord.core.entity.GuildEmoji
 import dev.kord.core.entity.Message
 import dev.kord.core.entity.ReactionEmoji
@@ -63,6 +64,11 @@ interface ChatterChannelPort {
      * or returns an empty list outside guilds.
      */
     suspend fun listGuildCustomEmojis(anchor: Message): List<GuildEmoji>
+
+    /**
+     * Lists available bot Application Emojis with non-blank names via [anchor]'s Kord instance.
+     */
+    suspend fun listApplicationEmojis(anchor: Message): List<GuildCustomEmoji>
 }
 
 /**
@@ -125,4 +131,23 @@ object KordChatterChannelAdapter : ChatterChannelPort {
         val guild = anchor.getGuildOrNull() ?: return emptyList()
         return guild.emojis.toList().filter { it.isAvailable && !it.name.isNullOrBlank() }
     }
+
+    override suspend fun listApplicationEmojis(anchor: Message): List<GuildCustomEmoji> =
+        anchor.kord.emojis
+            .toList()
+            .toAvailableGuildCustomEmojis()
 }
+
+internal fun Iterable<CustomEmoji>.toAvailableGuildCustomEmojis(): List<GuildCustomEmoji> =
+    mapNotNull { emoji ->
+        val emojiName = emoji.name?.takeIf { it.isNotBlank() }
+        if (emoji.isAvailable && emojiName != null) {
+            GuildCustomEmoji(
+                id = emoji.id,
+                name = emojiName,
+                isAnimated = emoji.isAnimated,
+            )
+        } else {
+            null
+        }
+    }

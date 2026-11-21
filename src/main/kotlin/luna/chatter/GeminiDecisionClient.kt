@@ -402,7 +402,7 @@ open class GeminiDecisionClient(
         const val QUESTION_SHOULD_PARTICIPATE = "should_participate"
 
         const val DEFAULT_INSTRUCTIONS =
-            "You are evaluating whether Luna, an active Discord group chat member, " +
+            "You are evaluating whether Luna, a quick-witted, curious, approachable, and naturally helpful Discord group chat friend, " +
                 "should chime in on [Latest Message] given [Recent Context] and [Bot Identity].\n" +
                 "Answer true when:\n" +
                 "- [Latest Message] shares a new topic, rumor, news, match/event reaction, game opinion, " +

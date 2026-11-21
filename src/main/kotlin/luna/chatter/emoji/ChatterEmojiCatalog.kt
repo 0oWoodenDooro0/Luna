@@ -41,16 +41,17 @@ class EmojiVisionTurnBudget {
 }
 
 /**
- * Combined result of preparing both the annotated dialogue transcript and the ranked guild emoji pool
- * for a single turn.
+ * Combined result of preparing the annotated dialogue transcript, ranked guild emoji pool,
+ * and ranked Application Emoji pool for a single turn.
  */
 data class PreparedPromptEmojis(
     val transcript: String,
     val guildEmojis: List<GuildCustomEmoji>,
+    val applicationEmojis: List<GuildCustomEmoji> = emptyList(),
 )
 
 /**
- * Seam coordinating custom emoji semantic enrichment and guild selection pool preparation
+ * Seam coordinating custom emoji semantic enrichment and selection pool preparation
  * for the Chatter pipeline.
  *
  * Downstream features (on-demand vision resolution, 30-day rolling usage ranking, and background pre-scan)
@@ -69,13 +70,27 @@ interface ChatterEmojiCatalog {
         roundBudget: EmojiVisionTurnBudget? = null,
     ): List<GuildCustomEmoji> = availableGuildEmojis.take(limit.coerceAtLeast(0))
 
+    suspend fun prepareApplicationEmojiPool(
+        availableApplicationEmojis: List<GuildCustomEmoji>,
+        limit: Int = ChatterPromptBuilder.MAX_REACTION_PROMPT_APP_EMOJIS,
+        roundBudget: EmojiVisionTurnBudget? = null,
+    ): List<GuildCustomEmoji> = availableApplicationEmojis.take(limit.coerceAtLeast(0))
+
     suspend fun preparePromptEmojis(
         transcript: String,
         guildId: Snowflake?,
         availableGuildEmojis: List<GuildCustomEmoji>,
         limit: Int = ChatterPromptBuilder.MAX_PROMPT_GUILD_EMOJIS,
         roundBudget: EmojiVisionTurnBudget? = null,
+        availableApplicationEmojis: List<GuildCustomEmoji> = emptyList(),
+        applicationEmojiLimit: Int = ChatterPromptBuilder.MAX_REACTION_PROMPT_APP_EMOJIS,
     ): PreparedPromptEmojis {
+        val preparedAppPool =
+            prepareApplicationEmojiPool(
+                availableApplicationEmojis = availableApplicationEmojis,
+                limit = applicationEmojiLimit,
+                roundBudget = roundBudget,
+            )
         val preparedPool =
             prepareGuildEmojiPool(
                 guildId = guildId,
@@ -88,23 +103,38 @@ interface ChatterEmojiCatalog {
                 transcript = transcript,
                 roundBudget = roundBudget,
             )
-        return PreparedPromptEmojis(transcript = preparedTranscript, guildEmojis = preparedPool)
+        return PreparedPromptEmojis(
+            transcript = preparedTranscript,
+            guildEmojis = preparedPool,
+            applicationEmojis = preparedAppPool,
+        )
     }
 
     suspend fun recordMessageUsage(
         guildId: Snowflake?,
         content: String,
+        knownApplicationEmojiIds: Set<String> = emptySet(),
     ) {}
 
     suspend fun recordReactionUsage(
         guildId: Snowflake?,
         emoji: ReactionEmoji,
+        knownApplicationEmojiIds: Set<String> = emptySet(),
     ) {}
 
     suspend fun preScanGuildEmojis(
         guildId: Snowflake?,
         emojis: List<GuildCustomEmoji>,
     ) {}
+
+    suspend fun preScanApplicationEmojis(emojis: List<GuildCustomEmoji>) {}
+
+    companion object {
+        /**
+         * Fixed global sentinel scope key for 30-day rolling `Emoji Usage Ranking` of Discord Application Emojis.
+         */
+        const val APP_EMOJI_USAGE_SCOPE: String = "__app__"
+    }
 }
 
 /**
@@ -142,12 +172,32 @@ class DefaultChatterEmojiCatalog(
         limit: Int,
         roundBudget: EmojiVisionTurnBudget?,
     ): List<GuildCustomEmoji> {
-        val bounded = selectBoundedGuildEmojis(guildId, availableGuildEmojis, limit)
+        val bounded = selectBoundedEmojis(guildId?.toString(), availableGuildEmojis, limit, scopeLabel = "guild $guildId")
         if (bounded.isEmpty()) return emptyList()
 
         val targets = toVisionTargets(bounded)
         resolveOrSyncMetadata(targets, contextLabel = "guild $guildId", roundBudget = roundBudget)
         val meaningsById = queryMeaningMap(targets.map { it.id }, contextLabel = "guild $guildId")
+        return applyMeanings(bounded, meaningsById)
+    }
+
+    override suspend fun prepareApplicationEmojiPool(
+        availableApplicationEmojis: List<GuildCustomEmoji>,
+        limit: Int,
+        roundBudget: EmojiVisionTurnBudget?,
+    ): List<GuildCustomEmoji> {
+        val bounded =
+            selectBoundedEmojis(
+                scopeKey = ChatterEmojiCatalog.APP_EMOJI_USAGE_SCOPE,
+                availableEmojis = availableApplicationEmojis,
+                limit = limit,
+                scopeLabel = "application emojis (${ChatterEmojiCatalog.APP_EMOJI_USAGE_SCOPE})",
+            )
+        if (bounded.isEmpty()) return emptyList()
+
+        val targets = toVisionTargets(bounded)
+        resolveOrSyncMetadata(targets, contextLabel = "application emojis", roundBudget = roundBudget)
+        val meaningsById = queryMeaningMap(targets.map { it.id }, contextLabel = "application emojis")
         return applyMeanings(bounded, meaningsById)
     }
 
@@ -157,11 +207,27 @@ class DefaultChatterEmojiCatalog(
         availableGuildEmojis: List<GuildCustomEmoji>,
         limit: Int,
         roundBudget: EmojiVisionTurnBudget?,
+        availableApplicationEmojis: List<GuildCustomEmoji>,
+        applicationEmojiLimit: Int,
     ): PreparedPromptEmojis {
-        val bounded = selectBoundedGuildEmojis(guildId, availableGuildEmojis, limit)
+        val boundedApp =
+            selectBoundedEmojis(
+                scopeKey = ChatterEmojiCatalog.APP_EMOJI_USAGE_SCOPE,
+                availableEmojis = availableApplicationEmojis,
+                limit = applicationEmojiLimit,
+                scopeLabel = "application emojis (${ChatterEmojiCatalog.APP_EMOJI_USAGE_SCOPE})",
+            )
+        val boundedGuild =
+            selectBoundedEmojis(
+                scopeKey = guildId?.toString(),
+                availableEmojis = availableGuildEmojis,
+                limit = limit,
+                scopeLabel = "guild $guildId",
+            )
         val transcriptTargets = extractTranscriptTargets(transcript)
-        val poolTargets = toVisionTargets(bounded)
-        val combinedTargets = (transcriptTargets + poolTargets).associateBy { it.id }.values.toList()
+        val appPoolTargets = toVisionTargets(boundedApp)
+        val guildPoolTargets = toVisionTargets(boundedGuild)
+        val combinedTargets = (transcriptTargets + appPoolTargets + guildPoolTargets).associateBy { it.id }.values.toList()
 
         resolveOrSyncMetadata(
             targets = combinedTargets,
@@ -184,7 +250,8 @@ class DefaultChatterEmojiCatalog(
             }
         return PreparedPromptEmojis(
             transcript = annotatedTranscript,
-            guildEmojis = applyMeanings(bounded, meaningsById),
+            guildEmojis = applyMeanings(boundedGuild, meaningsById),
+            applicationEmojis = applyMeanings(boundedApp, meaningsById),
         )
     }
 
@@ -219,23 +286,24 @@ class DefaultChatterEmojiCatalog(
             if (meaning != null) emoji.copy(meaning = meaning) else emoji
         }
 
-    private suspend fun selectBoundedGuildEmojis(
-        guildId: Snowflake?,
-        availableGuildEmojis: List<GuildCustomEmoji>,
+    private suspend fun selectBoundedEmojis(
+        scopeKey: String?,
+        availableEmojis: List<GuildCustomEmoji>,
         limit: Int,
+        scopeLabel: String,
     ): List<GuildCustomEmoji> {
         val normalizedLimit = limit.coerceAtLeast(0)
-        if (normalizedLimit == 0 || availableGuildEmojis.isEmpty()) return emptyList()
+        if (normalizedLimit == 0 || availableEmojis.isEmpty()) return emptyList()
 
-        val usageRepo = usageRepository ?: return availableGuildEmojis.take(normalizedLimit)
+        val usageRepo = usageRepository ?: return availableEmojis.take(normalizedLimit)
         val usageById =
-            if (guildId != null) {
+            if (scopeKey != null) {
                 runCatching {
-                    usageRepo.findRollingUsageCounts(guildId.toString())
+                    usageRepo.findRollingUsageCounts(scopeKey)
                 }.onFailure { e ->
                     logger.warn(
-                        "Failed to query 30-day Emoji Usage Ranking for guild {}; degrading to deterministic order: {}",
-                        guildId,
+                        "Failed to query 30-day Emoji Usage Ranking for {}; degrading to deterministic order: {}",
+                        scopeLabel,
                         e.message,
                     )
                 }.getOrDefault(emptyMap())
@@ -243,7 +311,7 @@ class DefaultChatterEmojiCatalog(
                 emptyMap()
             }
 
-        return availableGuildEmojis
+        return availableEmojis
             .sortedWith(
                 compareByDescending<GuildCustomEmoji> { usageById[it.id.toString()] ?: 0L }
                     .thenBy { it.name }
@@ -268,40 +336,74 @@ class DefaultChatterEmojiCatalog(
     override suspend fun recordMessageUsage(
         guildId: Snowflake?,
         content: String,
+        knownApplicationEmojiIds: Set<String>,
     ) {
-        if (guildId == null || content.isBlank()) return
+        if (content.isBlank()) return
         val usageRepo = usageRepository ?: return
         val tokens = ChatterEmojiTranscriptAnnotator.extractEmojiTokens(content)
         if (tokens.isEmpty()) return
 
-        runCatching {
-            usageRepo.recordUsage(guildId.toString(), tokens.map { it.id })
-        }.onFailure { e ->
-            logger.warn(
-                "Failed to record custom emoji message usage for guild {}: {}",
-                guildId,
-                e.message,
-            )
+        if (guildId != null) {
+            runCatching {
+                usageRepo.recordUsage(guildId.toString(), tokens.map { it.id })
+            }.onFailure { e ->
+                logger.warn(
+                    "Failed to record custom emoji message usage for guild {}: {}",
+                    guildId,
+                    e.message,
+                )
+            }
+        }
+
+        if (knownApplicationEmojiIds.isNotEmpty()) {
+            val appEmojiIds = tokens.map { it.id }.filter { it in knownApplicationEmojiIds }
+            if (appEmojiIds.isNotEmpty()) {
+                runCatching {
+                    usageRepo.recordUsage(ChatterEmojiCatalog.APP_EMOJI_USAGE_SCOPE, appEmojiIds)
+                }.onFailure { e ->
+                    logger.warn(
+                        "Failed to record Application Emoji message usage under {}: {}",
+                        ChatterEmojiCatalog.APP_EMOJI_USAGE_SCOPE,
+                        e.message,
+                    )
+                }
+            }
         }
     }
 
     override suspend fun recordReactionUsage(
         guildId: Snowflake?,
         emoji: ReactionEmoji,
+        knownApplicationEmojiIds: Set<String>,
     ) {
-        if (guildId == null) return
         val usageRepo = usageRepository ?: return
         val customEmoji = emoji as? ReactionEmoji.Custom ?: return
+        val emojiId = customEmoji.id.toString()
 
-        runCatching {
-            usageRepo.recordUsage(guildId.toString(), listOf(customEmoji.id.toString()))
-        }.onFailure { e ->
-            logger.warn(
-                "Failed to record custom emoji reaction usage for guild {} and emoji {}: {}",
-                guildId,
-                customEmoji.id,
-                e.message,
-            )
+        if (guildId != null) {
+            runCatching {
+                usageRepo.recordUsage(guildId.toString(), listOf(emojiId))
+            }.onFailure { e ->
+                logger.warn(
+                    "Failed to record custom emoji reaction usage for guild {} and emoji {}: {}",
+                    guildId,
+                    customEmoji.id,
+                    e.message,
+                )
+            }
+        }
+
+        if (emojiId in knownApplicationEmojiIds) {
+            runCatching {
+                usageRepo.recordUsage(ChatterEmojiCatalog.APP_EMOJI_USAGE_SCOPE, listOf(emojiId))
+            }.onFailure { e ->
+                logger.warn(
+                    "Failed to record Application Emoji reaction usage under {} for emoji {}: {}",
+                    ChatterEmojiCatalog.APP_EMOJI_USAGE_SCOPE,
+                    customEmoji.id,
+                    e.message,
+                )
+            }
         }
     }
 
@@ -321,6 +423,15 @@ class DefaultChatterEmojiCatalog(
         resolveOrSyncMetadata(
             targets = targets,
             contextLabel = "pre-scan guild $guildId",
+            useRoundTimeout = false,
+        )
+    }
+
+    override suspend fun preScanApplicationEmojis(emojis: List<GuildCustomEmoji>) {
+        if (emojis.isEmpty()) return
+        resolveOrSyncMetadata(
+            targets = toVisionTargets(emojis),
+            contextLabel = "pre-scan application emojis",
             useRoundTimeout = false,
         )
     }

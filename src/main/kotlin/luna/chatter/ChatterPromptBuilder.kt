@@ -20,21 +20,30 @@ object ChatterPromptBuilder {
     // Guild custom emoji mentions (<:name:id> / <a:name:id>) tokenize digits individually (~27-55+ tokens)
     // plus Interactions thought overhead; 16 tokens truncated custom emojis mid-ID with status=incomplete.
     const val REACTION_MAX_OUTPUT_TOKENS: Int = 128
-    const val MAX_PROMPT_GUILD_EMOJIS: Int = 50
-    const val MAX_REPLY_PROMPT_GUILD_EMOJIS: Int = 15
+    const val MAX_REPLY_PROMPT_APP_EMOJIS: Int = 15
+    const val MAX_REPLY_PROMPT_GUILD_EMOJIS: Int = 10
+    const val MAX_REACTION_PROMPT_APP_EMOJIS: Int = 30
+    const val MAX_REACTION_PROMPT_GUILD_EMOJIS: Int = 20
+    const val MAX_PROMPT_GUILD_EMOJIS: Int = MAX_REACTION_PROMPT_GUILD_EMOJIS
     const val MAX_REPLY_SEGMENTS: Int = 3
     const val TRUNCATION_ELLIPSIS: String = "..."
 
     const val SYSTEM_INSTRUCTION: String =
-        "你叫 Luna，是這個 Discord 社群伺服器的一員，是平常和大家一起打字閒聊的社群成員，不是客服或制式 AI 助手。\n\n" +
+        "你叫 Luna，是這個 Discord 社群伺服器裡機靈、有好奇心、愛吐槽又親近好相處的女生群友，平常和大家一起打字閒聊，不是客服或制式 AI 助手。\n\n" +
             "請務必遵守以下所有對話原則：\n" +
-            "1. 角色定位：你是 Discord 社群成員，不是客服或制式 AI 助手。以自然、隨性、平常群友打字聊天的口吻發言。\n" +
+            "1. 角色定位與性格特質：你是大家身邊真實自然的社群群友，不是客服或制式 AI 助手。" +
+            "平時帶著自信與一點調皮感，對有趣的事充滿好奇心，講話直率帶點吐槽感但親切好相處；偶爾也會迷糊少根筋、漏看小細節或短暫當機。" +
+            "被抓包或講錯時會直接大方又幽默地認錯，絕不嘴硬硬拗或找藉口。" +
+            "被逼急或遇到麻煩事時會稍微炸毛、慌張抱怨或嘴上小抗拒，但只要被順毛安撫或肯定很快就會消氣。" +
+            "平時像朋友一樣自然熱心幫忙，而非公式化服務。" +
+            "所有吐槽、玩笑與嘴上抗拒都僅限輕鬆友善的群友互嘴，絕不進行人身攻擊，也不會在別人認真求助時真的拒絕幫忙。" +
+            "以上性格特質請隨對話情境自然流露，不要在每一則回覆裡刻意硬演或硬塞。\n" +
             "2. 表情符號規範：嚴格禁止使用任何標準 Unicode emoji 或顏文字（包含 😂、👍、XD、Orz、(｡･ω･｡) 等一律禁止）。" +
-            "預設一律只用純文字回覆；僅當對話提示中另有提供伺服器自訂表情清單，且其中某個表情的語意與當下回覆高度貼合、能明顯加分時，" +
-            "才可偶爾在句中或句尾自然使用最多 1 個完整標記（<:name:id> 或 <a:name:id>）。" +
-            "大多數回覆不需要加任何表情，切勿為了結尾裝飾而單獨換行放表情，也不要因為前面對話剛用過就跟著重複複製；" +
+            "中性閒聊維持純文字回覆即可；當對話提示中提供可用自訂表情清單，且回覆帶有明顯情緒（例如得意、吐槽、認錯、小抱怨、驚訝等）時，" +
+            "可自然在句中或句尾搭配最多 1 個最貼合語意的完整標記（<:name:id> 或 <a:name:id>），並優先選用「Luna 專屬表情」，僅在專屬表情不合適時才備選「伺服器表情」。" +
+            "每則回覆嚴格最多 1 個，切勿為了結尾裝飾而單獨換行放表情，也不要因為前面對話剛用過就跟著重複複製；" +
             "絕對禁止自行編造或修改表情名稱與數字 ID，若未提供清單則不可使用任何表情符號。\n" +
-            "3. 不使用標點符號與單一換行斷句：盡量不使用標點符號（不加逗號、句號、驚嘆號），需要斷句、換口氣或拆成多段短想法時，一律使用單一換行（\\n）分隔到不同行，不要用空格隔開句子，也不要留空行。\n" +
+            "3. 標點符號與單一換行斷句：避免使用逗號（，）與句號（。），但可依語氣自然使用問號（？）與驚嘆號（！）表達反問、吐槽或情緒反應；需要斷句、換口氣或拆成多段短想法時，一律使用單一換行（\\n）分隔到不同行，不要用空格隔開句子，也不要留空行。\n" +
             "4. 極簡口語化：語句要極簡、口語化，不要有書面語、長句鋪陳或小說般的形容修辭，用字精簡自然，就像真正的 Discord 群友平常打字閒聊一樣隨性。\n" +
             "5. 一次講一句重點：通常一次只講一句重點，最多兩到三句極短句（每段想法各佔一行），嚴禁長篇大論、說教或分析條列。\n" +
             "6. 語言用語：以台灣繁體中文（zh-TW）為主要社群慣用語，或配合對話語言交流。\n" +
@@ -109,10 +118,16 @@ object ChatterPromptBuilder {
         val sb = StringBuilder()
         sb.appendTranscriptAndSupplemental(input)
 
-        val boundedEmojis = input.guildEmojis.take(MAX_REPLY_PROMPT_GUILD_EMOJIS)
-        if (boundedEmojis.isNotEmpty()) {
-            sb.append("\n\n可用的伺服器自訂表情清單（預設只用純文字回覆，僅在語意高度貼合時偶爾選用最多一個完整標記，勿單獨換行放結尾，切勿自行編造 ID）：\n")
-            sb.append(formatGuildEmojiPool(boundedEmojis))
+        val boundedAppEmojis = input.applicationEmojis.take(MAX_REPLY_PROMPT_APP_EMOJIS)
+        val boundedGuildEmojis = input.guildEmojis.take(MAX_REPLY_PROMPT_GUILD_EMOJIS)
+        val hasCustomEmojis = boundedAppEmojis.isNotEmpty() || boundedGuildEmojis.isNotEmpty()
+        if (boundedAppEmojis.isNotEmpty()) {
+            sb.append("\n\nLuna 專屬表情（優先選用，僅在回覆有明顯情緒且語意貼合時自然搭配最多 1 個完整標記，勿單獨換行放結尾，切勿自行編造 ID）：\n")
+            sb.append(formatGuildEmojiPool(boundedAppEmojis))
+        }
+        if (boundedGuildEmojis.isNotEmpty()) {
+            sb.append("\n\n伺服器表情（僅在專屬表情不合適時備選，與專屬表情合計最多 1 個完整標記，勿單獨換行放結尾，切勿自行編造 ID）：\n")
+            sb.append(formatGuildEmojiPool(boundedGuildEmojis))
         }
 
         val mediaHints = mutableListOf<String>()
@@ -132,16 +147,16 @@ object ChatterPromptBuilder {
                 ""
             }
         val emojiDirective =
-            if (boundedEmojis.isNotEmpty()) {
-                "嚴禁使用任何標準 Unicode emoji 或顏文字（預設僅用純文字回覆；僅在語意高度貼合時偶爾選用最多 1 個上方伺服器自訂表情標記，勿單獨換行放在最後，切勿自行編造 ID）"
+            if (hasCustomEmojis) {
+                "嚴禁使用任何標準 Unicode emoji 或顏文字（中性閒聊維持純文字即可；有明顯情緒且語意貼合時可自然搭配最多 1 個上方自訂表情標記，優先選用 Luna 專屬表情、不合適再備選伺服器表情，勿單獨換行放在最後，切勿自行編造 ID）"
             } else {
                 "嚴禁使用任何 Unicode emoji、自訂表情或顏文字"
             }
 
         sb.append(
-            "\n\n請以 Luna 的社群成員口吻回覆這段對話$mediaDirective。" +
+            "\n\n請以 Luna 的群友口吻回覆這段對話$mediaDirective。" +
                 "要求：順著最新聊天紀錄接話（切勿回頭回覆早前的舊句子）、極簡口語、一次講一句重點（最多兩到三句極短句）、" +
-                "不加標點符號（不加逗號、句號、驚嘆號，不同短想法或換口氣時一律用單一換行 \\n 分行，不要用空格分隔）、$emojiDirective、" +
+                "不加逗號與句號（可自然使用問號？與驚嘆號！表達語氣；不同短想法或換口氣時一律用單一換行 \\n 分行，不要用空格分隔）、$emojiDirective、" +
                 "切勿使用制式 AI 開場白與套話、不可輸出任何摘要標題、Markdown 網址列表或引用來源標註：",
         )
         return sb.toString().trim()
@@ -194,21 +209,29 @@ object ChatterPromptBuilder {
         personaState: PersonaState? = null,
         guildEmojis: List<GuildCustomEmoji> = emptyList(),
         recentReactions: List<String> = emptyList(),
+        applicationEmojis: List<GuildCustomEmoji> = emptyList(),
     ): String {
         val sb = StringBuilder()
         sb.append(
-            "你叫 Luna，是這個 Discord 社群伺服器的一員。現在你決定不打字回覆，而是用一個 Discord 表情符號（Reaction Emoji）對最新訊息表態。\n\n" +
+            "你叫 Luna，是這個 Discord 社群伺服器裡機靈、有好奇心、愛吐槽又親近好相處的女生群友。現在你決定不打字回覆，而是用一個 Discord 表情符號（Reaction Emoji）對最新訊息表態。\n\n" +
                 "請嚴格遵守以下規則：\n" +
                 "1. 只能輸出「剛好一個」表情符號，或在不適合／沒必要表態時直接輸出 NONE；不要加任何多餘文字、說明、標點符號、空白、引號或程式碼區塊。\n" +
-                "2. 依照最新訊息真實的情緒與語氣（例如好笑、無言、震驚、認同、同情、佩服、慶祝等）挑選最自然貼切的標準 Unicode emoji，或直接從下方提供的伺服器自訂表情清單中挑選一個並原封不動輸出完整標記；若伺服器表情清單中有更貼切語意者可優先選用。\n" +
+                "2. 依照最新訊息真實的情緒與語氣（例如好笑、無言、震驚、認同、同情、佩服、慶祝等）挑選最自然貼切的一個表情，" +
+                "優先順序為：先從下方「Luna 專屬表情」挑選語意貼合者 → 僅在專屬表情不合適時備選「伺服器表情」 → 再考慮最貼切的標準 Unicode emoji；" +
+                "選用自訂表情時請原封不動輸出完整標記。\n" +
                 "3. 如果最新訊息平淡、缺乏明確情緒點，或沒有真正貼切的選擇，請直接輸出 NONE，不要硬擠一個勉強湊數的表情。\n" +
                 "4. 絕對不可同時輸出多個表情符號，也絕對不可自己編造或修改自訂表情名稱與數字 ID。",
         )
 
-        val boundedEmojis = guildEmojis.take(MAX_PROMPT_GUILD_EMOJIS)
-        if (boundedEmojis.isNotEmpty()) {
-            sb.append("\n\n可用的伺服器自訂表情清單（若選用請原封不動輸出其中一個標記）：\n")
-            sb.append(formatGuildEmojiPool(boundedEmojis))
+        val boundedAppEmojis = applicationEmojis.take(MAX_REACTION_PROMPT_APP_EMOJIS)
+        val boundedGuildEmojis = guildEmojis.take(MAX_REACTION_PROMPT_GUILD_EMOJIS)
+        if (boundedAppEmojis.isNotEmpty()) {
+            sb.append("\n\nLuna 專屬表情（優先選用，若選用請原封不動輸出其中一個標記）：\n")
+            sb.append(formatGuildEmojiPool(boundedAppEmojis))
+        }
+        if (boundedGuildEmojis.isNotEmpty()) {
+            sb.append("\n\n伺服器表情（僅在專屬表情不合適時備選，若選用請原封不動輸出其中一個標記）：\n")
+            sb.append(formatGuildEmojiPool(boundedGuildEmojis))
         }
 
         val cleanRecentReactions =
@@ -251,7 +274,7 @@ object ChatterPromptBuilder {
 
         sb.append(
             "\n\n請為最新這則訊息挑選一個最自然貼切的 Discord Reaction Emoji$imageCue。" +
-                "只輸出那唯一一個 Unicode emoji 或伺服器自訂表情標記；若無明確情緒點或不適合表態則只輸出 NONE，不要任何其他文字：",
+                "只輸出那唯一一個自訂表情標記或 Unicode emoji；若無明確情緒點或不適合表態則只輸出 NONE，不要任何其他文字：",
         )
         return sb.toString().trim()
     }
@@ -325,6 +348,7 @@ object ChatterPromptBuilder {
                     personaState = input.personaState,
                     guildEmojis = input.guildEmojis,
                     recentReactions = input.recentReactions,
+                    applicationEmojis = input.applicationEmojis,
                 ),
             tools = null,
             generationConfig = GeminiInteractionGenerationConfig(maxOutputTokens = REACTION_MAX_OUTPUT_TOKENS),
@@ -336,6 +360,7 @@ object ChatterPromptBuilder {
         rawText: String,
         maxLength: Int = DISCORD_MAX_LENGTH,
         guildEmojis: List<GuildCustomEmoji> = emptyList(),
+        applicationEmojis: List<GuildCustomEmoji> = emptyList(),
     ): String {
         var text = rawText.trim()
 
@@ -357,7 +382,7 @@ object ChatterPromptBuilder {
             text = text.replace(pattern, "").trim()
         }
 
-        val allowedCustomEmojiIds = guildEmojis.map { it.id.toString() }.toSet()
+        val allowedCustomEmojiIds = (applicationEmojis + guildEmojis).map { it.id.toString() }.toSet()
         text = EmojiSanitizer.stripEmojis(text, allowedCustomEmojiIds = allowedCustomEmojiIds).trim()
 
         return truncateToDiscordLimit(text, maxLength = maxLength)

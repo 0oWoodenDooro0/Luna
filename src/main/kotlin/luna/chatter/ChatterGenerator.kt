@@ -164,7 +164,7 @@ open class ChatterGenerator(
                 memoryToolsEnabled = memoryToolsEnabled,
             )
 
-        val allowedCustomEmojiIds = effectiveInput.guildEmojis.map { it.id.toString() }.toSet()
+        val allowedCustomEmojiIds = (effectiveInput.applicationEmojis + effectiveInput.guildEmojis).map { it.id.toString() }.toSet()
         val initialResult =
             interactionClient.interact(
                 baseUrl = config.cleanBaseUrl,
@@ -209,6 +209,7 @@ open class ChatterGenerator(
                         result.text,
                         maxLength = config.maxOutputCharacters,
                         guildEmojis = effectiveInput.guildEmojis,
+                        applicationEmojis = effectiveInput.applicationEmojis,
                     )
                 if (sanitized.isBlank()) {
                     logger.error("ChatterGenerator response was sanitized to blank")
@@ -447,7 +448,12 @@ open class ChatterGenerator(
                     session?.skip(reason = "Reaction selection model declined to react (NONE)")
                     return null
                 }
-                val normalized = ChatterReactionEmojiValidator.validateAndNormalize(result.text, input.guildEmojis)
+                val normalized =
+                    ChatterReactionEmojiValidator.validateAndNormalize(
+                        raw = result.text,
+                        guildEmojis = input.guildEmojis,
+                        applicationEmojis = input.applicationEmojis,
+                    )
                 if (normalized == null) {
                     logger.warn(
                         "ChatterGenerator reaction selection returned invalid or unverified emoji: {}",

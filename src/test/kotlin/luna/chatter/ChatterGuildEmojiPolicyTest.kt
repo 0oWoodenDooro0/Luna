@@ -73,14 +73,14 @@ class ChatterGuildEmojiPolicyTest {
             )
         assertContains(withEmojisPrompt, "<:emoji_1:1001>")
         assertContains(withEmojisPrompt, "<a:emoji_2:1002>")
-        assertContains(withEmojisPrompt, "<:emoji_15:1015>")
-        assertFalse(withEmojisPrompt.contains("emoji_16"), "Prompt guild emojis for replies must be capped at MAX_REPLY_PROMPT_GUILD_EMOJIS")
+        assertContains(withEmojisPrompt, "<a:emoji_10:1010>")
+        assertFalse(withEmojisPrompt.contains("emoji_11"), "Prompt guild emojis for replies must be capped at MAX_REPLY_PROMPT_GUILD_EMOJIS (10)")
         assertContains(withEmojisPrompt, "Unicode")
 
         val reactionSys = ChatterPromptBuilder.buildReactionSystemInstruction(guildEmojis = sampleEmojis)
         assertContains(reactionSys, "<:emoji_1:1001>")
-        assertContains(reactionSys, "<a:emoji_50:1050>")
-        assertFalse(reactionSys.contains("emoji_51"), "Reaction guild emojis must be capped at MAX_PROMPT_GUILD_EMOJIS")
+        assertContains(reactionSys, "<a:emoji_20:1020>")
+        assertFalse(reactionSys.contains("emoji_21"), "Reaction guild emojis must be capped at MAX_REACTION_PROMPT_GUILD_EMOJIS (20)")
 
         val withoutEmojisPrompt =
             ChatterPromptBuilder.buildUserPrompt(
@@ -89,7 +89,8 @@ class ChatterGuildEmojiPolicyTest {
                     guildEmojis = emptyList(),
                 ),
             )
-        assertFalse(withoutEmojisPrompt.contains("可用的伺服器自訂表情"))
+        assertFalse(withoutEmojisPrompt.contains("伺服器表情（"), "Empty guild emojis must omit guild emoji section")
+        assertFalse(withoutEmojisPrompt.contains("Luna 專屬表情（"), "Empty application emojis must omit application emoji section")
         assertContains(withoutEmojisPrompt, "嚴禁使用任何 Unicode emoji")
     }
 
@@ -226,7 +227,8 @@ class ChatterGuildEmojiPolicyTest {
                     ?.jsonPrimitive
                     ?.content
                     .orEmpty()
-            assertFalse(promptText2.contains("可用的伺服器自訂表情"))
+            assertFalse(promptText2.contains("伺服器表情（"), "Empty guild emojis must omit guild emoji section")
+            assertFalse(promptText2.contains("Luna 專屬表情（"), "Empty application emojis must omit application emoji section")
 
             // 3. Output consisting solely of Unicode + hallucinated custom emojis degrades to null
             responseText = "😂😂 <:fake:999999>"

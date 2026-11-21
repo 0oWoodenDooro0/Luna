@@ -155,16 +155,16 @@ class ChatterEmojiUsageRankingServiceTest {
 
             val pool = catalog.prepareGuildEmojiPool(guildId = guildId, availableGuildEmojis = available)
 
-            assertEquals(50, pool.size, "Guild emoji pool must be capped at 50")
+            assertEquals(20, pool.size, "Guild emoji pool must be capped at MAX_REACTION_PROMPT_GUILD_EMOJIS (20)")
             assertEquals(
                 listOf("9001", "8001", "8002", "9002"),
                 pool.take(4).map { it.id.toString() },
                 "Expected z_top(3), then tied a_tied(1) ordered by id 8001 before 8002, then m_second(1) by name",
             )
             assertEquals(
-                (1..46).map { "unused_${it.toString().padStart(2, '0')}" },
+                (1..16).map { "unused_${it.toString().padStart(2, '0')}" },
                 pool.drop(4).map { it.name },
-                "Expected remaining 46 slots backfilled deterministically by name",
+                "Expected remaining 16 slots backfilled deterministically by name",
             )
             assertFalse(
                 pool.any { it.id.toString() == "77777" || it.id.toString() == "66666" },

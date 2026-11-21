@@ -124,17 +124,19 @@ class ChatterEmojiCadenceAndReactionPromptTest {
             }
 
         val systemInst = ChatterPromptBuilder.buildSystemInstruction()
-        assertContains(systemInst, "預設一律只用純文字回覆")
+        assertContains(systemInst, "中性閒聊維持純文字回覆")
+        assertContains(systemInst, "Luna 專屬表情")
         assertContains(systemInst, "單獨換行放表情")
 
         val replyPrompt = ChatterPromptBuilder.buildUserPrompt(ChatterInput(transcript = "[Alice]: 嗨", guildEmojis = emojis))
-        assertContains(replyPrompt, "預設只用純文字回覆")
-        assertContains(replyPrompt, "<:guild_15:2015>：語意15")
-        assertFalse(replyPrompt.contains("guild_16"), "Reply prompt must cap guild emoji pool at 15")
+        assertContains(replyPrompt, "中性閒聊維持純文字")
+        assertContains(replyPrompt, "<:guild_10:2010>：語意10")
+        assertFalse(replyPrompt.contains("guild_11"), "Reply prompt must cap guild emoji pool at 10")
 
         val reactionWithoutHistory = ChatterPromptBuilder.buildReactionSystemInstruction(guildEmojis = emojis)
         assertContains(reactionWithoutHistory, "Reaction Emoji")
-        assertContains(reactionWithoutHistory, "若伺服器表情清單中有更貼切語意者可優先選用")
+        assertContains(reactionWithoutHistory, "Luna 專屬表情")
+        assertContains(reactionWithoutHistory, "伺服器表情")
         assertContains(reactionWithoutHistory, "NONE")
         assertFalse(reactionWithoutHistory.contains("👀"), "Reaction prompt must not anchor on eyes emoji")
         assertFalse(reactionWithoutHistory.contains("👍、😂、👀、❤️、🔥"), "Reaction prompt must not embed hardcoded example list")
@@ -286,7 +288,8 @@ class ChatterEmojiCadenceAndReactionPromptTest {
             assertTrue(service.processMessage(guildMsg(2L, "再來一局 <:guild_happy:1001>")), "Turn 2 must succeed")
             assertEquals("笑死", channelPort.allDeliveredTexts[1])
             val prompt2 = extractInteractionPromptText(replyBodies[1])
-            assertFalse(prompt2.contains("可用的伺服器自訂表情清單"), "Turn 2 must omit guild emoji pool during cooldown")
+            assertFalse(prompt2.contains("伺服器表情（"), "Turn 2 must omit guild emoji pool during cooldown")
+            assertFalse(prompt2.contains("Luna 專屬表情（"), "Turn 2 must omit application emoji pool during cooldown")
             assertContains(prompt2, "<:guild_happy:1001>(開心慶祝)")
 
             // Turn 3 (cooldown turn 2): pool still omitted, pure text reply decrements remaining cooldown to 0
@@ -294,7 +297,7 @@ class ChatterEmojiCadenceAndReactionPromptTest {
             llmOutput = "穩了啦"
             assertTrue(service.processMessage(guildMsg(3L, "衝啊")), "Turn 3 must succeed")
             assertEquals("穩了啦", channelPort.allDeliveredTexts[2])
-            assertFalse(extractInteractionPromptText(replyBodies[2]).contains("可用的伺服器自訂表情清單"), "Turn 3 must still omit guild emoji pool")
+            assertFalse(extractInteractionPromptText(replyBodies[2]).contains("伺服器表情（"), "Turn 3 must still omit guild emoji pool")
 
             // Turn 4: cooldown cleared -> guild pool re-enabled
             now.addAndGet(10_000L)
