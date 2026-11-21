@@ -23,6 +23,8 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import luna.chatter.emoji.DefaultChatterEmojiService
+import luna.chatter.emoji.ReactionResolution
 import luna.core.ai.AiAttemptOutcome
 import luna.core.ai.AiAttemptStage
 import luna.core.ai.AiTraceFailureCategory
@@ -81,63 +83,61 @@ class ChatterReactionSelectionTest {
     }
 
     @Test
-    fun `ChatterReactionEmojiValidator accepts single Unicode and verified guild custom emojis and rejects invalid outputs`() {
-        val guildEmojis =
-            listOf(
-                GuildCustomEmoji(id = Snowflake(111222333444L), name = "blobcat", isAnimated = false),
-                GuildCustomEmoji(id = Snowflake(555666777888L), name = "party", isAnimated = true),
-            )
+    fun `ChatterEmojiTurn resolveReaction accepts single Unicode and verified guild custom emojis and rejects invalid outputs`() =
+        runTest {
+            val guildEmojis =
+                listOf(
+                    GuildCustomEmoji(id = Snowflake(111222333444L), name = "blobcat", isAnimated = false),
+                    GuildCustomEmoji(id = Snowflake(555666777888L), name = "party", isAnimated = true),
+                )
+            val turn =
+                DefaultChatterEmojiService()
+                    .beginTurn(
+                        channelId = Snowflake(1L),
+                        guildId = Snowflake(2L),
+                        guildEmojisProvider = { guildEmojis },
+                    )
+            turn.prepareReactionEmojis()
 
-        // Valid single Unicode emojis (basic, VS16, skin tone, ZWJ, flag, keycap, star)
-        assertEquals("👍", ChatterReactionEmojiValidator.validateAndNormalize("  👍\n", guildEmojis))
-        assertEquals("❤️", ChatterReactionEmojiValidator.validateAndNormalize("❤️", guildEmojis))
-        assertEquals("👍🏻", ChatterReactionEmojiValidator.validateAndNormalize("👍🏻", guildEmojis))
-        assertEquals("🤦‍♀️", ChatterReactionEmojiValidator.validateAndNormalize("🤦‍♀️", guildEmojis))
-        assertEquals("🇹🇼", ChatterReactionEmojiValidator.validateAndNormalize("🇹🇼", guildEmojis))
-        assertEquals("1️⃣", ChatterReactionEmojiValidator.validateAndNormalize("1️⃣", guildEmojis))
-        assertEquals("⭐", ChatterReactionEmojiValidator.validateAndNormalize("⭐", guildEmojis))
+            // Valid single Unicode emojis (basic, VS16, skin tone, ZWJ, flag, keycap, star)
+            for (emoji in listOf("👍", "❤️", "👍🏻", "🤦‍♀️", "🇹🇼", "1️⃣", "⭐")) {
+                val res = turn.resolveReaction("  $emoji\n") as ReactionResolution.Valid
+                assertEquals(emoji, res.normalizedToken)
+                assertEquals(ReactionEmoji.Unicode(emoji), res.reactionEmoji)
+            }
 
-        // Valid verified guild custom emojis
-        assertEquals(
-            "<:blobcat:111222333444>",
-            ChatterReactionEmojiValidator.validateAndNormalize("<:blobcat:111222333444>", guildEmojis),
-        )
-        assertEquals(
-            "<a:party:555666777888>",
-            ChatterReactionEmojiValidator.validateAndNormalize("<a:party:555666777888>", guildEmojis),
-        )
-        // Canonicalizes animated flag when ID and name match guild emoji
-        assertEquals(
-            "<a:party:555666777888>",
-            ChatterReactionEmojiValidator.validateAndNormalize("<:party:555666777888>", guildEmojis),
-        )
+            // Valid verified guild custom emojis (canonicalizes animated flag)
+            val blobcat = turn.resolveReaction("<:blobcat:111222333444>") as ReactionResolution.Valid
+            assertEquals("<:blobcat:111222333444>", blobcat.normalizedToken)
+            val party = turn.resolveReaction("<:party:555666777888>") as ReactionResolution.Valid
+            assertEquals("<a:party:555666777888>", party.normalizedToken)
+            assertEquals(ReactionEmoji.Custom(Snowflake(555666777888L), "party", isAnimated = true), party.reactionEmoji)
 
-        // Negative boundary rejections
-        assertNull(ChatterReactionEmojiValidator.validateAndNormalize("", guildEmojis))
-        assertNull(ChatterReactionEmojiValidator.validateAndNormalize("   \n ", guildEmojis))
-        assertNull(ChatterReactionEmojiValidator.validateAndNormalize("👍👍", guildEmojis))
-        assertNull(ChatterReactionEmojiValidator.validateAndNormalize("😂😭", guildEmojis))
-        assertNull(ChatterReactionEmojiValidator.validateAndNormalize("👍 nice", guildEmojis))
-        assertNull(ChatterReactionEmojiValidator.validateAndNormalize("haha", guildEmojis))
-        assertNull(ChatterReactionEmojiValidator.validateAndNormalize("none", guildEmojis))
-        assertNull(ChatterReactionEmojiValidator.validateAndNormalize("1", guildEmojis))
-        assertNull(ChatterReactionEmojiValidator.validateAndNormalize("🇹", guildEmojis))
-        assertNull(ChatterReactionEmojiValidator.validateAndNormalize("\uFE0F", guildEmojis))
-        assertNull(ChatterReactionEmojiValidator.validateAndNormalize("\u200D", guildEmojis))
-        assertNull(ChatterReactionEmojiValidator.validateAndNormalize("<:fake:999999999999>", guildEmojis))
-        assertNull(ChatterReactionEmojiValidator.validateAndNormalize("<:wrongname:111222333444>", guildEmojis))
-        assertNull(ChatterReactionEmojiValidator.validateAndNormalize("<:blobcat:111222333444> <:party:555666777888>", guildEmojis))
-        assertNull(ChatterReactionEmojiValidator.validateAndNormalize("<:blobcat:111222333444> lol", guildEmojis))
-        assertNull(ChatterReactionEmojiValidator.validateAndNormalize("<:blobcat:111222333444>", emptyList()))
+            // Explicit NONE -> Declined
+            assertEquals(ReactionResolution.Declined, turn.resolveReaction("none"))
 
-        // Conversion to Kord ReactionEmoji
-        assertEquals(ReactionEmoji.Unicode("🔥"), ChatterReactionEmojiValidator.toReactionEmoji("🔥", guildEmojis))
-        assertEquals(
-            ReactionEmoji.Custom(Snowflake(555666777888L), "party", isAnimated = true),
-            ChatterReactionEmojiValidator.toReactionEmoji("<a:party:555666777888>", guildEmojis),
-        )
-        assertNull(ChatterReactionEmojiValidator.toReactionEmoji("<:fake:999>", guildEmojis))
-    }
+            // Negative boundary rejections -> Invalid
+            val invalidCases =
+                listOf(
+                    "",
+                    "   \n ",
+                    "👍👍",
+                    "😂😭",
+                    "👍 nice",
+                    "haha",
+                    "1",
+                    "🇹",
+                    "\uFE0F",
+                    "\u200D",
+                    "<:fake:999999999999>",
+                    "<:wrongname:111222333444>",
+                    "<:blobcat:111222333444> <:party:555666777888>",
+                    "<:blobcat:111222333444> lol",
+                )
+            for (bad in invalidCases) {
+                assertTrue(turn.resolveReaction(bad) is ReactionResolution.Invalid, "Expected invalid reaction for '$bad'")
+            }
+        }
 
     @Test
     fun `ChatterPromptBuilder buildReactionInteractionRequest sets maxOutputTokens 128, multimodal attachments, guild emojis, and persona drift`() {
@@ -298,7 +298,7 @@ class ChatterReactionSelectionTest {
     }
 
     @Test
-    fun `selectReactionEmoji enforces strict no-fallback rule on HTTP error, timeout, blank, and invalid output with warn log and SKIPPED trace`(
+    fun `selectReactionEmoji enforces strict no-fallback rule on HTTP error, timeout, and blank output with warn log and SKIPPED trace`(
         @TempDir tempDir: Path,
     ) = runTest {
         val slf4jLogger = LoggerFactory.getLogger(ChatterGenerator::class.java) as Logger
@@ -324,25 +324,9 @@ class ChatterReactionSelectionTest {
                             throw HttpRequestTimeoutException("https://generativelanguage.googleapis.com", 10_000L)
                         }
 
-                        2 -> {
-                            respond(
-                                content = """{"id":"int-empty","status":"completed","finish_reason":"STOP","output_text":"   "}""",
-                                status = HttpStatusCode.OK,
-                                headers = headersOf(HttpHeaders.ContentType, "application/json"),
-                            )
-                        }
-
-                        3 -> {
-                            respond(
-                                content = """{"id":"int-bad-text","status":"completed","finish_reason":"STOP","output_text":"我覺得 👍👍 很棒"}""",
-                                status = HttpStatusCode.OK,
-                                headers = headersOf(HttpHeaders.ContentType, "application/json"),
-                            )
-                        }
-
                         else -> {
                             respond(
-                                content = """{"id":"int-hallucinated","status":"completed","finish_reason":"STOP","output_text":"<:fake:99999999>"}""",
+                                content = """{"id":"int-empty","status":"completed","finish_reason":"STOP","output_text":"   "}""",
                                 status = HttpStatusCode.OK,
                                 headers = headersOf(HttpHeaders.ContentType, "application/json"),
                             )
@@ -364,29 +348,26 @@ class ChatterReactionSelectionTest {
                     guildEmojis = listOf(GuildCustomEmoji(Snowflake(111222333444L), "blobcat")),
                 )
 
-            for (caseIdx in 0..4) {
+            for (caseIdx in 0..2) {
                 scenario = caseIdx
                 assertNull(generator.selectReactionEmoji(input), "Case $caseIdx must return null without fallback")
             }
             recorder.flushAndClose()
 
-            // Exactly 1 request per case (no retries or fallbacks)
-            assertEquals(5, requestCount)
+            assertEquals(3, requestCount)
 
             val traces = ChatterAiTraceTestSupport.readTraceLines(tempDir)
-            assertEquals(5, traces.size)
-            assertTrue(traces.all { it.outcome == AiTraceOutcome.SKIPPED })
-            assertTrue(traces.all { it.finalOutput == null })
-            assertTrue(traces.all { it.attempts.single().stage == AiAttemptStage.REACTION_SELECT })
+            assertEquals(3, traces.size)
+            assertTrue(traces.all { it.outcome == AiTraceOutcome.SKIPPED }, "Expected all failed reaction traces to be SKIPPED")
+            assertTrue(traces.all { it.finalOutput == null }, "Expected null finalOutput for all failed reaction traces")
+            assertTrue(traces.all { it.attempts.single().stage == AiAttemptStage.REACTION_SELECT }, "Expected REACTION_SELECT attempt stage")
 
             assertEquals(AiTraceFailureCategory.HTTP_ERROR, traces[0].failureCategory)
             assertEquals(AiTraceFailureCategory.TIMEOUT, traces[1].failureCategory)
             assertEquals(AiTraceFailureCategory.EMPTY_OUTPUT, traces[2].failureCategory)
-            assertEquals(AiTraceFailureCategory.PARSE_ERROR, traces[3].failureCategory)
-            assertEquals(AiTraceFailureCategory.PARSE_ERROR, traces[4].failureCategory)
 
             val warnMessages = appender.list.filter { it.level.levelStr == "WARN" }.map { it.formattedMessage }
-            assertEquals(5, warnMessages.size, "Expected observable WARN log for every failed/invalid reaction selection")
+            assertEquals(3, warnMessages.size, "Expected observable WARN log for every failed/blank reaction selection")
         } finally {
             slf4jLogger.detachAppender(appender)
         }
@@ -430,19 +411,22 @@ class ChatterReactionSelectionTest {
                 traceRecorder = recorder,
             )
 
-        val emoji =
+        val guildEmojis = listOf(GuildCustomEmoji(Snowflake(1433693710293667860L), "dora_peter"))
+        val raw =
             generator.selectReactionEmoji(
                 ChatterInput(
                     transcript = "[Alice]: 看看這個",
-                    guildEmojis = listOf(GuildCustomEmoji(Snowflake(1433693710293667860L), "dora_peter")),
+                    guildEmojis = guildEmojis,
                 ),
             )
         recorder.flushAndClose()
 
-        assertNull(emoji, "Truncated custom emoji must fail closed without falling back")
+        assertEquals("<:dora_peter:14336", raw)
+        val turn = DefaultChatterEmojiService().beginTurn(Snowflake(1L), Snowflake(2L), guildEmojisProvider = { guildEmojis })
+        turn.prepareReactionEmojis()
+        assertTrue(turn.resolveReaction(raw) is ReactionResolution.Invalid, "Truncated custom emoji must fail closed without falling back")
+
         val trace = ChatterAiTraceTestSupport.readTraceLines(tempDir).single()
-        assertEquals(AiTraceOutcome.SKIPPED, trace.outcome)
-        assertEquals(AiTraceFailureCategory.PARSE_ERROR, trace.failureCategory)
         val attempt = trace.attempts.single()
         assertEquals("INCOMPLETE", attempt.finishReason)
         assertEquals(2225, attempt.usageMetadata?.promptTokenCount)

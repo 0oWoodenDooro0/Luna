@@ -26,11 +26,11 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
-import luna.chatter.emoji.BoundedChannelEmojiCadenceTracker
-import luna.chatter.emoji.DefaultChatterEmojiCatalog
-import luna.chatter.emoji.ExposedCustomEmojiMeaningRepository
+import luna.chatter.emoji.DefaultChatterEmojiService
+import luna.chatter.emoji.ReactionResolution
 import luna.core.ai.AiAttemptStage
 import luna.core.ai.AiTraceOutcome
+import luna.core.ai.GeminiInteractionClient
 import luna.core.ai.JsonlAiTraceRecorder
 import luna.plugin.DefaultPluginContext
 import org.jetbrains.exposed.v1.jdbc.Database
@@ -160,41 +160,69 @@ class ChatterEmojiCadenceAndReactionPromptTest {
     }
 
     @Test
-    fun `ChatterReactionEmojiValidator and selectReactionEmoji treat NONE as intentional silent skip without warn`() =
+    fun `ChatterEmojiTurn and ChatterService treat NONE as intentional silent skip without warn`() =
         runTest {
             val guildEmojis = listOf(GuildCustomEmoji(Snowflake(1001L), "cat_ok"))
-            assertTrue(ChatterReactionEmojiValidator.isExplicitNoReaction("NONE"), "Exact NONE must be recognized")
-            assertTrue(ChatterReactionEmojiValidator.isExplicitNoReaction("  none \n"), "Case-insensitive trimmed none must be recognized")
-            assertFalse(ChatterReactionEmojiValidator.isExplicitNoReaction("🔥"), "Emoji must not match NONE sentinel")
-            assertFalse(ChatterReactionEmojiValidator.isExplicitNoReaction("NONE please"), "Extra words must not match NONE sentinel")
-            assertNull(ChatterReactionEmojiValidator.validateAndNormalize("NONE", guildEmojis))
+            val turn = DefaultChatterEmojiService().beginTurn(Snowflake(1L), Snowflake(2L), guildEmojisProvider = { guildEmojis })
+            turn.prepareReactionEmojis()
+            assertEquals(ReactionResolution.Declined, turn.resolveReaction("NONE"))
+            assertEquals(ReactionResolution.Declined, turn.resolveReaction("  none \n"))
+            assertTrue(turn.resolveReaction("🔥") is ReactionResolution.Valid, "Emoji must not match NONE sentinel")
+            assertTrue(turn.resolveReaction("NONE please") is ReactionResolution.Invalid, "Extra words must not match NONE sentinel")
 
-            val generatorLogger = LoggerFactory.getLogger(ChatterGenerator::class.java) as Logger
+            val serviceLogger = LoggerFactory.getLogger(ChatterService::class.java) as Logger
             val appender = ListAppender<ILoggingEvent>().apply { start() }
-            generatorLogger.addAppender(appender)
+            serviceLogger.addAppender(appender)
 
             try {
                 val traceDir = tempDir.resolve("none-trace")
                 val recorder = JsonlAiTraceRecorder(traceDir = traceDir, clock = ChatterAiTraceTestSupport.fixedClock)
                 val mockEngine =
-                    MockEngine {
-                        respond(
-                            content = """{"id":"int-none","status":"completed","finish_reason":"STOP","output_text":"  NONE "}""",
-                            status = HttpStatusCode.OK,
-                            headers = headersOf(HttpHeaders.ContentType, "application/json"),
-                        )
+                    MockEngine { request ->
+                        if (request.url.toString().contains("/v1beta/interactions")) {
+                            respond(
+                                content = """{"id":"int-none","status":"completed","finish_reason":"STOP","output_text":"  NONE "}""",
+                                status = HttpStatusCode.OK,
+                                headers = headersOf(HttpHeaders.ContentType, "application/json"),
+                            )
+                        } else {
+                            respond(
+                                content = """{"model":"gemini-decision-1","answers":{"should_participate":{"type":"noul","noul":0.55,"confidence":0.85}}}""",
+                                status = HttpStatusCode.OK,
+                                headers = headersOf(HttpHeaders.ContentType, "application/json"),
+                            )
+                        }
                     }
-                val generator =
-                    ChatterGenerator(
-                        config = ChatterConfig(apiKey = "secret-key"),
-                        httpClient = createClient(mockEngine),
+                val filter = ChatterNoiseFilter()
+                val service =
+                    ChatterService(
+                        filter = filter,
+                        decisionClient =
+                            GeminiDecisionClient(
+                                ChatterDecisionConfig(apiKey = "secret-key", threshold = 0.70),
+                                createClient(mockEngine),
+                                traceRecorder = recorder,
+                            ),
+                        chatterGenerator =
+                            ChatterGenerator(
+                                ChatterConfig(apiKey = "secret-key", reactionThreshold = 0.45),
+                                createClient(mockEngine),
+                                traceRecorder = recorder,
+                            ),
+                        channelPort = FakeChatterChannelPort(),
+                        contextCollector = ChatterContextCollector(noiseFilter = filter, peekResolver = { null }),
                         traceRecorder = recorder,
+                        burstCoordinator = BoundedChannelBurstCoordinator(debounceMs = 1L),
+                        randomProvider = { _, _ -> 0L },
+                        personaStateProvider = fixedPersonaProvider(),
                     )
 
-                val selected = generator.selectReactionEmoji(ChatterInput(transcript = "[Alice]: 嗯嗯", guildEmojis = guildEmojis))
+                assertFalse(
+                    service.processMessage(ChatterAiTraceTestSupport.createMockMessage(id = 99L, channelId = 901L, content = "嗯嗯")),
+                    "NONE reaction must return false",
+                )
                 recorder.flushAndClose()
 
-                assertNull(selected)
                 val trace = ChatterAiTraceTestSupport.readTraceLines(traceDir).single()
                 assertEquals(AiTraceOutcome.SKIPPED, trace.outcome)
                 assertNull(trace.failureCategory)
@@ -203,7 +231,7 @@ class ChatterEmojiCadenceAndReactionPromptTest {
                 val warnLogs = appender.list.filter { it.level == Level.WARN }.map { it.formattedMessage }
                 assertTrue(warnLogs.isEmpty(), "Intentional NONE skip must not emit WARN logs, got: $warnLogs")
             } finally {
-                generatorLogger.detachAppender(appender)
+                serviceLogger.detachAppender(appender)
             }
         }
 
@@ -211,14 +239,27 @@ class ChatterEmojiCadenceAndReactionPromptTest {
     fun `ChatterService reply emoji cooldown omits guild pool for two turns while preserving transcript meaning annotation`() =
         runTest {
             val db = openDatabase("reply-cadence.db")
-            val meaningRepo =
-                ExposedCustomEmojiMeaningRepository(
-                    database = db,
-                    clock = Clock.fixed(Instant.ofEpochMilli(10_000L), ZoneOffset.UTC),
-                )
-            meaningRepo.upsertResolvedMeaning("1001", "guild_happy", isAnimated = false, meaning = "開心慶祝")
-
             val now = AtomicLong(100_000L)
+            val visionEngine =
+                MockEngine {
+                    respond(
+                        content = """{"id":"v-1","status":"completed","finish_reason":"STOP","output_text":"開心慶祝"}""",
+                        status = HttpStatusCode.OK,
+                        headers = headersOf(HttpHeaders.ContentType, "application/json"),
+                    )
+                }
+            val emojiService =
+                DefaultChatterEmojiService(
+                    database = db,
+                    visionModel = "gemini-2.5-flash-lite",
+                    interactionClient = GeminiInteractionClient(httpClient = createClient(visionEngine)),
+                    apiKey = "vision-key",
+                    clock = Clock.fixed(Instant.ofEpochMilli(10_000L), ZoneOffset.UTC),
+                    timeSource = { now.get() },
+                    replyEmojiCooldownTurns = 2,
+                )
+            emojiService.preScanGuild(Snowflake(777L), listOf(GuildCustomEmoji(Snowflake(1001L), "guild_happy")))
+
             val replyBodies = mutableListOf<String>()
             var llmOutput = "太神了吧 <:guild_happy:1001>"
 
@@ -244,7 +285,6 @@ class ChatterEmojiCadenceAndReactionPromptTest {
 
             val cooldownCache = BoundedChannelCooldownCache(defaultCooldownDurationMs = 5_000L, timeSource = { now.get() })
             val filter = ChatterNoiseFilter(cooldownCache = cooldownCache, cooldownDurationMs = 5_000L)
-            val cadenceTracker = BoundedChannelEmojiCadenceTracker(replyCooldownTurns = 2, timeSource = { now.get() })
             val guildEmoji =
                 mockk<GuildEmoji>(relaxed = true).apply {
                     every { id } returns Snowflake(1001L)
@@ -266,8 +306,7 @@ class ChatterEmojiCadenceAndReactionPromptTest {
                     burstCoordinator = BoundedChannelBurstCoordinator(debounceMs = 1L),
                     randomProvider = { _, _ -> 0L },
                     personaStateProvider = fixedPersonaProvider(),
-                    emojiCatalog = DefaultChatterEmojiCatalog(meaningRepository = meaningRepo),
-                    emojiCadenceTracker = cadenceTracker,
+                    emojiService = emojiService,
                 )
 
             fun guildMsg(
@@ -339,7 +378,7 @@ class ChatterEmojiCadenceAndReactionPromptTest {
 
             val cooldownCache = BoundedChannelCooldownCache(timeSource = { now.get() })
             val filter = ChatterNoiseFilter(cooldownCache = cooldownCache)
-            val cadenceTracker = BoundedChannelEmojiCadenceTracker(reactionCooldownMs = 30_000L, timeSource = { now.get() })
+            val emojiService = DefaultChatterEmojiService(reactionCooldownMs = 30_000L, timeSource = { now.get() })
             val channelPort = FakeChatterChannelPort()
 
             val service =
@@ -363,7 +402,7 @@ class ChatterEmojiCadenceAndReactionPromptTest {
                     burstCoordinator = BoundedChannelBurstCoordinator(debounceMs = 1L),
                     randomProvider = { _, _ -> 0L },
                     personaStateProvider = fixedPersonaProvider(),
-                    emojiCadenceTracker = cadenceTracker,
+                    emojiService = emojiService,
                 )
 
             // Turn 1: delivers 🔥 reaction without starting text reply cooldown
@@ -394,7 +433,10 @@ class ChatterEmojiCadenceAndReactionPromptTest {
             assertContains(extractInteractionSystemInstruction(reactionBodies[1]), "近期在這個頻道已使用過的 Reaction")
             assertContains(extractInteractionSystemInstruction(reactionBodies[1]), "🔥")
             assertEquals(1, channelPort.addedReactions.size, "NONE must not add any Discord reaction")
-            assertFalse(cadenceTracker.isReactionOnCooldown(Snowflake(401L)), "Declined NONE reaction must not trigger reaction cooldown")
+            assertFalse(
+                emojiService.beginTurn(Snowflake(401L), null, guildEmojisProvider = { emptyList() }).isReactionOnCooldown(),
+                "Declined NONE reaction must not trigger reaction cooldown",
+            )
 
             // Turn 4 immediately after NONE: not on cooldown, only 🔥 remains in recentReactions
             nextReactionOutput = "👍"
@@ -406,7 +448,10 @@ class ChatterEmojiCadenceAndReactionPromptTest {
                 listOf<ReactionEmoji>(ReactionEmoji.Unicode("🔥"), ReactionEmoji.Unicode("👍")),
                 channelPort.addedReactions.map { it.emoji },
             )
-            assertEquals(listOf("🔥", "👍"), cadenceTracker.recentReactions(Snowflake(401L)))
+            assertEquals(
+                listOf("🔥", "👍"),
+                emojiService.beginTurn(Snowflake(401L), null, guildEmojisProvider = { emptyList() }).prepareReactionEmojis().recentReactions,
+            )
 
             recorder.flushAndClose()
             val traces = ChatterAiTraceTestSupport.readTraceLines(traceDir)
@@ -456,7 +501,7 @@ class ChatterEmojiCadenceAndReactionPromptTest {
 
             val cooldownCache = BoundedChannelCooldownCache(timeSource = { now.get() })
             val filter = ChatterNoiseFilter(cooldownCache = cooldownCache)
-            val cadenceTracker = BoundedChannelEmojiCadenceTracker(timeSource = { now.get() })
+            val emojiService = DefaultChatterEmojiService(timeSource = { now.get() })
 
             val okGuildEmoji =
                 mockk<GuildEmoji>(relaxed = true).apply {
@@ -481,12 +526,20 @@ class ChatterEmojiCadenceAndReactionPromptTest {
                     burstCoordinator = BoundedChannelBurstCoordinator(debounceMs = 1L),
                     randomProvider = { _, _ -> 0L },
                     personaStateProvider = fixedPersonaProvider(),
-                    emojiCadenceTracker = cadenceTracker,
+                    emojiService = emojiService,
                 )
 
             val replyMsg = ChatterAiTraceTestSupport.createMockMessage(id = 21L, channelId = 501L, content = "失敗測試")
             assertFalse(failingService.processMessage(replyMsg), "Failed sendMessage must return false")
-            assertTrue(cadenceTracker.shouldAllowReplyCustomEmojis(Snowflake(501L)), "Failed reply delivery must not trigger reply emoji cooldown")
+            assertEquals(
+                1,
+                emojiService
+                    .beginTurn(Snowflake(501L), null, guildEmojisProvider = { listOf(GuildCustomEmoji(Snowflake(1001L), "ok")) })
+                    .prepareReplyEmojis("check")
+                    .guildEmojis
+                    .size,
+                "Failed reply delivery must not trigger reply emoji cooldown",
+            )
 
             // Reaction path failure via addReaction exception
             val reactionFailingEngine =
@@ -519,39 +572,13 @@ class ChatterEmojiCadenceAndReactionPromptTest {
                     burstCoordinator = BoundedChannelBurstCoordinator(debounceMs = 1L),
                     randomProvider = { _, _ -> 0L },
                     personaStateProvider = fixedPersonaProvider(),
-                    emojiCadenceTracker = cadenceTracker,
+                    emojiService = emojiService,
                 )
 
             val reactMsg = ChatterAiTraceTestSupport.createMockMessage(id = 22L, channelId = 502L, content = "失敗表態測試")
             assertFalse(reactionFailingService.processMessage(reactMsg), "Failed addReaction must return false")
-            assertFalse(cadenceTracker.isReactionOnCooldown(Snowflake(502L)), "Failed reaction delivery must not trigger reaction cooldown")
-            assertEquals(emptyList(), cadenceTracker.recentReactions(Snowflake(502L)))
-        }
-
-    @Test
-    fun `ChatterPlugin wires shared BoundedChannelEmojiCadenceTracker into ChatterService`() =
-        runTest {
-            val context =
-                DefaultPluginContext(
-                    kord = mockk<Kord>(relaxed = true),
-                    routing = mockk<Routing>(relaxed = true),
-                    database = mockk<Database>(relaxed = true),
-                    env =
-                        luna.config.EnvReader.of(
-                            "GEMINI_API_KEY" to "plugin-key",
-                            "CHATTER_ENABLED" to "false",
-                        ),
-                )
-            val plugin = ChatterPlugin()
-            plugin.initialize(context)
-            try {
-                val tracker = assertNotNull(plugin.emojiCadenceTracker)
-                assertTrue(
-                    tracker === plugin.service?.emojiCadenceTracker,
-                    "ChatterPlugin must wire the same BoundedChannelEmojiCadenceTracker instance into ChatterService",
-                )
-            } finally {
-                plugin.shutdown()
-            }
+            val checkTurn = emojiService.beginTurn(Snowflake(502L), null, guildEmojisProvider = { emptyList() })
+            assertFalse(checkTurn.isReactionOnCooldown(), "Failed reaction delivery must not trigger reaction cooldown")
+            assertEquals(emptyList(), checkTurn.prepareReactionEmojis().recentReactions)
         }
 }

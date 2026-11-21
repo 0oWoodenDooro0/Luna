@@ -9,7 +9,7 @@ import java.util.LinkedHashMap
  *
  * Enforces capacity bounds per CODING_STANDARDS.md §1 to prevent unbounded daemon memory growth.
  */
-class BoundedChannelEmojiCadenceTracker(
+internal class BoundedChannelEmojiCadenceTracker(
     val maxEntries: Int = DEFAULT_MAX_CAPACITY,
     val replyCooldownTurns: Int = DEFAULT_REPLY_EMOJI_COOLDOWN_TURNS,
     val replyCooldownWindowMs: Long = DEFAULT_REPLY_EMOJI_COOLDOWN_WINDOW_MS,

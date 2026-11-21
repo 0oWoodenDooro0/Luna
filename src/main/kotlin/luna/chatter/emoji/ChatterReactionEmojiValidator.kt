@@ -1,13 +1,14 @@
-package luna.chatter
+package luna.chatter.emoji
 
 import dev.kord.core.entity.ReactionEmoji
+import luna.chatter.GuildCustomEmoji
 import luna.core.ai.EmojiSanitizer
 
 /**
- * Validates and normalizes LLM reaction-selection output into a single valid Unicode emoji
- * or verified Discord guild custom emoji (`<:name:id>` / `<a:name:id>`).
+ * Internal validator normalizing LLM reaction-selection output into a single valid Unicode emoji
+ * or verified Discord Application / Guild custom emoji (`<:name:id>` / `<a:name:id>`).
  */
-object ChatterReactionEmojiValidator {
+internal object ChatterReactionEmojiValidator {
     const val NO_REACTION_SENTINEL: String = "NONE"
     private const val VARIATION_SELECTOR_16 = 0xFE0F
     private const val VARIATION_SELECTOR_15 = 0xFE0E
@@ -18,22 +19,17 @@ object ChatterReactionEmojiValidator {
 
     private val CUSTOM_EMOJI_REGEX = Regex("""^<(a?):([A-Za-z0-9_~-]+):(\d+)>$""")
 
-    /**
-     * Returns `true` when the reaction selection model explicitly declined to react using [NO_REACTION_SENTINEL].
-     */
     fun isExplicitNoReaction(raw: String?): Boolean = raw?.trim()?.equals(NO_REACTION_SENTINEL, ignoreCase = true) == true
 
-    /**
-     * Validates [raw] and returns either the trimmed single Unicode emoji or the canonical verified
-     * custom emoji mention (`<:name:id>` / `<a:name:id>`) from [applicationEmojis] or [guildEmojis],
-     * or `null` if invalid/unverified.
-     */
-    fun validateAndNormalize(
+    fun resolve(
         raw: String?,
         guildEmojis: List<GuildCustomEmoji> = emptyList(),
         applicationEmojis: List<GuildCustomEmoji> = emptyList(),
-    ): String? {
-        val trimmed = raw?.trim()?.takeIf { it.isNotEmpty() } ?: return null
+    ): ReactionResolution {
+        val trimmed = raw?.trim()?.takeIf { it.isNotEmpty() } ?: return ReactionResolution.Invalid("Reaction selection output is blank")
+        if (isExplicitNoReaction(trimmed)) {
+            return ReactionResolution.Declined
+        }
 
         val customMatch = CUSTOM_EMOJI_REGEX.matchEntire(trimmed)
         if (customMatch != null) {
@@ -42,31 +38,26 @@ object ChatterReactionEmojiValidator {
             val matched =
                 (applicationEmojis + guildEmojis).firstOrNull { emoji ->
                     emoji.id.toString() == id && emoji.name == name
-                } ?: return null
-            return matched.mention
+                }
+                    ?: return ReactionResolution.Invalid(
+                        "Reaction selection output was not a single valid Unicode or verified guild custom emoji",
+                    )
+            return ReactionResolution.Valid(
+                normalizedToken = matched.mention,
+                reactionEmoji = matched.toReactionEmoji(),
+            )
         }
 
-        return if (isSingleUnicodeEmoji(trimmed)) trimmed else null
-    }
-
-    /**
-     * Converts a raw or normalized reaction emoji string into a Kord [ReactionEmoji] when valid and verified.
-     */
-    fun toReactionEmoji(
-        raw: String?,
-        guildEmojis: List<GuildCustomEmoji> = emptyList(),
-        applicationEmojis: List<GuildCustomEmoji> = emptyList(),
-    ): ReactionEmoji? {
-        val normalized = validateAndNormalize(raw, guildEmojis = guildEmojis, applicationEmojis = applicationEmojis) ?: return null
-        val customMatch = CUSTOM_EMOJI_REGEX.matchEntire(normalized)
-        if (customMatch != null) {
-            val name = customMatch.groupValues[2]
-            val id = customMatch.groupValues[3]
-            return (applicationEmojis + guildEmojis)
-                .firstOrNull { it.id.toString() == id && it.name == name }
-                ?.toReactionEmoji()
+        if (isSingleUnicodeEmoji(trimmed)) {
+            return ReactionResolution.Valid(
+                normalizedToken = trimmed,
+                reactionEmoji = ReactionEmoji.Unicode(trimmed),
+            )
         }
-        return ReactionEmoji.Unicode(normalized)
+
+        return ReactionResolution.Invalid(
+            "Reaction selection output was not a single valid Unicode or verified guild custom emoji",
+        )
     }
 
     internal fun isSingleUnicodeEmoji(text: String): Boolean {
@@ -74,25 +65,18 @@ object ChatterReactionEmojiValidator {
         val codePoints = text.codePoints().toArray()
         if (codePoints.isEmpty()) return false
 
-        // 1. Flag sequence: exactly two regional indicator symbols
         if (codePoints.size == 2 && codePoints.all(::isRegionalIndicator)) {
             return true
         }
         if (codePoints.any(::isRegionalIndicator)) {
             return false
         }
-
-        // 2. Keycap sequence: [0-9#*] + optional FE0F + 20E3
         if (isKeycapSequence(codePoints)) {
             return true
         }
-
-        // 3. Tag flag sequence (e.g., England/Scotland/Wales): 1F3F4 + tag chars (E0061..E007A) + E007F
         if (isTagFlagSequence(codePoints)) {
             return true
         }
-
-        // 4. Standard / skin-tone / ZWJ emoji sequence: component (ZWJ component)*
         return isSingleEmojiComponentSequence(codePoints)
     }
 
@@ -161,7 +145,6 @@ object ChatterReactionEmojiValidator {
                     return false
                 }
                 idx++
-                // Trailing ZWJ with no following component is invalid
                 if (idx >= codePoints.size) {
                     return false
                 }
