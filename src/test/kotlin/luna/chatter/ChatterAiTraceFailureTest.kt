@@ -8,7 +8,6 @@ import io.ktor.client.plugins.HttpRequestTimeoutException
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.headersOf
-import io.mockk.mockk
 import kotlinx.coroutines.test.runTest
 import luna.core.ai.AiAttemptStage
 import luna.core.ai.AiTraceFailureCategory
@@ -180,7 +179,7 @@ class ChatterAiTraceFailureTest {
                     filter = ChatterNoiseFilter(),
                     decisionClient = GeminiDecisionClient(config = ChatterDecisionConfig(apiKey = ""), traceRecorder = recorder),
                     chatterGenerator = ChatterGenerator(config = ChatterConfig(apiKey = ""), traceRecorder = recorder),
-                    historyFetcher = { _, _ -> emptyList() },
+                    channelPort = FakeChatterChannelPort(),
                     traceRecorder = recorder,
                 )
             val msg =
@@ -190,7 +189,7 @@ class ChatterAiTraceFailureTest {
                     mentionedUserIds = setOf(selfId),
                     selfId = selfId,
                 )
-            assertFalse(service.processMessage(msg))
+            assertFalse(service.processMessage(msg), "Unconfigured service must return false")
         }
 
         // 2. Blank reply context on direct mention (e.g. collector returns blank context) -> attempts: []
@@ -207,7 +206,7 @@ class ChatterAiTraceFailureTest {
                     filter = ChatterNoiseFilter(),
                     decisionClient = GeminiDecisionClient(config = ChatterDecisionConfig(apiKey = "k"), traceRecorder = recorder),
                     chatterGenerator = ChatterGenerator(config = ChatterConfig(apiKey = "k"), traceRecorder = recorder),
-                    historyFetcher = { _, _ -> emptyList() },
+                    channelPort = FakeChatterChannelPort(),
                     contextCollector = emptyCollector,
                     traceRecorder = recorder,
                 )
@@ -218,10 +217,10 @@ class ChatterAiTraceFailureTest {
                     mentionedUserIds = setOf(selfId),
                     selfId = selfId,
                 )
-            assertFalse(service.processMessage(msg))
+            assertFalse(service.processMessage(msg), "Blank reply context must return false")
         }
 
-        // 3. Channel resolution error after ambient DECISION succeeded -> preserves DECISION attempt
+        // 3. Post-decision collectReplyContext failure after ambient DECISION succeeded -> preserves DECISION attempt
         run {
             val decisionEngine =
                 MockEngine {
@@ -230,6 +229,13 @@ class ChatterAiTraceFailureTest {
                         status = HttpStatusCode.OK,
                         headers = headersOf(HttpHeaders.ContentType, "application/json"),
                     )
+                }
+            val failingReplyCollector =
+                object : ChatterContextCollector() {
+                    override suspend fun collectReplyContext(
+                        messages: List<Message>,
+                        kordSelfId: Snowflake?,
+                    ): PreparedChatterContext = throw IllegalStateException("Post-decision reply context boom")
                 }
             val service =
                 ChatterService(
@@ -241,16 +247,16 @@ class ChatterAiTraceFailureTest {
                             traceRecorder = recorder,
                         ),
                     chatterGenerator = ChatterGenerator(config = ChatterConfig(apiKey = "k"), traceRecorder = recorder),
-                    historyFetcher = { _, _ -> emptyList() },
+                    channelPort = FakeChatterChannelPort(),
+                    contextCollector = failingReplyCollector,
                     traceRecorder = recorder,
                 )
             val msg =
                 ChatterAiTraceTestSupport.createMockMessage(
                     id = 803L,
                     content = "Does anyone know Kotlin?",
-                    channelThrows = true,
                 )
-            assertFalse(service.processMessage(msg))
+            assertFalse(service.processMessage(msg), "Post-decision collectReplyContext failure must return false")
         }
 
         // 4. Discord delivery failure -> UNEXPECTED_ERROR with CHATTER_GENERATE attempt recorded
@@ -264,6 +270,10 @@ class ChatterAiTraceFailureTest {
                     )
                 }
             val httpClient = ChatterAiTraceTestSupport.createHttpClient(genEngine)
+            val channelPort =
+                FakeChatterChannelPort().apply {
+                    sendError = RuntimeException("Discord 500")
+                }
             val service =
                 ChatterService(
                     filter = ChatterNoiseFilter(),
@@ -279,8 +289,7 @@ class ChatterAiTraceFailureTest {
                             httpClient = httpClient,
                             traceRecorder = recorder,
                         ),
-                    historyFetcher = { _, _ -> emptyList() },
-                    messageSender = { _, _ -> throw RuntimeException("Discord 500") },
+                    channelPort = channelPort,
                     traceRecorder = recorder,
                 )
             val msg =
@@ -290,7 +299,7 @@ class ChatterAiTraceFailureTest {
                     mentionedUserIds = setOf(selfId),
                     selfId = selfId,
                 )
-            assertFalse(service.processMessage(msg))
+            assertFalse(service.processMessage(msg), "Delivery failure must return false")
         }
 
         recorder.flushAndClose()
@@ -339,7 +348,7 @@ class ChatterAiTraceFailureTest {
                     filter = ChatterNoiseFilter(),
                     decisionClient = GeminiDecisionClient(config = ChatterDecisionConfig(apiKey = "k"), traceRecorder = recorder),
                     chatterGenerator = ChatterGenerator(config = ChatterConfig(apiKey = "k"), traceRecorder = recorder),
-                    historyFetcher = { _, _ -> emptyList() },
+                    channelPort = FakeChatterChannelPort(),
                     contextCollector = failingDecisionCollector,
                     traceRecorder = recorder,
                 )
@@ -361,7 +370,7 @@ class ChatterAiTraceFailureTest {
                     filter = ChatterNoiseFilter(),
                     decisionClient = GeminiDecisionClient(config = ChatterDecisionConfig(apiKey = "k"), traceRecorder = recorder),
                     chatterGenerator = ChatterGenerator(config = ChatterConfig(apiKey = "k"), traceRecorder = recorder),
-                    historyFetcher = { _, _ -> emptyList() },
+                    channelPort = FakeChatterChannelPort(),
                     contextCollector = failingReplyCollector,
                     traceRecorder = recorder,
                 )

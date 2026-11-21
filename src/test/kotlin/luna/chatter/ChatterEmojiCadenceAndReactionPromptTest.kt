@@ -7,7 +7,6 @@ import ch.qos.logback.core.read.ListAppender
 import dev.kord.common.entity.Snowflake
 import dev.kord.common.entity.optional.OptionalSnowflake
 import dev.kord.core.Kord
-import dev.kord.core.entity.Guild
 import dev.kord.core.entity.GuildEmoji
 import dev.kord.core.entity.ReactionEmoji
 import io.ktor.client.HttpClient
@@ -20,10 +19,8 @@ import io.ktor.http.HttpStatusCode
 import io.ktor.http.headersOf
 import io.ktor.serialization.kotlinx.json.json
 import io.ktor.server.routing.Routing
-import io.mockk.coEvery
 import io.mockk.every
 import io.mockk.mockk
-import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonArray
@@ -253,28 +250,19 @@ class ChatterEmojiCadenceAndReactionPromptTest {
                     every { isAvailable } returns true
                     every { isAnimated } returns false
                 }
-            val guildMock =
-                mockk<Guild>(relaxed = true).apply {
-                    every { id } returns Snowflake(777L)
-                    every { emojis } returns flowOf(guildEmoji)
+            val channelPort =
+                FakeChatterChannelPort().apply {
+                    guildEmojis = listOf(guildEmoji)
                 }
-
-            val sentMessages = mutableListOf<String>()
             val service =
                 ChatterService(
                     filter = filter,
                     decisionClient = GeminiDecisionClient(ChatterDecisionConfig(apiKey = "secret-key", threshold = 0.70), createClient(mockEngine)),
                     chatterGenerator = ChatterGenerator(ChatterConfig(apiKey = "secret-key"), createClient(mockEngine)),
-                    cooldownCache = cooldownCache,
-                    historyFetcher = { _, _ -> emptyList() },
-                    afterMessagesFetcher = { _, _ -> emptyList() },
+                    channelPort = channelPort,
                     contextCollector = ChatterContextCollector(noiseFilter = filter, peekResolver = { null }),
                     burstCoordinator = BoundedChannelBurstCoordinator(debounceMs = 1L),
                     randomProvider = { _, _ -> 0L },
-                    messageSender = { _, content ->
-                        sentMessages += content
-                        mockk(relaxed = true)
-                    },
                     personaStateProvider = fixedPersonaProvider(),
                     emojiCatalog = DefaultChatterEmojiCatalog(meaningRepository = meaningRepo),
                     emojiCadenceTracker = cadenceTracker,
@@ -285,19 +273,18 @@ class ChatterEmojiCadenceAndReactionPromptTest {
                 content: String,
             ) = ChatterAiTraceTestSupport.createMockMessage(id = id, channelId = 301L, content = content).apply {
                 every { data.guildId } returns OptionalSnowflake.Value(Snowflake(777L))
-                coEvery { getGuildOrNull() } returns guildMock
             }
 
             // Turn 1: guild pool injected and custom emoji allowed
             assertTrue(service.processMessage(guildMsg(1L, "終於過關 <:guild_happy:1001>")), "Turn 1 must succeed")
-            assertEquals("太神了吧 <:guild_happy:1001>", sentMessages[0])
+            assertEquals("太神了吧 <:guild_happy:1001>", channelPort.allDeliveredTexts[0])
             assertContains(extractInteractionPromptText(replyBodies[0]), "<:guild_happy:1001>：開心慶祝")
 
             // Turn 2 (cooldown turn 1): pool omitted, imitated emoji stripped, transcript meaning still annotated
             now.addAndGet(10_000L)
             llmOutput = "笑死 <:guild_happy:1001>"
             assertTrue(service.processMessage(guildMsg(2L, "再來一局 <:guild_happy:1001>")), "Turn 2 must succeed")
-            assertEquals("笑死", sentMessages[1])
+            assertEquals("笑死", channelPort.allDeliveredTexts[1])
             val prompt2 = extractInteractionPromptText(replyBodies[1])
             assertFalse(prompt2.contains("可用的伺服器自訂表情清單"), "Turn 2 must omit guild emoji pool during cooldown")
             assertContains(prompt2, "<:guild_happy:1001>(開心慶祝)")
@@ -306,14 +293,14 @@ class ChatterEmojiCadenceAndReactionPromptTest {
             now.addAndGet(10_000L)
             llmOutput = "穩了啦"
             assertTrue(service.processMessage(guildMsg(3L, "衝啊")), "Turn 3 must succeed")
-            assertEquals("穩了啦", sentMessages[2])
+            assertEquals("穩了啦", channelPort.allDeliveredTexts[2])
             assertFalse(extractInteractionPromptText(replyBodies[2]).contains("可用的伺服器自訂表情清單"), "Turn 3 must still omit guild emoji pool")
 
             // Turn 4: cooldown cleared -> guild pool re-enabled
             now.addAndGet(10_000L)
             llmOutput = "讚啦 <:guild_happy:1001>"
             assertTrue(service.processMessage(guildMsg(4L, "真的過了")), "Turn 4 must succeed")
-            assertEquals("讚啦 <:guild_happy:1001>", sentMessages[3])
+            assertEquals("讚啦 <:guild_happy:1001>", channelPort.allDeliveredTexts[3])
             assertContains(extractInteractionPromptText(replyBodies[3]), "<:guild_happy:1001>：開心慶祝")
         }
 
@@ -350,7 +337,7 @@ class ChatterEmojiCadenceAndReactionPromptTest {
             val cooldownCache = BoundedChannelCooldownCache(timeSource = { now.get() })
             val filter = ChatterNoiseFilter(cooldownCache = cooldownCache)
             val cadenceTracker = BoundedChannelEmojiCadenceTracker(reactionCooldownMs = 30_000L, timeSource = { now.get() })
-            val addedReactions = mutableListOf<ReactionEmoji>()
+            val channelPort = FakeChatterChannelPort()
 
             val service =
                 ChatterService(
@@ -367,16 +354,12 @@ class ChatterEmojiCadenceAndReactionPromptTest {
                             httpClient = createClient(mockEngine),
                             traceRecorder = recorder,
                         ),
-                    cooldownCache = cooldownCache,
-                    historyFetcher = { _, _ -> emptyList() },
-                    afterMessagesFetcher = { _, _ -> emptyList() },
+                    channelPort = channelPort,
                     contextCollector = ChatterContextCollector(noiseFilter = filter, peekResolver = { null }),
                     traceRecorder = recorder,
                     burstCoordinator = BoundedChannelBurstCoordinator(debounceMs = 1L),
                     randomProvider = { _, _ -> 0L },
                     personaStateProvider = fixedPersonaProvider(),
-                    guildEmojisProvider = { emptyList() },
-                    reactionSender = { _, emoji -> addedReactions += emoji },
                     emojiCadenceTracker = cadenceTracker,
                 )
 
@@ -385,7 +368,7 @@ class ChatterEmojiCadenceAndReactionPromptTest {
                 service.processMessage(ChatterAiTraceTestSupport.createMockMessage(id = 11L, channelId = 401L, content = "買新顯卡了")),
                 "Turn 1 reaction should succeed",
             )
-            assertEquals(listOf<ReactionEmoji>(ReactionEmoji.Unicode("🔥")), addedReactions)
+            assertEquals(listOf<ReactionEmoji>(ReactionEmoji.Unicode("🔥")), channelPort.addedReactions.map { it.emoji })
             assertFalse(cooldownCache.isOnCooldown(Snowflake(401L)), "Silent reaction must not start text cooldownCache")
             assertFalse(extractInteractionSystemInstruction(reactionBodies[0]).contains("近期在這個頻道已使用過的 Reaction"), "Turn 1 has no prior reaction history")
 
@@ -407,7 +390,7 @@ class ChatterEmojiCadenceAndReactionPromptTest {
             assertEquals(2, reactionBodies.size)
             assertContains(extractInteractionSystemInstruction(reactionBodies[1]), "近期在這個頻道已使用過的 Reaction")
             assertContains(extractInteractionSystemInstruction(reactionBodies[1]), "🔥")
-            assertEquals(1, addedReactions.size, "NONE must not add any Discord reaction")
+            assertEquals(1, channelPort.addedReactions.size, "NONE must not add any Discord reaction")
             assertFalse(cadenceTracker.isReactionOnCooldown(Snowflake(401L)), "Declined NONE reaction must not trigger reaction cooldown")
 
             // Turn 4 immediately after NONE: not on cooldown, only 🔥 remains in recentReactions
@@ -416,7 +399,10 @@ class ChatterEmojiCadenceAndReactionPromptTest {
                 service.processMessage(ChatterAiTraceTestSupport.createMockMessage(id = 14L, channelId = 401L, content = "準備測試")),
                 "Turn 4 after NONE should not be blocked by cooldown",
             )
-            assertEquals(listOf<ReactionEmoji>(ReactionEmoji.Unicode("🔥"), ReactionEmoji.Unicode("👍")), addedReactions)
+            assertEquals(
+                listOf<ReactionEmoji>(ReactionEmoji.Unicode("🔥"), ReactionEmoji.Unicode("👍")),
+                channelPort.addedReactions.map { it.emoji },
+            )
             assertEquals(listOf("🔥", "👍"), cadenceTracker.recentReactions(Snowflake(401L)))
 
             recorder.flushAndClose()
@@ -469,29 +455,37 @@ class ChatterEmojiCadenceAndReactionPromptTest {
             val filter = ChatterNoiseFilter(cooldownCache = cooldownCache)
             val cadenceTracker = BoundedChannelEmojiCadenceTracker(timeSource = { now.get() })
 
+            val okGuildEmoji =
+                mockk<GuildEmoji>(relaxed = true).apply {
+                    every { id } returns Snowflake(1001L)
+                    every { name } returns "ok"
+                    every { isAvailable } returns true
+                    every { isAnimated } returns false
+                }
+            val replyFailPort =
+                FakeChatterChannelPort().apply {
+                    guildEmojis = listOf(okGuildEmoji)
+                    sendError = RuntimeException("Discord send failed")
+                    reactionError = RuntimeException("Missing Add Reactions permission")
+                }
             val failingService =
                 ChatterService(
                     filter = filter,
                     decisionClient = GeminiDecisionClient(ChatterDecisionConfig(apiKey = "secret-key", threshold = 0.70), createClient(mockEngine)),
                     chatterGenerator = ChatterGenerator(ChatterConfig(apiKey = "secret-key"), createClient(mockEngine)),
-                    cooldownCache = cooldownCache,
-                    historyFetcher = { _, _ -> emptyList() },
-                    afterMessagesFetcher = { _, _ -> emptyList() },
+                    channelPort = replyFailPort,
                     contextCollector = ChatterContextCollector(noiseFilter = filter, peekResolver = { null }),
                     burstCoordinator = BoundedChannelBurstCoordinator(debounceMs = 1L),
                     randomProvider = { _, _ -> 0L },
-                    messageSender = { _, _ -> throw RuntimeException("Discord send failed") },
-                    reactionSender = { _, _ -> throw RuntimeException("Missing Add Reactions permission") },
                     personaStateProvider = fixedPersonaProvider(),
-                    guildEmojisProvider = { listOf(GuildCustomEmoji(Snowflake(1001L), "ok")) },
                     emojiCadenceTracker = cadenceTracker,
                 )
 
             val replyMsg = ChatterAiTraceTestSupport.createMockMessage(id = 21L, channelId = 501L, content = "失敗測試")
-            assertFalse(failingService.processMessage(replyMsg), "Failed messageSender must return false")
+            assertFalse(failingService.processMessage(replyMsg), "Failed sendMessage must return false")
             assertTrue(cadenceTracker.shouldAllowReplyCustomEmojis(Snowflake(501L)), "Failed reply delivery must not trigger reply emoji cooldown")
 
-            // Reaction path failure via reactionSender exception
+            // Reaction path failure via addReaction exception
             val reactionFailingEngine =
                 MockEngine { request ->
                     if (request.url.toString().contains("/v1beta/interactions")) {
@@ -508,25 +502,25 @@ class ChatterEmojiCadenceAndReactionPromptTest {
                         )
                     }
                 }
+            val reactionFailPort =
+                FakeChatterChannelPort().apply {
+                    reactionError = RuntimeException("Missing Add Reactions permission")
+                }
             val reactionFailingService =
                 ChatterService(
                     filter = filter,
                     decisionClient = GeminiDecisionClient(ChatterDecisionConfig(apiKey = "secret-key", threshold = 0.70), createClient(reactionFailingEngine)),
                     chatterGenerator = ChatterGenerator(ChatterConfig(apiKey = "secret-key", reactionThreshold = 0.45), createClient(reactionFailingEngine)),
-                    cooldownCache = cooldownCache,
-                    historyFetcher = { _, _ -> emptyList() },
-                    afterMessagesFetcher = { _, _ -> emptyList() },
+                    channelPort = reactionFailPort,
                     contextCollector = ChatterContextCollector(noiseFilter = filter, peekResolver = { null }),
                     burstCoordinator = BoundedChannelBurstCoordinator(debounceMs = 1L),
                     randomProvider = { _, _ -> 0L },
-                    reactionSender = { _, _ -> throw RuntimeException("Missing Add Reactions permission") },
                     personaStateProvider = fixedPersonaProvider(),
-                    guildEmojisProvider = { emptyList() },
                     emojiCadenceTracker = cadenceTracker,
                 )
 
             val reactMsg = ChatterAiTraceTestSupport.createMockMessage(id = 22L, channelId = 502L, content = "失敗表態測試")
-            assertFalse(reactionFailingService.processMessage(reactMsg), "Failed reactionSender must return false")
+            assertFalse(reactionFailingService.processMessage(reactMsg), "Failed addReaction must return false")
             assertFalse(cadenceTracker.isReactionOnCooldown(Snowflake(502L)), "Failed reaction delivery must not trigger reaction cooldown")
             assertEquals(emptyList(), cadenceTracker.recentReactions(Snowflake(502L)))
         }
