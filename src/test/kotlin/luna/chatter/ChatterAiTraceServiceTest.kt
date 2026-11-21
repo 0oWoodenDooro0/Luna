@@ -77,7 +77,12 @@ class ChatterAiTraceServiceTest {
 
             val customDecisionClient = mockk<GeminiDecisionClient>(relaxed = true)
             val customGenerator = mockk<ChatterGenerator>(relaxed = true)
-            val customService = mockk<ChatterService>(relaxed = true)
+            val customService =
+                ChatterService(
+                    decisionClient = customDecisionClient,
+                    chatterGenerator = customGenerator,
+                    channelPort = FakeChatterChannelPort(),
+                )
 
             val plugin =
                 ChatterPlugin(
@@ -119,8 +124,7 @@ class ChatterAiTraceServiceTest {
                 filter = filter,
                 decisionClient = decisionClient,
                 chatterGenerator = generator,
-                cooldownCache = cooldownCache,
-                historyFetcher = { _, _ -> emptyList() },
+                channelPort = FakeChatterChannelPort(),
                 traceRecorder = recorder,
             )
 
@@ -214,17 +218,13 @@ class ChatterAiTraceServiceTest {
                     httpClient = httpClient,
                     traceRecorder = recorder,
                 )
-            val sentMessages = mutableListOf<String>()
+            val channelPort = FakeChatterChannelPort()
             val service =
                 ChatterService(
                     filter = filter,
                     decisionClient = decisionClient,
                     chatterGenerator = generator,
-                    historyFetcher = { _, _ -> emptyList() },
-                    messageSender = { _, content ->
-                        sentMessages.add(content)
-                        mockk(relaxed = true)
-                    },
+                    channelPort = channelPort,
                     traceRecorder = recorder,
                 )
 
@@ -244,8 +244,8 @@ class ChatterAiTraceServiceTest {
             val handled = service.processMessage(mentionMsg)
             recorder.flushAndClose()
 
-            assertTrue(handled)
-            assertEquals(listOf("Kotlin 協程寫起來超順手"), sentMessages)
+            assertTrue(handled, "Direct mention should be handled")
+            assertEquals(listOf("Kotlin 協程寫起來超順手"), channelPort.allDeliveredTexts)
 
             val traces = ChatterAiTraceTestSupport.readTraceLines(tempDir)
             assertEquals(1, traces.size)
@@ -338,7 +338,7 @@ class ChatterAiTraceServiceTest {
                             httpClient = httpClient,
                             traceRecorder = recorder,
                         ),
-                    historyFetcher = { _, _ -> emptyList() },
+                    channelPort = FakeChatterChannelPort(),
                     traceRecorder = recorder,
                 )
 
@@ -447,8 +447,7 @@ class ChatterAiTraceServiceTest {
                         httpClient = httpClient,
                         traceRecorder = recorder,
                     ),
-                historyFetcher = { _, _ -> emptyList() },
-                messageSender = { _, _ -> mockk(relaxed = true) },
+                channelPort = FakeChatterChannelPort(),
                 traceRecorder = recorder,
             )
 

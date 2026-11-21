@@ -10,7 +10,6 @@ import io.ktor.client.engine.mock.respond
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.headersOf
-import io.mockk.mockk
 import kotlinx.coroutines.test.runTest
 import luna.core.ai.AiAttemptOutcome
 import luna.core.ai.AiAttemptStage
@@ -90,7 +89,7 @@ class ChatterAiTraceAgenticAndUrlTest {
                 noiseFilter = filter,
                 peekResolver = { longVideoPost },
             )
-        val sentMessages = mutableListOf<String>()
+        val channelPort = FakeChatterChannelPort()
         val service =
             ChatterService(
                 filter = filter,
@@ -108,11 +107,7 @@ class ChatterAiTraceAgenticAndUrlTest {
                         maxPollingAttempts = 5,
                         traceRecorder = recorder,
                     ),
-                historyFetcher = { _, _ -> emptyList() },
-                messageSender = { _, content ->
-                    sentMessages.add(content)
-                    mockk(relaxed = true)
-                },
+                channelPort = channelPort,
                 contextCollector = collector,
                 traceRecorder = recorder,
             )
@@ -133,8 +128,8 @@ class ChatterAiTraceAgenticAndUrlTest {
         val handled = service.processMessage(mentionMsg)
         recorder.flushAndClose()
 
-        assertTrue(handled)
-        assertEquals(listOf("這支長影片重點在後半段的實測"), sentMessages)
+        assertTrue(handled, "Direct mention long video should be handled")
+        assertEquals(listOf("這支長影片重點在後半段的實測"), channelPort.allDeliveredTexts)
 
         val traces = ChatterAiTraceTestSupport.readTraceLines(tempDir)
         assertEquals(1, traces.size)
@@ -233,8 +228,7 @@ class ChatterAiTraceAgenticAndUrlTest {
                         maxPollingAttempts = 2,
                         traceRecorder = recorder,
                     ),
-                historyFetcher = { _, _ -> emptyList() },
-                messageSender = { _, _ -> mockk(relaxed = true) },
+                channelPort = FakeChatterChannelPort(),
                 contextCollector = ChatterContextCollector(noiseFilter = filter, peekResolver = { longVideoPost }),
                 traceRecorder = recorder,
             )
@@ -411,7 +405,7 @@ class ChatterAiTraceAgenticAndUrlTest {
         val recorder = JsonlAiTraceRecorder(traceDir = tempDir, clock = ChatterAiTraceTestSupport.fixedClock)
         val httpClient = ChatterAiTraceTestSupport.createHttpClient(mockEngine)
         val filter = ChatterNoiseFilter()
-        val sentMessages = mutableListOf<String>()
+        val channelPort = FakeChatterChannelPort()
         val service =
             ChatterService(
                 filter = filter,
@@ -427,11 +421,7 @@ class ChatterAiTraceAgenticAndUrlTest {
                         httpClient = httpClient,
                         traceRecorder = recorder,
                     ),
-                historyFetcher = { _, _ -> emptyList() },
-                messageSender = { _, content ->
-                    sentMessages.add(content)
-                    mockk(relaxed = true)
-                },
+                channelPort = channelPort,
                 contextCollector =
                     ChatterContextCollector(
                         noiseFilter = filter,
@@ -444,11 +434,11 @@ class ChatterAiTraceAgenticAndUrlTest {
             )
 
         val msg = ChatterAiTraceTestSupport.createMockMessage(id = 990L, channelId = 991L, content = "推薦看一下 $webUrl")
-        assertTrue(service.processMessage(msg))
+        assertTrue(service.processMessage(msg), "Web URL message should be handled")
         recorder.flushAndClose()
 
-        assertFalse(peekCalled)
-        assertEquals(listOf("官方文件寫得很清楚 新手照著看很快就能上手"), sentMessages)
+        assertFalse(peekCalled, "General web URL should skip SocialPeek")
+        assertEquals(listOf("官方文件寫得很清楚 新手照著看很快就能上手"), channelPort.allDeliveredTexts)
 
         val trace = ChatterAiTraceTestSupport.readTraceLines(tempDir).single()
         assertEquals(AiTraceOutcome.SUCCESS, trace.outcome)

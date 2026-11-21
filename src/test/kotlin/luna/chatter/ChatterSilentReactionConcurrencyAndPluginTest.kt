@@ -106,33 +106,30 @@ class ChatterSilentReactionConcurrencyAndPluginTest {
                 traceRecorder = recorder,
             )
 
-        val addedReactions = mutableListOf<Pair<Snowflake, ReactionEmoji>>()
+        val channelPort = FakeChatterChannelPort()
         val service =
             ChatterService(
                 filter = filter,
                 decisionClient = decisionClient,
                 chatterGenerator = chatterGenerator,
-                cooldownCache = cooldownCache,
-                historyFetcher = { _, _ -> emptyList() },
+                channelPort = channelPort,
                 contextCollector = ChatterContextCollector(noiseFilter = filter, peekResolver = { null }),
                 traceRecorder = recorder,
                 burstCoordinator = BoundedChannelBurstCoordinator(debounceMs = 100L),
                 randomProvider = { _, _ -> 1000L },
-                afterMessagesFetcher = { _, _ -> emptyList() },
                 personaStateProvider = fixedPersonaProvider(effectiveThreshold = 0.70),
-                reactionSender = { msg, emoji -> addedReactions += msg.id to emoji },
             )
 
         val msg1 = ChatterAiTraceTestSupport.createMockMessage(id = 301L, channelId = 501L, content = "第一則")
         val msg2 = ChatterAiTraceTestSupport.createMockMessage(id = 302L, channelId = 501L, content = "第二則補充")
 
-        val job1 = async { service.handleMessage(msg1) }
+        val job1 = async { service.processMessage(msg1) }
         advanceTimeBy(101L)
         runCurrent()
         decisionEntered.await()
 
         // Second message arrives while msg1 is in decision/silent reaction -> cancels msg1 burst
-        val job2 = async { service.handleMessage(msg2) }
+        val job2 = async { service.processMessage(msg2) }
         releaseFirst.complete(Unit)
         advanceTimeBy(2_000L)
         runCurrent()
@@ -141,7 +138,10 @@ class ChatterSilentReactionConcurrencyAndPluginTest {
         assertTrue(job2.await(), "Second message should complete silent reaction")
         recorder.flushAndClose()
 
-        assertEquals(listOf<Pair<Snowflake, ReactionEmoji>>(Snowflake(302L) to ReactionEmoji.Unicode("🔥")), addedReactions)
+        assertEquals(
+            listOf<Pair<Snowflake, ReactionEmoji>>(Snowflake(302L) to ReactionEmoji.Unicode("🔥")),
+            channelPort.addedReactions.map { it.targetMessageId to it.emoji },
+        )
         val traces = ChatterAiTraceTestSupport.readTraceLines(tempDir)
         assertEquals(2, traces.size)
         assertEquals(AiTraceOutcome.SKIPPED, traces.first { it.discord?.messageId == "301" }.outcome)

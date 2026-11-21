@@ -90,7 +90,7 @@ class ChatterPersonaDriftServiceAndTraceTest {
 
         val recorder = JsonlAiTraceRecorder(traceDir = tempDir, clock = ChatterAiTraceTestSupport.fixedClock)
         val httpClient = ChatterAiTraceTestSupport.createHttpClient(mockEngine)
-        val sentMessages = mutableListOf<String>()
+        val channelPort = FakeChatterChannelPort()
         val service =
             ChatterService(
                 filter = ChatterNoiseFilter(),
@@ -106,11 +106,7 @@ class ChatterPersonaDriftServiceAndTraceTest {
                         httpClient = httpClient,
                         traceRecorder = recorder,
                     ),
-                historyFetcher = { _, _ -> emptyList() },
-                messageSender = { _, content ->
-                    sentMessages.add(content)
-                    mockk(relaxed = true)
-                },
+                channelPort = channelPort,
                 traceRecorder = recorder,
                 personaStateProvider = drift,
             )
@@ -126,7 +122,7 @@ class ChatterPersonaDriftServiceAndTraceTest {
         recorder.flushAndClose()
 
         assertTrue(handled, "Expected noul=0.65 to participate when effectiveThreshold=0.60")
-        assertEquals(listOf("晚上大家都精神很好欸"), sentMessages)
+        assertEquals(listOf("晚上大家都精神很好欸"), channelPort.allDeliveredTexts)
 
         val sysPrompt = assertNotNull(capturedSystemInstruction)
         assertTrue(sysPrompt.contains("星期四"))
@@ -187,7 +183,7 @@ class ChatterPersonaDriftServiceAndTraceTest {
                         httpClient = httpClient,
                         traceRecorder = recorder,
                     ),
-                historyFetcher = { _, _ -> emptyList() },
+                channelPort = FakeChatterChannelPort(),
                 traceRecorder = recorder,
                 personaStateProvider = drift,
             )
@@ -258,8 +254,7 @@ class ChatterPersonaDriftServiceAndTraceTest {
                         httpClient = httpClient,
                         traceRecorder = recorder,
                     ),
-                historyFetcher = { _, _ -> emptyList() },
-                messageSender = { _, _ -> mockk(relaxed = true) },
+                channelPort = FakeChatterChannelPort(),
                 traceRecorder = recorder,
                 personaStateProvider = drift,
             )
