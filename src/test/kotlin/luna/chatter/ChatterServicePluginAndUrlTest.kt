@@ -2,7 +2,6 @@ package luna.chatter
 
 import dev.kord.common.entity.Snowflake
 import dev.kord.core.Kord
-import dev.kord.core.behavior.channel.createMessage
 import dev.kord.core.event.Event
 import dev.kord.core.event.message.MessageCreateEvent
 import dev.socialpeek.model.Author
@@ -111,7 +110,7 @@ class ChatterServicePluginAndUrlTest {
             assertEquals("Custom plugin decision instructions for Luna", customPlugin.decisionClient?.defaultInstructions)
             assertEquals(32, customPlugin.decisionClient?.config?.decisionMessageCount)
             assertEquals(32, customPlugin.contextCollector?.decisionMessageCount)
-            assertEquals(32, customPlugin.service?.decisionMessageCount)
+            assertEquals(32, customPlugin.service?.contextCollector?.decisionMessageCount)
             customPlugin.shutdown()
 
             val defaultContext =
@@ -129,7 +128,7 @@ class ChatterServicePluginAndUrlTest {
             assertEquals(GeminiDecisionClient.DEFAULT_INSTRUCTIONS, defaultPlugin.decisionClient?.defaultInstructions)
             assertEquals(15, defaultPlugin.decisionClient?.config?.decisionMessageCount)
             assertEquals(15, defaultPlugin.contextCollector?.decisionMessageCount)
-            assertEquals(15, defaultPlugin.service?.decisionMessageCount)
+            assertEquals(15, defaultPlugin.service?.contextCollector?.decisionMessageCount)
             defaultPlugin.shutdown()
         }
 
@@ -185,9 +184,12 @@ class ChatterServicePluginAndUrlTest {
             eventsFlow.emit(event)
             testScheduler.advanceUntilIdle()
 
-            coVerify(exactly = 1) { fixture.channel.type() }
-            coVerify(exactly = 1) { fixture.channel.createMessage("General Kenobi!") }
-            assertTrue(fixture.cooldownCache.isOnCooldown(channelId))
+            assertEquals(1, fixture.channelPort.typingCount)
+            assertEquals(listOf("General Kenobi!"), fixture.channelPort.sentMessages.map { it.content })
+            assertTrue(
+                fixture.cooldownCache.isOnCooldown(channelId),
+                "Expected channel cooldown to be recorded after MessageCreateEvent reply",
+            )
 
             job.cancel()
         }
@@ -273,14 +275,14 @@ class ChatterServicePluginAndUrlTest {
                         peekPost
                     },
                 )
+            val channelPort = FakeChatterChannelPort()
             val urlService =
                 ChatterService(
                     filter = fixture.filter,
                     decisionClient = fixture.decisionClient,
                     chatterGenerator = fixture.chatterGenerator,
-                    cooldownCache = fixture.cooldownCache,
-                    historyFetcher = { _, _ -> emptyList() },
                     contextCollector = customCollector,
+                    channelPort = channelPort,
                 )
 
             val urlMessage =
@@ -319,7 +321,7 @@ class ChatterServicePluginAndUrlTest {
                     },
                 )
             }
-            coVerify(exactly = 1) { fixture.channel.createMessage("Kotlin 2.2 context parameters look neat") }
+            assertEquals(listOf("Kotlin 2.2 context parameters look neat"), channelPort.sentMessages.map { it.content })
         }
 
     @Test
@@ -336,14 +338,14 @@ class ChatterServicePluginAndUrlTest {
                         null
                     },
                 )
+            val channelPort = FakeChatterChannelPort()
             val urlService =
                 ChatterService(
                     filter = fixture.filter,
                     decisionClient = fixture.decisionClient,
                     chatterGenerator = fixture.chatterGenerator,
-                    cooldownCache = fixture.cooldownCache,
-                    historyFetcher = { _, _ -> emptyList() },
                     contextCollector = customCollector,
+                    channelPort = channelPort,
                 )
 
             val urlMessage =
@@ -368,7 +370,7 @@ class ChatterServicePluginAndUrlTest {
                     },
                 )
             }
-            coVerify(exactly = 1) { fixture.channel.createMessage("Kotlin 2.2 context parameters look neat") }
+            assertEquals(listOf("Kotlin 2.2 context parameters look neat"), channelPort.sentMessages.map { it.content })
         }
 
     @Test
@@ -446,9 +448,7 @@ class ChatterServicePluginAndUrlTest {
     fun `default decision message count is 15 and service fetches max of decisionMessageCount and historyMessageCount`() =
         runTest {
             assertEquals(15, ChatterContextCollector.DEFAULT_DECISION_MESSAGE_COUNT)
-            assertEquals(15, ChatterService.DEFAULT_DECISION_MESSAGE_COUNT)
 
-            val fetchedLimits = mutableListOf<Int>()
             val priorMessages =
                 (1L..20L).map { idx ->
                     fixture.createMockMessage(
@@ -476,23 +476,24 @@ class ChatterServicePluginAndUrlTest {
                     historyMessageCount = 10,
                     peekResolver = { null },
                 )
+            val largePort =
+                FakeChatterChannelPort().apply {
+                    historyMessages = priorMessages
+                }
             val largeDecisionService =
                 ChatterService(
                     filter = fixture.filter,
                     decisionClient = fixture.decisionClient,
                     chatterGenerator = fixture.chatterGenerator,
-                    cooldownCache = fixture.cooldownCache,
-                    decisionMessageCount = 20,
-                    historyMessageCount = 10,
-                    historyFetcher = { _, limit ->
-                        fetchedLimits.add(limit)
-                        priorMessages.takeLast(limit)
-                    },
                     contextCollector = largeDecisionCollector,
+                    channelPort = largePort,
                 )
 
-            assertFalse(largeDecisionService.processMessage(triggeringMsg))
-            assertEquals(listOf(20), fetchedLimits)
+            assertFalse(
+                largeDecisionService.processMessage(triggeringMsg),
+                "Expected decision rejection for largeDecisionService",
+            )
+            assertEquals(listOf(20), largePort.recordedBeforeLimits)
             coVerify(exactly = 1) {
                 fixture.decisionClient.decide(
                     match { transcript ->
@@ -510,7 +511,6 @@ class ChatterServicePluginAndUrlTest {
             }
 
             // Case 2: historyMessageCount > decisionMessageCount (15 > 5) -> fetches 15
-            fetchedLimits.clear()
             val smallDecisionCollector =
                 ChatterContextCollector(
                     noiseFilter = fixture.filter,
@@ -518,22 +518,23 @@ class ChatterServicePluginAndUrlTest {
                     historyMessageCount = 15,
                     peekResolver = { null },
                 )
+            val smallPort =
+                FakeChatterChannelPort().apply {
+                    historyMessages = priorMessages
+                }
             val smallDecisionService =
                 ChatterService(
                     filter = fixture.filter,
                     decisionClient = fixture.decisionClient,
                     chatterGenerator = fixture.chatterGenerator,
-                    cooldownCache = fixture.cooldownCache,
-                    decisionMessageCount = 5,
-                    historyMessageCount = 15,
-                    historyFetcher = { _, limit ->
-                        fetchedLimits.add(limit)
-                        priorMessages.takeLast(limit)
-                    },
                     contextCollector = smallDecisionCollector,
+                    channelPort = smallPort,
                 )
 
-            assertFalse(smallDecisionService.processMessage(triggeringMsg))
-            assertEquals(listOf(15), fetchedLimits)
+            assertFalse(
+                smallDecisionService.processMessage(triggeringMsg),
+                "Expected decision rejection for smallDecisionService",
+            )
+            assertEquals(listOf(15), smallPort.recordedBeforeLimits)
         }
 }
