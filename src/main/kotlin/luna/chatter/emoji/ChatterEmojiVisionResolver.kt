@@ -14,9 +14,7 @@ import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
-import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.Semaphore
-import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
@@ -34,43 +32,63 @@ import luna.core.ai.InteractionTraceContext
 import org.slf4j.LoggerFactory
 import java.time.Clock
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicLong
 
 /**
  * Target descriptor for resolving a Discord custom emoji's semantic meaning via Gemini Vision.
  */
-data class EmojiVisionRequest(
+internal data class EmojiVisionRequest(
     val id: String,
     val name: String,
     val isAnimated: Boolean,
 )
 
 /**
- * Opt-in, bounded Gemini Vision resolver for `Custom Emoji Meaning` via `CDN Direct Ingestion`.
- *
- * Enforces:
- * - Strict opt-in gating (`visionModel` must be non-blank and `apiKey` must be non-blank; no fallback to chat models)
- * - In-flight deduplication by `emojiId` (shared safely across on-demand turns and background pre-scans)
- * - Bounded concurrency (`maxConcurrency`, default 5) and optional round timeout (`roundTimeoutMs`, default 5s)
- * - Animated emoji `.gif` -> `.png` static first-frame fallback
- * - Rename metadata updates without re-running vision, and `is_manual_override` preservation
- * - 1-hour `failed_until` cooldown on failures or empty/unusable outputs
+ * Tracks a single conversation turn's shared vision-resolution budget across pipeline stages
+ * (`Participation Decision`, reply generation, and `Silent Reaction Path`) so a turn never
+ * chains sequential round timeouts or retries already-attempted emojis.
  */
-class CustomEmojiVisionResolver(
-    private val meaningRepository: CustomEmojiMeaningRepository,
+internal class EmojiVisionTurnBudget {
+    private val attemptedEmojiIds: MutableSet<String> = ConcurrentHashMap.newKeySet()
+    private val consumedVisionNanos: AtomicLong = AtomicLong(0L)
+
+    fun remainingTimeoutMs(roundTimeoutMs: Long): Long {
+        if (roundTimeoutMs <= 0L) return 0L
+        val elapsedMs = (consumedVisionNanos.get() / 1_000_000L).coerceAtLeast(0L)
+        return (roundTimeoutMs - elapsedMs).coerceAtLeast(0L)
+    }
+
+    fun recordVisionElapsedNanos(elapsedNanos: Long) {
+        if (elapsedNanos > 0L) {
+            consumedVisionNanos.addAndGet(elapsedNanos)
+        }
+    }
+
+    fun filterUnattempted(targets: List<EmojiVisionRequest>): List<EmojiVisionRequest> = targets.filter { it.id !in attemptedEmojiIds }
+
+    fun markAttempted(targets: List<EmojiVisionRequest>) {
+        targets.forEach { attemptedEmojiIds.add(it.id) }
+    }
+}
+
+/**
+ * Opt-in, bounded Gemini Vision resolver for `Custom Emoji Meaning` via `CDN Direct Ingestion`.
+ */
+internal class ChatterEmojiVisionResolver(
+    private val store: ChatterEmojiSqliteStore,
     visionModel: String?,
     private val interactionClient: GeminiInteractionClient,
     private val baseUrl: String = ChatterConfig.DEFAULT_BASE_URL,
     private val apiKey: String = "",
     private val clock: Clock = Clock.systemUTC(),
-    private val maxConcurrency: Int = DEFAULT_MAX_CONCURRENCY,
+    maxConcurrency: Int = DEFAULT_MAX_CONCURRENCY,
     val roundTimeoutMs: Long = DEFAULT_ROUND_TIMEOUT_MS,
     private val failureCooldownMs: Long = DEFAULT_FAILURE_COOLDOWN_MS,
 ) {
-    private val logger = LoggerFactory.getLogger(CustomEmojiVisionResolver::class.java)
+    private val logger = LoggerFactory.getLogger(ChatterEmojiVisionResolver::class.java)
     private val cleanVisionModel: String? =
         visionModel?.trim()?.removePrefix("models/")?.ifBlank { null }
     private val semaphore = Semaphore(maxConcurrency.coerceAtLeast(1))
-    private val dbMutex = Mutex()
     private val inFlight = ConcurrentHashMap<String, Deferred<Unit>>()
 
     val isEnabled: Boolean
@@ -85,35 +103,25 @@ class CustomEmojiVisionResolver(
 
         val existingById =
             runCatching {
-                dbMutex.withLock {
-                    meaningRepository.findByIds(uniqueTargets.map { it.id })
-                }
+                store.findMeaningsByIds(uniqueTargets.map { it.id })
             }.onFailure { e ->
+                if (e is CancellationException) throw e
                 logger.warn(
                     "Failed to query Custom Emoji Meaning cache before vision resolution; degrading gracefully: {}",
                     e.message,
                 )
             }.getOrNull() ?: return
 
+        val metadataToSync = mutableListOf<EmojiVisionRequest>()
         val nowMs = clock.millis()
         val pending = mutableListOf<EmojiVisionRequest>()
 
         for (target in uniqueTargets) {
             val existing = existingById[target.id]
             if (existing != null) {
-                runCatching {
-                    dbMutex.withLock {
-                        meaningRepository.updateMetadataIfChanged(target.id, target.name, target.isAnimated)
-                    }
-                }.onFailure { e ->
-                    logger.warn(
-                        "Failed to update metadata for cached emoji {} ({}): {}",
-                        target.id,
-                        target.name,
-                        e.message,
-                    )
+                if (existing.name != target.name || existing.isAnimated != target.isAnimated) {
+                    metadataToSync += target
                 }
-
                 val hasMeaning = !existing.meaning.isNullOrBlank()
                 val inCooldown = existing.failedUntil != null && existing.failedUntil > nowMs
                 if (existing.isManualOverride || hasMeaning || inCooldown) {
@@ -121,6 +129,15 @@ class CustomEmojiVisionResolver(
                 }
             }
             pending += target
+        }
+
+        if (metadataToSync.isNotEmpty()) {
+            runCatching {
+                store.syncMetadataIfChanged(metadataToSync)
+            }.onFailure { e ->
+                if (e is CancellationException) throw e
+                logger.warn("Failed to sync metadata for {} cached emoji(s): {}", metadataToSync.size, e.message)
+            }
         }
 
         if (!isEnabled || pending.isEmpty()) return
@@ -157,7 +174,6 @@ class CustomEmojiVisionResolver(
                     return
                 } catch (e: CancellationException) {
                     currentCoroutineContext().ensureActive()
-                    // Previous owner was cancelled (e.g. caller timeout); retry loop
                     continue
                 }
             }
@@ -195,10 +211,9 @@ class CustomEmojiVisionResolver(
         semaphore.withPermit {
             currentCoroutineContext().ensureActive()
 
-            // Re-check repository in case a concurrent turn populated it while waiting on semaphore
             val currentRecord =
                 runCatching {
-                    dbMutex.withLock { meaningRepository.findById(target.id) }
+                    store.findMeaningById(target.id)
                 }.onFailure { e ->
                     if (e is CancellationException) throw e
                     logger.warn(
@@ -257,14 +272,12 @@ class CustomEmojiVisionResolver(
 
             when (result) {
                 is VisionAttemptResult.Success -> {
-                    dbMutex.withLock {
-                        meaningRepository.upsertResolvedMeaning(
-                            emojiId = target.id,
-                            name = target.name,
-                            isAnimated = target.isAnimated,
-                            meaning = result.meaning,
-                        )
-                    }
+                    store.upsertResolvedMeaning(
+                        emojiId = target.id,
+                        name = target.name,
+                        isAnimated = target.isAnimated,
+                        meaning = result.meaning,
+                    )
                 }
 
                 is VisionAttemptResult.Failure -> {
@@ -276,14 +289,12 @@ class CustomEmojiVisionResolver(
                         result.reason,
                         failedUntil,
                     )
-                    dbMutex.withLock {
-                        meaningRepository.recordFailureCooldown(
-                            emojiId = target.id,
-                            name = target.name,
-                            isAnimated = target.isAnimated,
-                            failedUntilEpochMs = failedUntil,
-                        )
-                    }
+                    store.recordFailureCooldown(
+                        emojiId = target.id,
+                        name = target.name,
+                        isAnimated = target.isAnimated,
+                        failedUntilEpochMs = failedUntil,
+                    )
                 }
             }
         }

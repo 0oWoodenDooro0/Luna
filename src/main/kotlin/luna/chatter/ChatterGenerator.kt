@@ -435,7 +435,8 @@ open class ChatterGenerator(
 
         return when (result) {
             is InteractionExecutionResult.Success -> {
-                if (result.text.isBlank()) {
+                val raw = result.text.trim()
+                if (raw.isEmpty()) {
                     logger.warn("ChatterGenerator reaction selection returned blank output")
                     session?.skip(
                         reason = "Gemini reaction selection output is blank",
@@ -443,32 +444,10 @@ open class ChatterGenerator(
                     )
                     return null
                 }
-                if (ChatterReactionEmojiValidator.isExplicitNoReaction(result.text)) {
-                    logger.debug("ChatterGenerator reaction selection explicitly declined to react (NONE)")
-                    session?.skip(reason = "Reaction selection model declined to react (NONE)")
-                    return null
-                }
-                val normalized =
-                    ChatterReactionEmojiValidator.validateAndNormalize(
-                        raw = result.text,
-                        guildEmojis = input.guildEmojis,
-                        applicationEmojis = input.applicationEmojis,
-                    )
-                if (normalized == null) {
-                    logger.warn(
-                        "ChatterGenerator reaction selection returned invalid or unverified emoji: {}",
-                        result.text.trim().take(80),
-                    )
-                    session?.skip(
-                        reason = "Reaction selection output was not a single valid Unicode or verified guild custom emoji",
-                        failureCategory = AiTraceFailureCategory.PARSE_ERROR,
-                    )
-                    return null
-                }
                 if (isStandalone) {
-                    session?.complete(finalOutput = normalized, citations = emptyList())
+                    session?.complete(finalOutput = raw, citations = emptyList())
                 }
-                normalized
+                raw
             }
 
             is InteractionExecutionResult.Error -> {

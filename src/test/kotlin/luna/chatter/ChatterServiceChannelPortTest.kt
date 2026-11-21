@@ -19,7 +19,8 @@ import io.mockk.mockk
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.runTest
-import luna.chatter.emoji.BoundedChannelEmojiCadenceTracker
+import luna.chatter.emoji.ChatterEmojiService
+import luna.chatter.emoji.DefaultChatterEmojiService
 import luna.core.ai.AiTraceFailureCategory
 import luna.core.ai.AiTraceOutcome
 import luna.core.ai.AiTraceSession
@@ -105,7 +106,7 @@ class ChatterServiceChannelPortTest {
         contextCollector: ChatterContextCollector =
             ChatterContextCollector(noiseFilter = filter, decisionMessageCount = 7, historyMessageCount = 19, peekResolver = { null }),
         traceRecorder: luna.core.ai.AiTraceRecorder = luna.core.ai.NoOpAiTraceRecorder,
-        emojiCadenceTracker: BoundedChannelEmojiCadenceTracker = BoundedChannelEmojiCadenceTracker(),
+        emojiService: ChatterEmojiService = DefaultChatterEmojiService(),
         randomProvider: (Long, Long) -> Long = { min, _ -> min },
     ): ChatterService =
         ChatterService(
@@ -116,7 +117,7 @@ class ChatterServiceChannelPortTest {
             traceRecorder = traceRecorder,
             randomProvider = randomProvider,
             personaStateProvider = CircadianPersonaDrift(enabled = false),
-            emojiCadenceTracker = emojiCadenceTracker,
+            emojiService = emojiService,
             channelPort = channelPort,
         )
 
@@ -193,13 +194,13 @@ class ChatterServiceChannelPortTest {
                     every { startSession(any(), any(), any()) } returns session
                 }
             val filter = ChatterNoiseFilter()
-            val cadenceTracker = BoundedChannelEmojiCadenceTracker()
+            val emojiService = DefaultChatterEmojiService()
             val service =
                 buildService(
                     channelPort = port,
                     filter = filter,
                     traceRecorder = recorder,
-                    emojiCadenceTracker = cadenceTracker,
+                    emojiService = emojiService,
                 )
 
             val result = service.processMessage(mockMessage(id = 10L, channelId = 100L))
@@ -208,7 +209,13 @@ class ChatterServiceChannelPortTest {
             assertFalse(filter.cooldownCache.isOnCooldown(Snowflake(100L))) {
                 "Expected no cooldown recorded when sendMessage fails"
             }
-            assertTrue(cadenceTracker.shouldAllowReplyCustomEmojis(Snowflake(100L))) {
+            assertTrue(
+                emojiService
+                    .beginTurn(Snowflake(100L), null, guildEmojisProvider = { listOf(GuildCustomEmoji(Snowflake(1L), "ok")) })
+                    .prepareReplyEmojis("check")
+                    .guildEmojis
+                    .isNotEmpty(),
+            ) {
                 "Expected no reply emoji cadence update when sendMessage fails"
             }
             io.mockk.verify(exactly = 1) { session.fail(AiTraceFailureCategory.UNEXPECTED_ERROR, any()) }
@@ -233,21 +240,27 @@ class ChatterServiceChannelPortTest {
                     every { config } returns ChatterConfig(reactionThreshold = 0.4)
                     coEvery { selectReactionEmoji(any()) } returns "👍"
                 }
-            val cadenceTracker = BoundedChannelEmojiCadenceTracker()
+            val emojiService = DefaultChatterEmojiService()
             val service =
                 buildService(
                     channelPort = port,
                     decisionClient = decisionClient,
                     chatterGenerator = generator,
                     traceRecorder = recorder,
-                    emojiCadenceTracker = cadenceTracker,
+                    emojiService = emojiService,
                 )
 
             val result = service.processMessage(mockMessage(id = 10L, channelId = 100L))
 
             assertFalse(result) { "Expected processMessage to return false when addReaction fails" }
             assertEquals(0, port.typingCount)
-            assertTrue(cadenceTracker.recentReactions(Snowflake(100L)).isEmpty()) {
+            assertTrue(
+                emojiService
+                    .beginTurn(Snowflake(100L), null, guildEmojisProvider = { emptyList() })
+                    .prepareReactionEmojis()
+                    .recentReactions
+                    .isEmpty(),
+            ) {
                 "Expected no reaction cadence recorded when addReaction fails"
             }
             io.mockk.verify(exactly = 1) {

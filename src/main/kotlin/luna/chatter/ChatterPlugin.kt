@@ -10,13 +10,8 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.toList
-import luna.chatter.emoji.BoundedChannelEmojiCadenceTracker
-import luna.chatter.emoji.ChatterEmojiCatalog
-import luna.chatter.emoji.CustomEmojiVisionResolver
-import luna.chatter.emoji.DefaultChatterEmojiCatalog
-import luna.chatter.emoji.ExposedCustomEmojiMeaningRepository
-import luna.chatter.emoji.ExposedEmojiUsageRankingRepository
-import luna.chatter.emoji.NoOpChatterEmojiCatalog
+import luna.chatter.emoji.ChatterEmojiService
+import luna.chatter.emoji.DefaultChatterEmojiService
 import luna.chatter.memory.ChatterMemoryConfig
 import luna.chatter.memory.ChatterMemoryStore
 import luna.chatter.memory.ChatterMemoryToolHandler
@@ -81,13 +76,7 @@ class ChatterPlugin(
     var personaStateProvider: PersonaStateProvider? = null
         internal set
 
-    var emojiCatalog: ChatterEmojiCatalog? = null
-        internal set
-
-    var emojiCadenceTracker: BoundedChannelEmojiCadenceTracker? = null
-        internal set
-
-    var emojiVisionResolver: CustomEmojiVisionResolver? = null
+    var emojiService: ChatterEmojiService? = null
         internal set
 
     var memoryStore: ChatterMemoryStore? = null
@@ -258,42 +247,32 @@ class ChatterPlugin(
             )
         this.personaStateProvider = drift
 
-        val catalog =
+        val emojiServiceInstance: ChatterEmojiService =
             runCatching {
-                val meaningRepository = ExposedCustomEmojiMeaningRepository(context.database)
-                val usageRepository = ExposedEmojiUsageRankingRepository(context.database)
-                val resolver =
-                    chatterConfig.cleanEmojiVisionModel?.takeIf { chatterConfig.isConfigured }?.let { visionModel ->
-                        val httpClient = CustomEmojiVisionResolver.createDefaultHttpClient()
+                val visionModel = chatterConfig.cleanEmojiVisionModel?.takeIf { chatterConfig.isConfigured }
+                val visionInteractionClient =
+                    visionModel?.let {
+                        val httpClient = ChatterEmojiService.createDefaultVisionHttpClient()
                         this.visionHttpClient = httpClient
-                        CustomEmojiVisionResolver(
-                            meaningRepository = meaningRepository,
-                            visionModel = visionModel,
-                            interactionClient =
-                                GeminiInteractionClient(
-                                    httpClient = httpClient,
-                                    traceRecorder = traceRecorder,
-                                ),
-                            baseUrl = chatterConfig.cleanBaseUrl,
-                            apiKey = chatterConfig.apiKey,
+                        GeminiInteractionClient(
+                            httpClient = httpClient,
+                            traceRecorder = traceRecorder,
                         )
                     }
-                this.emojiVisionResolver = resolver
-                DefaultChatterEmojiCatalog(
-                    meaningRepository = meaningRepository,
-                    usageRepository = usageRepository,
-                    visionResolver = resolver,
+                DefaultChatterEmojiService(
+                    database = context.database,
+                    visionModel = visionModel,
+                    interactionClient = visionInteractionClient,
+                    baseUrl = chatterConfig.cleanBaseUrl,
+                    apiKey = chatterConfig.apiKey,
                 )
             }.onFailure { e ->
                 logger.warn(
-                    "Failed to initialize Custom Emoji Meaning repository; degrading to no-op emoji catalog: {}",
+                    "Failed to initialize ChatterEmojiService with SQLite; degrading to in-memory emoji service: {}",
                     e.message,
                 )
-            }.getOrElse { NoOpChatterEmojiCatalog }
-        this.emojiCatalog = catalog
-
-        val cadenceTracker = BoundedChannelEmojiCadenceTracker()
-        this.emojiCadenceTracker = cadenceTracker
+            }.getOrElse { DefaultChatterEmojiService() }
+        this.emojiService = emojiServiceInstance
 
         val chatterService =
             ChatterService(
@@ -304,8 +283,7 @@ class ChatterPlugin(
                 traceRecorder = traceRecorder,
                 burstCoordinator = coordinator,
                 personaStateProvider = drift,
-                emojiCatalog = catalog,
-                emojiCadenceTracker = cadenceTracker,
+                emojiService = emojiServiceInstance,
             )
         val finalService = serviceFactory?.invoke(chatterService) ?: chatterService
         this.service = finalService

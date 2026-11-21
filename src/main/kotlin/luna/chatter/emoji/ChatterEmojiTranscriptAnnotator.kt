@@ -3,7 +3,7 @@ package luna.chatter.emoji
 /**
  * Parsed Discord custom emoji token (`<:name:id>` or `<a:name:id>`).
  */
-data class CustomEmojiToken(
+internal data class CustomEmojiToken(
     val id: String,
     val name: String,
     val isAnimated: Boolean,
@@ -13,7 +13,7 @@ data class CustomEmojiToken(
 /**
  * Extracts Discord custom emoji tokens and annotates dialogue transcripts inline with cached meanings.
  */
-object ChatterEmojiTranscriptAnnotator {
+internal object ChatterEmojiTranscriptAnnotator {
     private val CUSTOM_EMOJI_TOKEN_REGEX = Regex("""<(a?):([A-Za-z0-9_~-]+):(\d+)>""")
 
     fun extractEmojiTokens(text: String): List<CustomEmojiToken> {

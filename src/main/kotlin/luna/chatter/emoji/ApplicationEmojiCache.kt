@@ -1,16 +1,9 @@
 package luna.chatter.emoji
 
-import dev.kord.core.Kord
-import dev.kord.core.entity.Message
 import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.flow.toList
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
-import luna.chatter.ChatterChannelPort
 import luna.chatter.GuildCustomEmoji
-import luna.chatter.toAvailableGuildCustomEmojis
 import org.slf4j.LoggerFactory
 import java.time.Clock
 
@@ -22,7 +15,7 @@ import java.time.Clock
  * transient failures without caching errors, and notifies callers when newly discovered
  * emoji IDs appear so background vision pre-scanning can run without blocking turns.
  */
-class ApplicationEmojiCache(
+internal class ApplicationEmojiCache(
     private val ttlMillis: Long = DEFAULT_TTL_MILLIS,
     private val clock: Clock = Clock.systemUTC(),
 ) {
@@ -135,70 +128,4 @@ class ApplicationEmojiCache(
     companion object {
         const val DEFAULT_TTL_MILLIS: Long = 10L * 60L * 1000L
     }
-}
-
-private val applicationEmojiPreScanLogger = LoggerFactory.getLogger(ApplicationEmojiCache::class.java)
-
-internal suspend fun ApplicationEmojiCache.preScanStartup(
-    kord: Kord,
-    emojiCatalog: ChatterEmojiCatalog,
-) {
-    val availableEmojis =
-        refresh(
-            fetcher = { kord.emojis.toList().toAvailableGuildCustomEmojis() },
-        )
-    if (availableEmojis.isEmpty()) return
-    runCatching {
-        emojiCatalog.preScanApplicationEmojis(availableEmojis)
-    }.onFailure { e ->
-        if (e is CancellationException) throw e
-        applicationEmojiPreScanLogger.warn(
-            "Failed to pre-scan {} Application Emoji(s) on startup: {}",
-            availableEmojis.size,
-            e.message,
-        )
-    }
-}
-
-internal suspend fun ApplicationEmojiCache.resolveForMessage(
-    message: Message,
-    channelPort: ChatterChannelPort,
-    emojiCatalog: ChatterEmojiCatalog,
-    preScanScope: CoroutineScope?,
-    fallbackDescription: String = "continuing without Application Emojis",
-): List<GuildCustomEmoji> {
-    val appEmojis =
-        getOrRefresh(
-            fetcher = { channelPort.listApplicationEmojis(message) },
-            onNewEmojisDiscovered = { newlyDiscovered ->
-                if (preScanScope == null) {
-                    applicationEmojiPreScanLogger.debug(
-                        "Skipping background pre-scan for {} newly discovered Application Emoji(s); no active background scope",
-                        newlyDiscovered.size,
-                    )
-                } else {
-                    preScanScope.launch {
-                        runCatching {
-                            emojiCatalog.preScanApplicationEmojis(newlyDiscovered)
-                        }.onFailure { e ->
-                            if (e is CancellationException) throw e
-                            applicationEmojiPreScanLogger.warn(
-                                "Failed to pre-scan {} newly discovered Application Emoji(s) after TTL refresh: {}",
-                                newlyDiscovered.size,
-                                e.message,
-                            )
-                        }
-                    }
-                }
-            },
-        )
-    if (appEmojis.isEmpty()) {
-        applicationEmojiPreScanLogger.debug(
-            "No Application Emojis available for message {} in channel {}; {}",
-            message.id,
-            message.channelId,
-            fallbackDescription,
-        )
-    }
-    return appEmojis
 }
