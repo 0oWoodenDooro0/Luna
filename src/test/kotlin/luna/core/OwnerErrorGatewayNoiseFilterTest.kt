@@ -19,14 +19,6 @@ import kotlin.test.assertTrue
 class OwnerErrorGatewayNoiseFilterTest {
     private val fixedClock: Clock = Clock.fixed(Instant.parse("2026-11-19T21:08:58Z"), ZoneOffset.UTC)
 
-    private object ImmediateReadyBuffer : StartupAlertBuffer {
-        override val isReady: Boolean = true
-
-        override fun bufferIfNotReady(event: OwnerErrorEvent): Boolean = false
-
-        override fun markReadyAndDrain(): List<OwnerErrorEvent> = emptyList()
-    }
-
     private fun webSocketReaderStackTrace(): String =
         """
         java.io.EOFException
@@ -39,7 +31,14 @@ class OwnerErrorGatewayNoiseFilterTest {
     @Test
     fun `suppresses transient DefaultGateway OkHttp WebSocket EOFException and SocketException while preserving real errors`() =
         runTest {
-            val filter = AsymmetricErrorEventFilter(clock = fixedClock)
+            val delivered = CopyOnWriteArrayList<Pair<Snowflake, String>>()
+            val notifier =
+                OwnerErrorNotifier(
+                    config = ErrorNotifyConfig(recipientUserIds = listOf(Snowflake(42uL))),
+                    clock = fixedClock,
+                    dmSender = { userId, content -> delivered.add(userId to content) },
+                )
+            notifier.onReady()
 
             val eofDisconnect =
                 OwnerErrorEvent(
@@ -65,17 +64,6 @@ class OwnerErrorGatewayNoiseFilterTest {
                         	at okhttp3.internal.ws.RealWebSocket.loopReader(RealWebSocket.kt:317)
                         """.trimIndent(),
                 )
-
-            assertFalse(
-                filter.shouldNotify(eofDisconnect),
-                "Transient DefaultGateway EOFException on WebSocketReader must be suppressed",
-            )
-            assertFalse(
-                filter.shouldNotify(resetDisconnect),
-                "Transient DefaultGateway SocketException on WebSocketReader must be suppressed",
-            )
-
-            // Negative boundary 1: non-WebSocketReader error on DefaultGateway must still notify
             val fatalGatewayError =
                 OwnerErrorEvent(
                     timestamp = fixedClock.instant(),
@@ -89,12 +77,6 @@ class OwnerErrorGatewayNoiseFilterTest {
                         	at dev.kord.gateway.DefaultGateway.start(DefaultGateway.kt:120)
                         """.trimIndent(),
                 )
-            assertTrue(
-                filter.shouldNotify(fatalGatewayError),
-                "Non-transient DefaultGateway error must still notify",
-            )
-
-            // Negative boundary 2: EOFException on DefaultGateway without WebSocketReader stack frame must still notify
             val nonWsEof =
                 OwnerErrorEvent(
                     timestamp = fixedClock.instant(),
@@ -108,12 +90,6 @@ class OwnerErrorGatewayNoiseFilterTest {
                         	at dev.kord.gateway.DefaultGateway.handleFrame(DefaultGateway.kt:210)
                         """.trimIndent(),
                 )
-            assertTrue(
-                filter.shouldNotify(nonWsEof),
-                "EOFException outside WebSocketReader must still notify",
-            )
-
-            // Negative boundary 3: SocketException on another third-party logger must still notify
             val restSocketError =
                 OwnerErrorEvent(
                     timestamp = fixedClock.instant(),
@@ -123,8 +99,33 @@ class OwnerErrorGatewayNoiseFilterTest {
                     throwableClass = "java.net.SocketException",
                     stackTrace = resetDisconnect.stackTrace,
                 )
+
+            try {
+                notifier.submit(eofDisconnect)
+                notifier.submit(resetDisconnect)
+                notifier.submit(fatalGatewayError)
+                notifier.submit(nonWsEof)
+                notifier.submit(restSocketError)
+            } finally {
+                notifier.flushAndClose()
+            }
+
+            assertEquals(3, delivered.size, "Only the 3 non-transient errors should be delivered")
+            val messages = delivered.map { it.second }
+            assertFalse(
+                messages.any { it.contains("WebSocketReader") && it.contains("DefaultGateway") },
+                "Transient DefaultGateway WebSocketReader errors must be suppressed",
+            )
             assertTrue(
-                filter.shouldNotify(restSocketError),
+                messages.any { it.contains("Gateway handshake failed: 4004 Authentication failed") },
+                "Non-transient DefaultGateway error must still notify",
+            )
+            assertTrue(
+                messages.any { it.contains("Unexpected EOF decoding payload") },
+                "EOFException outside WebSocketReader must still notify",
+            )
+            assertTrue(
+                messages.any { it.contains("DefaultRequestHandler") && it.contains("Connection reset") },
                 "SocketException on non-DefaultGateway logger must still notify",
             )
         }
@@ -136,10 +137,10 @@ class OwnerErrorGatewayNoiseFilterTest {
             val notifier =
                 OwnerErrorNotifier(
                     config = ErrorNotifyConfig(recipientUserIds = listOf(Snowflake(42uL))),
-                    startupBuffer = ImmediateReadyBuffer,
                     clock = fixedClock,
                     dmSender = { userId, content -> delivered.add(userId to content) },
                 )
+            notifier.onReady()
 
             val context = LoggerFactory.getILoggerFactory() as LoggerContext
             val gatewayLogger = LoggerFactory.getLogger("dev.kord.gateway.DefaultGateway") as Logger
