@@ -3,11 +3,11 @@ package luna.summarizer
 import dev.kord.common.entity.Snowflake
 import dev.kord.core.entity.Message
 import dev.socialpeek.model.PeekPost
-import dev.socialpeek.model.Platform
 import kotlinx.coroutines.flow.toList
 import luna.core.ai.ChatImageAttachment
 import luna.core.ai.ChatImageAttachmentExtractor
-import luna.core.ai.ContextUrlClassifier
+import luna.core.ai.DialogueContextPolicy
+import luna.core.ai.DiscordDialogueContextEngine
 import luna.core.ai.SocialPeekFactory
 import org.slf4j.LoggerFactory
 import kotlin.time.Duration
@@ -33,11 +33,11 @@ data class PreparedConversationSlice(
  * Chat Image Attachment extraction, capacity budgeting, and transcript formatting.
  */
 open class ConversationSliceCollector(
-    val maxHistoryMessages: Int = resolveMaxHistoryMessages(),
-    val inactivityGap: Duration = resolveInactivityGap(),
-    val maxCharacterBudget: Int = resolveMaxCharacterBudget(),
-    val maxImages: Int = resolveMaxImages(),
-    val maxLookbackMessages: Int = resolveMaxLookbackMessages(),
+    val maxHistoryMessages: Int = DEFAULT_MAX_HISTORY_MESSAGES,
+    val inactivityGap: Duration = DEFAULT_INACTIVITY_GAP,
+    val maxCharacterBudget: Int = DEFAULT_MAX_CHARACTER_BUDGET,
+    val maxImages: Int = DEFAULT_MAX_IMAGES,
+    val maxLookbackMessages: Int = DEFAULT_MAX_LOOKBACK_MESSAGES,
     val maxImageBytes: Int = ChatImageAttachmentExtractor.DEFAULT_MAX_IMAGE_BYTES,
     val noiseFilter: DialogueNoiseFilter = DialogueNoiseFilter(),
     val peekResolver: suspend (String) -> PeekPost? = SocialPeekFactory.buildPeekResolver(),
@@ -53,13 +53,13 @@ open class ConversationSliceCollector(
             .toList()
     },
     val referenceFetcher: suspend (message: Message) -> Message? = { msg ->
-        runCatching {
-            msg.referencedMessage
-                ?: msg.messageReference?.data?.id?.value?.let { refId ->
-                    msg.channel.getMessageOrNull(refId)
-                }
-        }.getOrNull()
+        msg.referencedMessage
+            ?: msg.messageReference?.data?.id?.value?.let { refId ->
+                msg.channel.getMessageOrNull(refId)
+            }
     },
+    val contextEngine: DiscordDialogueContextEngine = noiseFilter.contextEngine,
+    val policy: DialogueContextPolicy = noiseFilter.policy,
 ) {
     private val logger = LoggerFactory.getLogger(ConversationSliceCollector::class.java)
 
@@ -70,6 +70,20 @@ open class ConversationSliceCollector(
     internal suspend fun isNoiseMessage(message: Message): Boolean = noiseFilter.isNoiseMessage(message)
 
     internal suspend fun isBotSummaryMessage(message: Message): Boolean = noiseFilter.isBotSummaryMessage(message)
+
+    private fun formatTranscript(
+        messages: List<Message>,
+        imagesByMessage: Map<Snowflake, List<ChatImageAttachment>> = emptyMap(),
+        replyReferencesByMessage: Map<Snowflake, Message> = emptyMap(),
+    ): String =
+        contextEngine
+            .formatDialogueMessages(
+                messages = messages,
+                policy = policy,
+                imagesByMessage = imagesByMessage,
+                replyReferencesByMessage = replyReferencesByMessage,
+                kordSelfId = noiseFilter.selfId,
+            ).transcript
 
     suspend fun collectSlice(message: Message): PreparedConversationSlice? {
         if (isNoiseMessage(message)) {
@@ -98,110 +112,96 @@ open class ConversationSliceCollector(
                 .sortedBy { it.id.value }
 
         val imagesMap =
-            ChatImageAttachmentExtractor.selectChronologicalImages(
+            contextEngine.selectImages(
                 messages = allMessages,
+                policy = policy,
                 maxImages = maxImages,
                 maxImageBytes = maxImageBytes,
                 prioritizedMessageId = message.id,
             )
         val sliceImageAttachments = imagesMap.values.flatten()
 
-        val classifiedUrls =
-            ContextUrlClassifier.classify(
-                messages = allMessages.map { it.content },
-                capturedAttachmentUrls = sliceImageAttachments.map { it.url },
+        val replyReferencesByMessage =
+            contextEngine.resolveExternalReplyReferences(
+                messages = allMessages,
+                policy = policy,
+                referenceFetcher = referenceFetcher,
             )
-        val peekCandidates = (classifiedUrls.socialUrls + classifiedUrls.youtubeUrls).toSet()
-        val peekTargetUrl = classifiedUrls.allOriginalUrls.asReversed().firstOrNull { it in peekCandidates }
-        val primaryUrl = peekTargetUrl ?: classifiedUrls.webUrls.lastOrNull()
-
-        val replyReferencesByMessage = resolveExternalReplyReferences(allMessages)
 
         val formattedContent =
             if (allMessages.size > 1) {
-                val (formatted, _) =
-                    formatDialogueMessages(
-                        messages = allMessages,
-                        imagesByMessage = imagesMap,
-                        replyReferencesByMessage = replyReferencesByMessage,
-                    )
-                formatted
+                formatTranscript(
+                    messages = allMessages,
+                    imagesByMessage = imagesMap,
+                    replyReferencesByMessage = replyReferencesByMessage,
+                )
             } else {
-                val embedText = formatEmbedPreviews(message)
+                val embedText = contextEngine.formatEmbedPreviews(message)
                 if (sliceImageAttachments.isNotEmpty() || embedText.isNotEmpty() || replyReferencesByMessage.isNotEmpty()) {
-                    formatDialogueMessages(
+                    formatTranscript(
                         messages = listOf(message),
                         imagesByMessage = mapOf(message.id to sliceImageAttachments),
                         replyReferencesByMessage = replyReferencesByMessage,
-                    ).first
+                    )
                 } else {
                     message.content
                 }
             }
 
-        var fallbackVideoUri: String? = null
-        if (peekTargetUrl != null) {
-            val post =
-                runCatching { peekResolver(peekTargetUrl) }
-                    .onFailure { e ->
-                        logger.warn("Failed to resolve URL $peekTargetUrl via peekResolver, falling back to message context", e)
-                    }.getOrNull()
+        val enrichment =
+            contextEngine.enrichLinks(
+                messages = allMessages,
+                policy = policy,
+                imagesByMessage = imagesMap,
+                peekResolver = peekResolver,
+            )
 
-            if (post != null) {
-                val durationSeconds = post.rawData["durationSeconds"]?.toLongOrNull()
-                if (post.platform == Platform.YOUTUBE && durationSeconds != null && durationSeconds > 7200L) {
-                    return PreparedConversationSlice(
-                        summaryInput = SummaryInput(content = ""),
-                        primaryUrl = peekTargetUrl,
-                        durationExceeded = true,
-                    )
-                }
-
-                val postContent = post.content.ifBlank { "" }.trim()
-                val combinedContent =
-                    if (allMessages.size == 1 && sliceImageAttachments.isEmpty()) {
-                        val commentary = message.content.replace(peekTargetUrl, "").trim()
-                        if (commentary.isNotBlank() && postContent.isNotBlank()) {
-                            "使用者附註: $commentary\n\n內容:\n$postContent"
-                        } else {
-                            postContent.ifBlank { message.content }
-                        }
-                    } else {
-                        if (postContent.isNotBlank()) {
-                            "$formattedContent\n\n內容:\n$postContent"
-                        } else {
-                            formattedContent
-                        }
-                    }
-
-                return PreparedConversationSlice(
-                    summaryInput =
-                        SummaryInput(
-                            content = combinedContent,
-                            title = post.title,
-                            comments = post.comments.map { it.content },
-                            url = peekTargetUrl,
-                            webUrls = classifiedUrls.webUrls,
-                            originalUrls = classifiedUrls.allOriginalUrls,
-                            videoUri = if (post.platform == Platform.YOUTUBE) (post.cleanUrl.ifBlank { peekTargetUrl }) else null,
-                            videoDurationSeconds = durationSeconds,
-                            imageAttachments = sliceImageAttachments,
-                        ),
-                    primaryUrl = peekTargetUrl,
-                    durationExceeded = false,
-                )
-            } else if (peekTargetUrl in classifiedUrls.youtubeUrls) {
-                logger.warn(
-                    "YouTubeResolver failed or returned null for '{}'; falling back to regex-detected videoUri for static Video Understanding",
-                    peekTargetUrl,
-                )
-                fallbackVideoUri = peekTargetUrl
-            } else {
-                logger.debug("No post resolved for SocialPeek URL {}, summarizing message context directly", peekTargetUrl)
-            }
+        if (enrichment.durationExceeded) {
+            return PreparedConversationSlice(
+                summaryInput = SummaryInput(content = ""),
+                primaryUrl = enrichment.primaryUrl,
+                durationExceeded = true,
+            )
         }
 
-        val lookbackProvider: suspend (reason: String) -> String? = { reason ->
+        if (enrichment.resolvedPost != null) {
+            val postContent = enrichment.postContent.orEmpty()
+            val peekTargetUrl = enrichment.peekTargetUrl
+            val combinedContent =
+                if (allMessages.size == 1 && sliceImageAttachments.isEmpty() && peekTargetUrl != null) {
+                    val commentary = message.content.replace(peekTargetUrl, "").trim()
+                    if (commentary.isNotBlank() && postContent.isNotBlank()) {
+                        "使用者附註: $commentary\n\n內容:\n$postContent"
+                    } else {
+                        postContent.ifBlank { message.content }
+                    }
+                } else {
+                    if (postContent.isNotBlank()) {
+                        "$formattedContent\n\n內容:\n$postContent"
+                    } else {
+                        formattedContent
+                    }
+                }
+
+            return PreparedConversationSlice(
+                summaryInput =
+                    SummaryInput(
+                        content = combinedContent,
+                        title = enrichment.title,
+                        comments = enrichment.comments,
+                        url = enrichment.primaryUrl,
+                        webUrls = enrichment.classifiedUrls.webUrls,
+                        originalUrls = enrichment.classifiedUrls.allOriginalUrls,
+                        videoUri = enrichment.videoUri,
+                        videoDurationSeconds = enrichment.videoDurationSeconds,
+                        imageAttachments = sliceImageAttachments,
+                    ),
+                primaryUrl = enrichment.primaryUrl,
+                durationExceeded = false,
+            )
+        }
+
+        val lookbackProvider: suspend (reason: String) -> String? = { _ ->
             val earliestBaseline = allMessages.first()
             val earlierMessages =
                 retrieveEarlierMessages(
@@ -210,22 +210,25 @@ open class ConversationSliceCollector(
                 )
 
             if (earlierMessages.isNotEmpty()) {
-                val earlierReferences = resolveExternalReplyReferences(earlierMessages)
-                val (earlierTranscript, _) =
-                    formatDialogueMessages(
+                val earlierReferences =
+                    contextEngine.resolveExternalReplyReferences(
                         messages = earlierMessages,
-                        startingImageIndex = 1,
+                        policy = policy,
+                        referenceFetcher = referenceFetcher,
+                    )
+                val earlierTranscript =
+                    formatTranscript(
+                        messages = earlierMessages,
                         replyReferencesByMessage = earlierReferences,
                     )
                 val baselineTranscript =
                     if (allMessages.size > 1) {
                         formattedContent
                     } else {
-                        formatDialogueMessages(
+                        formatTranscript(
                             messages = allMessages,
-                            startingImageIndex = 1,
                             replyReferencesByMessage = replyReferencesByMessage,
-                        ).first
+                        )
                     }
                 GeminiPromptBuilder.formatExpandedDialogue(
                     earlierContent = earlierTranscript,
@@ -240,14 +243,14 @@ open class ConversationSliceCollector(
             summaryInput =
                 SummaryInput(
                     content = formattedContent,
-                    url = primaryUrl,
-                    webUrls = classifiedUrls.webUrls,
-                    originalUrls = classifiedUrls.allOriginalUrls,
-                    videoUri = fallbackVideoUri,
+                    url = enrichment.primaryUrl,
+                    webUrls = enrichment.classifiedUrls.webUrls,
+                    originalUrls = enrichment.classifiedUrls.allOriginalUrls,
+                    videoUri = enrichment.videoUri,
                     videoDurationSeconds = null,
                     imageAttachments = sliceImageAttachments,
                 ),
-            primaryUrl = primaryUrl,
+            primaryUrl = enrichment.primaryUrl,
             durationExceeded = false,
             lookbackProvider = lookbackProvider,
         )
@@ -456,128 +459,6 @@ open class ConversationSliceCollector(
         return acceptedEarlier.filterNot { isNoiseMessage(it) }
     }
 
-    internal suspend fun resolveExternalReplyReferences(
-        messages: List<Message>,
-        maxExternalReferences: Int = 3,
-    ): Map<Snowflake, Message> {
-        val windowMessageIds = messages.map { it.id }.toSet()
-        val result = mutableMapOf<Snowflake, Message>()
-        val resolvedExternalIds = mutableSetOf<Snowflake>()
-
-        for (msg in messages) {
-            val ref = runCatching { referenceFetcher(msg) }.getOrNull() ?: continue
-            if (ref.id in windowMessageIds) {
-                continue
-            }
-            if (ref.id in resolvedExternalIds) {
-                result[msg.id] = ref
-                continue
-            }
-            if (resolvedExternalIds.size < maxExternalReferences) {
-                resolvedExternalIds.add(ref.id)
-                result[msg.id] = ref
-            }
-        }
-        return result
-    }
-
-    internal fun formatDialogueMessages(
-        messages: List<Message>,
-        imagesByMessage: Map<Snowflake, List<ChatImageAttachment>> = emptyMap(),
-        startingImageIndex: Int = 1,
-        replyReferencesByMessage: Map<Snowflake, Message> = emptyMap(),
-    ): Pair<String, Int> {
-        var imageIndex = startingImageIndex
-        val formatted =
-            messages.joinToString("\n") { msg ->
-                val baseAuthor = resolveAuthorName(msg)
-                val refMsg = replyReferencesByMessage[msg.id]
-                val author =
-                    if (refMsg != null) {
-                        val refAuthor = resolveAuthorName(refMsg)
-                        val rawContent = refMsg.content.trim().replace("\n", " ")
-                        val excerpt =
-                            if (rawContent.length > 40) {
-                                "${rawContent.take(37)}..."
-                            } else {
-                                rawContent
-                            }
-                        "$baseAuthor 回覆 $refAuthor「$excerpt」"
-                    } else {
-                        baseAuthor
-                    }
-                val embedText = formatEmbedPreviews(msg)
-                val images = imagesByMessage[msg.id] ?: ChatImageAttachmentExtractor.extractFromMessage(msg, maxImageBytes)
-                if (images.isNotEmpty()) {
-                    val markers =
-                        images.map { img ->
-                            val idx = imageIndex++
-                            if (!img.filename.isNullOrBlank()) {
-                                "[附帶圖片 $idx: ${img.filename}]"
-                            } else {
-                                "[附帶圖片 $idx]"
-                            }
-                        }
-                    val markersText = markers.joinToString(" ")
-                    val trimmedContent = msg.content.trim()
-                    val parts =
-                        listOfNotNull(
-                            trimmedContent.takeIf { it.isNotEmpty() },
-                            embedText.takeIf { it.isNotEmpty() },
-                            markersText.takeIf { it.isNotEmpty() },
-                        )
-                    if (parts.isNotEmpty()) {
-                        "[$author]: ${parts.joinToString(" ")}"
-                    } else {
-                        "[$author]:"
-                    }
-                } else if (embedText.isNotEmpty()) {
-                    val trimmedContent = msg.content.trim()
-                    if (trimmedContent.isNotEmpty()) {
-                        "[$author]: $trimmedContent $embedText"
-                    } else {
-                        "[$author]: $embedText"
-                    }
-                } else {
-                    "[$author]: ${msg.content}"
-                }
-            }
-        return formatted to imageIndex
-    }
-
-    internal fun formatEmbedPreviews(message: Message): String {
-        val embeds = runCatching { message.embeds }.getOrNull() ?: return ""
-        if (embeds.isEmpty()) return ""
-
-        val previews =
-            embeds.mapNotNull { embed ->
-                val title = embed.title?.trim()?.takeIf { it.isNotBlank() }
-                val desc = embed.description?.trim()?.takeIf { it.isNotBlank() }
-                when {
-                    title != null && desc != null -> "[連結預覽: $title - $desc]"
-                    title != null -> "[連結預覽: $title]"
-                    desc != null -> "[連結預覽: $desc]"
-                    else -> null
-                }
-            }
-        return previews.joinToString(" ")
-    }
-
-    internal fun resolveAuthorName(message: Message): String {
-        val selfId = noiseFilter.selfId
-        if (selfId != null) {
-            val authorId =
-                runCatching { message.author?.id }.getOrNull()
-                    ?: runCatching { message.data.author.id }.getOrNull()
-            if (authorId == selfId) {
-                return "Luna"
-            }
-        }
-        return runCatching { message.author?.username }.getOrNull()
-            ?: runCatching { message.data.author.username }.getOrNull()
-            ?: "Unknown"
-    }
-
     companion object {
         const val DEFAULT_MAX_HISTORY_MESSAGES = 50
         val DEFAULT_INACTIVITY_GAP = 15.minutes
@@ -585,36 +466,5 @@ open class ConversationSliceCollector(
         const val DEFAULT_MAX_IMAGES = 10
         const val DEFAULT_MAX_LOOKBACK_MESSAGES = 20
         const val NO_FURTHER_HISTORY_MESSAGE = "查無更早的歷史訊息。"
-
-        fun resolveMaxHistoryMessages(env: Map<String, String> = emptyMap()): Int =
-            env["SUMMARY_MAX_HISTORY_MESSAGES"]
-                ?.toIntOrNull()
-                ?.coerceIn(1, 100)
-                ?: DEFAULT_MAX_HISTORY_MESSAGES
-
-        fun resolveInactivityGap(env: Map<String, String> = emptyMap()): Duration =
-            env["SUMMARY_INACTIVITY_GAP_MINUTES"]
-                ?.toLongOrNull()
-                ?.takeIf { it > 0 }
-                ?.minutes
-                ?: DEFAULT_INACTIVITY_GAP
-
-        fun resolveMaxCharacterBudget(env: Map<String, String> = emptyMap()): Int =
-            env["SUMMARY_MAX_CHARACTER_BUDGET"]
-                ?.toIntOrNull()
-                ?.takeIf { it > 0 }
-                ?: DEFAULT_MAX_CHARACTER_BUDGET
-
-        fun resolveMaxLookbackMessages(env: Map<String, String> = emptyMap()): Int =
-            env["SUMMARY_MAX_LOOKBACK_MESSAGES"]
-                ?.toIntOrNull()
-                ?.coerceIn(1, DEFAULT_MAX_LOOKBACK_MESSAGES)
-                ?: DEFAULT_MAX_LOOKBACK_MESSAGES
-
-        fun resolveMaxImages(env: Map<String, String> = emptyMap()): Int =
-            env["SUMMARY_MAX_IMAGES"]
-                ?.toIntOrNull()
-                ?.takeIf { it > 0 }
-                ?: DEFAULT_MAX_IMAGES
     }
 }

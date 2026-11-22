@@ -268,7 +268,7 @@ class ConversationSliceUrlAndMediaTest {
     @Test
     fun `collectSlice enriches YouTube metadata and falls back to regex videoUri when peekResolver fails`() =
         runTest {
-            val logger = LoggerFactory.getLogger(ConversationSliceCollector::class.java) as Logger
+            val logger = LoggerFactory.getLogger(luna.core.ai.DiscordDialogueContextEngine::class.java) as Logger
             val listAppender = ListAppender<ILoggingEvent>()
             listAppender.start()
             logger.addAppender(listAppender)

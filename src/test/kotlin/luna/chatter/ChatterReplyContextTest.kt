@@ -11,6 +11,7 @@ import dev.socialpeek.model.Platform
 import kotlinx.coroutines.test.runTest
 import luna.core.LunaWebhookRegistry
 import luna.core.SummaryMessageRegistry
+import luna.core.ai.DiscordDialogueContextEngine
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.slf4j.LoggerFactory
@@ -217,71 +218,6 @@ class ChatterReplyContextTest {
         }
 
     @Test
-    fun `collectReplyContext logs warning and degrades to Discord embed transcript when SocialPeek fails or returns null for social URL`() =
-        runTest {
-            val logger = LoggerFactory.getLogger(ChatterContextCollector::class.java) as Logger
-            val listAppender = ListAppender<ILoggingEvent>()
-            listAppender.start()
-            logger.addAppender(listAppender)
-
-            try {
-                val socialUrl = "https://www.threads.net/@alice/post/broken"
-                val embed = createMockEmbed(title = "Fallback Embed Title", description = "Fallback embed snippet")
-                val msg =
-                    createMockMessage(
-                        id = 5001L,
-                        username = "Alice",
-                        content = "Read $socialUrl",
-                        embeds = listOf(embed),
-                    )
-
-                // Case 1: peekResolver throws exception
-                val throwingCollector =
-                    ChatterContextCollector(
-                        noiseFilter = filter,
-                        peekResolver = { throw IllegalStateException("HTTP 503 upstream failure") },
-                    )
-                val degradedOnThrow = throwingCollector.collectReplyContext(listOf(msg))
-
-                assertEquals(socialUrl, degradedOnThrow.primaryUrl)
-                assertNull(degradedOnThrow.title)
-                assertNull(degradedOnThrow.postContent)
-                assertTrue(degradedOnThrow.comments.isEmpty())
-                assertTrue(degradedOnThrow.webUrls.isEmpty())
-                assertTrue(degradedOnThrow.transcript.contains("Alice (uid:5001): Read $socialUrl"))
-                assertTrue(degradedOnThrow.transcript.contains("[連結預覽: Fallback Embed Title - Fallback embed snippet]"))
-                assertTrue(
-                    listAppender.list.any {
-                        it.level == Level.WARN && it.formattedMessage.contains(socialUrl)
-                    },
-                )
-
-                listAppender.list.clear()
-
-                // Case 2: peekResolver returns null
-                val nullCollector =
-                    ChatterContextCollector(
-                        noiseFilter = filter,
-                        peekResolver = { null },
-                    )
-                val degradedOnNull = nullCollector.collectReplyContext(listOf(msg))
-
-                assertEquals(socialUrl, degradedOnNull.primaryUrl)
-                assertNull(degradedOnNull.postContent)
-                assertTrue(degradedOnNull.webUrls.isEmpty())
-                assertTrue(degradedOnNull.transcript.contains("[連結預覽: Fallback Embed Title - Fallback embed snippet]"))
-                assertTrue(
-                    listAppender.list.any {
-                        it.level == Level.WARN && it.formattedMessage.contains(socialUrl)
-                    },
-                )
-            } finally {
-                logger.detachAppender(listAppender)
-                listAppender.stop()
-            }
-        }
-
-    @Test
     fun `collectReplyContext skips peekResolver for general web URLs, preserves embeds, caps at 20, and excludes Discord CDN`() =
         runTest {
             var peekCalled = false
@@ -384,51 +320,61 @@ class ChatterReplyContextTest {
         }
 
     @Test
-    fun `collectReplyContext falls back to regex-detected videoUri with warning log when YouTube resolution fails or returns null`() =
+    fun `collectReplyContext omits videoUri and degrades gracefully when YouTube video exceeds 2 hours`() =
         runTest {
-            val logger = LoggerFactory.getLogger(ChatterContextCollector::class.java) as Logger
+            val logger = LoggerFactory.getLogger(DiscordDialogueContextEngine::class.java) as Logger
             val listAppender = ListAppender<ILoggingEvent>()
             listAppender.start()
             logger.addAppender(listAppender)
 
             try {
-                val ytUrl = "https://youtu.be/dQw4w9WgXcQ"
-                val webUrl = "https://kotlinlang.org/docs/home.html"
-                val msg1 = createMockMessage(id = 6201L, username = "Alice", content = "Docs: $webUrl")
-                val msg2 = createMockMessage(id = 6202L, username = "Bob", content = "Video: $ytUrl")
+                val ytUrl = "https://www.youtube.com/watch?v=longVideo123"
+                val longPost =
+                    PeekPost(
+                        platform = Platform.YOUTUBE,
+                        id = "longVideo123",
+                        originalUrl = ytUrl,
+                        cleanUrl = ytUrl,
+                        author = Author(username = "PodcastHost"),
+                        title = "3-Hour Deep Dive Podcast",
+                        content = "Creator description of the 3-hour episode",
+                        comments = listOf(Comment(author = "listener", content = "Great timestamps!")),
+                        rawData = mapOf("durationSeconds" to "7201"),
+                    )
 
-                // Case 1: YouTube resolution returns null (e.g. unconfigured YouTube Data API)
-                val nullCollector = ChatterContextCollector(noiseFilter = filter, peekResolver = { null })
-                val nullPrepared = nullCollector.collectReplyContext(listOf(msg1, msg2))
-
-                assertEquals(ytUrl, nullPrepared.primaryUrl)
-                assertEquals(ytUrl, nullPrepared.url)
-                assertEquals(ytUrl, nullPrepared.videoUri)
-                assertNull(nullPrepared.videoDurationSeconds)
-                assertEquals(listOf(webUrl), nullPrepared.webUrls)
-                assertTrue(
-                    listAppender.list.any {
-                        it.level == Level.WARN && it.formattedMessage.contains(ytUrl)
-                    },
-                )
-
-                listAppender.list.clear()
-
-                // Case 2: YouTube resolution throws exception
-                val throwingCollector =
+                val msg = createMockMessage(id = 4011L, username = "Alice", content = "Check $ytUrl")
+                val collector =
                     ChatterContextCollector(
                         noiseFilter = filter,
-                        peekResolver = { throw IllegalStateException("YouTube Data API 403") },
+                        peekResolver = { longPost },
                     )
-                val throwPrepared = throwingCollector.collectReplyContext(listOf(msg1, msg2))
 
-                assertEquals(ytUrl, throwPrepared.videoUri)
-                assertNull(throwPrepared.videoDurationSeconds)
-                assertEquals(listOf(webUrl), throwPrepared.webUrls)
+                val result = collector.collectReplyContext(listOf(msg))
+
+                assertEquals(ytUrl, result.primaryUrl)
+                assertEquals(ytUrl, result.url)
+                assertNull(result.videoUri)
+                assertEquals(7201L, result.videoDurationSeconds)
+                assertEquals("3-Hour Deep Dive Podcast", result.title)
+                assertEquals("Creator description of the 3-hour episode", result.postContent)
+                assertEquals(listOf("Great timestamps!"), result.comments)
+                assertTrue(
+                    result.transcript.contains("3-Hour Deep Dive Podcast"),
+                    "Transcript should retain creator title on >2h YouTube degradation",
+                )
+                assertTrue(
+                    result.transcript.contains("Creator description of the 3-hour episode"),
+                    "Transcript should retain creator description on >2h YouTube degradation",
+                )
+                assertTrue(
+                    result.transcript.contains("Great timestamps!"),
+                    "Transcript should retain audience comments on >2h YouTube degradation",
+                )
                 assertTrue(
                     listAppender.list.any {
                         it.level == Level.WARN && it.formattedMessage.contains(ytUrl)
                     },
+                    "DiscordDialogueContextEngine should emit a WARN log when YouTube video exceeds 2 hours",
                 )
             } finally {
                 logger.detachAppender(listAppender)

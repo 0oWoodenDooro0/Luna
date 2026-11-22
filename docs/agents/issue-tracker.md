@@ -1,6 +1,6 @@
 # Issue tracker: GitHub
 
-Issues and specs for this repo live as GitHub issues. Use the `gh` CLI for all operations.
+Issues and specs for this repo live directly as GitHub issue bodies (do not create local `docs/specs/` files). Use the `gh` CLI for tracker mutations; when reading via T3 MCP `read_issue`, pass the bare numeric `key` (e.g. `"200"`, without `#`).
 
 ## Conventions
 

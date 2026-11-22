@@ -8,7 +8,10 @@ import luna.core.LunaWebhookRegistry
 import luna.core.SummaryMessageRegistry
 import luna.core.SummaryRegistry
 import luna.core.WebhookRegistry
-import luna.core.ai.DiscordMediaEmbedExtractor
+import luna.core.ai.CommandPrefixRule
+import luna.core.ai.DialogueContextPolicy
+import luna.core.ai.DialogueNoiseReason
+import luna.core.ai.DiscordDialogueContextEngine
 
 enum class RejectionReason {
     CHATTER_DISABLED,
@@ -50,6 +53,7 @@ open class ChatterNoiseFilter(
     var allowedChannels: Set<Snowflake> = emptySet(),
     var cooldownDurationMs: Long = BoundedChannelCooldownCache.DEFAULT_COOLDOWN_MS,
     var botPrefixes: Set<String> = DEFAULT_BOT_PREFIXES,
+    val contextEngine: DiscordDialogueContextEngine = DiscordDialogueContextEngine(webhookRegistry, summaryRegistry),
 ) {
     constructor(
         config: ChatterFilterConfig,
@@ -57,6 +61,7 @@ open class ChatterNoiseFilter(
             BoundedChannelCooldownCache(defaultCooldownDurationMs = config.cooldownDurationMs),
         webhookRegistry: WebhookRegistry = LunaWebhookRegistry,
         summaryRegistry: SummaryRegistry = SummaryMessageRegistry,
+        contextEngine: DiscordDialogueContextEngine = DiscordDialogueContextEngine(webhookRegistry, summaryRegistry),
     ) : this(
         cooldownCache = cooldownCache,
         webhookRegistry = webhookRegistry,
@@ -65,7 +70,12 @@ open class ChatterNoiseFilter(
         allowedChannels = config.allowedChannels,
         cooldownDurationMs = config.cooldownDurationMs,
         botPrefixes = config.botPrefixes,
+        contextEngine = contextEngine,
     )
+
+    internal fun contextPolicy(): DialogueContextPolicy = DialogueContextPolicy.chatter(botPrefixes = botPrefixes)
+
+    private fun triggerPolicy(): DialogueContextPolicy = contextPolicy().copy(allowThirdPartyBots = false)
 
     fun evaluate(
         message: Message,
@@ -99,67 +109,83 @@ open class ChatterNoiseFilter(
             )
         }
 
-        // 4. Check slash commands and bot prefix commands
-        val type = runCatching { message.type }.getOrNull() ?: MessageType.Default
-        if (isCommand(message.content, type)) {
-            return ChatterFilterResult.Rejected(
-                RejectionReason.COMMAND,
-                "Message starts with slash command or bot prefix command",
-            )
-        }
-
-        // 5. Check system notices / non-speech message types
-        if (isSystemNotice(type)) {
-            return ChatterFilterResult.Rejected(
-                RejectionReason.SYSTEM_MESSAGE,
-                "System message type: $type",
-            )
-        }
-
-        // 6. Check webhooks & bots
-        val webhookId = runCatching { message.webhookId }.getOrNull()
-        val isLunaWebhook = webhookId != null && webhookRegistry.contains(webhookId)
-
-        if (webhookId != null && !isLunaWebhook) {
-            // Third-party / unverified webhook
-            return ChatterFilterResult.Rejected(
-                RejectionReason.UNVERIFIED_WEBHOOK,
-                "Message from unverified external webhook $webhookId",
-            )
-        }
-
-        if (!isLunaWebhook && (message.author == null || message.author?.isBot == true)) {
-            return ChatterFilterResult.Rejected(
-                RejectionReason.BOT_MESSAGE,
-                "Message from ambient third-party bot or missing author",
-            )
-        }
-
-        // 7. Check empty / whitespace-only messages without media attachments, stickers, or embeds (CODING_STANDARDS.md §3)
-        val placeholder = resolveBlankMessagePlaceholder(message)
-        if (message.content.isBlank() && placeholder == null && !directMention) {
-            return ChatterFilterResult.Rejected(
-                RejectionReason.EMPTY_MESSAGE,
-                "Message content is blank or empty without attachments, stickers, or embeds",
-            )
+        // 4. Delegate shared noise evaluation (commands, system notices, webhooks/bots, blank/media checks)
+        val noiseEval = contextEngine.evaluateNoise(message, triggerPolicy(), kordSelfId = null)
+        if (noiseEval.isNoise) {
+            if (noiseEval.reason == DialogueNoiseReason.EMPTY_OR_EMOJI_ONLY && directMention) {
+                return ChatterFilterResult.Allowed(
+                    speakerName = noiseEval.speaker.name,
+                    channelId = channelId,
+                    messageId = message.id,
+                    content = message.content,
+                )
+            }
+            return mapNoiseRejection(message, noiseEval.reason)
         }
 
         val finalContent =
             if (message.content.isNotBlank()) {
                 message.content
             } else {
-                placeholder ?: message.content
+                noiseEval.blankPlaceholder ?: message.content
             }
 
-        val speakerName = extractSpeakerName(message)
-
         return ChatterFilterResult.Allowed(
-            speakerName = speakerName,
+            speakerName = noiseEval.speaker.name,
             channelId = channelId,
             messageId = message.id,
             content = finalContent,
         )
     }
+
+    private fun mapNoiseRejection(
+        message: Message,
+        reason: DialogueNoiseReason?,
+    ): ChatterFilterResult.Rejected =
+        when (reason) {
+            DialogueNoiseReason.COMMAND -> {
+                ChatterFilterResult.Rejected(
+                    RejectionReason.COMMAND,
+                    "Message starts with slash command or bot prefix command",
+                )
+            }
+
+            DialogueNoiseReason.SYSTEM_MESSAGE -> {
+                val type = runCatching { message.type }.getOrNull() ?: MessageType.Default
+                ChatterFilterResult.Rejected(
+                    RejectionReason.SYSTEM_MESSAGE,
+                    "System message type: $type",
+                )
+            }
+
+            DialogueNoiseReason.UNVERIFIED_WEBHOOK -> {
+                val webhookId = runCatching { message.webhookId }.getOrNull()
+                ChatterFilterResult.Rejected(
+                    RejectionReason.UNVERIFIED_WEBHOOK,
+                    "Message from unverified external webhook $webhookId",
+                )
+            }
+
+            DialogueNoiseReason.THIRD_PARTY_BOT,
+            DialogueNoiseReason.BOT_SUMMARY,
+            DialogueNoiseReason.MISSING_AUTHOR,
+            -> {
+                ChatterFilterResult.Rejected(
+                    RejectionReason.BOT_MESSAGE,
+                    "Message from ambient third-party bot or missing author",
+                )
+            }
+
+            DialogueNoiseReason.STICKER_ONLY,
+            DialogueNoiseReason.EMPTY_OR_EMOJI_ONLY,
+            null,
+            -> {
+                ChatterFilterResult.Rejected(
+                    RejectionReason.EMPTY_MESSAGE,
+                    "Message content is blank or empty without attachments, stickers, or embeds",
+                )
+            }
+        }
 
     fun shouldProcess(
         message: Message,
@@ -191,29 +217,12 @@ open class ChatterNoiseFilter(
         message: Message,
         kordSelfId: Snowflake? = null,
     ): Boolean {
-        val type = runCatching { message.type }.getOrNull() ?: MessageType.Default
-        if (isCommand(message.content, type)) return false
-        if (isSystemNotice(type)) return false
-        val webhookId = runCatching { message.webhookId }.getOrNull()
-        val isLunaWebhook = webhookId != null && webhookRegistry.contains(webhookId)
-        if (webhookId != null && !isLunaWebhook) return false
-
         val resolvedSelfId = kordSelfId ?: runCatching { message.kord.selfId }.getOrNull()
-        val authorId =
-            runCatching { message.author?.id }.getOrNull()
-                ?: runCatching { message.data.author.id }.getOrNull()
-        val isLunaBot = resolvedSelfId != null && authorId == resolvedSelfId
-        if (!isLunaWebhook && !isLunaBot && message.author == null) return false
-
-        if (isLunaBot) {
-            val isSummary = summaryRegistry.contains(message.id) || SummaryRegistry.isSummaryContent(message.content)
-            if (isSummary) {
-                return false
-            }
+        val noiseEval = contextEngine.evaluateNoise(message, contextPolicy(), kordSelfId = resolvedSelfId)
+        if (!noiseEval.isNoise) {
+            return true
         }
-
-        return message.content.isNotBlank() ||
-            resolveBlankMessagePlaceholder(message) != null ||
+        return noiseEval.reason == DialogueNoiseReason.EMPTY_OR_EMOJI_ONLY &&
             isDirectBotMention(message, resolvedSelfId)
     }
 
@@ -226,28 +235,22 @@ open class ChatterNoiseFilter(
         message: Message,
         kordSelfId: Snowflake? = null,
     ): ChatMessage? {
-        if (!isContextMessage(message, kordSelfId)) return null
-
         val resolvedSelfId = kordSelfId ?: runCatching { message.kord.selfId }.getOrNull()
-        val authorId =
-            runCatching { message.author?.id }.getOrNull()
-                ?: runCatching { message.data.author.id }.getOrNull()
-        val isLunaBot = resolvedSelfId != null && authorId == resolvedSelfId
-        val isThirdPartyBot = !isLunaBot && (runCatching { message.author?.isBot }.getOrNull() == true)
-
+        val noiseEval = contextEngine.evaluateNoise(message, contextPolicy(), kordSelfId = resolvedSelfId)
+        if (noiseEval.isNoise) {
+            return null
+        }
         val content =
             if (message.content.isNotBlank()) {
                 message.content
             } else {
-                resolveBlankMessagePlaceholder(message) ?: return null
+                noiseEval.blankPlaceholder ?: return null
             }
-
-        val speaker = if (isLunaBot) "Luna" else extractSpeakerName(message)
         return ChatMessage(
-            author = speaker,
+            author = noiseEval.speaker.name,
             content = content,
-            authorId = authorId?.toString(),
-            isBot = isThirdPartyBot,
+            authorId = noiseEval.speaker.authorId,
+            isBot = noiseEval.speaker.isThirdPartyBot,
         )
     }
 
@@ -258,60 +261,18 @@ open class ChatterNoiseFilter(
 
     fun speakerName(message: Message): String = extractSpeakerName(message)
 
-    fun extractSpeakerName(message: Message): String =
-        message.author?.username
-            ?: runCatching { message.data.author.username }.getOrNull()
-            ?: "Unknown"
-
-    private fun isSystemNotice(type: MessageType): Boolean =
-        when (type) {
-            MessageType.Default,
-            MessageType.Reply,
-            MessageType.ThreadStarterMessage,
-            -> false
-
-            else -> true
-        }
-
-    private fun isCommand(
-        content: String,
-        type: MessageType,
-    ): Boolean {
-        if (type == MessageType.ChatInputCommand || type == MessageType.ContextMenuCommand) {
-            return true
-        }
-        val trimmed = content.trim()
-        if (trimmed.startsWith("/")) return true
-        for (prefix in botPrefixes) {
-            if (trimmed.startsWith(prefix) && trimmed.length > prefix.length && trimmed[prefix.length].isLetterOrDigit()) {
-                return true
-            }
-        }
-        return false
-    }
+    fun extractSpeakerName(message: Message): String = contextEngine.extractSpeakerName(message)
 
     companion object {
-        val DEFAULT_BOT_PREFIXES = setOf("!", "~", "?")
+        val DEFAULT_BOT_PREFIXES = CommandPrefixRule.DEFAULT_BOT_PREFIXES
         val URL_REGEX = Regex("""https?://[^\s<>"']+""")
-        const val ATTACHMENT_PLACEHOLDER = "[Attachment]"
-        const val EMBED_PLACEHOLDER = "[Embed]"
-        const val GIF_PLACEHOLDER = DiscordMediaEmbedExtractor.GIF_PLACEHOLDER
-        const val STICKER_PLACEHOLDER = DiscordMediaEmbedExtractor.STICKER_PLACEHOLDER
+        const val ATTACHMENT_PLACEHOLDER = DiscordDialogueContextEngine.ATTACHMENT_PLACEHOLDER
+        const val EMBED_PLACEHOLDER = DiscordDialogueContextEngine.EMBED_PLACEHOLDER
+        const val GIF_PLACEHOLDER = DiscordDialogueContextEngine.GIF_PLACEHOLDER
+        const val STICKER_PLACEHOLDER = DiscordDialogueContextEngine.STICKER_PLACEHOLDER
 
-        fun resolveBlankMessagePlaceholder(message: Message): String? {
-            val hasAttachments = runCatching { message.attachments.isNotEmpty() }.getOrDefault(false)
-            if (hasAttachments) return ATTACHMENT_PLACEHOLDER
-            val stickerPlaceholder = DiscordMediaEmbedExtractor.formatStickerAnnotations(message)
-            if (stickerPlaceholder.isNotEmpty()) return stickerPlaceholder
-            val embeds = runCatching { message.embeds }.getOrDefault(emptyList())
-            if (embeds.isNotEmpty()) {
-                return if (embeds.any { DiscordMediaEmbedExtractor.isTenorOrGiphyEmbed(it) }) {
-                    GIF_PLACEHOLDER
-                } else {
-                    EMBED_PLACEHOLDER
-                }
-            }
-            return null
-        }
+        private val DEFAULT_CONTEXT_ENGINE = DiscordDialogueContextEngine()
+
+        fun resolveBlankMessagePlaceholder(message: Message): String? = DEFAULT_CONTEXT_ENGINE.resolveBlankMessagePlaceholder(message)
     }
 }

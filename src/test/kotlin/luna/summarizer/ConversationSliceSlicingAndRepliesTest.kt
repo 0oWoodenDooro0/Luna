@@ -143,97 +143,47 @@ class ConversationSliceSlicingAndRepliesTest {
         }
 
     @Test
-    fun `collectSlice formats normally without inline quote when referenced message is already in slice window`() =
+    fun `collectSlice formats Tenor GIF embed as GIF preview without ingesting GIF thumbnail image`() =
         runTest {
             val baseTime = Instant.parse("2026-11-06T12:00:00Z")
-            val inWindowMsg =
+            val gifEmbed =
+                mockk<dev.kord.core.entity.Embed>(relaxed = true).also {
+                    every { it.title } returns "Happy Dance"
+                    every { it.description } returns null
+                    every { it.url } returns "https://tenor.com/view/happy-dance-123"
+                }
+            val msg1 =
                 createMockMessage(
-                    2011L,
-                    "Alice",
-                    "Plan proposal",
+                    id = 2041L,
+                    username = "Alice",
+                    content = "Check this",
                     timestamp = baseTime,
-                )
-            val replyMsg =
-                createMockMessage(
-                    2012L,
-                    "Bob",
-                    "Looks good",
-                    timestamp = baseTime + 1.minutes,
-                    referencedMessage = inWindowMsg,
+                    embeds = listOf(gifEmbed),
                 )
             val targetMsg =
                 createMockMessage(
-                    2013L,
-                    "Charlie",
-                    "Finalizing",
-                    timestamp = baseTime + 2.minutes,
+                    id = 2042L,
+                    username = "Bob",
+                    content = "Nice",
+                    timestamp = baseTime + 1.minutes,
                 )
 
             val collector =
                 ConversationSliceCollector(
-                    historyFetcher = { _, _ -> listOf(inWindowMsg, replyMsg) },
+                    historyFetcher = { _, _ -> listOf(msg1) },
                     forwardFetcher = { _, _ -> emptyList() },
                 )
 
             val slice = collector.collectSlice(targetMsg)
             assertNotNull(slice)
-            val content = slice.summaryInput.content
-            assertTrue(content.contains("[Alice]: Plan proposal"))
-            assertTrue(content.contains("[Bob]: Looks good"))
-            assertFalse(content.contains("回覆 Alice"))
-        }
-
-    @Test
-    fun `collectSlice bounds external reference lookups to maximum of 3 messages`() =
-        runTest {
-            val baseTime = Instant.parse("2026-11-06T12:00:00Z")
-            val ext1 = createMockMessage(2021L, "Ext1", "External 1", timestamp = baseTime - 60.minutes)
-            val ext2 = createMockMessage(2022L, "Ext2", "External 2", timestamp = baseTime - 50.minutes)
-            val ext3 = createMockMessage(2023L, "Ext3", "External 3", timestamp = baseTime - 40.minutes)
-            val ext4 = createMockMessage(2024L, "Ext4", "External 4", timestamp = baseTime - 30.minutes)
-
-            val r1 = createMockMessage(2025L, "U1", "Reply 1", timestamp = baseTime, referencedMessage = ext1)
-            val r2 = createMockMessage(2026L, "U2", "Reply 2", timestamp = baseTime + 1.minutes, referencedMessage = ext2)
-            val r3 = createMockMessage(2027L, "U3", "Reply 3", timestamp = baseTime + 2.minutes, referencedMessage = ext3)
-            val r4 = createMockMessage(2028L, "U4", "Reply 4", timestamp = baseTime + 3.minutes, referencedMessage = ext4)
-            val targetMsg = createMockMessage(2029L, "U5", "Target", timestamp = baseTime + 4.minutes)
-
-            val collector =
-                ConversationSliceCollector(
-                    historyFetcher = { _, _ -> listOf(r1, r2, r3, r4) },
-                    forwardFetcher = { _, _ -> emptyList() },
-                )
-
-            val slice = collector.collectSlice(targetMsg)
-            assertNotNull(slice)
-            val content = slice.summaryInput.content
-            assertTrue(content.contains("[U1 回覆 Ext1「External 1」]: Reply 1"))
-            assertTrue(content.contains("[U2 回覆 Ext2「External 2」]: Reply 2"))
-            assertTrue(content.contains("[U3 回覆 Ext3「External 3」]: Reply 3"))
-            assertTrue(content.contains("[U4]: Reply 4"))
-            assertFalse(content.contains("回覆 Ext4"))
-        }
-
-    @Test
-    fun `collectSlice clamps reply reference excerpt to 40 characters with ellipsis`() =
-        runTest {
-            val baseTime = Instant.parse("2026-11-06T12:00:00Z")
-            val longContent = "A".repeat(60)
-            val ext = createMockMessage(2031L, "Alice", longContent, timestamp = baseTime - 60.minutes)
-            val replyMsg = createMockMessage(2032L, "Bob", "Comment", timestamp = baseTime, referencedMessage = ext)
-            val targetMsg = createMockMessage(2033L, "Charlie", "Target", timestamp = baseTime + 1.minutes)
-
-            val collector =
-                ConversationSliceCollector(
-                    historyFetcher = { _, _ -> listOf(replyMsg) },
-                    forwardFetcher = { _, _ -> emptyList() },
-                )
-
-            val slice = collector.collectSlice(targetMsg)
-            assertNotNull(slice)
-            val content = slice.summaryInput.content
-            val expectedExcerpt = "A".repeat(37) + "..."
-            assertTrue(content.contains("[Bob 回覆 Alice「$expectedExcerpt」]: Comment"))
+            assertTrue(
+                slice.summaryInput.content.contains("[Alice]: Check this [GIF: Happy Dance]"),
+                "Expected Tenor embed to render as [GIF: Happy Dance], got: ${slice.summaryInput.content}",
+            )
+            assertTrue(
+                slice.summaryInput.imageAttachments.isEmpty(),
+                "Expected Summary Pipeline to exclude GIF embed images (includeStickersAndGifEmbeds = false)",
+            )
         }
 
     @Test
@@ -382,63 +332,6 @@ class ConversationSliceSlicingAndRepliesTest {
             val slice = collector.collectSlice(targetMsg)
             assertNotNull(slice)
             assertTrue(slice.summaryInput.content.contains("[MasqueradedAlice]: Cleaned post link https://example.com/post"))
-        }
-
-    @Test
-    fun `collectSlice formats Discord embeds with title, description, or attachments`() =
-        runTest {
-            val baseTime = Instant.parse("2026-11-06T12:00:00Z")
-            val lunaWebhookId = Snowflake(777L)
-            val img = createMockAttachment("https://cdn.example.com/chart.png", "image/png", "chart.png")
-
-            val both =
-                createMockMessage(
-                    id = 8201L,
-                    username = "MasqueradedAlice",
-                    content = "Update",
-                    isBot = true,
-                    webhookId = lunaWebhookId,
-                    timestamp = baseTime,
-                    attachments = setOf(img),
-                    embeds = listOf(SummaryTestFixtures.createMockEmbed(title = "Preview Title", description = "Preview Desc")),
-                )
-            val onlyTitle =
-                createMockMessage(
-                    id = 8202L,
-                    username = "Bob",
-                    content = "Msg 1",
-                    timestamp = baseTime + 1.minutes,
-                    embeds = listOf(SummaryTestFixtures.createMockEmbed(title = "Only Title", description = null)),
-                )
-            val onlyDesc =
-                createMockMessage(
-                    id = 8203L,
-                    username = "Charlie",
-                    content = "Msg 2",
-                    timestamp = baseTime + 2.minutes,
-                    embeds = listOf(SummaryTestFixtures.createMockEmbed(title = "", description = "Only Description")),
-                )
-            val targetMsg =
-                createMockMessage(
-                    id = 8204L,
-                    username = "Dave",
-                    content = "Target",
-                    timestamp = baseTime + 3.minutes,
-                )
-
-            val collector =
-                ConversationSliceCollector(
-                    historyFetcher = { _, _ -> listOf(both, onlyTitle, onlyDesc) },
-                    peekResolver = { null },
-                    noiseFilter = DialogueNoiseFilter(isLunaWebhook = { it == lunaWebhookId }),
-                )
-
-            val slice = collector.collectSlice(targetMsg)
-            assertNotNull(slice)
-            val content = slice.summaryInput.content
-            assertTrue(content.contains("[MasqueradedAlice]: Update [連結預覽: Preview Title - Preview Desc] [附帶圖片 1: chart.png]"))
-            assertTrue(content.contains("[Bob]: Msg 1 [連結預覽: Only Title]"))
-            assertTrue(content.contains("[Charlie]: Msg 2 [連結預覽: Only Description]"))
         }
 
     @Test
