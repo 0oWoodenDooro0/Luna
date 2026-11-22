@@ -1,6 +1,5 @@
 package luna.summarizer
 
-import dev.kord.common.entity.MessageType
 import dev.kord.common.entity.Snowflake
 import dev.kord.core.Kord
 import dev.kord.core.entity.Message
@@ -8,6 +7,8 @@ import luna.core.LunaWebhookRegistry
 import luna.core.SummaryMessageRegistry
 import luna.core.SummaryRegistry
 import luna.core.WebhookRegistry
+import luna.core.ai.DialogueContextPolicy
+import luna.core.ai.DiscordDialogueContextEngine
 import org.slf4j.LoggerFactory
 import java.util.Collections
 import java.util.LinkedHashMap
@@ -50,6 +51,12 @@ open class DialogueNoiseFilter(
     val webhookCache: BoundedWebhookCache = BoundedWebhookCache(),
     val webhookRegistry: WebhookRegistry = LunaWebhookRegistry,
     val summaryRegistry: SummaryRegistry = SummaryMessageRegistry,
+    val contextEngine: DiscordDialogueContextEngine =
+        DiscordDialogueContextEngine(
+            webhookRegistry = webhookRegistry,
+            summaryRegistry = summaryRegistry,
+        ),
+    val policy: DialogueContextPolicy = DialogueContextPolicy.summary(),
 ) {
     private val logger = LoggerFactory.getLogger(DialogueNoiseFilter::class.java)
     var kordInstance: Kord? = kord
@@ -108,94 +115,22 @@ open class DialogueNoiseFilter(
 
     open suspend fun isBotSummaryMessage(message: Message): Boolean {
         val webhookId = runCatching { message.webhookId }.getOrNull()
-        if (webhookId != null && isLunaWebhook(webhookId)) {
-            return false
-        }
-        if (summaryRegistry.contains(message.id)) {
-            return true
-        }
-        return message.author?.isBot == true && SummaryRegistry.isSummaryContent(message.content)
+        val verifiedWebhook = if (webhookId != null) isLunaWebhook(webhookId) else null
+        return contextEngine.isBotSummaryMessage(message, isVerifiedWebhook = verifiedWebhook)
     }
 
     open suspend fun isNoiseMessage(message: Message): Boolean {
         val webhookId = runCatching { message.webhookId }.getOrNull()
-        val isLuna = webhookId != null && isLunaWebhook(webhookId)
-
-        // Exclude unknown or third-party webhooks
-        if (webhookId != null && !isLuna) {
-            return true
-        }
-
-        val currentSelfId = this.selfId
-        val authorId = runCatching { message.author?.id }.getOrNull()
-        val isLunaBot = currentSelfId != null && authorId == currentSelfId
-
-        if (isLunaBot) {
-            if (isBotSummaryMessage(message)) {
-                return true
-            }
-        } else if (!isLuna && (message.author == null || message.author?.isBot == true)) {
-            // Exclude bot or missing author (unless it's a Luna Webhook Replacement)
-            return true
-        }
-
-        // Exclude system message types
-        val type = runCatching { message.type }.getOrNull()
-        if (type != null && isSystemMessageType(type)) {
-            return true
-        }
-
-        // Exclude commands matching slash or bot command patterns
-        if (isCommand(message.content, type)) {
-            return true
-        }
-
-        val hasAttachments = runCatching { message.attachments }.getOrNull()?.isNotEmpty() == true
-
-        // Exclude messages consisting solely of stickers (unless attachments are present)
-        val hasStickers = runCatching { message.stickers }.getOrNull()?.isNotEmpty() == true
-        if (hasStickers && !hasAttachments && isBlankOrCustomEmojiOnly(message.content)) {
-            return true
-        }
-
-        // Exclude empty, blank, or solely custom graphic emojis without text (unless attachments are present)
-        if (!hasAttachments && isBlankOrCustomEmojiOnly(message.content)) {
-            return true
-        }
-
-        return false
-    }
-
-    private fun isSystemMessageType(type: MessageType): Boolean =
-        when (type) {
-            MessageType.Default,
-            MessageType.Reply,
-            MessageType.ThreadStarterMessage,
-            -> false
-
-            else -> true
-        }
-
-    private fun isCommand(
-        content: String,
-        type: MessageType?,
-    ): Boolean {
-        if (type == MessageType.ChatInputCommand || type == MessageType.ContextMenuCommand) {
-            return true
-        }
-        val trimmed = content.trim()
-        if (trimmed.startsWith("/")) return true
-        if (trimmed.startsWith("!") && trimmed.length > 1 && trimmed[1].isLetter()) return true
-        return false
-    }
-
-    private fun isBlankOrCustomEmojiOnly(content: String): Boolean {
-        if (content.isBlank()) return true
-        return CUSTOM_EMOJI_REGEX.replace(content, "").isBlank()
+        val verifiedWebhook = if (webhookId != null) isLunaWebhook(webhookId) else null
+        return contextEngine.isNoiseMessage(
+            message = message,
+            policy = policy,
+            kordSelfId = selfId,
+            isVerifiedWebhook = verifiedWebhook,
+        )
     }
 
     companion object {
         const val LUNA_PREVIEW_WEBHOOK_NAME = "Luna Preview"
-        val CUSTOM_EMOJI_REGEX = Regex("""<a?:[a-zA-Z0-9_]+:\d+>""")
     }
 }

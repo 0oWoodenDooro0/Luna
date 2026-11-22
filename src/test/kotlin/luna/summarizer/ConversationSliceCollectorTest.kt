@@ -379,38 +379,4 @@ class ConversationSliceCollectorTest {
             assertEquals("https://cdn.discordapp.com/1.png", slice.summaryInput.imageAttachments[0].url)
             assertEquals("https://cdn.discordapp.com/2.png", slice.summaryInput.imageAttachments[1].url)
         }
-
-    @Test
-    fun `resolves default configuration values when environment is unconfigured`() {
-        assertEquals(50, ConversationSliceCollector.resolveMaxHistoryMessages())
-        assertEquals(15.minutes, ConversationSliceCollector.resolveInactivityGap())
-        assertEquals(20000, ConversationSliceCollector.resolveMaxCharacterBudget())
-        assertEquals(10, ConversationSliceCollector.resolveMaxImages())
-        assertEquals(20, ConversationSliceCollector.resolveMaxLookbackMessages())
-    }
-
-    @Test
-    fun `resolves custom configuration values from environment with bounds clamping`() {
-        val env =
-            mapOf(
-                "SUMMARY_MAX_HISTORY_MESSAGES" to "30",
-                "SUMMARY_INACTIVITY_GAP_MINUTES" to "25",
-                "SUMMARY_MAX_CHARACTER_BUDGET" to "12000",
-                "SUMMARY_MAX_IMAGES" to "8",
-                "SUMMARY_MAX_LOOKBACK_MESSAGES" to "10",
-            )
-        assertEquals(30, ConversationSliceCollector.resolveMaxHistoryMessages(env))
-        assertEquals(25.minutes, ConversationSliceCollector.resolveInactivityGap(env))
-        assertEquals(12000, ConversationSliceCollector.resolveMaxCharacterBudget(env))
-        assertEquals(8, ConversationSliceCollector.resolveMaxImages(env))
-        assertEquals(10, ConversationSliceCollector.resolveMaxLookbackMessages(env))
-
-        val clampedEnv =
-            mapOf(
-                "SUMMARY_MAX_HISTORY_MESSAGES" to "500",
-                "SUMMARY_MAX_LOOKBACK_MESSAGES" to "0",
-            )
-        assertEquals(100, ConversationSliceCollector.resolveMaxHistoryMessages(clampedEnv))
-        assertEquals(1, ConversationSliceCollector.resolveMaxLookbackMessages(clampedEnv))
-    }
 }

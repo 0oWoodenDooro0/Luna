@@ -215,10 +215,10 @@ class ConversationSliceSlicingAndRepliesTest {
         }
 
     @Test
-    fun `collectSlice clamps reply reference excerpt to 40 characters with ellipsis`() =
+    fun `collectSlice clamps reply reference excerpt to 120 characters with ellipsis`() =
         runTest {
             val baseTime = Instant.parse("2026-11-06T12:00:00Z")
-            val longContent = "A".repeat(60)
+            val longContent = "A".repeat(150)
             val ext = createMockMessage(2031L, "Alice", longContent, timestamp = baseTime - 60.minutes)
             val replyMsg = createMockMessage(2032L, "Bob", "Comment", timestamp = baseTime, referencedMessage = ext)
             val targetMsg = createMockMessage(2033L, "Charlie", "Target", timestamp = baseTime + 1.minutes)
@@ -232,8 +232,55 @@ class ConversationSliceSlicingAndRepliesTest {
             val slice = collector.collectSlice(targetMsg)
             assertNotNull(slice)
             val content = slice.summaryInput.content
-            val expectedExcerpt = "A".repeat(37) + "..."
-            assertTrue(content.contains("[Bob 回覆 Alice「$expectedExcerpt」]: Comment"))
+            val expectedExcerpt = "A".repeat(117) + "..."
+            assertTrue(
+                content.contains("[Bob 回覆 Alice「$expectedExcerpt」]: Comment"),
+                "Expected 120-char clamped reply excerpt in transcript, got: $content",
+            )
+        }
+
+    @Test
+    fun `collectSlice formats Tenor GIF embed as GIF preview without ingesting GIF thumbnail image`() =
+        runTest {
+            val baseTime = Instant.parse("2026-11-06T12:00:00Z")
+            val gifEmbed =
+                mockk<dev.kord.core.entity.Embed>(relaxed = true).also {
+                    every { it.title } returns "Happy Dance"
+                    every { it.description } returns null
+                    every { it.url } returns "https://tenor.com/view/happy-dance-123"
+                }
+            val msg1 =
+                createMockMessage(
+                    id = 2041L,
+                    username = "Alice",
+                    content = "Check this",
+                    timestamp = baseTime,
+                    embeds = listOf(gifEmbed),
+                )
+            val targetMsg =
+                createMockMessage(
+                    id = 2042L,
+                    username = "Bob",
+                    content = "Nice",
+                    timestamp = baseTime + 1.minutes,
+                )
+
+            val collector =
+                ConversationSliceCollector(
+                    historyFetcher = { _, _ -> listOf(msg1) },
+                    forwardFetcher = { _, _ -> emptyList() },
+                )
+
+            val slice = collector.collectSlice(targetMsg)
+            assertNotNull(slice)
+            assertTrue(
+                slice.summaryInput.content.contains("[Alice]: Check this [GIF: Happy Dance]"),
+                "Expected Tenor embed to render as [GIF: Happy Dance], got: ${slice.summaryInput.content}",
+            )
+            assertTrue(
+                slice.summaryInput.imageAttachments.isEmpty(),
+                "Expected Summary Pipeline to exclude GIF embed images (includeStickersAndGifEmbeds = false)",
+            )
         }
 
     @Test
@@ -454,5 +501,48 @@ class ConversationSliceSlicingAndRepliesTest {
             val slice = collector.collectSlice(targetMsg)
             assertNotNull(slice)
             assertTrue(slice.summaryInput.content.contains("Target message content"))
+        }
+
+    @Test
+    fun `collectSlice emits warn log when referenceFetcher throws and degrades cleanly`() =
+        runTest {
+            val logger =
+                org.slf4j.LoggerFactory.getLogger(luna.core.ai.DiscordDialogueContextEngine::class.java)
+                    as ch.qos.logback.classic.Logger
+            val listAppender =
+                ch.qos.logback.core.read
+                    .ListAppender<ch.qos.logback.classic.spi.ILoggingEvent>()
+            listAppender.start()
+            logger.addAppender(listAppender)
+
+            try {
+                val baseTime = Instant.parse("2026-11-06T12:00:00Z")
+                val replyMsg = createMockMessage(9011L, "Bob", "Replying to missing", timestamp = baseTime)
+                val targetMsg = createMockMessage(9012L, "Charlie", "Target", timestamp = baseTime + 1.minutes)
+
+                val collector =
+                    ConversationSliceCollector(
+                        historyFetcher = { _, _ -> listOf(replyMsg) },
+                        forwardFetcher = { _, _ -> emptyList() },
+                        referenceFetcher = { throw IllegalStateException("Discord REST 502") },
+                    )
+
+                val slice = collector.collectSlice(targetMsg)
+                assertNotNull(slice)
+                assertTrue(
+                    slice.summaryInput.content.contains("[Bob]: Replying to missing"),
+                    "Expected message to be formatted without reply quote on fetch failure",
+                )
+                assertTrue(
+                    listAppender.list.any {
+                        it.level == ch.qos.logback.classic.Level.WARN &&
+                            it.formattedMessage.contains("Discord REST 502")
+                    },
+                    "Expected WARN log when referenceFetcher fails",
+                )
+            } finally {
+                logger.detachAppender(listAppender)
+                listAppender.stop()
+            }
         }
 }
