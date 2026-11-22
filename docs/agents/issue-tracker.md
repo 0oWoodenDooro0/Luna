@@ -11,6 +11,7 @@ Issues and specs for this repo live directly as GitHub issue bodies (do not crea
 - **Comment on an issue**: `gh issue comment <number> --body "..."`
 - **Apply / remove labels**: `gh issue edit <number> --add-label "..."` / `--remove-label "..."`
 - **Close**: `gh issue close <number> --comment "..."`
+- **Create a PR**: The default base branch is `master` (not `main`); always pass `base: "master"` to `pull_request_create` (or `--base master` to `gh pr create`).
 
 ## Pull requests as a triage surface
 
