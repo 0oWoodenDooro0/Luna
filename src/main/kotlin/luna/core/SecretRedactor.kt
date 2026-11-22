@@ -4,12 +4,12 @@ import luna.config.EnvReader
 import luna.config.SecretMasker
 
 /**
- * Redacts sensitive configuration values, credentials, headers, and query secrets
- * from Owner Error Notification messages, stack traces, and context fields using
- * `:libs:config` [SecretMasker].
+ * Unified secret redactor for masking URL query credentials, sensitive headers,
+ * Bearer tokens, inline key-value secrets, and configured secret values.
  */
-class OwnerErrorRedactor(
+class SecretRedactor(
     explicitSecrets: Collection<String> = emptyList(),
+    private val redactInlineKeyValues: Boolean = false,
 ) {
     private val normalizedSecrets: List<String> =
         explicitSecrets
@@ -20,13 +20,31 @@ class OwnerErrorRedactor(
             .sortedByDescending { it.length }
             .toList()
 
+    fun withExtraSecrets(extraSecrets: Collection<String>): SecretRedactor {
+        if (extraSecrets.isEmpty()) return this
+        val filtered =
+            extraSecrets
+                .map { it.trim() }
+                .filter { it.length >= MIN_SECRET_LENGTH && it != MASK }
+        if (filtered.isEmpty() || normalizedSecrets.containsAll(filtered)) return this
+        return SecretRedactor(
+            explicitSecrets = normalizedSecrets + filtered,
+            redactInlineKeyValues = redactInlineKeyValues,
+        )
+    }
+
     fun redact(input: String?): String? {
         if (input == null) return null
         var result: String = input
         result = QUERY_KEY_REGEX.replace(result) { "${it.groupValues[1]}$MASK" }
         result = HEADER_GOOG_KEY_REGEX.replace(result) { "${it.groupValues[1]}$MASK" }
         result = BEARER_AUTH_REGEX.replace(result) { "${it.groupValues[1]}$MASK" }
-        result = INLINE_SECRET_KV_REGEX.replace(result) { "${it.groupValues[1]}${it.groupValues[2]}${it.groupValues[3]}$MASK${it.groupValues[3]}" }
+        if (redactInlineKeyValues) {
+            result =
+                INLINE_SECRET_KV_REGEX.replace(result) {
+                    "${it.groupValues[1]}${it.groupValues[2]}${it.groupValues[3]}$MASK${it.groupValues[3]}"
+                }
+        }
         for (secret in normalizedSecrets) {
             if (result.contains(secret)) {
                 result = result.replace(secret, MASK)
@@ -34,16 +52,6 @@ class OwnerErrorRedactor(
         }
         return result
     }
-
-    fun redactEvent(event: OwnerErrorEvent): OwnerErrorEvent =
-        event.copy(
-            message = redact(event.message) ?: "",
-            stackTrace = redact(event.stackTrace),
-            contextFields =
-                event.contextFields.mapValues { (key, value) ->
-                    if (SecretMasker.isSensitiveKey(key)) MASK else (redact(value) ?: "")
-                },
-        )
 
     companion object {
         const val MASK = "******"
@@ -64,12 +72,23 @@ class OwnerErrorRedactor(
                 RegexOption.IGNORE_CASE,
             )
 
-        fun from(env: EnvReader): OwnerErrorRedactor = fromConfig(env.toMap())
+        fun sanitizeEndpoint(endpoint: String): String = QUERY_KEY_REGEX.replace(endpoint) { "${it.groupValues[1]}$MASK" }
 
-        fun fromConfig(config: Map<String, Any?>): OwnerErrorRedactor {
+        fun from(
+            env: EnvReader,
+            redactInlineKeyValues: Boolean = false,
+        ): SecretRedactor = fromConfig(env.toMap(), redactInlineKeyValues = redactInlineKeyValues)
+
+        fun fromConfig(
+            config: Map<String, Any?>,
+            redactInlineKeyValues: Boolean = false,
+        ): SecretRedactor {
             val secrets = mutableListOf<String>()
             collectSecretsFromMap(config, secrets)
-            return OwnerErrorRedactor(secrets)
+            return SecretRedactor(
+                explicitSecrets = secrets,
+                redactInlineKeyValues = redactInlineKeyValues,
+            )
         }
 
         private fun collectSecretsFromMap(

@@ -31,28 +31,55 @@ import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
 
 /**
+ * Severity level for Owner Error Notification alerts.
+ */
+enum class ErrorAlertSeverity {
+    WARN,
+    ERROR,
+}
+
+/**
+ * Immutable event payload flowing through the Owner Error Notification pipeline.
+ */
+data class OwnerErrorEvent(
+    val timestamp: Instant,
+    val severity: ErrorAlertSeverity,
+    val loggerName: String,
+    val message: String,
+    val throwableClass: String? = null,
+    val stackTrace: String? = null,
+    val layer: String? = null,
+    val component: String? = null,
+    val operation: String? = null,
+    val traceId: String? = null,
+    val guildId: String? = null,
+    val channelId: String? = null,
+    val threadName: String? = null,
+    val contextFields: Map<String, String> = emptyMap(),
+    val suppressedCount: Int = 0,
+)
+
+/**
  * Asynchronous, fail-open owner DM error notification pipeline.
  *
  * Captures qualifying log events via [OwnerErrorLogbackAppender] into a bounded coroutine
- * [Channel], applies [ErrorEventFilter], [StartupAlertBuffer], [AlertRateLimiter], secret
- * redaction via [OwnerErrorRedactor], Discord 2,000-char formatting, and fail-open DM delivery.
+ * [Channel], applies asymmetric event filtering, startup buffering, rate limiting, secret
+ * redaction via [SecretRedactor], Discord 2,000-char formatting, and fail-open DM delivery.
  */
 class OwnerErrorNotifier(
     val config: ErrorNotifyConfig,
     env: EnvReader = EnvReader.of(emptyMap()),
-    eventFilter: ErrorEventFilter? = null,
-    rateLimiter: AlertRateLimiter? = null,
-    private val startupBuffer: StartupAlertBuffer = BoundedStartupAlertBuffer(),
-    private val queueCapacity: Int = DEFAULT_QUEUE_CAPACITY,
     private val clock: Clock = Clock.systemUTC(),
-    private val redactor: OwnerErrorRedactor = OwnerErrorRedactor.from(env),
     dispatcher: CoroutineDispatcher? = null,
     private val dmSender: (suspend (Snowflake, String) -> Unit)? = null,
 ) {
-    private val resolvedEventFilter: ErrorEventFilter = eventFilter ?: AsymmetricErrorEventFilter(clock = clock)
+    private val queueCapacity: Int = DEFAULT_QUEUE_CAPACITY
+    private val eventFilter = AsymmetricErrorEventFilter(clock = clock)
     private val internalLogger = LoggerFactory.getLogger(INTERNAL_LOGGER_NAME)
-    private val resolvedRateLimiter: AlertRateLimiter =
-        rateLimiter ?: BoundedAlertRateLimiter(cooldownSeconds = config.cooldownSeconds.toLong(), clock = clock)
+    private val rateLimiter =
+        BoundedAlertRateLimiter(cooldownSeconds = config.cooldownSeconds.toLong(), clock = clock)
+    private val startupBuffer = BoundedStartupAlertBuffer()
+    private val redactor = SecretRedactor.from(env, redactInlineKeyValues = true)
     private val closed = AtomicBoolean(false)
     private val kordRef = AtomicReference<Kord?>(null)
     private val channel = Channel<OwnerErrorEvent>(capacity = queueCapacity.coerceAtLeast(1))
@@ -97,7 +124,7 @@ class OwnerErrorNotifier(
     fun submit(event: OwnerErrorEvent) {
         if (!config.isEnabled || closed.get()) return
         if (isExcludedLogger(event.loggerName)) return
-        if (!resolvedEventFilter.shouldNotify(event)) return
+        if (!eventFilter.shouldNotify(event)) return
 
         val result = channel.trySend(event)
         if (!result.isSuccess) {
@@ -163,13 +190,13 @@ class OwnerErrorNotifier(
     }
 
     private suspend fun dispatchWithRateLimit(event: OwnerErrorEvent) {
-        val allowedEvent = resolvedRateLimiter.acquire(event) ?: return
+        val allowedEvent = rateLimiter.acquire(event) ?: return
         val formatted = formatAlertMessage(allowedEvent)
         dispatchToRecipients(formatted)
     }
 
     internal fun formatAlertMessage(event: OwnerErrorEvent): String {
-        val sanitized = redactor.redactEvent(event)
+        val sanitized = redactEvent(event)
         val badge =
             when (sanitized.severity) {
                 ErrorAlertSeverity.ERROR -> "🚨 **[ERROR]**"
@@ -257,6 +284,16 @@ class OwnerErrorNotifier(
             }
         }
     }
+
+    private fun redactEvent(event: OwnerErrorEvent): OwnerErrorEvent =
+        event.copy(
+            message = redactor.redact(event.message) ?: "",
+            stackTrace = redactor.redact(event.stackTrace),
+            contextFields =
+                event.contextFields.mapValues { (key, value) ->
+                    if (SecretMasker.isSensitiveKey(key)) SecretRedactor.MASK else (redactor.redact(value) ?: "")
+                },
+        )
 
     private fun toOwnerErrorEvent(event: ILoggingEvent): OwnerErrorEvent {
         val severity =

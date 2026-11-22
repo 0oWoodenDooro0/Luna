@@ -18,14 +18,6 @@ import kotlin.test.assertTrue
 class OwnerErrorNotifierTest {
     private val fixedClock: Clock = Clock.fixed(Instant.parse("2026-11-15T01:02:03Z"), ZoneOffset.UTC)
 
-    private object ImmediateReadyStartupAlertBuffer : StartupAlertBuffer {
-        override val isReady: Boolean = true
-
-        override fun bufferIfNotReady(event: OwnerErrorEvent): Boolean = false
-
-        override fun markReadyAndDrain(): List<OwnerErrorEvent> = emptyList()
-    }
-
     private fun attachTestAppender(
         loggerName: String,
         notifier: OwnerErrorNotifier,
@@ -55,10 +47,10 @@ class OwnerErrorNotifierTest {
             val notifier =
                 OwnerErrorNotifier(
                     config = config,
-                    startupBuffer = ImmediateReadyStartupAlertBuffer,
                     clock = fixedClock,
                     dmSender = { userId, content -> delivered.add(userId to content) },
                 )
+            notifier.onReady()
 
             val (logger, appender) = attachTestAppender("luna.summarizer.SummaryServiceTestLogger", notifier)
             try {
@@ -137,10 +129,10 @@ class OwnerErrorNotifierTest {
                 OwnerErrorNotifier(
                     config = ErrorNotifyConfig(recipientUserIds = listOf(Snowflake(123uL)), environment = "staging"),
                     env = luna.config.EnvReader.of(secretConfig),
-                    startupBuffer = ImmediateReadyStartupAlertBuffer,
                     clock = fixedClock,
                     dmSender = { userId, content -> delivered.add(userId to content) },
                 )
+            notifier.onReady()
 
             val hugeStackTrace =
                 List(80) { idx -> "    at luna.core.FakeFrame.step$idx(FakeFrame.kt:$idx)" }.joinToString("\n")
@@ -182,16 +174,69 @@ class OwnerErrorNotifierTest {
         }
 
     @Test
+    fun `redacts inline KV secrets, query keys, headers, Bearer tokens, and configured secrets of 3+ chars while preserving short secrets under 3 chars`() =
+        runTest {
+            val delivered = CopyOnWriteArrayList<Pair<Snowflake, String>>()
+            val env =
+                luna.config.EnvReader.of(
+                    mapOf(
+                        "SHORT_TOKEN" to "ab",
+                        "MIN_SECRET" to "xyz",
+                        "LONG_API_KEY" to "configured-secret-value-999",
+                    ),
+                )
+            val notifier =
+                OwnerErrorNotifier(
+                    config = ErrorNotifyConfig(recipientUserIds = listOf(Snowflake(123uL))),
+                    env = env,
+                    clock = fixedClock,
+                    dmSender = { userId, content -> delivered.add(userId to content) },
+                )
+            notifier.onReady()
+
+            val event =
+                OwnerErrorEvent(
+                    timestamp = fixedClock.instant(),
+                    severity = ErrorAlertSeverity.ERROR,
+                    loggerName = "luna.core.RedactionBoundaryTest",
+                    message =
+                        "ab short value stays; min=xyz; long=configured-secret-value-999; " +
+                            "url=https://example.com/hook?api_key=qApi123&token=qTok456&secret=qSec789; " +
+                            "x-goog-api-key: googHeaderSecret1; Authorization: Bearer bearerTok2; " +
+                            "password=inlinePass3 secret=inlineSec4 api_key=inlineKey5 token=inlineTok6",
+                )
+
+            notifier.submit(event)
+            notifier.flushAndClose()
+
+            assertEquals(1, delivered.size)
+            val dm = delivered.single().second
+            assertTrue(dm.contains("ab short value stays"), "Short secret (< 3 chars) must not be masked: $dm")
+            assertTrue(!dm.contains("xyz"), "Configured secret of 3 chars must be masked: $dm")
+            assertTrue(!dm.contains("configured-secret-value-999"), "Configured secret (>= 3 chars) must be masked: $dm")
+            assertTrue(!dm.contains("qApi123"), "Query api_key must be masked: $dm")
+            assertTrue(!dm.contains("qTok456"), "Query token must be masked: $dm")
+            assertTrue(!dm.contains("qSec789"), "Query secret must be masked: $dm")
+            assertTrue(!dm.contains("googHeaderSecret1"), "x-goog-api-key header must be masked: $dm")
+            assertTrue(!dm.contains("bearerTok2"), "Bearer token must be masked: $dm")
+            assertTrue(!dm.contains("inlinePass3"), "Inline password KV must be masked: $dm")
+            assertTrue(!dm.contains("inlineSec4"), "Inline secret KV must be masked: $dm")
+            assertTrue(!dm.contains("inlineKey5"), "Inline api_key KV must be masked: $dm")
+            assertTrue(!dm.contains("inlineTok6"), "Inline token KV must be masked: $dm")
+            assertTrue(dm.contains(SecretRedactor.MASK), "Masked payload must contain redaction mask: $dm")
+        }
+
+    @Test
     fun `extracts only safe metadata keys and never embeds chat transcript keys from Logback event`() =
         runTest {
             val delivered = CopyOnWriteArrayList<Pair<Snowflake, String>>()
             val notifier =
                 OwnerErrorNotifier(
                     config = ErrorNotifyConfig(recipientUserIds = listOf(Snowflake(123uL))),
-                    startupBuffer = ImmediateReadyStartupAlertBuffer,
                     clock = fixedClock,
                     dmSender = { userId, content -> delivered.add(userId to content) },
                 )
+            notifier.onReady()
 
             val (logger, appender) = attachTestAppender("luna.chatter.ChatterServiceTestLogger", notifier)
             try {
@@ -226,90 +271,16 @@ class OwnerErrorNotifierTest {
         }
 
     @Test
-    fun `collaborator seams isolate filtering, rate limiting with suppressedCount, and startup buffering`() =
-        runTest {
-            val delivered = CopyOnWriteArrayList<Pair<Snowflake, String>>()
-            val buffered = mutableListOf<OwnerErrorEvent>()
-            val bufferedLatch = java.util.concurrent.CountDownLatch(2)
-            var ready = false
-
-            val customBuffer =
-                object : StartupAlertBuffer {
-                    override val isReady: Boolean get() = ready
-
-                    override fun bufferIfNotReady(event: OwnerErrorEvent): Boolean {
-                        if (ready) return false
-                        buffered.add(event)
-                        bufferedLatch.countDown()
-                        return true
-                    }
-
-                    override fun markReadyAndDrain(): List<OwnerErrorEvent> {
-                        ready = true
-                        return buffered.toList().also { buffered.clear() }
-                    }
-                }
-
-            val customFilter = ErrorEventFilter { it.severity == ErrorAlertSeverity.WARN || it.severity == ErrorAlertSeverity.ERROR }
-            val customLimiter =
-                AlertRateLimiter { event ->
-                    if (event.message.contains("DROP_ME")) null else event.copy(suppressedCount = 4)
-                }
-
-            val notifier =
-                OwnerErrorNotifier(
-                    config = ErrorNotifyConfig(recipientUserIds = listOf(Snowflake(42uL))),
-                    eventFilter = customFilter,
-                    rateLimiter = customLimiter,
-                    startupBuffer = customBuffer,
-                    clock = fixedClock,
-                    dmSender = { userId, content -> delivered.add(userId to content) },
-                )
-
-            notifier.submit(
-                OwnerErrorEvent(
-                    timestamp = fixedClock.instant(),
-                    severity = ErrorAlertSeverity.WARN,
-                    loggerName = "luna.core.StartupCheck",
-                    message = "CONFIG_DRIFT detected",
-                ),
-            )
-            notifier.submit(
-                OwnerErrorEvent(
-                    timestamp = fixedClock.instant(),
-                    severity = ErrorAlertSeverity.ERROR,
-                    loggerName = "luna.core.StartupCheck",
-                    message = "DROP_ME duplicate",
-                ),
-            )
-
-            assertTrue(
-                bufferedLatch.await(2, java.util.concurrent.TimeUnit.SECONDS),
-                "Pre-ready events must reach startupBuffer",
-            )
-            assertTrue(delivered.isEmpty(), "Pre-ready events must stay buffered until onReady()")
-
-            notifier.onReady()
-            notifier.flushAndClose()
-
-            assertEquals(1, delivered.size)
-            val dm = delivered.single().second
-            assertTrue(dm.contains("WARN"))
-            assertTrue(dm.contains("CONFIG_DRIFT detected"))
-            assertTrue(dm.contains("4 repeated alert(s)"))
-        }
-
-    @Test
     fun `default asymmetric filter accepts first-party WARN and rejects third-party WARN while accepting third-party ERROR`() =
         runTest {
             val delivered = CopyOnWriteArrayList<Pair<Snowflake, String>>()
             val notifier =
                 OwnerErrorNotifier(
                     config = ErrorNotifyConfig(recipientUserIds = listOf(Snowflake(42uL))),
-                    startupBuffer = ImmediateReadyStartupAlertBuffer,
                     clock = fixedClock,
                     dmSender = { userId, content -> delivered.add(userId to content) },
                 )
+            notifier.onReady()
             val (firstPartyLogger, firstPartyAppender) = attachTestAppender("luna.core.DefaultFilterTestLogger", notifier)
             val (thirdPartyLogger, thirdPartyAppender) = attachTestAppender("dev.kord.rest.DefaultFilterTestThirdParty", notifier)
             try {
@@ -325,8 +296,8 @@ class OwnerErrorNotifierTest {
             }
 
             assertEquals(2, delivered.size)
-            assertTrue(delivered.any { it.second.contains("First-party degraded warning accepted") })
-            assertTrue(delivered.any { it.second.contains("Critical third-party error accepted") })
+            assertTrue(delivered.any { it.second.contains("First-party degraded warning accepted") }, "First-party WARN must be delivered")
+            assertTrue(delivered.any { it.second.contains("Critical third-party error accepted") }, "Third-party ERROR must be delivered")
         }
 
     @Test
@@ -340,27 +311,40 @@ class OwnerErrorNotifierTest {
             internalLogger.addAppender(internalEvents)
 
             val gate = kotlinx.coroutines.CompletableDeferred<Unit>()
+            val firstDispatchStarted = java.util.concurrent.CountDownLatch(1)
             val delivered = CopyOnWriteArrayList<Pair<Snowflake, String>>()
             val notifier =
                 OwnerErrorNotifier(
                     config = ErrorNotifyConfig(recipientUserIds = listOf(Snowflake(42uL))),
-                    startupBuffer = ImmediateReadyStartupAlertBuffer,
-                    queueCapacity = 1,
                     clock = fixedClock,
                     dmSender = { userId, content ->
+                        firstDispatchStarted.countDown()
                         gate.await()
                         delivered.add(userId to content)
                     },
                 )
+            notifier.onReady()
 
             try {
-                repeat(10) { idx ->
+                notifier.submit(
+                    OwnerErrorEvent(
+                        timestamp = fixedClock.instant(),
+                        severity = ErrorAlertSeverity.ERROR,
+                        loggerName = "luna.core.BurstTest",
+                        message = "Burst error #0",
+                    ),
+                )
+                assertTrue(
+                    firstDispatchStarted.await(2, java.util.concurrent.TimeUnit.SECONDS),
+                    "Worker must enter dmSender gate before flooding bounded channel",
+                )
+                repeat(150) { idx ->
                     notifier.submit(
                         OwnerErrorEvent(
                             timestamp = fixedClock.instant(),
                             severity = ErrorAlertSeverity.ERROR,
                             loggerName = "luna.core.BurstTest",
-                            message = "Burst error #$idx",
+                            message = "Burst error #${idx + 1}",
                         ),
                     )
                 }
@@ -371,7 +355,7 @@ class OwnerErrorNotifierTest {
                 internalEvents.stop()
             }
 
-            assertTrue(delivered.size < 10, "Bounded queue capacity=1 must drop overflow events")
+            assertTrue(delivered.size < 151, "Bounded queue capacity=128 must drop overflow events")
             assertTrue(
                 internalEvents.list.any {
                     it.level == ch.qos.logback.classic.Level.WARN && it.formattedMessage.contains("queue full")
@@ -398,7 +382,6 @@ class OwnerErrorNotifierTest {
                         ErrorNotifyConfig(
                             recipientUserIds = listOf(Snowflake(101uL), Snowflake(202uL)),
                         ),
-                    startupBuffer = ImmediateReadyStartupAlertBuffer,
                     clock = fixedClock,
                     dmSender = { userId, _ ->
                         try {
@@ -416,6 +399,7 @@ class OwnerErrorNotifierTest {
                         }
                     },
                 )
+            notifier.onReady()
 
             val (kordLogger, kordAppender) = attachTestAppender("dev.kord.rest.DefaultRequestHandler", notifier)
             val (appLogger, appAppender) = attachTestAppender("luna.core.FailOpenTrigger", notifier)
@@ -473,10 +457,10 @@ class OwnerErrorNotifierTest {
             val notifier =
                 OwnerErrorNotifier(
                     config = ErrorNotifyConfig(recipientUserIds = listOf(unreachableId, reachableId)),
-                    startupBuffer = ImmediateReadyStartupAlertBuffer,
                     clock = fixedClock,
                 )
             notifier.bindKord(mockKord)
+            notifier.onReady()
 
             try {
                 notifier.submit(
@@ -512,10 +496,10 @@ class OwnerErrorNotifierTest {
                 OwnerErrorNotifier(
                     config = ErrorNotifyConfig(recipientUserIds = listOf(Snowflake(42uL)), cooldownSeconds = 1),
                     env = luna.config.EnvReader.of(mapOf("GEMINI_API_KEY" to "AIzaSyFallbackSecret999")),
-                    startupBuffer = ImmediateReadyStartupAlertBuffer,
                     clock = fixedClock,
                     dmSender = { userId, content -> delivered.add(userId to content) },
                 )
+            notifier.onReady()
 
             val (logger, appender) = attachTestAppender("luna.core.EmptyMsgFallbackLogger", notifier)
             try {
