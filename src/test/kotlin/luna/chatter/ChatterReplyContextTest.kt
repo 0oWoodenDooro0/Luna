@@ -11,6 +11,7 @@ import dev.socialpeek.model.Platform
 import kotlinx.coroutines.test.runTest
 import luna.core.LunaWebhookRegistry
 import luna.core.SummaryMessageRegistry
+import luna.core.ai.DiscordDialogueContextEngine
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.slf4j.LoggerFactory
@@ -219,7 +220,7 @@ class ChatterReplyContextTest {
     @Test
     fun `collectReplyContext logs warning and degrades to Discord embed transcript when SocialPeek fails or returns null for social URL`() =
         runTest {
-            val logger = LoggerFactory.getLogger(ChatterContextCollector::class.java) as Logger
+            val logger = LoggerFactory.getLogger(DiscordDialogueContextEngine::class.java) as Logger
             val listAppender = ListAppender<ILoggingEvent>()
             listAppender.start()
             logger.addAppender(listAppender)
@@ -386,7 +387,7 @@ class ChatterReplyContextTest {
     @Test
     fun `collectReplyContext falls back to regex-detected videoUri with warning log when YouTube resolution fails or returns null`() =
         runTest {
-            val logger = LoggerFactory.getLogger(ChatterContextCollector::class.java) as Logger
+            val logger = LoggerFactory.getLogger(DiscordDialogueContextEngine::class.java) as Logger
             val listAppender = ListAppender<ILoggingEvent>()
             listAppender.start()
             logger.addAppender(listAppender)
@@ -429,6 +430,69 @@ class ChatterReplyContextTest {
                     listAppender.list.any {
                         it.level == Level.WARN && it.formattedMessage.contains(ytUrl)
                     },
+                )
+            } finally {
+                logger.detachAppender(listAppender)
+                listAppender.stop()
+            }
+        }
+
+    @Test
+    fun `collectReplyContext omits videoUri and degrades gracefully when YouTube video exceeds 2 hours`() =
+        runTest {
+            val logger = LoggerFactory.getLogger(DiscordDialogueContextEngine::class.java) as Logger
+            val listAppender = ListAppender<ILoggingEvent>()
+            listAppender.start()
+            logger.addAppender(listAppender)
+
+            try {
+                val ytUrl = "https://www.youtube.com/watch?v=longVideo123"
+                val longPost =
+                    PeekPost(
+                        platform = Platform.YOUTUBE,
+                        id = "longVideo123",
+                        originalUrl = ytUrl,
+                        cleanUrl = ytUrl,
+                        author = Author(username = "PodcastHost"),
+                        title = "3-Hour Deep Dive Podcast",
+                        content = "Creator description of the 3-hour episode",
+                        comments = listOf(Comment(author = "listener", content = "Great timestamps!")),
+                        rawData = mapOf("durationSeconds" to "7201"),
+                    )
+
+                val msg = createMockMessage(id = 4011L, username = "Alice", content = "Check $ytUrl")
+                val collector =
+                    ChatterContextCollector(
+                        noiseFilter = filter,
+                        peekResolver = { longPost },
+                    )
+
+                val result = collector.collectReplyContext(listOf(msg))
+
+                assertEquals(ytUrl, result.primaryUrl)
+                assertEquals(ytUrl, result.url)
+                assertNull(result.videoUri)
+                assertEquals(7201L, result.videoDurationSeconds)
+                assertEquals("3-Hour Deep Dive Podcast", result.title)
+                assertEquals("Creator description of the 3-hour episode", result.postContent)
+                assertEquals(listOf("Great timestamps!"), result.comments)
+                assertTrue(
+                    result.transcript.contains("3-Hour Deep Dive Podcast"),
+                    "Transcript should retain creator title on >2h YouTube degradation",
+                )
+                assertTrue(
+                    result.transcript.contains("Creator description of the 3-hour episode"),
+                    "Transcript should retain creator description on >2h YouTube degradation",
+                )
+                assertTrue(
+                    result.transcript.contains("Great timestamps!"),
+                    "Transcript should retain audience comments on >2h YouTube degradation",
+                )
+                assertTrue(
+                    listAppender.list.any {
+                        it.level == Level.WARN && it.formattedMessage.contains(ytUrl)
+                    },
+                    "DiscordDialogueContextEngine should emit a WARN log when YouTube video exceeds 2 hours",
                 )
             } finally {
                 logger.detachAppender(listAppender)
