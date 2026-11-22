@@ -3,14 +3,12 @@ package luna.chatter
 import dev.kord.common.entity.Snowflake
 import dev.kord.core.entity.Message
 import dev.socialpeek.model.PeekPost
-import dev.socialpeek.model.Platform
 import luna.core.ai.ChatImageAttachment
 import luna.core.ai.ChatImageAttachmentExtractor
-import luna.core.ai.ContextUrlCategory
-import luna.core.ai.ContextUrlClassifier
-import luna.core.ai.DiscordMediaEmbedExtractor
+import luna.core.ai.DialogueContextPolicy
+import luna.core.ai.DialogueSpeaker
+import luna.core.ai.DiscordDialogueContextEngine
 import luna.core.ai.SocialPeekFactory
-import org.slf4j.LoggerFactory
 import kotlin.time.Duration.Companion.minutes
 
 /**
@@ -54,12 +52,11 @@ data class PreparedChatterContext(
 
 /**
  * Collaborator seam responsible for the Lightweight-Heavy Multimodal Split in the Chatter Pipeline:
- * - Lightweight decision context: last [decisionMessageCount] filtered turns, external Reply Reference Chaining,
- *   Discord embed previews, structural section framing, and up to [maxDecisionImages] newest valid
- *   [ChatImageAttachment]s (never invokes SocialPeek or YouTube ingestion).
- * - Heavy reply context: last [historyMessageCount] filtered turns, external Reply Reference Chaining,
- *   Discord embed previews, up to [maxImages] valid [ChatImageAttachment]s, and SocialPeek resolution
- *   for the latest `primaryUrl` in the window.
+ * - Lightweight decision context: last [decisionMessageCount] filtered turns within the Working Memory Window,
+ *   structural section framing, and up to [maxDecisionImages] newest valid [ChatImageAttachment]s
+ *   (never invokes SocialPeek or YouTube ingestion).
+ * - Heavy reply context: last [historyMessageCount] filtered turns within the Working Memory Window,
+ *   up to [maxImages] valid [ChatImageAttachment]s, and SocialPeek/YouTube enrichment via [contextEngine].
  */
 open class ChatterContextCollector(
     val noiseFilter: ChatterNoiseFilter = ChatterNoiseFilter(),
@@ -79,8 +76,17 @@ open class ChatterContextCollector(
         }.getOrNull()
     },
     val historyWindowMinutes: Long = DEFAULT_HISTORY_WINDOW_MINUTES,
+    val contextEngine: DiscordDialogueContextEngine = noiseFilter.contextEngine,
 ) {
-    private val logger = LoggerFactory.getLogger(ChatterContextCollector::class.java)
+    private fun chatterPolicy(): DialogueContextPolicy =
+        DialogueContextPolicy.chatter(
+            botPrefixes = noiseFilter.botPrefixes,
+            maxExternalReferences = maxExternalReferences.coerceAtLeast(0),
+            maxReplyExcerptLength = MAX_REPLY_EXCERPT_LENGTH,
+        )
+
+    private fun formatChatterSpeakerHeader(speaker: DialogueSpeaker): String =
+        ChatterPromptBuilder.formatSpeakerHeader(speaker.name, speaker.authorId, speaker.isThirdPartyBot)
 
     /**
      * Assembles lightweight decision context over the last [decisionMessageCount] filtered messages,
@@ -103,29 +109,33 @@ open class ChatterContextCollector(
 
         val recent = filterByRecencyWindow(filtered)
         val window = recent.takeLast(decisionMessageCount.coerceAtLeast(1))
+        val policy = chatterPolicy()
         val imagesByMessage =
-            ChatImageAttachmentExtractor.selectChronologicalImages(
+            contextEngine.selectImages(
                 messages = window,
+                policy = policy,
                 maxImages = maxDecisionImages.coerceAtLeast(0),
                 maxImageBytes = maxImageBytes,
-                includeStickersAndGifEmbeds = true,
             )
         val decisionImages = imagesByMessage.values.flatten()
         val replyReferencesByMessage =
-            resolveExternalReplyReferences(
+            contextEngine.resolveExternalReplyReferences(
                 messages = window,
-                maxExternalReferences = maxExternalReferences.coerceAtLeast(0),
+                policy = policy,
+                referenceFetcher = referenceFetcher,
             )
-        val formattedTurns =
-            formatDialogueTurnList(
+        val formatted =
+            contextEngine.formatDialogueMessages(
                 messages = window,
+                policy = policy,
                 imagesByMessage = imagesByMessage,
                 replyReferencesByMessage = replyReferencesByMessage,
                 kordSelfId = resolvedSelfId,
+                formatSpeakerHeader = ::formatChatterSpeakerHeader,
             )
         val transcript =
             formatDecisionTranscript(
-                formattedTurns = formattedTurns,
+                formattedTurns = formatted.turns,
                 kordSelfId = resolvedSelfId,
             )
 
@@ -160,129 +170,64 @@ open class ChatterContextCollector(
             window.firstNotNullOfOrNull { msg ->
                 runCatching { msg.timestamp.toEpochMilliseconds() }.getOrNull()
             }
+        val policy = chatterPolicy()
         val imagesByMessage =
-            ChatImageAttachmentExtractor.selectChronologicalImages(
+            contextEngine.selectImages(
                 messages = window,
+                policy = policy,
                 maxImages = maxImages.coerceAtLeast(0),
                 maxImageBytes = maxImageBytes,
-                includeStickersAndGifEmbeds = true,
             )
         val replyImages = imagesByMessage.values.flatten()
         val replyReferencesByMessage =
-            resolveExternalReplyReferences(
+            contextEngine.resolveExternalReplyReferences(
                 messages = window,
-                maxExternalReferences = maxExternalReferences.coerceAtLeast(0),
+                policy = policy,
+                referenceFetcher = referenceFetcher,
             )
         val dialogueTranscript =
-            formatDialogueMessages(
+            contextEngine
+                .formatDialogueMessages(
+                    messages = window,
+                    policy = policy,
+                    imagesByMessage = imagesByMessage,
+                    replyReferencesByMessage = replyReferencesByMessage,
+                    kordSelfId = resolvedSelfId,
+                    formatSpeakerHeader = ::formatChatterSpeakerHeader,
+                ).transcript
+
+        val enrichment =
+            contextEngine.enrichLinks(
                 messages = window,
+                policy = policy,
                 imagesByMessage = imagesByMessage,
-                replyReferencesByMessage = replyReferencesByMessage,
-                kordSelfId = resolvedSelfId,
+                peekResolver = peekResolver,
             )
 
-        val capturedGifEmbedPageUrls =
-            window.flatMap { msg ->
-                if (imagesByMessage[msg.id].isNullOrEmpty()) {
-                    emptyList()
-                } else {
-                    DiscordMediaEmbedExtractor.extractCapturedGifEmbedPageUrls(msg)
-                }
-            }
-        val capturedAttachmentUrls = (replyImages.map { it.url } + capturedGifEmbedPageUrls).distinct()
-        val classifiedUrls =
-            ContextUrlClassifier.classify(
-                messages = window.map { it.content },
-                capturedAttachmentUrls = capturedAttachmentUrls,
-            )
-
-        var primaryUrl: String? = null
-        var primaryCategory: ContextUrlCategory? = null
-        for (msg in window.asReversed()) {
-            for (url in ContextUrlClassifier.extractUrls(msg.content).asReversed()) {
-                val category = ContextUrlClassifier.classifyUrl(url, capturedAttachmentUrls)
-                if (category == ContextUrlCategory.SOCIAL || category == ContextUrlCategory.YOUTUBE) {
-                    primaryUrl = url
-                    primaryCategory = category
-                    break
-                }
-            }
-            if (primaryUrl != null) break
-        }
-
-        if (primaryUrl != null) {
-            val postOutcome = runCatching { peekResolver(primaryUrl) }
-            val post =
-                postOutcome
-                    .onFailure { e ->
-                        logger.warn(
-                            "Failed to resolve primaryUrl '{}' via SocialPeek ({}); degrading to Discord message/embed transcript",
-                            primaryUrl,
-                            e.message ?: e::class.simpleName,
-                            e,
-                        )
-                    }.getOrNull()
-
-            if (post != null) {
-                val resolvedUrl = post.cleanUrl.ifBlank { primaryUrl }
-                val title = post.title?.trim()?.takeIf { it.isNotBlank() }
-                val postContent = post.content.trim().takeIf { it.isNotBlank() }
-                val comments = post.comments.mapNotNull { it.content.trim().takeIf { c -> c.isNotBlank() } }
-                val videoUri = if (post.platform == Platform.YOUTUBE) resolvedUrl else null
-                val videoDurationSeconds = post.rawData["durationSeconds"]?.toLongOrNull()
-
-                val enrichedTranscript =
-                    buildEnrichedTranscript(
-                        dialogueTranscript = dialogueTranscript,
-                        postTitle = title,
-                        postUrl = resolvedUrl,
-                        postContent = postContent,
-                        comments = comments,
-                    )
-
-                return PreparedChatterContext(
-                    transcript = enrichedTranscript,
-                    imageAttachments = replyImages,
-                    primaryUrl = primaryUrl,
-                    title = title,
-                    url = resolvedUrl,
-                    postContent = postContent,
-                    comments = comments,
-                    videoUri = videoUri,
-                    videoDurationSeconds = videoDurationSeconds,
-                    webUrls = classifiedUrls.webUrls,
-                    oldestWindowTimestampMs = oldestWindowTimestampMs,
+        val transcript =
+            if (enrichment.resolvedPost != null) {
+                buildEnrichedTranscript(
+                    dialogueTranscript = dialogueTranscript,
+                    postTitle = enrichment.title,
+                    postUrl = enrichment.resolvedUrl ?: enrichment.primaryUrl.orEmpty(),
+                    postContent = enrichment.postContent,
+                    comments = enrichment.comments,
                 )
-            } else if (postOutcome.isSuccess) {
-                logger.warn(
-                    "SocialPeek returned null for primaryUrl '{}' (unsupported, blocked, or empty resolution); degrading to Discord message/embed transcript",
-                    primaryUrl,
-                )
+            } else {
+                dialogueTranscript
             }
-
-            if (primaryCategory == ContextUrlCategory.YOUTUBE) {
-                logger.warn(
-                    "YouTubeResolver failed or returned null for '{}'; falling back to regex-detected videoUri for static Video Understanding",
-                    primaryUrl,
-                )
-                return PreparedChatterContext(
-                    transcript = dialogueTranscript,
-                    imageAttachments = replyImages,
-                    primaryUrl = primaryUrl,
-                    url = primaryUrl,
-                    videoUri = primaryUrl,
-                    videoDurationSeconds = null,
-                    webUrls = classifiedUrls.webUrls,
-                    oldestWindowTimestampMs = oldestWindowTimestampMs,
-                )
-            }
-        }
 
         return PreparedChatterContext(
-            transcript = dialogueTranscript,
+            transcript = transcript,
             imageAttachments = replyImages,
-            primaryUrl = primaryUrl,
-            webUrls = classifiedUrls.webUrls,
+            primaryUrl = enrichment.primaryUrl,
+            title = enrichment.title,
+            url = enrichment.resolvedUrl,
+            postContent = enrichment.postContent,
+            comments = enrichment.comments,
+            videoUri = enrichment.videoUri,
+            videoDurationSeconds = enrichment.videoDurationSeconds,
+            webUrls = enrichment.classifiedUrls.webUrls,
             oldestWindowTimestampMs = oldestWindowTimestampMs,
         )
     }
@@ -316,42 +261,6 @@ open class ChatterContextCollector(
         }
 
         return keptReversed.asReversed()
-    }
-
-    internal suspend fun resolveExternalReplyReferences(
-        messages: List<Message>,
-        maxExternalReferences: Int = DEFAULT_MAX_EXTERNAL_REFERENCES,
-    ): Map<Snowflake, Message> {
-        if (maxExternalReferences <= 0 || messages.isEmpty()) {
-            return emptyMap()
-        }
-        val windowMessageIds = messages.map { it.id }.toSet()
-        val result = mutableMapOf<Snowflake, Message>()
-        val resolvedExternalIds = mutableSetOf<Snowflake>()
-
-        for (msg in messages) {
-            val ref =
-                runCatching { referenceFetcher(msg) }
-                    .onFailure { e ->
-                        logger.warn(
-                            "Failed to resolve external reply reference for message {}: {}",
-                            msg.id,
-                            e.message ?: e::class.simpleName,
-                        )
-                    }.getOrNull() ?: continue
-            if (ref.id in windowMessageIds) {
-                continue
-            }
-            if (ref.id in resolvedExternalIds) {
-                result[msg.id] = ref
-                continue
-            }
-            if (resolvedExternalIds.size < maxExternalReferences) {
-                resolvedExternalIds.add(ref.id)
-                result[msg.id] = ref
-            }
-        }
-        return result
     }
 
     internal fun buildEnrichedTranscript(
@@ -411,141 +320,6 @@ open class ChatterContextCollector(
         }
     }
 
-    internal fun formatDialogueMessages(
-        messages: List<Message>,
-        imagesByMessage: Map<Snowflake, List<ChatImageAttachment>> = emptyMap(),
-        replyReferencesByMessage: Map<Snowflake, Message> = emptyMap(),
-        kordSelfId: Snowflake? = null,
-    ): String =
-        formatDialogueTurnList(
-            messages = messages,
-            imagesByMessage = imagesByMessage,
-            replyReferencesByMessage = replyReferencesByMessage,
-            kordSelfId = kordSelfId,
-        ).joinToString("\n")
-
-    internal fun formatDialogueTurnList(
-        messages: List<Message>,
-        imagesByMessage: Map<Snowflake, List<ChatImageAttachment>> = emptyMap(),
-        replyReferencesByMessage: Map<Snowflake, Message> = emptyMap(),
-        kordSelfId: Snowflake? = null,
-    ): List<String> {
-        var imageIndex = 1
-        return messages.map { msg ->
-            val speaker = resolveSpeakerMetadata(msg, kordSelfId)
-            val baseHeader = ChatterPromptBuilder.formatSpeakerHeader(speaker.name, speaker.authorId, speaker.isThirdPartyBot)
-            val refMsg = replyReferencesByMessage[msg.id]
-            val turnHeader =
-                if (refMsg != null) {
-                    val refSpeaker = resolveSpeakerMetadata(refMsg, kordSelfId)
-                    val refHeader =
-                        ChatterPromptBuilder.formatSpeakerHeader(
-                            refSpeaker.name,
-                            refSpeaker.authorId,
-                            refSpeaker.isThirdPartyBot,
-                        )
-                    val rawContent = refMsg.content.trim().replace("\n", " ")
-                    val excerpt =
-                        if (rawContent.length > MAX_REPLY_EXCERPT_LENGTH) {
-                            "${rawContent.take(MAX_REPLY_EXCERPT_LENGTH - 3)}..."
-                        } else {
-                            rawContent
-                        }
-                    "$baseHeader 回覆 $refHeader「$excerpt」"
-                } else {
-                    baseHeader
-                }
-
-            val stickerText = DiscordMediaEmbedExtractor.formatStickerAnnotations(msg)
-            val embedText = formatEmbedPreviews(msg)
-            val images = imagesByMessage[msg.id].orEmpty()
-            val markersText =
-                if (images.isNotEmpty()) {
-                    images.joinToString(" ") { img ->
-                        val idx = imageIndex++
-                        if (!img.filename.isNullOrBlank()) {
-                            "[附帶圖片 $idx: ${img.filename}]"
-                        } else {
-                            "[附帶圖片 $idx]"
-                        }
-                    }
-                } else {
-                    ""
-                }
-
-            val rawText = msg.content.takeIf { it.isNotBlank() }
-
-            val parts =
-                listOfNotNull(
-                    rawText,
-                    stickerText.takeIf { it.isNotEmpty() },
-                    embedText.takeIf { it.isNotEmpty() },
-                    markersText.takeIf { it.isNotEmpty() },
-                )
-
-            val body =
-                if (parts.isNotEmpty()) {
-                    parts.joinToString(" ")
-                } else {
-                    ChatterNoiseFilter.resolveBlankMessagePlaceholder(msg).orEmpty()
-                }
-
-            if (body.isEmpty()) "$turnHeader:" else "$turnHeader: $body"
-        }
-    }
-
-    internal fun formatEmbedPreviews(message: Message): String {
-        val embeds = runCatching { message.embeds }.getOrNull() ?: return ""
-        if (embeds.isEmpty()) return ""
-
-        val previews =
-            embeds.mapNotNull { embed ->
-                val title = runCatching { embed.title }.getOrNull()?.trim()?.takeIf { it.isNotBlank() }
-                val desc = runCatching { embed.description }.getOrNull()?.trim()?.takeIf { it.isNotBlank() }
-                val isGifEmbed = DiscordMediaEmbedExtractor.isTenorOrGiphyEmbed(embed)
-                when {
-                    isGifEmbed && title != null && desc != null -> "[GIF: $title - $desc]"
-                    isGifEmbed && title != null -> "[GIF: $title]"
-                    isGifEmbed && desc != null -> "[GIF: $desc]"
-                    isGifEmbed -> DiscordMediaEmbedExtractor.GIF_PLACEHOLDER
-                    title != null && desc != null -> "[連結預覽: $title - $desc]"
-                    title != null -> "[連結預覽: $title]"
-                    desc != null -> "[連結預覽: $desc]"
-                    else -> null
-                }
-            }
-        return previews.joinToString(" ")
-    }
-
-    private data class SpeakerMetadata(
-        val name: String,
-        val authorId: String?,
-        val isThirdPartyBot: Boolean,
-    )
-
-    private fun resolveSpeakerMetadata(
-        message: Message,
-        kordSelfId: Snowflake? = null,
-    ): SpeakerMetadata {
-        val resolvedSelfId = kordSelfId ?: runCatching { message.kord.selfId }.getOrNull()
-        val authorId =
-            runCatching { message.author?.id }.getOrNull()
-                ?: runCatching { message.data.author.id }.getOrNull()
-        val isLunaBot = resolvedSelfId != null && authorId == resolvedSelfId
-        val name = if (isLunaBot) "Luna" else noiseFilter.extractSpeakerName(message)
-        val isThirdPartyBot = !isLunaBot && (runCatching { message.author?.isBot }.getOrNull() == true)
-        return SpeakerMetadata(
-            name = name,
-            authorId = authorId?.toString(),
-            isThirdPartyBot = isThirdPartyBot,
-        )
-    }
-
-    internal fun resolveAuthorName(
-        message: Message,
-        kordSelfId: Snowflake? = null,
-    ): String = resolveSpeakerMetadata(message, kordSelfId).name
-
     companion object {
         const val DEFAULT_DECISION_MESSAGE_COUNT = 15
         const val DEFAULT_HISTORY_MESSAGE_COUNT = 30
@@ -555,7 +329,7 @@ open class ChatterContextCollector(
         const val MAX_LOOKBACK_GAP_MULTIPLIER = 6L
         const val DEFAULT_MAX_DECISION_IMAGES = 3
         const val DEFAULT_MAX_IMAGES = 10
-        const val DEFAULT_MAX_EXTERNAL_REFERENCES = 3
-        const val MAX_REPLY_EXCERPT_LENGTH = 120
+        const val DEFAULT_MAX_EXTERNAL_REFERENCES = DialogueContextPolicy.DEFAULT_MAX_EXTERNAL_REFERENCES
+        const val MAX_REPLY_EXCERPT_LENGTH = DialogueContextPolicy.DEFAULT_MAX_REPLY_EXCERPT_LENGTH
     }
 }
