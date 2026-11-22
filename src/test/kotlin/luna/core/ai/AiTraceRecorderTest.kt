@@ -252,6 +252,36 @@ class AiTraceRecorderTest {
     }
 
     @Test
+    fun `AiTraceRedactor masks token and secret query params while preserving benign inline prose`() {
+        val redactor = AiTraceRedactor(listOf("ab", "long-explicit-secret"))
+
+        assertEquals(
+            "https://example.com/hook?token=******&secret=******&page=1",
+            AiTraceRedactor.sanitizeEndpoint("https://example.com/hook?token=tok123&secret=sec456&page=1"),
+        )
+
+        val prose = "Summary mentions token: 120, secret=benign_word, short=ab, explicit=long-explicit-secret"
+        val redactedProse = redactor.redactString(prose) ?: ""
+        assertTrue(redactedProse.contains("token: 120"), "Benign inline token-count prose must be preserved")
+        assertTrue(redactedProse.contains("secret=benign_word"), "Benign inline key-value prose must be preserved")
+        assertTrue(redactedProse.contains("short=ab"), "Explicit secret shorter than 3 chars must not be redacted")
+        assertFalse(redactedProse.contains("long-explicit-secret"), "Explicit secret >= 3 chars must be redacted")
+
+        val jsonRedacted =
+            redactor.redactJsonElement(
+                buildJsonObject {
+                    put("prompt", "Discussing token: 120 and https://x.test?token=leakToken1&secret=leakSecret2")
+                    put("apiKey", "sensitive-json-key-val")
+                },
+            ) as JsonObject
+        assertEquals(
+            "Discussing token: 120 and https://x.test?token=******&secret=******",
+            jsonRedacted["prompt"]?.jsonPrimitive?.content,
+        )
+        assertEquals("******", jsonRedacted["apiKey"]?.jsonPrimitive?.content)
+    }
+
+    @Test
     fun `NoOpAiTraceRecorder does not write files or enable sessions`(
         @TempDir tempDir: Path,
     ) = runTest {

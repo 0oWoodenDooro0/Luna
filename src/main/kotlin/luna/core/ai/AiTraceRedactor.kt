@@ -7,43 +7,25 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import luna.config.EnvReader
 import luna.config.SecretMasker
+import luna.core.SecretRedactor
 
 /**
  * Scrubs API keys, sensitive headers, and configured secret values from AI Trace payloads
- * before serialization.
+ * before serialization, delegating string and credential masking to [SecretRedactor].
  */
-class AiTraceRedactor(
-    explicitSecrets: Collection<String> = emptyList(),
+class AiTraceRedactor private constructor(
+    private val secretRedactor: SecretRedactor,
 ) {
-    private val normalizedSecrets: List<String> =
-        explicitSecrets
-            .asSequence()
-            .map { it.trim() }
-            .filter { it.length >= MIN_SECRET_LENGTH && it != MASK }
-            .distinct()
-            .sortedByDescending { it.length }
-            .toList()
+    constructor(explicitSecrets: Collection<String> = emptyList()) : this(
+        SecretRedactor(explicitSecrets = explicitSecrets, redactInlineKeyValues = false),
+    )
 
     fun withExtraSecrets(extraSecrets: Collection<String>): AiTraceRedactor {
-        if (extraSecrets.isEmpty()) return this
-        val filtered = extraSecrets.map { it.trim() }.filter { it.length >= MIN_SECRET_LENGTH && it != MASK }
-        if (filtered.isEmpty() || normalizedSecrets.containsAll(filtered)) return this
-        return AiTraceRedactor(normalizedSecrets + filtered)
+        val updated = secretRedactor.withExtraSecrets(extraSecrets)
+        return if (updated === secretRedactor) this else AiTraceRedactor(updated)
     }
 
-    fun redactString(input: String?): String? {
-        if (input == null) return null
-        var result: String = input
-        result = QUERY_KEY_REGEX.replace(result) { "${it.groupValues[1]}$MASK" }
-        result = HEADER_GOOG_KEY_REGEX.replace(result) { "${it.groupValues[1]}$MASK" }
-        result = BEARER_AUTH_REGEX.replace(result) { "${it.groupValues[1]}$MASK" }
-        for (secret in normalizedSecrets) {
-            if (result.contains(secret)) {
-                result = result.replace(secret, MASK)
-            }
-        }
-        return result
-    }
+    fun redactString(input: String?): String? = secretRedactor.redact(input)
 
     fun redactJsonElement(element: JsonElement?): JsonElement? =
         when (element) {
@@ -140,47 +122,13 @@ class AiTraceRedactor(
         )
 
     companion object {
-        const val MASK = "******"
+        const val MASK = SecretRedactor.MASK
         private const val REDACTED_BINARY = "[REDACTED_BINARY]"
-        private const val MIN_SECRET_LENGTH = 3
 
-        private val QUERY_KEY_REGEX =
-            Regex("""([?&](?:api_?key|key)=)([^&#\s"']+)""", RegexOption.IGNORE_CASE)
+        fun sanitizeEndpoint(endpoint: String): String = SecretRedactor.sanitizeEndpoint(endpoint)
 
-        private val HEADER_GOOG_KEY_REGEX =
-            Regex("""(x-goog-api-key\s*[:=]\s*["']?)([^"'\s,;}\]]+)""", RegexOption.IGNORE_CASE)
+        fun from(env: EnvReader): AiTraceRedactor = AiTraceRedactor(SecretRedactor.from(env, redactInlineKeyValues = false))
 
-        private val BEARER_AUTH_REGEX =
-            Regex("""(authorization\s*[:=]\s*["']?Bearer\s+)([^"'\s,;}\]]+)""", RegexOption.IGNORE_CASE)
-
-        fun sanitizeEndpoint(endpoint: String): String = QUERY_KEY_REGEX.replace(endpoint) { "${it.groupValues[1]}$MASK" }
-
-        fun from(env: EnvReader): AiTraceRedactor = fromConfig(env.toMap())
-
-        fun fromConfig(config: Map<String, Any?>): AiTraceRedactor {
-            val secrets = mutableListOf<String>()
-            collectSecretsFromMap(config, secrets)
-            return AiTraceRedactor(secrets)
-        }
-
-        private fun collectSecretsFromMap(
-            map: Map<*, *>,
-            target: MutableList<String>,
-        ) {
-            for ((rawKey, value) in map) {
-                val key = rawKey?.toString() ?: continue
-                when (value) {
-                    is Map<*, *> -> {
-                        collectSecretsFromMap(value, target)
-                    }
-
-                    is String -> {
-                        if (SecretMasker.isSensitiveKey(key) && value.isNotBlank()) {
-                            target.add(value)
-                        }
-                    }
-                }
-            }
-        }
+        fun fromConfig(config: Map<String, Any?>): AiTraceRedactor = AiTraceRedactor(SecretRedactor.fromConfig(config, redactInlineKeyValues = false))
     }
 }
