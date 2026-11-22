@@ -1,5 +1,9 @@
 package luna.core.ai
 
+import ch.qos.logback.classic.Level
+import ch.qos.logback.classic.Logger
+import ch.qos.logback.classic.spi.ILoggingEvent
+import ch.qos.logback.core.read.ListAppender
 import dev.kord.common.entity.Snowflake
 import dev.kord.core.entity.Message
 import dev.kord.core.entity.User
@@ -14,6 +18,7 @@ import luna.core.BoundedSummaryRegistry
 import luna.core.LunaWebhookRegistry
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeEach
+import org.slf4j.LoggerFactory
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -119,83 +124,155 @@ class DialogueLinkEnrichmentTest {
     @Test
     fun `YouTube duration cap omits videoUri above 7200s while retaining extracted content and allows exact 7200s`() =
         runTest {
-            val msg = mockMessage(1L, "Watch https://www.youtube.com/watch?v=longvideo12")
+            val logger = LoggerFactory.getLogger(DiscordDialogueContextEngine::class.java) as Logger
+            val listAppender = ListAppender<ILoggingEvent>().apply { start() }
+            logger.addAppender(listAppender)
 
-            val overLimit =
-                engine.enrichLinks(
-                    messages = listOf(msg),
-                    policy = DialogueContextPolicy.chatter(),
-                    peekResolver = {
-                        PeekPost(
-                            platform = Platform.YOUTUBE,
-                            id = "longvideo12",
-                            originalUrl = "https://www.youtube.com/watch?v=longvideo12",
-                            cleanUrl = "https://www.youtube.com/watch?v=longvideo12",
-                            author = Author(username = "Creator"),
-                            title = "3-Hour Livestream",
-                            content = "Creator chapters and notes",
-                            comments = listOf(Comment(author = "Fan", content = "Loved the Q&A")),
-                            rawData = mapOf("durationSeconds" to "7201"),
-                        )
-                    },
-                )
-            assertTrue(overLimit.durationExceeded, "7201s must trigger durationExceeded=true")
-            assertNull(overLimit.videoUri)
-            assertEquals(7201L, overLimit.videoDurationSeconds)
-            assertEquals("3-Hour Livestream", overLimit.title)
-            assertEquals("Creator chapters and notes", overLimit.postContent)
-            assertEquals(listOf("Loved the Q&A"), overLimit.comments)
+            try {
+                val msg = mockMessage(1L, "Watch https://www.youtube.com/watch?v=longvideo12")
 
-            val exactLimit =
-                engine.enrichLinks(
-                    messages = listOf(msg),
-                    policy = DialogueContextPolicy.summary(),
-                    peekResolver = {
-                        PeekPost(
-                            platform = Platform.YOUTUBE,
-                            id = "longvideo12",
-                            originalUrl = "https://www.youtube.com/watch?v=longvideo12",
-                            cleanUrl = "https://www.youtube.com/watch?v=longvideo12",
-                            author = Author(username = "Creator"),
-                            title = "2-Hour Exact",
-                            content = "Exact limit",
-                            rawData = mapOf("durationSeconds" to "7200"),
-                        )
+                val overLimit =
+                    engine.enrichLinks(
+                        messages = listOf(msg),
+                        policy = DialogueContextPolicy.chatter(),
+                        peekResolver = {
+                            PeekPost(
+                                platform = Platform.YOUTUBE,
+                                id = "longvideo12",
+                                originalUrl = "https://www.youtube.com/watch?v=longvideo12",
+                                cleanUrl = "https://www.youtube.com/watch?v=longvideo12",
+                                author = Author(username = "Creator"),
+                                title = "3-Hour Livestream",
+                                content = "Creator chapters and notes",
+                                comments = listOf(Comment(author = "Fan", content = "Loved the Q&A")),
+                                rawData = mapOf("durationSeconds" to "7201"),
+                            )
+                        },
+                    )
+                assertTrue(overLimit.durationExceeded, "7201s must trigger durationExceeded=true")
+                assertNull(overLimit.videoUri)
+                assertEquals(7201L, overLimit.videoDurationSeconds)
+                assertEquals("3-Hour Livestream", overLimit.title)
+                assertEquals("Creator chapters and notes", overLimit.postContent)
+                assertEquals(listOf("Loved the Q&A"), overLimit.comments)
+                assertTrue(
+                    listAppender.list.any {
+                        it.level == Level.WARN &&
+                            it.formattedMessage.contains("7201s") &&
+                            it.formattedMessage.contains("maxYouTubeDurationSeconds=7200s")
                     },
+                    "Expected WARN log when YouTube video duration exceeds 7200s cap",
                 )
-            assertFalse(exactLimit.durationExceeded, "7200s boundary must be allowed")
-            assertEquals("https://www.youtube.com/watch?v=longvideo12", exactLimit.videoUri)
+
+                listAppender.list.clear()
+
+                val exactLimit =
+                    engine.enrichLinks(
+                        messages = listOf(msg),
+                        policy = DialogueContextPolicy.summary(),
+                        peekResolver = {
+                            PeekPost(
+                                platform = Platform.YOUTUBE,
+                                id = "longvideo12",
+                                originalUrl = "https://www.youtube.com/watch?v=longvideo12",
+                                cleanUrl = "https://www.youtube.com/watch?v=longvideo12",
+                                author = Author(username = "Creator"),
+                                title = "2-Hour Exact",
+                                content = "Exact limit",
+                                rawData = mapOf("durationSeconds" to "7200"),
+                            )
+                        },
+                    )
+                assertFalse(exactLimit.durationExceeded, "7200s boundary must be allowed")
+                assertEquals("https://www.youtube.com/watch?v=longvideo12", exactLimit.videoUri)
+            } finally {
+                logger.detachAppender(listAppender)
+                listAppender.stop()
+            }
         }
 
     @Test
     fun `YouTube link falls back to regex videoUri when peekResolver throws or returns null`() =
         runTest {
-            val ytMsg = mockMessage(1L, "Check https://www.youtube.com/watch?v=fallback123")
-            val socialMsg = mockMessage(2L, "Check https://x.com/user/status/999")
+            val logger = LoggerFactory.getLogger(DiscordDialogueContextEngine::class.java) as Logger
+            val listAppender = ListAppender<ILoggingEvent>().apply { start() }
+            logger.addAppender(listAppender)
 
-            val onThrow =
-                engine.enrichLinks(
-                    messages = listOf(ytMsg),
-                    policy = DialogueContextPolicy.chatter(),
-                    peekResolver = { error("YouTube API 429") },
-                )
-            assertEquals("https://www.youtube.com/watch?v=fallback123", onThrow.videoUri)
-            assertFalse(onThrow.durationExceeded, "Fallback without duration must not mark durationExceeded")
+            try {
+                val ytUrl = "https://www.youtube.com/watch?v=fallback123"
+                val socialUrl = "https://x.com/user/status/999"
+                val ytMsg = mockMessage(1L, "Check $ytUrl")
+                val socialMsg = mockMessage(2L, "Check $socialUrl")
 
-            val onNull =
-                engine.enrichLinks(
-                    messages = listOf(ytMsg),
-                    policy = DialogueContextPolicy.summary(),
-                    peekResolver = { null },
+                val onThrow =
+                    engine.enrichLinks(
+                        messages = listOf(ytMsg),
+                        policy = DialogueContextPolicy.chatter(),
+                        peekResolver = { error("YouTube API 429") },
+                    )
+                assertEquals(ytUrl, onThrow.videoUri)
+                assertFalse(onThrow.durationExceeded, "Fallback without duration must not mark durationExceeded")
+                assertTrue(
+                    listAppender.list.any {
+                        it.level == Level.WARN && it.formattedMessage.contains("YouTube API 429")
+                    },
+                    "Expected WARN log when peekResolver throws",
                 )
-            assertEquals("https://www.youtube.com/watch?v=fallback123", onNull.videoUri)
+                assertTrue(
+                    listAppender.list.any {
+                        it.level == Level.WARN &&
+                            it.formattedMessage.contains("YouTubeResolver failed or returned null") &&
+                            it.formattedMessage.contains(ytUrl)
+                    },
+                    "Expected WARN log for YouTube regex videoUri fallback after exception",
+                )
 
-            val socialOnNull =
-                engine.enrichLinks(
-                    messages = listOf(socialMsg),
-                    policy = DialogueContextPolicy.chatter(),
-                    peekResolver = { null },
+                listAppender.list.clear()
+
+                val onNull =
+                    engine.enrichLinks(
+                        messages = listOf(ytMsg),
+                        policy = DialogueContextPolicy.summary(),
+                        peekResolver = { null },
+                    )
+                assertEquals(ytUrl, onNull.videoUri)
+                assertTrue(
+                    listAppender.list.any {
+                        it.level == Level.WARN &&
+                            it.formattedMessage.contains("SocialPeek returned null") &&
+                            it.formattedMessage.contains(ytUrl)
+                    },
+                    "Expected WARN log when SocialPeek returns null for YouTube URL",
                 )
-            assertNull(socialOnNull.videoUri)
+                assertTrue(
+                    listAppender.list.any {
+                        it.level == Level.WARN &&
+                            it.formattedMessage.contains("YouTubeResolver failed or returned null") &&
+                            it.formattedMessage.contains(ytUrl)
+                    },
+                    "Expected WARN log for YouTube regex videoUri fallback after null",
+                )
+
+                listAppender.list.clear()
+
+                val socialOnNull =
+                    engine.enrichLinks(
+                        messages = listOf(socialMsg),
+                        policy = DialogueContextPolicy.chatter(),
+                        peekResolver = { null },
+                    )
+                assertNull(socialOnNull.videoUri)
+                assertTrue(
+                    listAppender.list.any {
+                        it.level == Level.WARN &&
+                            it.formattedMessage.contains("SocialPeek returned null") &&
+                            it.formattedMessage.contains(socialUrl)
+                    },
+                    "Expected WARN log when SocialPeek returns null for social URL",
+                )
+            } finally {
+                logger.detachAppender(listAppender)
+                listAppender.stop()
+            }
         }
 }

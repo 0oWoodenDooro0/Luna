@@ -152,17 +152,10 @@ open class ChatterNoiseFilter(
 
             DialogueNoiseReason.SYSTEM_MESSAGE -> {
                 val type = runCatching { message.type }.getOrNull() ?: MessageType.Default
-                if (type == MessageType.ChatInputCommand || type == MessageType.ContextMenuCommand) {
-                    ChatterFilterResult.Rejected(
-                        RejectionReason.COMMAND,
-                        "Message starts with slash command or bot prefix command",
-                    )
-                } else {
-                    ChatterFilterResult.Rejected(
-                        RejectionReason.SYSTEM_MESSAGE,
-                        "System message type: $type",
-                    )
-                }
+                ChatterFilterResult.Rejected(
+                    RejectionReason.SYSTEM_MESSAGE,
+                    "System message type: $type",
+                )
             }
 
             DialogueNoiseReason.UNVERIFIED_WEBHOOK -> {

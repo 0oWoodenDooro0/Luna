@@ -8,6 +8,7 @@ import luna.core.ai.ChatImageAttachmentExtractor
 import luna.core.ai.DialogueContextPolicy
 import luna.core.ai.DialogueSpeaker
 import luna.core.ai.DiscordDialogueContextEngine
+import luna.core.ai.FormattedDialogueResult
 import luna.core.ai.SocialPeekFactory
 import kotlin.time.Duration.Companion.minutes
 
@@ -88,6 +89,49 @@ open class ChatterContextCollector(
     private fun formatChatterSpeakerHeader(speaker: DialogueSpeaker): String =
         ChatterPromptBuilder.formatSpeakerHeader(speaker.name, speaker.authorId, speaker.isThirdPartyBot)
 
+    private data class FormattedChatterWindow(
+        val policy: DialogueContextPolicy,
+        val imagesByMessage: Map<Snowflake, List<ChatImageAttachment>>,
+        val images: List<ChatImageAttachment>,
+        val formatted: FormattedDialogueResult,
+    )
+
+    private suspend fun formatChatterWindow(
+        window: List<Message>,
+        maxWindowImages: Int,
+        kordSelfId: Snowflake?,
+    ): FormattedChatterWindow {
+        val policy = chatterPolicy()
+        val imagesByMessage =
+            contextEngine.selectImages(
+                messages = window,
+                policy = policy,
+                maxImages = maxWindowImages.coerceAtLeast(0),
+                maxImageBytes = maxImageBytes,
+            )
+        val replyReferencesByMessage =
+            contextEngine.resolveExternalReplyReferences(
+                messages = window,
+                policy = policy,
+                referenceFetcher = referenceFetcher,
+            )
+        val formatted =
+            contextEngine.formatDialogueMessages(
+                messages = window,
+                policy = policy,
+                imagesByMessage = imagesByMessage,
+                replyReferencesByMessage = replyReferencesByMessage,
+                kordSelfId = kordSelfId,
+                formatSpeakerHeader = ::formatChatterSpeakerHeader,
+            )
+        return FormattedChatterWindow(
+            policy = policy,
+            imagesByMessage = imagesByMessage,
+            images = imagesByMessage.values.flatten(),
+            formatted = formatted,
+        )
+    }
+
     /**
      * Assembles lightweight decision context over the last [decisionMessageCount] filtered messages,
      * including external Reply Reference Chaining and structural section framing.
@@ -109,39 +153,21 @@ open class ChatterContextCollector(
 
         val recent = filterByRecencyWindow(filtered)
         val window = recent.takeLast(decisionMessageCount.coerceAtLeast(1))
-        val policy = chatterPolicy()
-        val imagesByMessage =
-            contextEngine.selectImages(
-                messages = window,
-                policy = policy,
-                maxImages = maxDecisionImages.coerceAtLeast(0),
-                maxImageBytes = maxImageBytes,
-            )
-        val decisionImages = imagesByMessage.values.flatten()
-        val replyReferencesByMessage =
-            contextEngine.resolveExternalReplyReferences(
-                messages = window,
-                policy = policy,
-                referenceFetcher = referenceFetcher,
-            )
-        val formatted =
-            contextEngine.formatDialogueMessages(
-                messages = window,
-                policy = policy,
-                imagesByMessage = imagesByMessage,
-                replyReferencesByMessage = replyReferencesByMessage,
+        val windowContext =
+            formatChatterWindow(
+                window = window,
+                maxWindowImages = maxDecisionImages,
                 kordSelfId = resolvedSelfId,
-                formatSpeakerHeader = ::formatChatterSpeakerHeader,
             )
         val transcript =
             formatDecisionTranscript(
-                formattedTurns = formatted.turns,
+                formattedTurns = windowContext.formatted.turns,
                 kordSelfId = resolvedSelfId,
             )
 
         return ChatterDecisionContext(
             transcript = transcript,
-            images = decisionImages,
+            images = windowContext.images,
         )
     }
 
@@ -170,37 +196,19 @@ open class ChatterContextCollector(
             window.firstNotNullOfOrNull { msg ->
                 runCatching { msg.timestamp.toEpochMilliseconds() }.getOrNull()
             }
-        val policy = chatterPolicy()
-        val imagesByMessage =
-            contextEngine.selectImages(
-                messages = window,
-                policy = policy,
-                maxImages = maxImages.coerceAtLeast(0),
-                maxImageBytes = maxImageBytes,
+        val windowContext =
+            formatChatterWindow(
+                window = window,
+                maxWindowImages = maxImages,
+                kordSelfId = resolvedSelfId,
             )
-        val replyImages = imagesByMessage.values.flatten()
-        val replyReferencesByMessage =
-            contextEngine.resolveExternalReplyReferences(
-                messages = window,
-                policy = policy,
-                referenceFetcher = referenceFetcher,
-            )
-        val dialogueTranscript =
-            contextEngine
-                .formatDialogueMessages(
-                    messages = window,
-                    policy = policy,
-                    imagesByMessage = imagesByMessage,
-                    replyReferencesByMessage = replyReferencesByMessage,
-                    kordSelfId = resolvedSelfId,
-                    formatSpeakerHeader = ::formatChatterSpeakerHeader,
-                ).transcript
+        val dialogueTranscript = windowContext.formatted.transcript
 
         val enrichment =
             contextEngine.enrichLinks(
                 messages = window,
-                policy = policy,
-                imagesByMessage = imagesByMessage,
+                policy = windowContext.policy,
+                imagesByMessage = windowContext.imagesByMessage,
                 peekResolver = peekResolver,
             )
 
@@ -219,7 +227,7 @@ open class ChatterContextCollector(
 
         return PreparedChatterContext(
             transcript = transcript,
-            imageAttachments = replyImages,
+            imageAttachments = windowContext.images,
             primaryUrl = enrichment.primaryUrl,
             title = enrichment.title,
             url = enrichment.resolvedUrl,

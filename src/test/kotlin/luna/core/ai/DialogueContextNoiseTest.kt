@@ -168,6 +168,7 @@ class DialogueContextNoiseTest {
     fun `command prefix rules enforce chatter vs summary command semantics`() {
         val slashCmd = mockMessage(id = 40L, content = "/summarize")
         val chatInputCmd = mockMessage(id = 41L, content = "ignored", type = MessageType.ChatInputCommand)
+        val contextMenuCmd = mockMessage(id = 46L, content = "ignored", type = MessageType.ContextMenuCommand)
         val bangLetterCmd = mockMessage(id = 42L, content = "!play song")
         val tildeCmd = mockMessage(id = 43L, content = "~help")
         val bangPunctuation = mockMessage(id = 44L, content = "!?!?")
@@ -178,8 +179,20 @@ class DialogueContextNoiseTest {
 
         assertTrue(engine.evaluateNoise(slashCmd, chatter, selfId).isNoise, "Chatter must reject / commands")
         assertTrue(engine.evaluateNoise(slashCmd, summary, selfId).isNoise, "Summary must reject / commands")
-        assertTrue(engine.evaluateNoise(chatInputCmd, chatter, selfId).isNoise, "Chatter must reject ChatInputCommand")
-        assertTrue(engine.evaluateNoise(chatInputCmd, summary, selfId).isNoise, "Summary must reject ChatInputCommand")
+        val chatInputChatterEval = engine.evaluateNoise(chatInputCmd, chatter, selfId)
+        val chatInputSummaryEval = engine.evaluateNoise(chatInputCmd, summary, selfId)
+        assertTrue(chatInputChatterEval.isNoise, "Chatter must reject ChatInputCommand")
+        assertEquals(DialogueNoiseReason.COMMAND, chatInputChatterEval.reason)
+        assertTrue(chatInputSummaryEval.isNoise, "Summary must reject ChatInputCommand")
+        assertEquals(DialogueNoiseReason.COMMAND, chatInputSummaryEval.reason)
+
+        val contextMenuChatterEval = engine.evaluateNoise(contextMenuCmd, chatter, selfId)
+        val contextMenuSummaryEval = engine.evaluateNoise(contextMenuCmd, summary, selfId)
+        assertTrue(contextMenuChatterEval.isNoise, "Chatter must reject ContextMenuCommand")
+        assertEquals(DialogueNoiseReason.COMMAND, contextMenuChatterEval.reason)
+        assertTrue(contextMenuSummaryEval.isNoise, "Summary must reject ContextMenuCommand")
+        assertEquals(DialogueNoiseReason.COMMAND, contextMenuSummaryEval.reason)
+
         assertTrue(engine.evaluateNoise(bangLetterCmd, chatter, selfId).isNoise, "Chatter must reject !play")
         assertTrue(engine.evaluateNoise(bangLetterCmd, summary, selfId).isNoise, "Summary must reject !play")
 

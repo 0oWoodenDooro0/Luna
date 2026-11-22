@@ -1,8 +1,10 @@
 package luna.summarizer
 
+import dev.kord.common.entity.Snowflake
 import dev.kord.core.entity.Message
 import dev.socialpeek.model.PeekPost
 import kotlinx.coroutines.flow.toList
+import luna.core.ai.ChatImageAttachment
 import luna.core.ai.ChatImageAttachmentExtractor
 import luna.core.ai.DialogueContextPolicy
 import luna.core.ai.DiscordDialogueContextEngine
@@ -69,6 +71,20 @@ open class ConversationSliceCollector(
 
     internal suspend fun isBotSummaryMessage(message: Message): Boolean = noiseFilter.isBotSummaryMessage(message)
 
+    private fun formatTranscript(
+        messages: List<Message>,
+        imagesByMessage: Map<Snowflake, List<ChatImageAttachment>> = emptyMap(),
+        replyReferencesByMessage: Map<Snowflake, Message> = emptyMap(),
+    ): String =
+        contextEngine
+            .formatDialogueMessages(
+                messages = messages,
+                policy = policy,
+                imagesByMessage = imagesByMessage,
+                replyReferencesByMessage = replyReferencesByMessage,
+                kordSelfId = noiseFilter.selfId,
+            ).transcript
+
     suspend fun collectSlice(message: Message): PreparedConversationSlice? {
         if (isNoiseMessage(message)) {
             logger.debug("Ignoring reaction on noise or bot message {}", message.id)
@@ -114,25 +130,19 @@ open class ConversationSliceCollector(
 
         val formattedContent =
             if (allMessages.size > 1) {
-                contextEngine
-                    .formatDialogueMessages(
-                        messages = allMessages,
-                        policy = policy,
-                        imagesByMessage = imagesMap,
-                        replyReferencesByMessage = replyReferencesByMessage,
-                        kordSelfId = noiseFilter.selfId,
-                    ).transcript
+                formatTranscript(
+                    messages = allMessages,
+                    imagesByMessage = imagesMap,
+                    replyReferencesByMessage = replyReferencesByMessage,
+                )
             } else {
                 val embedText = contextEngine.formatEmbedPreviews(message)
                 if (sliceImageAttachments.isNotEmpty() || embedText.isNotEmpty() || replyReferencesByMessage.isNotEmpty()) {
-                    contextEngine
-                        .formatDialogueMessages(
-                            messages = listOf(message),
-                            policy = policy,
-                            imagesByMessage = mapOf(message.id to sliceImageAttachments),
-                            replyReferencesByMessage = replyReferencesByMessage,
-                            kordSelfId = noiseFilter.selfId,
-                        ).transcript
+                    formatTranscript(
+                        messages = listOf(message),
+                        imagesByMessage = mapOf(message.id to sliceImageAttachments),
+                        replyReferencesByMessage = replyReferencesByMessage,
+                    )
                 } else {
                     message.content
                 }
@@ -207,24 +217,18 @@ open class ConversationSliceCollector(
                         referenceFetcher = referenceFetcher,
                     )
                 val earlierTranscript =
-                    contextEngine
-                        .formatDialogueMessages(
-                            messages = earlierMessages,
-                            policy = policy,
-                            replyReferencesByMessage = earlierReferences,
-                            kordSelfId = noiseFilter.selfId,
-                        ).transcript
+                    formatTranscript(
+                        messages = earlierMessages,
+                        replyReferencesByMessage = earlierReferences,
+                    )
                 val baselineTranscript =
                     if (allMessages.size > 1) {
                         formattedContent
                     } else {
-                        contextEngine
-                            .formatDialogueMessages(
-                                messages = allMessages,
-                                policy = policy,
-                                replyReferencesByMessage = replyReferencesByMessage,
-                                kordSelfId = noiseFilter.selfId,
-                            ).transcript
+                        formatTranscript(
+                            messages = allMessages,
+                            replyReferencesByMessage = replyReferencesByMessage,
+                        )
                     }
                 GeminiPromptBuilder.formatExpandedDialogue(
                     earlierContent = earlierTranscript,

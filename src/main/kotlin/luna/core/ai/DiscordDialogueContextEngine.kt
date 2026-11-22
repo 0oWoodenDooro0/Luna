@@ -63,12 +63,12 @@ open class DiscordDialogueContextEngine(
         }
 
         val type = runCatching { message.type }.getOrNull() ?: MessageType.Default
-        if (isSystemMessageType(type)) {
-            return DialogueNoiseEvaluation(isNoise = true, reason = DialogueNoiseReason.SYSTEM_MESSAGE, speaker = speaker)
-        }
-
         if (isCommand(message.content, type, policy.commandPrefixRule)) {
             return DialogueNoiseEvaluation(isNoise = true, reason = DialogueNoiseReason.COMMAND, speaker = speaker)
+        }
+
+        if (isSystemMessageType(type)) {
+            return DialogueNoiseEvaluation(isNoise = true, reason = DialogueNoiseReason.SYSTEM_MESSAGE, speaker = speaker)
         }
 
         val hasAttachments = runCatching { message.attachments }.getOrNull()?.isNotEmpty() == true

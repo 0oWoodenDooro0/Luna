@@ -1,5 +1,9 @@
 package luna.core.ai
 
+import ch.qos.logback.classic.Level
+import ch.qos.logback.classic.Logger
+import ch.qos.logback.classic.spi.ILoggingEvent
+import ch.qos.logback.core.read.ListAppender
 import dev.kord.common.entity.MessageStickerType
 import dev.kord.common.entity.Snowflake
 import dev.kord.core.entity.Attachment
@@ -14,6 +18,7 @@ import luna.core.BoundedSummaryRegistry
 import luna.core.LunaWebhookRegistry
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeEach
+import org.slf4j.LoggerFactory
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
@@ -87,112 +92,173 @@ class DialogueContextEngineTest {
     @Test
     fun `resolveExternalReplyReferences skips in-slice replies, enforces cap, and deduplicates shared targets`() =
         runTest {
-            val inSliceTarget = mockMessage(1L, content = "In slice", authorName = "Bob")
-            val msgInSliceReply = mockMessage(2L, content = "Replying in slice", authorName = "Alice")
-            val ext1 = mockMessage(100L, content = "External 1", authorName = "Carol")
-            val ext2 = mockMessage(101L, content = "External 2", authorName = "Dave")
-            val ext3 = mockMessage(102L, content = "External 3", authorName = "Eve")
+            val logger = LoggerFactory.getLogger(DiscordDialogueContextEngine::class.java) as Logger
+            val previousLevel = logger.level
+            val listAppender = ListAppender<ILoggingEvent>().apply { start() }
+            logger.level = Level.DEBUG
+            logger.addAppender(listAppender)
 
-            val msg3 = mockMessage(3L, content = "Reply to ext1", authorName = "Alice")
-            val msg4 = mockMessage(4L, content = "Also reply to ext1", authorName = "Bob")
-            val msg5 = mockMessage(5L, content = "Reply to ext2", authorName = "Alice")
-            val msg6 = mockMessage(6L, content = "Reply to ext3 exceeds cap", authorName = "Bob")
+            try {
+                val inSliceTarget = mockMessage(1L, content = "In slice", authorName = "Bob")
+                val msgInSliceReply = mockMessage(2L, content = "Replying in slice", authorName = "Alice")
+                val ext1 = mockMessage(100L, content = "External 1", authorName = "Carol")
+                val ext2 = mockMessage(101L, content = "External 2", authorName = "Dave")
+                val ext3 = mockMessage(102L, content = "External 3", authorName = "Eve")
 
-            val refs =
-                mapOf(
-                    2L to inSliceTarget,
-                    3L to ext1,
-                    4L to ext1,
-                    5L to ext2,
-                    6L to ext3,
+                val msg3 = mockMessage(3L, content = "Reply to ext1", authorName = "Alice")
+                val msg4 = mockMessage(4L, content = "Also reply to ext1", authorName = "Bob")
+                val msg5 = mockMessage(5L, content = "Reply to ext2", authorName = "Alice")
+                val msg6 = mockMessage(6L, content = "Reply to ext3 exceeds cap", authorName = "Bob")
+
+                val refs =
+                    mapOf(
+                        2L to inSliceTarget,
+                        3L to ext1,
+                        4L to ext1,
+                        5L to ext2,
+                        6L to ext3,
+                    )
+                val policy = DialogueContextPolicy.summary(maxExternalReferences = 2)
+                val resolved =
+                    engine.resolveExternalReplyReferences(
+                        messages = listOf(inSliceTarget, msgInSliceReply, msg3, msg4, msg5, msg6),
+                        policy = policy,
+                        referenceFetcher = { msg -> refs[msg.id.value.toLong()] },
+                    )
+
+                assertEquals(3, resolved.size)
+                assertEquals(ext1, resolved[msg3.id])
+                assertEquals(ext1, resolved[msg4.id])
+                assertEquals(ext2, resolved[msg5.id])
+                assertTrue(msg6.id !in resolved, "External reference beyond maxExternalReferences=2 must be skipped")
+                assertTrue(
+                    listAppender.list.any {
+                        it.level == Level.DEBUG &&
+                            it.formattedMessage.contains("maxExternalReferences=2") &&
+                            it.formattedMessage.contains("102")
+                    },
+                    "Expected DEBUG log when maxExternalReferences cap is reached",
                 )
-            val policy = DialogueContextPolicy.summary(maxExternalReferences = 2)
-            val resolved =
-                engine.resolveExternalReplyReferences(
-                    messages = listOf(inSliceTarget, msgInSliceReply, msg3, msg4, msg5, msg6),
-                    policy = policy,
-                    referenceFetcher = { msg -> refs[msg.id.value.toLong()] },
-                )
-
-            assertEquals(3, resolved.size)
-            assertEquals(ext1, resolved[msg3.id])
-            assertEquals(ext1, resolved[msg4.id])
-            assertEquals(ext2, resolved[msg5.id])
-            assertTrue(msg6.id !in resolved, "External reference beyond maxExternalReferences=2 must be skipped")
+            } finally {
+                logger.detachAppender(listAppender)
+                listAppender.stop()
+                logger.level = previousLevel
+            }
         }
 
     @Test
     fun `resolveExternalReplyReferences guards non-positive cap and degrades cleanly on fetcher failure`() =
         runTest {
-            val msg1 = mockMessage(1L, content = "Reply 1")
-            val msg2 = mockMessage(2L, content = "Reply 2")
-            val ext2 = mockMessage(200L, content = "Recovered ref")
-            var fetchCalls = 0
+            val logger = LoggerFactory.getLogger(DiscordDialogueContextEngine::class.java) as Logger
+            val listAppender = ListAppender<ILoggingEvent>().apply { start() }
+            logger.addAppender(listAppender)
 
-            val zeroCap =
-                engine.resolveExternalReplyReferences(
-                    messages = listOf(msg1, msg2),
-                    policy = DialogueContextPolicy.chatter(maxExternalReferences = 0),
-                    referenceFetcher = {
-                        fetchCalls++
-                        ext2
-                    },
-                )
-            assertTrue(zeroCap.isEmpty(), "maxExternalReferences <= 0 must return empty map")
-            assertEquals(0, fetchCalls)
+            try {
+                val msg1 = mockMessage(1L, content = "Reply 1")
+                val msg2 = mockMessage(2L, content = "Reply 2")
+                val ext2 = mockMessage(200L, content = "Recovered ref")
+                var fetchCalls = 0
 
-            val negativeCap =
-                engine.resolveExternalReplyReferences(
-                    messages = listOf(msg1),
-                    policy = DialogueContextPolicy.chatter(maxExternalReferences = -3),
-                    referenceFetcher = {
-                        fetchCalls++
-                        ext2
-                    },
-                )
-            assertTrue(negativeCap.isEmpty(), "Negative maxExternalReferences must return empty map")
-            assertEquals(0, fetchCalls)
+                val zeroCap =
+                    engine.resolveExternalReplyReferences(
+                        messages = listOf(msg1, msg2),
+                        policy = DialogueContextPolicy.chatter(maxExternalReferences = 0),
+                        referenceFetcher = {
+                            fetchCalls++
+                            ext2
+                        },
+                    )
+                assertTrue(zeroCap.isEmpty(), "maxExternalReferences <= 0 must return empty map")
+                assertEquals(0, fetchCalls)
 
-            val partial =
-                engine.resolveExternalReplyReferences(
-                    messages = listOf(msg1, msg2),
-                    policy = DialogueContextPolicy.summary(),
-                    referenceFetcher = { msg ->
-                        if (msg.id == msg1.id) error("Discord 500") else ext2
+                val negativeCap =
+                    engine.resolveExternalReplyReferences(
+                        messages = listOf(msg1),
+                        policy = DialogueContextPolicy.chatter(maxExternalReferences = -3),
+                        referenceFetcher = {
+                            fetchCalls++
+                            ext2
+                        },
+                    )
+                assertTrue(negativeCap.isEmpty(), "Negative maxExternalReferences must return empty map")
+                assertEquals(0, fetchCalls)
+
+                val partial =
+                    engine.resolveExternalReplyReferences(
+                        messages = listOf(msg1, msg2),
+                        policy = DialogueContextPolicy.summary(),
+                        referenceFetcher = { msg ->
+                            if (msg.id == msg1.id) error("Discord 500") else ext2
+                        },
+                    )
+                assertEquals(1, partial.size)
+                assertEquals(ext2, partial[msg2.id])
+                assertTrue(
+                    listAppender.list.any {
+                        it.level == Level.WARN && it.formattedMessage.contains("Discord 500")
                     },
+                    "Expected WARN log when referenceFetcher throws",
                 )
-            assertEquals(1, partial.size)
-            assertEquals(ext2, partial[msg2.id])
+            } finally {
+                logger.detachAppender(listAppender)
+                listAppender.stop()
+            }
         }
 
     @Test
     fun `formatDialogueMessages truncates reply excerpts at 120 chars by default and respects custom cap`() {
-        val longRefText = "A".repeat(130)
-        val refMsg = mockMessage(10L, content = longRefText, authorName = "Bob")
-        val replyMsg = mockMessage(11L, content = "Look at this", authorName = "Alice")
-        val refs = mapOf(replyMsg.id to refMsg)
+        val logger = LoggerFactory.getLogger(DiscordDialogueContextEngine::class.java) as Logger
+        val previousLevel = logger.level
+        val listAppender = ListAppender<ILoggingEvent>().apply { start() }
+        logger.level = Level.DEBUG
+        logger.addAppender(listAppender)
 
-        val defaultFormatted =
-            engine.formatDialogueMessages(
-                messages = listOf(replyMsg),
-                policy = DialogueContextPolicy.summary(),
-                replyReferencesByMessage = refs,
-                formatSpeakerHeader = { it.name },
-                kordSelfId = selfId,
-            )
-        val expectedDefaultExcerpt = "A".repeat(117) + "..."
-        assertEquals("[Alice 回覆 Bob「$expectedDefaultExcerpt」]: Look at this", defaultFormatted.transcript)
+        try {
+            val longRefText = "A".repeat(130)
+            val refMsg = mockMessage(10L, content = longRefText, authorName = "Bob")
+            val replyMsg = mockMessage(11L, content = "Look at this", authorName = "Alice")
+            val refs = mapOf(replyMsg.id to refMsg)
 
-        val customFormatted =
-            engine.formatDialogueMessages(
-                messages = listOf(replyMsg),
-                policy = DialogueContextPolicy.summary(maxReplyExcerptLength = 20),
-                replyReferencesByMessage = refs,
-                formatSpeakerHeader = { it.name },
-                kordSelfId = selfId,
+            val defaultFormatted =
+                engine.formatDialogueMessages(
+                    messages = listOf(replyMsg),
+                    policy = DialogueContextPolicy.summary(),
+                    replyReferencesByMessage = refs,
+                    formatSpeakerHeader = { it.name },
+                    kordSelfId = selfId,
+                )
+            val expectedDefaultExcerpt = "A".repeat(117) + "..."
+            assertEquals("[Alice 回覆 Bob「$expectedDefaultExcerpt」]: Look at this", defaultFormatted.transcript)
+            assertTrue(
+                listAppender.list.any {
+                    it.level == Level.DEBUG && it.formattedMessage.contains("maxReplyExcerptLength=120")
+                },
+                "Expected DEBUG log when reply excerpt is truncated at default 120 chars",
             )
-        val expectedCustomExcerpt = "A".repeat(17) + "..."
-        assertEquals("[Alice 回覆 Bob「$expectedCustomExcerpt」]: Look at this", customFormatted.transcript)
+
+            listAppender.list.clear()
+
+            val customFormatted =
+                engine.formatDialogueMessages(
+                    messages = listOf(replyMsg),
+                    policy = DialogueContextPolicy.summary(maxReplyExcerptLength = 20),
+                    replyReferencesByMessage = refs,
+                    formatSpeakerHeader = { it.name },
+                    kordSelfId = selfId,
+                )
+            val expectedCustomExcerpt = "A".repeat(17) + "..."
+            assertEquals("[Alice 回覆 Bob「$expectedCustomExcerpt」]: Look at this", customFormatted.transcript)
+            assertTrue(
+                listAppender.list.any {
+                    it.level == Level.DEBUG && it.formattedMessage.contains("maxReplyExcerptLength=20")
+                },
+                "Expected DEBUG log when reply excerpt is truncated at custom 20 chars",
+            )
+        } finally {
+            logger.detachAppender(listAppender)
+            listAppender.stop()
+            logger.level = previousLevel
+        }
     }
 
     @Test
