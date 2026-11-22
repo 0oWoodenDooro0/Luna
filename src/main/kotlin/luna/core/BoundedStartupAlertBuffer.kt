@@ -3,7 +3,7 @@ package luna.core
 import org.slf4j.LoggerFactory
 
 /**
- * Bounded, thread-safe [StartupAlertBuffer] retaining pre-`ReadyEvent` alerts in FIFO order.
+ * Bounded, thread-safe startup alert buffer retaining pre-`ReadyEvent` alerts in FIFO order.
  *
  * Retains up to [maxEntries] (default `20`) qualifying alerts while `!isReady`. Excess events
  * beyond [maxEntries] are dropped with an observable degraded local warning logged via
@@ -12,9 +12,9 @@ import org.slf4j.LoggerFactory
  * events in FIFO order; subsequent runtime events return `false` from [bufferIfNotReady] so
  * they bypass the startup buffer.
  */
-class BoundedStartupAlertBuffer(
+internal class BoundedStartupAlertBuffer(
     val maxEntries: Int = DEFAULT_MAX_ENTRIES,
-) : StartupAlertBuffer {
+) {
     init {
         require(maxEntries >= 0) { "maxEntries must be non-negative, got $maxEntries" }
     }
@@ -27,7 +27,7 @@ class BoundedStartupAlertBuffer(
     private var ready: Boolean = false
     private var droppedOverflowCount: Int = 0
 
-    override val isReady: Boolean
+    val isReady: Boolean
         get() = ready
 
     val bufferedCount: Int
@@ -36,7 +36,7 @@ class BoundedStartupAlertBuffer(
     val droppedCount: Int
         get() = synchronized(lock) { droppedOverflowCount }
 
-    override fun bufferIfNotReady(event: OwnerErrorEvent): Boolean {
+    fun bufferIfNotReady(event: OwnerErrorEvent): Boolean {
         var overflowTotal: Int? = null
         val handledByBuffer =
             synchronized(lock) {
@@ -67,7 +67,7 @@ class BoundedStartupAlertBuffer(
         return handledByBuffer
     }
 
-    override fun markReadyAndDrain(): List<OwnerErrorEvent> =
+    fun markReadyAndDrain(): List<OwnerErrorEvent> =
         synchronized(lock) {
             if (ready) {
                 return emptyList()

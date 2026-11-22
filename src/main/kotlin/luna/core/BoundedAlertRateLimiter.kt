@@ -21,14 +21,14 @@ import java.util.LinkedHashMap
  *   [ErrorAlertSeverity.WARN] so noisy warnings cannot starve error alerts, emitting an observable
  *   warning log via [OwnerErrorNotifier.INTERNAL_LOGGER_NAME] under a recursion guard on drops.
  */
-class BoundedAlertRateLimiter(
+internal class BoundedAlertRateLimiter(
     cooldownSeconds: Long = ErrorNotifyConfig.DEFAULT_COOLDOWN_SECONDS.toLong(),
     maxErrorsPerMinute: Int = DEFAULT_MAX_ERRORS_PER_MINUTE,
     maxWarnsPerMinute: Int = DEFAULT_MAX_WARNS_PER_MINUTE,
     maxFingerprints: Int = DEFAULT_MAX_FINGERPRINTS,
     private val clock: Clock = Clock.systemUTC(),
     private val warningLogger: Logger = LoggerFactory.getLogger(OwnerErrorNotifier.INTERNAL_LOGGER_NAME),
-) : AlertRateLimiter {
+) {
     val effectiveCooldownSeconds: Long =
         if (cooldownSeconds > 0L) {
             cooldownSeconds
@@ -88,7 +88,7 @@ class BoundedAlertRateLimiter(
         }
     }
 
-    override fun acquire(event: OwnerErrorEvent): OwnerErrorEvent? {
+    fun acquire(event: OwnerErrorEvent): OwnerErrorEvent? {
         val nowMillis = clock.millis()
         val fingerprint = computeFingerprint(event)
 

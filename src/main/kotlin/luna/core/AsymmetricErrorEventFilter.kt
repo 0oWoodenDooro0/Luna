@@ -6,7 +6,7 @@ import java.util.LinkedHashMap
 import java.util.concurrent.atomic.AtomicLong
 
 /**
- * Asymmetric source/severity [ErrorEventFilter] with bounded SLF4J / `JsonLogger` double-log correlation.
+ * Asymmetric source/severity error event filter with bounded SLF4J / `JsonLogger` double-log correlation.
  *
  * - First-party loggers (`luna.*`, `dev.socialpeek.*`, `JSON_LOGGER`, `luna.core.UncaughtException`)
  *   pass both [ErrorAlertSeverity.WARN] and [ErrorAlertSeverity.ERROR].
@@ -16,11 +16,11 @@ import java.util.concurrent.atomic.AtomicLong
  *   [correlationWindowMs] suppress the redundant second emission (1-to-1) using bounded
  *   LRU + TTL correlation state per `CODING_STANDARDS.md` §1.
  */
-class AsymmetricErrorEventFilter(
+internal class AsymmetricErrorEventFilter(
     private val clock: Clock = Clock.systemUTC(),
     private val correlationWindowMs: Long = DEFAULT_CORRELATION_WINDOW_MS,
     maxTrackedEntries: Int = DEFAULT_MAX_TRACKED_ENTRIES,
-) : ErrorEventFilter {
+) {
     private enum class LogChannel {
         SLF4J,
         JSON_LOGGER,
@@ -65,7 +65,7 @@ class AsymmetricErrorEventFilter(
             },
         )
 
-    override fun shouldNotify(event: OwnerErrorEvent): Boolean {
+    fun shouldNotify(event: OwnerErrorEvent): Boolean {
         val passesSeverityPolicy =
             when (event.severity) {
                 ErrorAlertSeverity.ERROR -> true

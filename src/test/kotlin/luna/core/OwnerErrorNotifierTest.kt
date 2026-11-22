@@ -174,6 +174,59 @@ class OwnerErrorNotifierTest {
         }
 
     @Test
+    fun `redacts inline KV secrets, query keys, headers, Bearer tokens, and configured secrets of 3+ chars while preserving short secrets under 3 chars`() =
+        runTest {
+            val delivered = CopyOnWriteArrayList<Pair<Snowflake, String>>()
+            val env =
+                luna.config.EnvReader.of(
+                    mapOf(
+                        "SHORT_TOKEN" to "ab",
+                        "MIN_SECRET" to "xyz",
+                        "LONG_API_KEY" to "configured-secret-value-999",
+                    ),
+                )
+            val notifier =
+                OwnerErrorNotifier(
+                    config = ErrorNotifyConfig(recipientUserIds = listOf(Snowflake(123uL))),
+                    env = env,
+                    clock = fixedClock,
+                    dmSender = { userId, content -> delivered.add(userId to content) },
+                )
+            notifier.onReady()
+
+            val event =
+                OwnerErrorEvent(
+                    timestamp = fixedClock.instant(),
+                    severity = ErrorAlertSeverity.ERROR,
+                    loggerName = "luna.core.RedactionBoundaryTest",
+                    message =
+                        "ab short value stays; min=xyz; long=configured-secret-value-999; " +
+                            "url=https://example.com/hook?api_key=qApi123&token=qTok456&secret=qSec789; " +
+                            "x-goog-api-key: googHeaderSecret1; Authorization: Bearer bearerTok2; " +
+                            "password=inlinePass3 secret=inlineSec4 api_key=inlineKey5 token=inlineTok6",
+                )
+
+            notifier.submit(event)
+            notifier.flushAndClose()
+
+            assertEquals(1, delivered.size)
+            val dm = delivered.single().second
+            assertTrue(dm.contains("ab short value stays"), "Short secret (< 3 chars) must not be masked: $dm")
+            assertTrue(!dm.contains("xyz"), "Configured secret of 3 chars must be masked: $dm")
+            assertTrue(!dm.contains("configured-secret-value-999"), "Configured secret (>= 3 chars) must be masked: $dm")
+            assertTrue(!dm.contains("qApi123"), "Query api_key must be masked: $dm")
+            assertTrue(!dm.contains("qTok456"), "Query token must be masked: $dm")
+            assertTrue(!dm.contains("qSec789"), "Query secret must be masked: $dm")
+            assertTrue(!dm.contains("googHeaderSecret1"), "x-goog-api-key header must be masked: $dm")
+            assertTrue(!dm.contains("bearerTok2"), "Bearer token must be masked: $dm")
+            assertTrue(!dm.contains("inlinePass3"), "Inline password KV must be masked: $dm")
+            assertTrue(!dm.contains("inlineSec4"), "Inline secret KV must be masked: $dm")
+            assertTrue(!dm.contains("inlineKey5"), "Inline api_key KV must be masked: $dm")
+            assertTrue(!dm.contains("inlineTok6"), "Inline token KV must be masked: $dm")
+            assertTrue(dm.contains(SecretRedactor.MASK), "Masked payload must contain redaction mask: $dm")
+        }
+
+    @Test
     fun `extracts only safe metadata keys and never embeds chat transcript keys from Logback event`() =
         runTest {
             val delivered = CopyOnWriteArrayList<Pair<Snowflake, String>>()
