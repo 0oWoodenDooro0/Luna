@@ -208,3 +208,7 @@ _Avoid_: Message offset, sync checkpoint, log pointer
 The model-driven tool invocation inside `Chatter Pipeline` reply generation that searches `Long-Term Memory` on demand with context-rewritten queries, hybrid lexical-semantic ranking, recency exclusion, and bounded turn and timeout guardrails.
 _Avoid_: Pre-prompt RAG, memory injection, auto-recall
 
+**Dialogue Context Engine**:
+The policy-driven shared module in `luna.core.ai` that provides unified Discord noise evaluation, external `Reply Reference Chaining`, embed and Tenor/Giphy GIF preview formatting, primary social/YouTube link enrichment (with 2-hour duration cap and regex fallback), and image marker formatting for both `Chatter Pipeline` and `Summary Pipeline` without cross-plugin coupling.
+_Avoid_: Context helper, shared collector, dialogue utils, enrichment service
+
