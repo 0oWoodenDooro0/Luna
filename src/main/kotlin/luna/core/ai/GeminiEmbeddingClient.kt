@@ -1,9 +1,7 @@
 package luna.core.ai
 
 import io.ktor.client.HttpClient
-import io.ktor.client.engine.cio.CIO
 import io.ktor.client.plugins.HttpRequestTimeoutException
-import io.ktor.client.plugins.HttpTimeout
 import io.ktor.client.request.header
 import io.ktor.client.request.post
 import io.ktor.client.request.setBody
@@ -73,12 +71,22 @@ private data class BatchEmbedContentsResponse(
  * client-side L2 normalization.
  */
 class GeminiEmbeddingClient(
-    private val httpClient: HttpClient = createDefaultHttpClient(),
+    httpClient: HttpClient? = null,
     private val apiKey: String,
     private val baseUrl: String = DEFAULT_BASE_URL,
     private val model: String = DEFAULT_MODEL,
     private val outputDimensionality: Int = DEFAULT_OUTPUT_DIMENSIONALITY,
+    private val timeoutMs: Long = DEFAULT_TIMEOUT_MS,
 ) : AutoCloseable {
+    private val ownsHttpClient: Boolean = httpClient == null
+    private val httpClient: HttpClient =
+        httpClient
+            ?: GeminiHttpClientFactory.create(
+                requestTimeoutMs = timeoutMs,
+                connectTimeoutMs = timeoutMs,
+                socketTimeoutMs = timeoutMs,
+                installContentNegotiation = false,
+            )
     private val json = Json { ignoreUnknownKeys = true }
     private val normalizedBaseUrl = baseUrl.trimEnd('/')
     private val modelResource = if (model.startsWith("models/")) model else "models/$model"
@@ -151,6 +159,12 @@ class GeminiEmbeddingClient(
                 httpClient.post(endpoint) {
                     header(API_KEY_HEADER, apiKey)
                     contentType(ContentType.Application.Json)
+                    applyGeminiTimeout(
+                        httpClient,
+                        requestTimeoutMs = timeoutMs,
+                        connectTimeoutMs = timeoutMs,
+                        socketTimeoutMs = timeoutMs,
+                    )
                     setBody(payload)
                 }
             } catch (ex: TimeoutCancellationException) {
@@ -176,25 +190,19 @@ class GeminiEmbeddingClient(
     }
 
     override fun close() {
-        httpClient.close()
+        if (ownsHttpClient) {
+            httpClient.close()
+        }
     }
 
     companion object {
         const val DEFAULT_BASE_URL = "https://generativelanguage.googleapis.com"
         const val DEFAULT_MODEL = "gemini-embedding-001"
         const val DEFAULT_OUTPUT_DIMENSIONALITY = 768
+        const val DEFAULT_TIMEOUT_MS = 10_000L
         const val TASK_TYPE_RETRIEVAL_QUERY = "RETRIEVAL_QUERY"
         const val TASK_TYPE_RETRIEVAL_DOCUMENT = "RETRIEVAL_DOCUMENT"
         const val API_KEY_HEADER = "x-goog-api-key"
-
-        fun createDefaultHttpClient(timeoutMs: Long = 10_000L): HttpClient =
-            HttpClient(CIO) {
-                install(HttpTimeout) {
-                    requestTimeoutMillis = timeoutMs
-                    connectTimeoutMillis = timeoutMs
-                    socketTimeoutMillis = timeoutMs
-                }
-            }
 
         /**
          * Validates finiteness, dimension count, and non-zero norm, returning a unit-length [FloatArray].

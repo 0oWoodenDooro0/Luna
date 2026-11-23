@@ -15,7 +15,6 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.delay
 import kotlinx.serialization.SerializationException
-import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
@@ -113,6 +112,9 @@ class GeminiInteractionClient(
     private val pollingDelayMs: Long = DEFAULT_POLLING_DELAY_MS,
     private val maxPollingAttempts: Int = DEFAULT_MAX_POLLING_ATTEMPTS,
     private val traceRecorder: AiTraceRecorder = NoOpAiTraceRecorder,
+    private val requestTimeoutMs: Long? = null,
+    private val connectTimeoutMs: Long? = null,
+    private val socketTimeoutMs: Long? = null,
 ) {
     private val logger = LoggerFactory.getLogger(GeminiInteractionClient::class.java)
 
@@ -350,6 +352,7 @@ class GeminiInteractionClient(
                     val response: HttpResponse =
                         httpClient.post(rawEndpoint) {
                             contentType(ContentType.Application.Json)
+                            applyGeminiTimeout(httpClient, requestTimeoutMs, connectTimeoutMs, socketTimeoutMs)
                             setBody(requestPayload)
                         }
                     traceState.httpStatus = response.status.value
@@ -526,7 +529,10 @@ class GeminiInteractionClient(
             traceState.httpStatus = null
             traceState.responseRaw = null
 
-            val response = httpClient.get(endpoint)
+            val response =
+                httpClient.get(endpoint) {
+                    applyGeminiTimeout(httpClient, requestTimeoutMs, connectTimeoutMs, socketTimeoutMs)
+                }
             traceState.httpStatus = response.status.value
             val rawBody = readBodyTextSafely(response)
             traceState.responseRaw = rawBody
@@ -764,13 +770,7 @@ class GeminiInteractionClient(
         const val DEFAULT_POLLING_DELAY_MS = 2000L
         const val DEFAULT_MAX_POLLING_ATTEMPTS = 30
 
-        private val jsonParser =
-            Json {
-                ignoreUnknownKeys = true
-                isLenient = true
-                encodeDefaults = false
-                explicitNulls = false
-            }
+        private val jsonParser = GeminiHttpClientFactory.json
 
         /**
          * Builds ordered Interactions API input blocks with multimodal media (`video`, `image`)

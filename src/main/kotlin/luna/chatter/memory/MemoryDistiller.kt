@@ -2,11 +2,6 @@ package luna.chatter.memory
 
 import dev.kord.common.entity.Snowflake
 import dev.kord.core.entity.Message
-import io.ktor.client.HttpClient
-import io.ktor.client.engine.cio.CIO
-import io.ktor.client.plugins.HttpTimeout
-import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
-import io.ktor.serialization.kotlinx.json.json
 import kotlinx.coroutines.CancellationException
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
@@ -503,25 +498,6 @@ class MemoryDistiller(
         private const val FETCH_BUFFER_SIZE = 20
         private const val TOP_K_SIMILAR = 6
         private const val MAX_DISTILL_OUTPUT_TOKENS = 2048
-        private const val HTTP_REQUEST_TIMEOUT_MS = 30_000L
-        private const val HTTP_CONNECT_TIMEOUT_MS = 10_000L
-
-        fun createDefaultHttpClient(): HttpClient =
-            HttpClient(CIO) {
-                install(ContentNegotiation) {
-                    json(
-                        Json {
-                            ignoreUnknownKeys = true
-                            encodeDefaults = false
-                        },
-                    )
-                }
-                install(HttpTimeout) {
-                    requestTimeoutMillis = HTTP_REQUEST_TIMEOUT_MS
-                    connectTimeoutMillis = HTTP_CONNECT_TIMEOUT_MS
-                    socketTimeoutMillis = HTTP_REQUEST_TIMEOUT_MS
-                }
-            }
 
         private val EXTRACTION_SYSTEM_INSTRUCTION =
             """

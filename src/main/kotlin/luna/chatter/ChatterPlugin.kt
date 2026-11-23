@@ -11,6 +11,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.toList
 import luna.chatter.emoji.ChatterEmojiService
+import luna.chatter.emoji.ChatterEmojiVisionResolver
 import luna.chatter.emoji.DefaultChatterEmojiService
 import luna.chatter.memory.ChatterMemoryConfig
 import luna.chatter.memory.ChatterMemoryStore
@@ -22,6 +23,7 @@ import luna.chatter.memory.SqliteChatterMemoryStore
 import luna.config.ConfigValidationException
 import luna.core.JsonLogger
 import luna.core.ai.GeminiEmbeddingClient
+import luna.core.ai.GeminiHttpClientFactory
 import luna.core.ai.GeminiInteractionClient
 import luna.core.ai.SocialPeekFactory
 import luna.plugin.LunaPlugin
@@ -92,8 +94,8 @@ class ChatterPlugin(
         internal set
 
     private var embeddingClient: GeminiEmbeddingClient? = null
-    private var visionHttpClient: HttpClient? = null
-    private var distillationHttpClient: HttpClient? = null
+    var sharedHttpClient: HttpClient? = null
+        internal set
 
     var maxImages: Int = ChatterContextCollector.DEFAULT_MAX_IMAGES
         internal set
@@ -141,11 +143,13 @@ class ChatterPlugin(
         this.maxImages = imagesLimit
 
         val traceRecorder = context.aiTraceRecorder
+        val httpClient = GeminiHttpClientFactory.create().also { this.sharedHttpClient = it }
 
         val client =
             decisionClientFactory?.invoke(decisionConfig)
                 ?: GeminiDecisionClient(
                     config = decisionConfig,
+                    httpClient = httpClient,
                     traceRecorder = traceRecorder,
                 )
         this.decisionClient = client
@@ -176,6 +180,7 @@ class ChatterPlugin(
         val initializedEmbeddingClient =
             if (memoryConfig.enabled && initializedStore != null && chatterConfig.isConfigured) {
                 GeminiEmbeddingClient(
+                    httpClient = httpClient,
                     apiKey = chatterConfig.apiKey,
                     baseUrl = chatterConfig.cleanBaseUrl,
                     model = memoryConfig.cleanEmbeddingModel,
@@ -201,6 +206,7 @@ class ChatterPlugin(
             generatorFactory?.invoke(chatterConfig)
                 ?: ChatterGenerator(
                     config = chatterConfig,
+                    httpClient = httpClient,
                     traceRecorder = traceRecorder,
                     memoryConfig = memoryConfig,
                     memoryToolHandler = toolHandler,
@@ -252,11 +258,12 @@ class ChatterPlugin(
                 val visionModel = chatterConfig.cleanEmojiVisionModel?.takeIf { chatterConfig.isConfigured }
                 val visionInteractionClient =
                     visionModel?.let {
-                        val httpClient = ChatterEmojiService.createDefaultVisionHttpClient()
-                        this.visionHttpClient = httpClient
                         GeminiInteractionClient(
                             httpClient = httpClient,
                             traceRecorder = traceRecorder,
+                            requestTimeoutMs = ChatterEmojiVisionResolver.DEFAULT_HTTP_REQUEST_TIMEOUT_MS,
+                            connectTimeoutMs = ChatterEmojiVisionResolver.DEFAULT_HTTP_CONNECT_TIMEOUT_MS,
+                            socketTimeoutMs = ChatterEmojiVisionResolver.DEFAULT_HTTP_SOCKET_TIMEOUT_MS,
                         )
                     }
                 DefaultChatterEmojiService(
@@ -344,6 +351,7 @@ class ChatterPlugin(
             this.registrationJob = finalService.register(context.kord, scope = scope)
             initializeMemoryDistillation(
                 context = context,
+                sharedHttpClient = httpClient,
                 chatterConfig = chatterConfig,
                 memoryConfig = memoryConfig,
                 memoryStore = initializedStore,
@@ -360,6 +368,7 @@ class ChatterPlugin(
 
     private fun initializeMemoryDistillation(
         context: PluginContext,
+        sharedHttpClient: HttpClient,
         chatterConfig: ChatterConfig,
         memoryConfig: ChatterMemoryConfig,
         memoryStore: ChatterMemoryStore?,
@@ -371,14 +380,13 @@ class ChatterPlugin(
         if (!memoryConfig.enabled || memoryStore == null || embeddingClient == null) return
 
         runCatching {
-            val distillHttp = MemoryDistiller.createDefaultHttpClient().also { this.distillationHttpClient = it }
             val distiller =
                 MemoryDistiller(
                     memoryStore = memoryStore,
                     embeddingClient = embeddingClient,
                     interactionClient =
                         GeminiInteractionClient(
-                            httpClient = distillHttp,
+                            httpClient = sharedHttpClient,
                             traceRecorder = context.aiTraceRecorder,
                         ),
                     noiseFilter = noiseFilter,
@@ -425,10 +433,8 @@ class ChatterPlugin(
         chatterGenerator?.close()
         embeddingClient?.close()
         embeddingClient = null
-        visionHttpClient?.close()
-        visionHttpClient = null
-        distillationHttpClient?.close()
-        distillationHttpClient = null
+        sharedHttpClient?.close()
+        sharedHttpClient = null
     }
 
     companion object {
