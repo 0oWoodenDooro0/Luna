@@ -52,6 +52,11 @@ interface ChatterMemoryStore {
         userId: String,
     ): Boolean
 
+    fun deleteAllOwnedUserMemories(
+        guildId: String,
+        userId: String,
+    ): Int
+
     fun purgeExpiredMemories(nowMs: Long): Int
 
     fun search(

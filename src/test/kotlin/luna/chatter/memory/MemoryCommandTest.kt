@@ -46,6 +46,7 @@ class MemoryCommandTest {
         guildId: Snowflake? = Snowflake(100L),
         userId: Snowflake = Snowflake(200L),
         integers: Map<String, Long> = emptyMap(),
+        booleans: Map<String, Boolean> = emptyMap(),
     ): Pair<ChatInputCommandInteraction, () -> String?> {
         val capturedModify = slot<MultipartInteractionResponseModifyRequest>()
         var respondedContent: String? = null
@@ -93,6 +94,7 @@ class MemoryCommandTest {
             mockk<SubCommand>(relaxed = true) {
                 every { name } returns subcommandName
                 every { this@mockk.integers } returns integers
+                every { this@mockk.booleans } returns booleans
             }
 
         val mockInteraction =
@@ -168,12 +170,12 @@ class MemoryCommandTest {
     fun `list truncates cleanly below 2000 characters with trailing ellipsis when long`() =
         runTest {
             val store = createStore()
-            repeat(40) { idx ->
+            repeat(10) { idx ->
                 store.insertMemory(
                     guildId = "100",
                     scope = MemoryScope.USER,
                     targetUserId = "200",
-                    content = "Memory entry $idx: " + "x".repeat(60),
+                    content = "Memory entry $idx: " + "x".repeat(250),
                 )
             }
 
@@ -189,6 +191,92 @@ class MemoryCommandTest {
                 "Response length ${content.length} must be <= ${MemoryCommand.DISCORD_MAX_MESSAGE_LENGTH}",
             )
             assertTrue(content.endsWith("..."), "Truncated response must end with ellipsis")
+        }
+
+    @Test
+    fun `list paginates 10 memories per page with Page X of Y metadata, total count, and expiry date`() =
+        runTest {
+            val store = createStore()
+            val inserted =
+                (1..15).map { idx ->
+                    val expiresAt =
+                        if (idx == 15) {
+                            Instant.parse("2026-11-30T23:59:59Z").toEpochMilli()
+                        } else {
+                            null
+                        }
+                    store.insertMemory(
+                        guildId = "100",
+                        scope = MemoryScope.USER,
+                        targetUserId = "200",
+                        content = "Paginated fact #$idx",
+                        expiresAt = expiresAt,
+                    )
+                }
+            // Expired memory should be excluded from total count and pages
+            val expired =
+                store.insertMemory(
+                    guildId = "100",
+                    scope = MemoryScope.USER,
+                    targetUserId = "200",
+                    content = "Already expired fact",
+                    expiresAt = Instant.parse("2026-11-19T00:00:00Z").toEpochMilli(),
+                )
+
+            val command = MemoryCommand(store)
+
+            val (page1Interaction, getPage1) = setupInteraction(subcommandName = "list")
+            command.handle(page1Interaction)
+            val page1 = getPage1()
+            assertNotNull(page1)
+            assertTrue(page1.contains("1/2"), "Expected page 1/2 metadata, got: $page1")
+            assertTrue(page1.contains("15"), "Expected total count 15, got: $page1")
+            assertTrue(page1.contains("[#${inserted[14].id}] Paginated fact #15"), "Expected newest item on page 1")
+            assertTrue(page1.contains("2026-11-30"), "Expected expiry date 2026-11-30 for expiring memory")
+            assertFalse(page1.contains("[#${inserted[0].id}] Paginated fact #1"), "Oldest item must be on page 2")
+            assertFalse(page1.contains("[#${expired.id}]"), "Expired memory must not appear")
+
+            val (page2Interaction, getPage2) =
+                setupInteraction(
+                    subcommandName = "list",
+                    integers = mapOf("page" to 2L),
+                )
+            command.handle(page2Interaction)
+            val page2 = getPage2()
+            assertNotNull(page2)
+            assertTrue(page2.contains("2/2"), "Expected page 2/2 metadata, got: $page2")
+            assertTrue(page2.contains("15"), "Expected total count 15, got: $page2")
+            assertTrue(page2.contains("[#${inserted[0].id}] Paginated fact #1"), "Expected oldest item on page 2")
+            assertFalse(page2.contains("[#${inserted[14].id}] Paginated fact #15"), "Page 1 item must not appear on page 2")
+        }
+
+    @Test
+    fun `list returns clear ephemeral guidance for out-of-range page numbers`() =
+        runTest {
+            val store = createStore()
+            repeat(12) { idx ->
+                store.insertMemory(
+                    guildId = "100",
+                    scope = MemoryScope.USER,
+                    targetUserId = "200",
+                    content = "Fact $idx",
+                )
+            }
+
+            val command = MemoryCommand(store)
+
+            for (badPage in listOf(0L, -1L, 3L)) {
+                val (interaction, getContent) =
+                    setupInteraction(
+                        subcommandName = "list",
+                        integers = mapOf("page" to badPage),
+                    )
+                command.handle(interaction)
+                coVerify(atLeast = 1) { interaction.deferEphemeralResponse() }
+                val content = getContent()
+                assertNotNull(content)
+                assertTrue(content.contains("1") && content.contains("2"), "Expected valid page range 1..2 in guidance for page=$badPage, got: $content")
+            }
         }
 
     @Test
@@ -312,12 +400,13 @@ class MemoryCommandTest {
             val store = createStore()
             val command = MemoryCommand(store)
 
-            for (subcommand in listOf("list", "delete")) {
+            for (subcommand in listOf("list", "delete", "clear")) {
                 val (interaction, getContent) =
                     setupInteraction(
                         subcommandName = subcommand,
                         guildId = null,
                         integers = if (subcommand == "delete") mapOf("id" to 1L) else emptyMap(),
+                        booleans = if (subcommand == "clear") mapOf("confirm" to true) else emptyMap(),
                     )
 
                 command.handle(interaction)
@@ -346,5 +435,79 @@ class MemoryCommandTest {
             assertNotNull(plugin.memoryStore)
             assertNotNull(plugin.memoryCommand)
             plugin.shutdown()
+        }
+
+    @Test
+    fun `clear with confirm true ephemerally hard-deletes all invoking user memories in current guild and returns count`() =
+        runTest {
+            val store = createStore()
+            store.insertMemory("100", MemoryScope.USER, "200", "User1 fact one")
+            store.insertMemory("100", MemoryScope.USER, "200", "User1 fact two")
+            store.insertMemory("100", MemoryScope.USER, "200", "User1 fact three")
+            val otherUser = store.insertMemory("100", MemoryScope.USER, "201", "Other user fact")
+            val guildMem = store.insertMemory("100", MemoryScope.GUILD, null, "Guild shared fact")
+            val otherGuild = store.insertMemory("101", MemoryScope.USER, "200", "Other guild fact")
+
+            val command = MemoryCommand(store)
+            val (interaction, getContent) =
+                setupInteraction(
+                    subcommandName = "clear",
+                    booleans = mapOf("confirm" to true),
+                )
+
+            command.handle(interaction)
+
+            coVerify(exactly = 1) { interaction.deferEphemeralResponse() }
+            val content = getContent()
+            assertNotNull(content)
+            assertTrue(content.contains("3"), "Expected deleted count 3 in confirmation, got: $content")
+            assertTrue(store.listUserMemories("100", "200").isEmpty(), "All invoking user memories in guild 100 must be deleted")
+            assertTrue(
+                store
+                    .search(
+                        guildId = "100",
+                        queryText = "User1 fact",
+                        scope = SearchScope.USER,
+                        targetUserId = "200",
+                        recencyExcludeMinutes = 0,
+                    ).isEmpty(),
+                "Cleared memories must be purged from FTS5",
+            )
+            assertEquals(listOf(otherUser.id), store.listUserMemories("100", "201").map { it.id })
+            assertEquals(listOf(otherGuild.id), store.listUserMemories("101", "200").map { it.id })
+            val guildHits =
+                store.search(
+                    guildId = "100",
+                    queryText = "Guild shared",
+                    scope = SearchScope.GUILD,
+                    recencyExcludeMinutes = 0,
+                )
+            assertEquals(listOf(guildMem.id), guildHits.map { it.memory.id })
+        }
+
+    @Test
+    fun `clear with confirm false or missing aborts without deleting and explains confirm true is required`() =
+        runTest {
+            val store = createStore()
+            store.insertMemory("100", MemoryScope.USER, "200", "Keep fact one")
+            store.insertMemory("100", MemoryScope.USER, "200", "Keep fact two")
+
+            val command = MemoryCommand(store)
+
+            for (booleans in listOf(mapOf("confirm" to false), emptyMap())) {
+                val (interaction, getContent) =
+                    setupInteraction(
+                        subcommandName = "clear",
+                        booleans = booleans,
+                    )
+
+                command.handle(interaction)
+
+                coVerify(exactly = 1) { interaction.deferEphemeralResponse() }
+                val content = getContent()
+                assertNotNull(content)
+                assertTrue(content.contains("confirm:true"), "Expected guidance explaining confirm:true is required, got: $content")
+                assertEquals(2, store.listUserMemories("100", "200").size, "Memories must not be deleted when confirm is not true")
+            }
         }
 }

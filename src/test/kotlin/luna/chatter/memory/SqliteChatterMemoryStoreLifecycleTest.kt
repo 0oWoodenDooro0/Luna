@@ -104,7 +104,7 @@ class SqliteChatterMemoryStoreLifecycleTest {
             ChatterMemoryRecord(4L, "g1", MemoryScope.USER, "u1", "Dual FTS and vector", now, now, now)
 
         val hits =
-            SqliteChatterMemoryStore.fuseCandidatesWithRrf(
+            ChatterMemoryRrfRanker.fuseCandidatesWithRrf(
                 lexicalCandidates = listOf(recordFtsOnly, recordDual),
                 vectorCandidates =
                     listOf(
@@ -339,7 +339,7 @@ class SqliteChatterMemoryStoreLifecycleTest {
             ChatterMemoryRecord(2L, "g1", MemoryScope.USER, "u1", "Alice saw a coffee shop", nowMs, nowMs, nowMs)
 
         val hits =
-            SqliteChatterMemoryStore.fuseCandidatesWithRrf(
+            ChatterMemoryRrfRanker.fuseCandidatesWithRrf(
                 lexicalCandidates = listOf(durable, recentLessRelevant),
                 vectorCandidates =
                     listOf(
@@ -372,7 +372,7 @@ class SqliteChatterMemoryStoreLifecycleTest {
             ChatterMemoryRecord(2L, "g1", MemoryScope.USER, "u1", "Present timestamped memory", nowMs, nowMs, nowMs)
 
         val hits =
-            SqliteChatterMemoryStore.fuseCandidatesWithRrf(
+            ChatterMemoryRrfRanker.fuseCandidatesWithRrf(
                 lexicalCandidates = listOf(futureRecord, presentRecord),
                 vectorCandidates = emptyList(),
                 scoreCutoff = 0.55,
@@ -384,5 +384,42 @@ class SqliteChatterMemoryStoreLifecycleTest {
         val futureHit = hits.first { it.memory.id == 1L }
         val expectedRrf = 1.0 / 61.0
         assertEquals(expectedRrf, futureHit.score, 1e-12, "Negative age must clamp to 0.0 so decay multiplier is 1.0")
+    }
+
+    @Test
+    fun `deleteAllOwnedUserMemories hard-deletes only invoking user memories in target guild across FTS5 and returns count`() {
+        val store = createStore()
+        store.insertMemory("guild-1", MemoryScope.USER, "user-1", "User1 fact one in guild1")
+        store.insertMemory("guild-1", MemoryScope.USER, "user-1", "User1 fact two in guild1")
+        val otherUser = store.insertMemory("guild-1", MemoryScope.USER, "user-2", "User2 fact in guild1")
+        val guildMem = store.insertMemory("guild-1", MemoryScope.GUILD, null, "Guild1 shared fact")
+        val otherGuild = store.insertMemory("guild-2", MemoryScope.USER, "user-1", "User1 fact in guild2")
+
+        val deletedCount = store.deleteAllOwnedUserMemories(guildId = "guild-1", userId = "user-1")
+
+        assertEquals(2, deletedCount)
+        assertTrue(store.listUserMemories("guild-1", "user-1").isEmpty(), "Target user memories in guild-1 must be deleted")
+        assertTrue(
+            store
+                .search(
+                    guildId = "guild-1",
+                    queryText = "User1 fact",
+                    scope = SearchScope.USER,
+                    targetUserId = "user-1",
+                    recencyExcludeMinutes = 0,
+                ).isEmpty(),
+            "Deleted user memories must be purged from FTS5",
+        )
+        assertEquals(listOf(otherUser.id), store.listUserMemories("guild-1", "user-2").map { it.id })
+        assertEquals(listOf(otherGuild.id), store.listUserMemories("guild-2", "user-1").map { it.id })
+        val guildHits =
+            store.search(
+                guildId = "guild-1",
+                queryText = "Guild1 shared",
+                scope = SearchScope.GUILD,
+                recencyExcludeMinutes = 0,
+            )
+        assertEquals(listOf(guildMem.id), guildHits.map { it.memory.id })
+        assertEquals(0, store.deleteAllOwnedUserMemories(guildId = "guild-1", userId = "user-1"))
     }
 }

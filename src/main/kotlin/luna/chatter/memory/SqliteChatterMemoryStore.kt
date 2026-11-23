@@ -11,7 +11,6 @@ import java.sql.ResultSet
 import java.sql.Statement
 import java.time.Clock
 import java.util.concurrent.TimeUnit
-import kotlin.math.exp
 
 /**
  * SQLite-backed hybrid (`sqlite-vec` cosine + `FTS5 trigram` / `LIKE` fallback) implementation
@@ -247,25 +246,42 @@ class SqliteChatterMemoryStore(
             deleted
         }
 
+    override fun deleteAllOwnedUserMemories(
+        guildId: String,
+        userId: String,
+    ): Int =
+        deleteMemoriesWhere("guild_id = ? AND scope = 'user' AND target_user_id = ?") { ps ->
+            ps.setString(1, guildId)
+            ps.setString(2, userId)
+        }
+
     override fun purgeExpiredMemories(nowMs: Long): Int =
+        deleteMemoriesWhere("expires_at IS NOT NULL AND expires_at <= ?") { ps ->
+            ps.setLong(1, nowMs)
+        }
+
+    private fun deleteMemoriesWhere(
+        whereClause: String,
+        bindParams: (java.sql.PreparedStatement) -> Unit,
+    ): Int =
         transaction(database) {
             val conn = currentJdbcConnection()
-            val expiredIds =
-                conn.prepareStatement("SELECT id FROM chatter_memories WHERE expires_at IS NOT NULL AND expires_at <= ?").use { ps ->
-                    ps.setLong(1, nowMs)
+            val targetIds =
+                conn.prepareStatement("SELECT id FROM chatter_memories WHERE $whereClause").use { ps ->
+                    bindParams(ps)
                     ps.executeQuery().use { rs ->
                         buildList { while (rs.next()) add(rs.getLong(1)) }
                     }
                 }
-            if (expiredIds.isEmpty()) return@transaction 0
+            if (targetIds.isEmpty()) return@transaction 0
 
             val deletedCount =
-                conn.prepareStatement("DELETE FROM chatter_memories WHERE expires_at IS NOT NULL AND expires_at <= ?").use { ps ->
-                    ps.setLong(1, nowMs)
+                conn.prepareStatement("DELETE FROM chatter_memories WHERE $whereClause").use { ps ->
+                    bindParams(ps)
                     ps.executeUpdate()
                 }
             if (isVectorSearchEnabled) {
-                expiredIds.forEach { deleteVectorRow(conn, it) }
+                targetIds.forEach { deleteVectorRow(conn, it) }
             }
             deletedCount
         }
@@ -331,7 +347,7 @@ class SqliteChatterMemoryStore(
                 }
 
             val fused =
-                fuseCandidatesWithRrf(
+                ChatterMemoryRrfRanker.fuseCandidatesWithRrf(
                     lexicalCandidates = lexicalCandidates,
                     vectorCandidates = vectorCandidates,
                     scoreCutoff = effectiveCutoff,
@@ -850,11 +866,6 @@ class SqliteChatterMemoryStore(
         const val DEFAULT_MAX_PER_USER = 100
         const val DEFAULT_MAX_PER_GUILD = 300
         const val DEFAULT_EMBEDDING_DIMENSION = 768
-        private const val RRF_K = 60.0
-        private const val MILLIS_PER_DAY = 86_400_000.0
-        private const val RECENCY_DECAY_FLOOR = 0.7
-        private const val RECENCY_DECAY_AMPLITUDE = 0.3
-        private const val RECENCY_DECAY_SCALE_DAYS = 60.0
         private val WHITESPACE_REGEX = Regex("""\s+""")
 
         private fun escapeLikePattern(token: String): String = token.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
@@ -883,58 +894,6 @@ class SqliteChatterMemoryStore(
             val buffer = ByteBuffer.allocate(values.size * 4).order(ByteOrder.LITTLE_ENDIAN)
             for (v in values) buffer.putFloat(v)
             return buffer.array()
-        }
-
-        internal fun fuseCandidatesWithRrf(
-            lexicalCandidates: List<ChatterMemoryRecord>,
-            vectorCandidates: List<VectorCandidate>,
-            scoreCutoff: Double,
-            limit: Int,
-            nowMs: Long = System.currentTimeMillis(),
-        ): List<ChatterMemorySearchHit> {
-            val recordsById = LinkedHashMap<Long, ChatterMemoryRecord>()
-            val lexicalRanks = HashMap<Long, Int>()
-            val vectorRanks = HashMap<Long, Int>()
-            val cosineById = HashMap<Long, Double>()
-
-            lexicalCandidates.forEachIndexed { index, record ->
-                recordsById.putIfAbsent(record.id, record)
-                lexicalRanks[record.id] = index + 1
-            }
-            vectorCandidates.forEachIndexed { index, candidate ->
-                recordsById.putIfAbsent(candidate.record.id, candidate.record)
-                vectorRanks[candidate.record.id] = index + 1
-                cosineById[candidate.record.id] = candidate.cosineSimilarity
-            }
-
-            return recordsById.values
-                .mapNotNull { record ->
-                    val ftsRank = lexicalRanks[record.id]
-                    val vecRank = vectorRanks[record.id]
-                    val cosine = cosineById[record.id]
-                    val matchedByFts = ftsRank != null
-                    val matchedByVector = vecRank != null
-                    if (!matchedByFts && (cosine == null || cosine < scoreCutoff)) {
-                        return@mapNotNull null
-                    }
-                    val rrfScore =
-                        (if (ftsRank != null) 1.0 / (RRF_K + ftsRank) else 0.0) +
-                            (if (vecRank != null) 1.0 / (RRF_K + vecRank) else 0.0)
-                    val ageDays = maxOf(0.0, (nowMs - record.updatedAt) / MILLIS_PER_DAY)
-                    val decayMultiplier = RECENCY_DECAY_FLOOR + RECENCY_DECAY_AMPLITUDE * exp(-ageDays / RECENCY_DECAY_SCALE_DAYS)
-                    val finalScore = rrfScore * decayMultiplier
-                    ChatterMemorySearchHit(
-                        memory = record,
-                        score = finalScore,
-                        cosineSimilarity = cosine,
-                        matchedByFts = matchedByFts,
-                        matchedByVector = matchedByVector,
-                    )
-                }.sortedWith(
-                    compareByDescending<ChatterMemorySearchHit> { it.score }
-                        .thenByDescending { it.memory.updatedAt }
-                        .thenByDescending { it.memory.id },
-                ).take(limit)
         }
     }
 }
