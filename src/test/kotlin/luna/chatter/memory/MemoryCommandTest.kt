@@ -419,7 +419,7 @@ class MemoryCommandTest {
         }
 
     @Test
-    fun `ChatterPlugin initializes MemoryStore and registers MemoryCommand`() =
+    fun `ChatterPlugin initializes ChatterMemoryService and registers MemoryCommand`() =
         runTest {
             val dbPath = tempDir.resolve("plugin-mem-${System.nanoTime()}.db").toString()
             val db = LunaHost.initDatabase(dbPath = dbPath, vecExtensionPath = tempDir.resolve("missing-vec0.so").toString())
@@ -432,9 +432,46 @@ class MemoryCommandTest {
                     database = db,
                 )
             plugin.initialize(context)
-            assertNotNull(plugin.memoryStore)
-            assertNotNull(plugin.memoryCommand)
+            assertNotNull(plugin.memoryService)
+            assertNotNull(plugin.memoryService?.memoryStore)
+            assertNotNull(plugin.memoryService?.memoryCommand)
             plugin.shutdown()
+        }
+
+    @Test
+    fun `ChatterPlugin degrades fail-open with WARN log when ChatterMemoryService initialization fails`() =
+        runTest {
+            val pluginLogger = org.slf4j.LoggerFactory.getLogger(ChatterPlugin::class.java) as ch.qos.logback.classic.Logger
+            val appender =
+                ch.qos.logback.core.read
+                    .ListAppender<ch.qos.logback.classic.spi.ILoggingEvent>()
+                    .apply { start() }
+            pluginLogger.addAppender(appender)
+
+            try {
+                val plugin = ChatterPlugin()
+                val failingDb = mockk<org.jetbrains.exposed.v1.jdbc.Database>(relaxed = true)
+                val context =
+                    DefaultPluginContext(
+                        kord = mockk(relaxed = true),
+                        routing = mockk(relaxed = true),
+                        database = failingDb,
+                    )
+                plugin.initialize(context)
+
+                kotlin.test.assertNull(plugin.memoryService)
+                assertNotNull(plugin.service)
+                assertTrue(
+                    appender.list.any { event ->
+                        event.level == ch.qos.logback.classic.Level.WARN &&
+                            event.formattedMessage.contains("ChatterMemoryService")
+                    },
+                    "Expected observable WARN log when ChatterMemoryService initialization fails",
+                )
+                plugin.shutdown()
+            } finally {
+                pluginLogger.detachAppender(appender)
+            }
         }
 
     @Test
