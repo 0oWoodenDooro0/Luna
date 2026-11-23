@@ -291,4 +291,98 @@ class SqliteChatterMemoryStoreLifecycleTest {
             "Vector KNN pre-filter subquery must include recency filter when enabled: $sql",
         )
     }
+
+    @Test
+    fun `recency decay ranks newer facts above older ones at comparable relevance`() {
+        val clock = MutableClock(Instant.parse("2026-01-01T00:00:00Z"))
+        val store = createStore(clock = clock)
+
+        val older =
+            store.insertMemory(
+                guildId = "guild-1",
+                scope = MemoryScope.USER,
+                targetUserId = "user-1",
+                content = "Alice likes pour-over coffee",
+            )
+        clock.advanceMinutes(90L * 24 * 60)
+        val newer =
+            store.insertMemory(
+                guildId = "guild-1",
+                scope = MemoryScope.USER,
+                targetUserId = "user-1",
+                content = "Alice likes espresso coffee",
+            )
+        clock.advanceMinutes(15)
+
+        val hits =
+            store.search(
+                guildId = "guild-1",
+                queryText = "coffee",
+                scope = SearchScope.USER,
+                targetUserId = "user-1",
+            )
+
+        assertEquals(listOf(newer.id, older.id), hits.map { it.memory.id })
+        assertTrue(
+            hits[0].score > hits[1].score,
+            "Newer fact score (${hits[0].score}) must exceed older fact score (${hits[1].score})",
+        )
+    }
+
+    @Test
+    fun `recency decay enforces 0_7 floor so highly relevant durable preference beats less relevant newer fact`() {
+        val nowMs = Instant.parse("2026-11-23T00:00:00Z").toEpochMilli()
+        val yearAgoMs = Instant.parse("2025-11-23T00:00:00Z").toEpochMilli()
+        val durable =
+            ChatterMemoryRecord(1L, "g1", MemoryScope.USER, "u1", "Alice loves pour-over coffee", yearAgoMs, yearAgoMs, yearAgoMs)
+        val recentLessRelevant =
+            ChatterMemoryRecord(2L, "g1", MemoryScope.USER, "u1", "Alice saw a coffee shop", nowMs, nowMs, nowMs)
+
+        val hits =
+            SqliteChatterMemoryStore.fuseCandidatesWithRrf(
+                lexicalCandidates = listOf(durable, recentLessRelevant),
+                vectorCandidates =
+                    listOf(
+                        SqliteChatterMemoryStore.VectorCandidate(durable, cosineSimilarity = 0.90),
+                    ),
+                scoreCutoff = 0.55,
+                limit = 5,
+                nowMs = nowMs,
+            )
+
+        assertEquals(listOf(1L, 2L), hits.map { it.memory.id })
+        val durableRrf = (1.0 / 61.0) + (1.0 / 61.0)
+        assertTrue(
+            hits[0].score >= durableRrf * 0.7,
+            "Durable score (${hits[0].score}) must respect 0.7 floor of RRF (${durableRrf * 0.7})",
+        )
+        assertTrue(
+            hits[0].score < durableRrf * 0.75,
+            "365-day-old memory should be decayed near the 0.7 floor, got ${hits[0].score}",
+        )
+    }
+
+    @Test
+    fun `recency decay clamps negative age when updatedAt is in the future`() {
+        val nowMs = Instant.parse("2026-11-23T00:00:00Z").toEpochMilli()
+        val futureMs = nowMs + 5L * 86_400_000L
+        val futureRecord =
+            ChatterMemoryRecord(1L, "g1", MemoryScope.USER, "u1", "Future timestamped memory", futureMs, futureMs, futureMs)
+        val presentRecord =
+            ChatterMemoryRecord(2L, "g1", MemoryScope.USER, "u1", "Present timestamped memory", nowMs, nowMs, nowMs)
+
+        val hits =
+            SqliteChatterMemoryStore.fuseCandidatesWithRrf(
+                lexicalCandidates = listOf(futureRecord, presentRecord),
+                vectorCandidates = emptyList(),
+                scoreCutoff = 0.55,
+                limit = 5,
+                nowMs = nowMs,
+            )
+
+        assertEquals(2, hits.size)
+        val futureHit = hits.first { it.memory.id == 1L }
+        val expectedRrf = 1.0 / 61.0
+        assertEquals(expectedRrf, futureHit.score, 1e-12, "Negative age must clamp to 0.0 so decay multiplier is 1.0")
+    }
 }

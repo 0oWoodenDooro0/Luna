@@ -11,6 +11,7 @@ import java.sql.ResultSet
 import java.sql.Statement
 import java.time.Clock
 import java.util.concurrent.TimeUnit
+import kotlin.math.exp
 
 /**
  * SQLite-backed hybrid (`sqlite-vec` cosine + `FTS5 trigram` / `LIKE` fallback) implementation
@@ -335,6 +336,7 @@ class SqliteChatterMemoryStore(
                     vectorCandidates = vectorCandidates,
                     scoreCutoff = effectiveCutoff,
                     limit = limit,
+                    nowMs = now,
                 )
 
             if (updateLastAccessed && fused.isNotEmpty()) {
@@ -849,6 +851,10 @@ class SqliteChatterMemoryStore(
         const val DEFAULT_MAX_PER_GUILD = 300
         const val DEFAULT_EMBEDDING_DIMENSION = 768
         private const val RRF_K = 60.0
+        private const val MILLIS_PER_DAY = 86_400_000.0
+        private const val RECENCY_DECAY_FLOOR = 0.7
+        private const val RECENCY_DECAY_AMPLITUDE = 0.3
+        private const val RECENCY_DECAY_SCALE_DAYS = 60.0
         private val WHITESPACE_REGEX = Regex("""\s+""")
 
         private fun escapeLikePattern(token: String): String = token.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
@@ -884,6 +890,7 @@ class SqliteChatterMemoryStore(
             vectorCandidates: List<VectorCandidate>,
             scoreCutoff: Double,
             limit: Int,
+            nowMs: Long = System.currentTimeMillis(),
         ): List<ChatterMemorySearchHit> {
             val recordsById = LinkedHashMap<Long, ChatterMemoryRecord>()
             val lexicalRanks = HashMap<Long, Int>()
@@ -913,9 +920,12 @@ class SqliteChatterMemoryStore(
                     val rrfScore =
                         (if (ftsRank != null) 1.0 / (RRF_K + ftsRank) else 0.0) +
                             (if (vecRank != null) 1.0 / (RRF_K + vecRank) else 0.0)
+                    val ageDays = maxOf(0.0, (nowMs - record.updatedAt) / MILLIS_PER_DAY)
+                    val decayMultiplier = RECENCY_DECAY_FLOOR + RECENCY_DECAY_AMPLITUDE * exp(-ageDays / RECENCY_DECAY_SCALE_DAYS)
+                    val finalScore = rrfScore * decayMultiplier
                     ChatterMemorySearchHit(
                         memory = record,
-                        score = rrfScore,
+                        score = finalScore,
                         cosineSimilarity = cosine,
                         matchedByFts = matchedByFts,
                         matchedByVector = matchedByVector,

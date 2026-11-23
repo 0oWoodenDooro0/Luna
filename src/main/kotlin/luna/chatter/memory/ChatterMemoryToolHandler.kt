@@ -17,6 +17,10 @@ import kotlinx.serialization.json.putJsonObject
 import luna.core.ai.GeminiEmbeddingClient
 import luna.core.ai.GeminiInteractionTool
 import org.slf4j.LoggerFactory
+import java.time.Clock
+import java.time.Instant
+import java.time.format.DateTimeFormatter
+import java.time.temporal.ChronoUnit
 
 /**
  * Handles `search_long_term_memory` function calls from `ChatterGenerator` (`/v1beta/interactions`).
@@ -29,6 +33,7 @@ open class ChatterMemoryToolHandler(
     private val embeddingClient: GeminiEmbeddingClient,
     private val memoryStore: ChatterMemoryStore,
     val config: ChatterMemoryConfig = ChatterMemoryConfig(),
+    private val clock: Clock = Clock.systemUTC(),
 ) {
     private val logger = LoggerFactory.getLogger(ChatterMemoryToolHandler::class.java)
 
@@ -142,7 +147,8 @@ open class ChatterMemoryToolHandler(
                                 hit.memory.targetUserId?.let { put("target_user_id", it) }
                                 put("content", hit.memory.content)
                                 put("score", hit.score)
-                                put("updated_at", hit.memory.updatedAt)
+                                put("updated_at", formatTemporalDate(hit.memory.updatedAt, clampFutureToToday = true))
+                                hit.memory.expiresAt?.let { put("expires_at", formatTemporalDate(it)) }
                             },
                         )
                     }
@@ -152,6 +158,24 @@ open class ChatterMemoryToolHandler(
                 put("note", EMPTY_RESULTS_NOTE)
             }
         }.toString()
+
+    private fun formatTemporalDate(
+        epochMs: Long,
+        clampFutureToToday: Boolean = false,
+    ): String {
+        val zone = clock.zone
+        val targetDate = Instant.ofEpochMilli(epochMs).atZone(zone).toLocalDate()
+        val today = clock.instant().atZone(zone).toLocalDate()
+        val rawDeltaDays = ChronoUnit.DAYS.between(today, targetDate)
+        val deltaDays = if (clampFutureToToday) rawDeltaDays.coerceAtMost(0L) else rawDeltaDays
+        val relative =
+            when {
+                deltaDays == 0L -> "today"
+                deltaDays > 0L -> "in ${deltaDays}d"
+                else -> "${-deltaDays}d ago"
+            }
+        return "${DATE_FORMATTER.format(targetDate)} ($relative)"
+    }
 
     private fun extractString(
         arguments: JsonObject,
@@ -177,6 +201,7 @@ open class ChatterMemoryToolHandler(
         const val MAX_LIMIT = 8
         const val DEFAULT_LIMIT = 5
         const val EMPTY_RESULTS_NOTE = "近期 10 分鐘對話已在上下文中，且未找到符合門檻的較早長期記憶。"
+        private val DATE_FORMATTER: DateTimeFormatter = DateTimeFormatter.ISO_LOCAL_DATE
 
         val TOOL_DECLARATION: GeminiInteractionTool =
             GeminiInteractionTool.function(

@@ -1,5 +1,9 @@
 package luna.chatter.memory
 
+import ch.qos.logback.classic.Level
+import ch.qos.logback.classic.Logger
+import ch.qos.logback.classic.spi.ILoggingEvent
+import ch.qos.logback.core.read.ListAppender
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.mock.MockEngine
 import io.ktor.client.engine.mock.respond
@@ -18,6 +22,7 @@ import kotlinx.serialization.json.put
 import luna.core.LunaHost
 import luna.core.ai.GeminiEmbeddingClient
 import org.junit.jupiter.api.io.TempDir
+import org.slf4j.LoggerFactory
 import java.nio.file.Path
 import java.time.Clock
 import java.time.Instant
@@ -415,5 +420,118 @@ class ChatterMemoryToolHandlerTest {
                         ),
                     ).jsonObject
             assertEquals(0, overlapResult["count"]?.jsonPrimitive?.content?.toInt())
+        }
+
+    @Test
+    fun `formats updated_at as ISO date with relative age and includes formatted expires_at when present`() =
+        runBlocking {
+            val mutableClock =
+                object : Clock() {
+                    var now: Instant = Instant.parse("2026-11-20T08:00:00Z")
+
+                    override fun getZone() = ZoneOffset.UTC
+
+                    override fun withZone(zone: java.time.ZoneId) = this
+
+                    override fun instant(): Instant = now
+                }
+            val store = createStore(mutableClock)
+            store.insertMemory(
+                guildId = "1001",
+                scope = MemoryScope.USER,
+                targetUserId = "999001",
+                content = "Alice prefers pour-over Ethiopian coffee",
+                expiresAt = null,
+            )
+            mutableClock.now = Instant.parse("2026-11-23T01:00:00Z")
+            store.insertMemory(
+                guildId = "1001",
+                scope = MemoryScope.USER,
+                targetUserId = "999001",
+                content = "Alice has a coffee tasting event",
+                expiresAt = Instant.parse("2026-11-25T23:59:59Z").toEpochMilli(),
+            )
+            mutableClock.now = Instant.parse("2026-11-23T12:00:00Z")
+
+            val handler =
+                ChatterMemoryToolHandler(
+                    embeddingClient = createMockEmbeddingClient(),
+                    memoryStore = store,
+                    config = ChatterMemoryConfig(),
+                    clock = mutableClock,
+                )
+
+            val resultJson =
+                handler.handleToolCall(
+                    arguments = buildJsonObject { put("query", "coffee") },
+                    guildId = "1001",
+                    channelId = "2001",
+                    defaultAuthorId = "999001",
+                )
+
+            val obj = json.parseToJsonElement(resultJson).jsonObject
+            assertEquals("ok", obj["status"]?.jsonPrimitive?.content)
+            val memories = obj["memories"]?.jsonArray.orEmpty().map { it.jsonObject }
+            assertEquals(2, memories.size)
+
+            val durable = memories.first { it["content"]?.jsonPrimitive?.content == "Alice prefers pour-over Ethiopian coffee" }
+            assertEquals("2026-11-20 (3d ago)", durable["updated_at"]?.jsonPrimitive?.content)
+            assertTrue(!durable.containsKey("expires_at"), "Durable memory without expiresAt must omit expires_at: $durable")
+
+            val temporary = memories.first { it["content"]?.jsonPrimitive?.content == "Alice has a coffee tasting event" }
+            assertEquals("2026-11-23 (today)", temporary["updated_at"]?.jsonPrimitive?.content)
+            assertEquals("2026-11-25 (in 2d)", temporary["expires_at"]?.jsonPrimitive?.content)
+        }
+
+    @Test
+    fun `logs observable WARN on fail-open timeout and API error`() =
+        runBlocking {
+            val logger = LoggerFactory.getLogger(ChatterMemoryToolHandler::class.java) as Logger
+            val appender = ListAppender<ILoggingEvent>().apply { start() }
+            logger.addAppender(appender)
+            try {
+                val store = createStore()
+                val timeoutHandler =
+                    ChatterMemoryToolHandler(
+                        embeddingClient = createMockEmbeddingClient(delayMs = 500L),
+                        memoryStore = store,
+                        config = ChatterMemoryConfig(toolTimeoutMs = 50L),
+                    )
+                timeoutHandler.handleToolCall(
+                    arguments = buildJsonObject { put("query", "coffee") },
+                    guildId = "1001",
+                    channelId = "2001",
+                    defaultAuthorId = "999001",
+                )
+
+                val errorHandler =
+                    ChatterMemoryToolHandler(
+                        embeddingClient =
+                            createMockEmbeddingClient(
+                                statusCode = HttpStatusCode.InternalServerError,
+                                responseBody = """{"error":"boom"}""",
+                            ),
+                        memoryStore = store,
+                        config = ChatterMemoryConfig(toolTimeoutMs = 3000L),
+                    )
+                errorHandler.handleToolCall(
+                    arguments = buildJsonObject { put("query", "coffee") },
+                    guildId = "1001",
+                    channelId = "2001",
+                    defaultAuthorId = "999001",
+                )
+
+                val warnMessages = appender.list.filter { it.level == Level.WARN }.map { it.formattedMessage }
+                assertTrue(
+                    warnMessages.any { it.contains("timed out") },
+                    "Expected WARN log for tool timeout, got: $warnMessages",
+                )
+                assertTrue(
+                    warnMessages.any { it.contains("failed open") },
+                    "Expected WARN log for fail-open error, got: $warnMessages",
+                )
+            } finally {
+                logger.detachAppender(appender)
+            }
         }
 }
