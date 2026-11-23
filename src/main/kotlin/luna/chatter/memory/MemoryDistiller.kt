@@ -237,7 +237,7 @@ class MemoryDistiller(
                 input =
                     listOf(
                         GeminiInteractionInput.text(
-                            "Current date: $currentDateIso ($dayOfWeek)\nConversation transcript:\n$transcript",
+                            "Current date: $currentDateIso ($dayOfWeek, ${zonedNow.zone.id})\nConversation transcript:\n$transcript",
                         ),
                     ),
                 generationConfig = GeminiInteractionGenerationConfig(maxOutputTokens = MAX_DISTILL_OUTPUT_TOKENS),
