@@ -55,9 +55,9 @@ open class ChatterMemoryToolHandler(
         val scope =
             when (rawScope) {
                 "user" -> SearchScope.USER
-                "channel" -> SearchScope.CHANNEL
+                "guild" -> SearchScope.GUILD
                 "both" -> SearchScope.BOTH
-                else -> return invalidArgumentResponse("scope must be one of: user, channel, both")
+                else -> return invalidArgumentResponse("scope must be one of: user, guild, both")
             }
 
         val rawTargetUserId = extractString(arguments, "target_user_id")
@@ -67,7 +67,7 @@ open class ChatterMemoryToolHandler(
 
         val resolvedTargetUserId =
             when (scope) {
-                SearchScope.CHANNEL -> {
+                SearchScope.GUILD -> {
                     null
                 }
 
@@ -92,7 +92,6 @@ open class ChatterMemoryToolHandler(
                 val hits =
                     memoryStore.search(
                         guildId = cleanGuildId,
-                        channelId = channelId?.trim()?.takeIf { it.isNotEmpty() },
                         queryText = query,
                         queryEmbedding = queryEmbedding,
                         scope = scope,
@@ -184,7 +183,7 @@ open class ChatterMemoryToolHandler(
                 name = TOOL_NAME,
                 description =
                     "Search Luna's guild-isolated long-term memory for older user preferences, personal facts, " +
-                        "or channel context beyond the recent 10-minute working memory window. " +
+                        "or shared guild context beyond the recent 10-minute working memory window. " +
                         "Skip for casual small talk; rewrite pronouns into standalone queries.",
                 parameters =
                     buildJsonObject {
@@ -205,12 +204,12 @@ open class ChatterMemoryToolHandler(
                                 put("type", "string")
                                 putJsonArray("enum") {
                                     add(JsonPrimitive("user"))
-                                    add(JsonPrimitive("channel"))
+                                    add(JsonPrimitive("guild"))
                                     add(JsonPrimitive("both"))
                                 }
                                 put(
                                     "description",
-                                    "Memory scope: 'user' (user facts across guild), 'channel' (channel facts), or 'both' (default).",
+                                    "Memory scope: 'user' (user facts across guild), 'guild' (shared guild facts), or 'both' (default).",
                                 )
                             }
                             putJsonObject("target_user_id") {

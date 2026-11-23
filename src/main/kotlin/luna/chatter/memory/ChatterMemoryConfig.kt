@@ -23,7 +23,7 @@ data class ChatterMemoryConfig(
     val maxTurns: Int = DEFAULT_MAX_TURNS,
     val toolTimeoutMs: Long = DEFAULT_TOOL_TIMEOUT_MS,
     val maxPerUser: Int = DEFAULT_MAX_PER_USER,
-    val maxPerChannel: Int = DEFAULT_MAX_PER_CHANNEL,
+    val maxPerGuild: Int = DEFAULT_MAX_PER_GUILD,
     val sqliteVecExtensionPath: String = DEFAULT_SQLITE_VEC_EXTENSION_PATH,
 ) {
     val cleanDistillModel: String
@@ -53,7 +53,7 @@ data class ChatterMemoryConfig(
         const val DEFAULT_MAX_TURNS = 8
         const val DEFAULT_TOOL_TIMEOUT_MS = 3000L
         const val DEFAULT_MAX_PER_USER = 100
-        const val DEFAULT_MAX_PER_CHANNEL = 200
+        const val DEFAULT_MAX_PER_GUILD = 300
         const val DEFAULT_SQLITE_VEC_EXTENSION_PATH = "/app/lib/vec0.so"
 
         /** Parses [ChatterMemoryConfig] from [env] with strict fail-fast validation. */
@@ -103,7 +103,7 @@ data class ChatterMemoryConfig(
             }
             val toolTimeoutMs = env.long("CHATTER_MEMORY_TOOL_TIMEOUT_MS", DEFAULT_TOOL_TIMEOUT_MS, 1L..Long.MAX_VALUE)
             val maxPerUser = env.int("CHATTER_MEMORY_MAX_PER_USER", DEFAULT_MAX_PER_USER, 1..Int.MAX_VALUE)
-            val maxPerChannel = env.int("CHATTER_MEMORY_MAX_PER_CHANNEL", DEFAULT_MAX_PER_CHANNEL, 1..Int.MAX_VALUE)
+            val maxPerGuild = env.int("CHATTER_MEMORY_MAX_PER_GUILD", DEFAULT_MAX_PER_GUILD, 1..Int.MAX_VALUE)
             val sqliteVecExtensionPath = env.string("SQLITE_VEC_EXTENSION_PATH", DEFAULT_SQLITE_VEC_EXTENSION_PATH)
 
             return ChatterMemoryConfig(
@@ -122,7 +122,7 @@ data class ChatterMemoryConfig(
                 maxTurns = maxTurns,
                 toolTimeoutMs = toolTimeoutMs,
                 maxPerUser = maxPerUser,
-                maxPerChannel = maxPerChannel,
+                maxPerGuild = maxPerGuild,
                 sqliteVecExtensionPath = sqliteVecExtensionPath,
             )
         }

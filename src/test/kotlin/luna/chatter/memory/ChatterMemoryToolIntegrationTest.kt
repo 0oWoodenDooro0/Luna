@@ -85,7 +85,6 @@ class ChatterMemoryToolIntegrationTest {
             guildId = "1001",
             scope = MemoryScope.USER,
             targetUserId = "999001",
-            channelId = "2001",
             content = "Alice prefers oat milk flat whites",
         )
         mutableClock.now = Instant.parse("2026-01-01T01:00:00Z")

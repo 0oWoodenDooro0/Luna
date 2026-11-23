@@ -22,7 +22,7 @@ class SqliteChatterMemoryStore(
     private val defaultRecencyExcludeMinutes: Int = DEFAULT_RECENCY_EXCLUDE_MINUTES,
     private val defaultScoreCutoff: Double = DEFAULT_SCORE_CUTOFF,
     private val maxPerUser: Int = DEFAULT_MAX_PER_USER,
-    private val maxPerChannel: Int = DEFAULT_MAX_PER_CHANNEL,
+    private val maxPerGuild: Int = DEFAULT_MAX_PER_GUILD,
     private val embeddingDimension: Int = DEFAULT_EMBEDDING_DIMENSION,
 ) : ChatterMemoryStore {
     private val logger = LoggerFactory.getLogger(SqliteChatterMemoryStore::class.java)
@@ -33,14 +33,18 @@ class SqliteChatterMemoryStore(
         require(defaultRecencyExcludeMinutes >= 0) { "defaultRecencyExcludeMinutes must be >= 0" }
         require(defaultScoreCutoff in 0.0..1.0) { "defaultScoreCutoff must be in 0.0..1.0" }
         require(maxPerUser >= 1) { "maxPerUser must be >= 1" }
-        require(maxPerChannel >= 1) { "maxPerChannel must be >= 1" }
+        require(maxPerGuild >= 1) { "maxPerGuild must be >= 1" }
         require(embeddingDimension >= 1) { "embeddingDimension must be >= 1" }
 
         isVectorSearchEnabled =
             transaction(database) {
                 val conn = currentJdbcConnection()
-                initializeBaseSchema(conn)
-                initializeVectorSchemaFailOpen(conn)
+                val migrated = ChatterMemorySchemaMigrator.initializeAndMigrateBaseSchema(conn)
+                val vecEnabled = initializeVectorSchemaFailOpen(conn)
+                if (migrated) {
+                    evictAllGuildOverflowAfterMigration(conn, vecEnabled)
+                }
+                vecEnabled
             }
     }
 
@@ -93,9 +97,9 @@ class SqliteChatterMemoryStore(
         guildId: String,
         scope: MemoryScope,
         targetUserId: String?,
-        channelId: String?,
         content: String,
         embedding: FloatArray?,
+        expiresAt: Long?,
     ): ChatterMemoryRecord =
         transaction(database) {
             insertMemoryInternal(
@@ -103,9 +107,9 @@ class SqliteChatterMemoryStore(
                 guildId = guildId,
                 scope = scope,
                 targetUserId = targetUserId,
-                channelId = channelId,
                 content = content,
                 embedding = embedding,
+                expiresAt = expiresAt,
                 now = clock.millis(),
             )
         }
@@ -115,6 +119,7 @@ class SqliteChatterMemoryStore(
         guildId: String,
         content: String,
         embedding: FloatArray?,
+        expiresAt: Long?,
     ): Boolean =
         transaction(database) {
             updateMemoryInternal(
@@ -123,6 +128,7 @@ class SqliteChatterMemoryStore(
                 guildId = guildId,
                 content = content,
                 embedding = embedding,
+                expiresAt = expiresAt,
                 now = clock.millis(),
             )
         }
@@ -150,9 +156,9 @@ class SqliteChatterMemoryStore(
                             guildId = mutation.guildId,
                             scope = mutation.scope,
                             targetUserId = mutation.targetUserId,
-                            channelId = mutation.channelId,
                             content = mutation.content,
                             embedding = mutation.embedding,
+                            expiresAt = mutation.expiresAt,
                             now = now,
                         )
                     }
@@ -164,6 +170,7 @@ class SqliteChatterMemoryStore(
                             guildId = mutation.guildId,
                             content = mutation.content,
                             embedding = mutation.embedding,
+                            expiresAt = mutation.expiresAt,
                             now = now,
                         )
                     }
@@ -192,7 +199,7 @@ class SqliteChatterMemoryStore(
             conn
                 .prepareStatement(
                     """
-                    SELECT id, guild_id, scope, target_user_id, channel_id, content, created_at, updated_at, last_accessed_at
+                    SELECT id, guild_id, scope, target_user_id, content, created_at, updated_at, last_accessed_at, expires_at
                     FROM chatter_memories
                     WHERE guild_id = ? AND scope = 'user' AND target_user_id = ?
                     ORDER BY updated_at DESC, id DESC
@@ -238,7 +245,6 @@ class SqliteChatterMemoryStore(
 
     override fun search(
         guildId: String,
-        channelId: String?,
         queryText: String,
         queryEmbedding: FloatArray?,
         scope: SearchScope,
@@ -256,7 +262,7 @@ class SqliteChatterMemoryStore(
             }
         }
 
-        val scopeFilter = buildScopeFilter(scope = scope, targetUserId = targetUserId, channelId = channelId) ?: return emptyList()
+        val scopeFilter = buildScopeFilter(scope = scope, targetUserId = targetUserId) ?: return emptyList()
         val effectiveRecencyMinutes = (recencyExcludeMinutes ?: defaultRecencyExcludeMinutes).coerceAtLeast(0)
         val effectiveCutoff = (scoreCutoff ?: defaultScoreCutoff).coerceIn(0.0, 1.0)
 
@@ -312,76 +318,34 @@ class SqliteChatterMemoryStore(
 
     private fun currentJdbcConnection(): Connection = TransactionManager.current().connection.connection as Connection
 
-    private fun initializeBaseSchema(conn: Connection) {
-        conn.createStatement().use { stmt ->
-            stmt.execute(
-                """
-                CREATE TABLE IF NOT EXISTS chatter_memory_cursors (
-                    channel_id TEXT PRIMARY KEY,
-                    guild_id TEXT NOT NULL,
-                    last_summarized_message_id TEXT NOT NULL,
-                    updated_at INTEGER NOT NULL
-                );
-                """.trimIndent(),
-            )
-            stmt.execute(
-                """
-                CREATE TABLE IF NOT EXISTS chatter_memories (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    guild_id TEXT NOT NULL,
-                    scope TEXT NOT NULL CHECK(scope IN ('user', 'channel')),
-                    target_user_id TEXT,
-                    channel_id TEXT,
-                    content TEXT NOT NULL,
-                    created_at INTEGER NOT NULL,
-                    updated_at INTEGER NOT NULL,
-                    last_accessed_at INTEGER NOT NULL
-                );
-                """.trimIndent(),
-            )
-            stmt.execute(
-                """
-                CREATE INDEX IF NOT EXISTS idx_chatter_memories_guild_user
-                    ON chatter_memories(guild_id, scope, target_user_id, updated_at, last_accessed_at);
-                """.trimIndent(),
-            )
-            stmt.execute(
-                """
-                CREATE INDEX IF NOT EXISTS idx_chatter_memories_guild_channel
-                    ON chatter_memories(guild_id, scope, channel_id, updated_at, last_accessed_at);
-                """.trimIndent(),
-            )
-            stmt.execute(
-                """
-                CREATE VIRTUAL TABLE IF NOT EXISTS chatter_memories_fts USING fts5(
-                    content,
-                    content='chatter_memories',
-                    content_rowid='id',
-                    tokenize='trigram'
-                );
-                """.trimIndent(),
-            )
-            stmt.execute(
-                """
-                CREATE TRIGGER IF NOT EXISTS chatter_memories_ai AFTER INSERT ON chatter_memories BEGIN
-                    INSERT INTO chatter_memories_fts(rowid, content) VALUES (new.id, new.content);
-                END;
-                """.trimIndent(),
-            )
-            stmt.execute(
-                """
-                CREATE TRIGGER IF NOT EXISTS chatter_memories_ad AFTER DELETE ON chatter_memories BEGIN
-                    INSERT INTO chatter_memories_fts(chatter_memories_fts, rowid, content) VALUES('delete', old.id, old.content);
-                END;
-                """.trimIndent(),
-            )
-            stmt.execute(
-                """
-                CREATE TRIGGER IF NOT EXISTS chatter_memories_au AFTER UPDATE ON chatter_memories BEGIN
-                    INSERT INTO chatter_memories_fts(chatter_memories_fts, rowid, content) VALUES('delete', old.id, old.content);
-                    INSERT INTO chatter_memories_fts(rowid, content) VALUES (new.id, new.content);
-                END;
-                """.trimIndent(),
+    private fun evictAllGuildOverflowAfterMigration(
+        conn: Connection,
+        vecEnabled: Boolean,
+    ) {
+        if (vecEnabled) {
+            conn.createStatement().use { stmt ->
+                stmt.execute("DELETE FROM chatter_memories_vec WHERE memory_id NOT IN (SELECT id FROM chatter_memories);")
+            }
+        }
+        val guildIds =
+            conn
+                .prepareStatement("SELECT DISTINCT guild_id FROM chatter_memories WHERE scope = 'guild'")
+                .use { ps ->
+                    ps.executeQuery().use { rs ->
+                        buildList {
+                            while (rs.next()) {
+                                add(rs.getString("guild_id"))
+                            }
+                        }
+                    }
+                }
+        for (guildId in guildIds) {
+            evictLruOverflow(
+                conn = conn,
+                guildId = guildId,
+                scope = MemoryScope.GUILD,
+                targetUserId = null,
+                vecEnabled = vecEnabled,
             )
         }
     }
@@ -443,16 +407,18 @@ class SqliteChatterMemoryStore(
         guildId: String,
         scope: MemoryScope,
         targetUserId: String?,
-        channelId: String?,
         content: String,
         embedding: FloatArray?,
+        expiresAt: Long?,
         now: Long,
     ): ChatterMemoryRecord {
-        if (scope == MemoryScope.USER) {
-            require(!targetUserId.isNullOrBlank()) { "targetUserId is required for USER scope memories" }
-        } else {
-            require(!channelId.isNullOrBlank()) { "channelId is required for CHANNEL scope memories" }
-        }
+        val effectiveTargetUserId =
+            if (scope == MemoryScope.USER) {
+                require(!targetUserId.isNullOrBlank()) { "targetUserId is required for USER scope memories" }
+                targetUserId
+            } else {
+                null
+            }
         if (embedding != null) {
             require(embedding.size == embeddingDimension) {
                 "Expected $embeddingDimension-dimensional embedding, got ${embedding.size}"
@@ -466,19 +432,23 @@ class SqliteChatterMemoryStore(
             conn
                 .prepareStatement(
                     """
-                    INSERT INTO chatter_memories(guild_id, scope, target_user_id, channel_id, content, created_at, updated_at, last_accessed_at)
+                    INSERT INTO chatter_memories(guild_id, scope, target_user_id, content, created_at, updated_at, last_accessed_at, expires_at)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                     """.trimIndent(),
                     Statement.RETURN_GENERATED_KEYS,
                 ).use { ps ->
                     ps.setString(1, guildId)
                     ps.setString(2, scope.dbValue)
-                    ps.setString(3, targetUserId)
-                    ps.setString(4, channelId)
-                    ps.setString(5, cleanContent)
+                    ps.setString(3, effectiveTargetUserId)
+                    ps.setString(4, cleanContent)
+                    ps.setLong(5, now)
                     ps.setLong(6, now)
                     ps.setLong(7, now)
-                    ps.setLong(8, now)
+                    if (expiresAt != null) {
+                        ps.setLong(8, expiresAt)
+                    } else {
+                        ps.setNull(8, java.sql.Types.INTEGER)
+                    }
                     ps.executeUpdate()
                     ps.generatedKeys.use { keys ->
                         check(keys.next()) { "SQLite did not return generated row ID for chatter_memories insert" }
@@ -494,20 +464,19 @@ class SqliteChatterMemoryStore(
             conn = conn,
             guildId = guildId,
             scope = scope,
-            targetUserId = targetUserId,
-            channelId = channelId,
+            targetUserId = effectiveTargetUserId,
         )
 
         return ChatterMemoryRecord(
             id = insertedId,
             guildId = guildId,
             scope = scope,
-            targetUserId = targetUserId,
-            channelId = channelId,
+            targetUserId = effectiveTargetUserId,
             content = cleanContent,
             createdAt = now,
             updatedAt = now,
             lastAccessedAt = now,
+            expiresAt = expiresAt,
         )
     }
 
@@ -517,6 +486,7 @@ class SqliteChatterMemoryStore(
         guildId: String,
         content: String,
         embedding: FloatArray?,
+        expiresAt: Long?,
         now: Long,
     ): Boolean {
         if (embedding != null) {
@@ -532,15 +502,20 @@ class SqliteChatterMemoryStore(
                 .prepareStatement(
                     """
                     UPDATE chatter_memories
-                    SET content = ?, updated_at = ?, last_accessed_at = ?
+                    SET content = ?, updated_at = ?, last_accessed_at = ?, expires_at = ?
                     WHERE id = ? AND guild_id = ?
                     """.trimIndent(),
                 ).use { ps ->
                     ps.setString(1, cleanContent)
                     ps.setLong(2, now)
                     ps.setLong(3, now)
-                    ps.setLong(4, id)
-                    ps.setString(5, guildId)
+                    if (expiresAt != null) {
+                        ps.setLong(4, expiresAt)
+                    } else {
+                        ps.setNull(4, java.sql.Types.INTEGER)
+                    }
+                    ps.setLong(5, id)
+                    ps.setString(6, guildId)
                     ps.executeUpdate() > 0
                 }
         if (updated && isVectorSearchEnabled && embedding != null) {
@@ -554,6 +529,7 @@ class SqliteChatterMemoryStore(
         conn: Connection,
         id: Long,
         guildId: String,
+        vecEnabled: Boolean = isVectorSearchEnabled,
     ): Boolean {
         val deleted =
             conn
@@ -567,7 +543,7 @@ class SqliteChatterMemoryStore(
                     ps.setString(2, guildId)
                     ps.executeUpdate() > 0
                 }
-        if (deleted && isVectorSearchEnabled) {
+        if (deleted && vecEnabled) {
             deleteVectorRow(conn, id)
         }
         return deleted
@@ -578,21 +554,25 @@ class SqliteChatterMemoryStore(
         guildId: String,
         scope: MemoryScope,
         targetUserId: String?,
-        channelId: String?,
+        vecEnabled: Boolean = isVectorSearchEnabled,
     ) {
-        val cap = if (scope == MemoryScope.USER) maxPerUser else maxPerChannel
+        val cap = if (scope == MemoryScope.USER) maxPerUser else maxPerGuild
         val scopeWhere =
             if (scope == MemoryScope.USER) {
                 "guild_id = ? AND scope = 'user' AND target_user_id = ?"
             } else {
-                "guild_id = ? AND scope = 'channel' AND channel_id = ?"
+                "guild_id = ? AND scope = 'guild'"
             }
-        val keyParam = if (scope == MemoryScope.USER) requireNotNull(targetUserId) else requireNotNull(channelId)
+        val params =
+            if (scope == MemoryScope.USER) {
+                listOf(guildId, requireNotNull(targetUserId))
+            } else {
+                listOf(guildId)
+            }
 
         val totalCount =
             conn.prepareStatement("SELECT COUNT(*) FROM chatter_memories WHERE $scopeWhere").use { ps ->
-                ps.setString(1, guildId)
-                ps.setString(2, keyParam)
+                params.forEachIndexed { index, param -> ps.setString(index + 1, param) }
                 ps.executeQuery().use { rs ->
                     if (rs.next()) rs.getInt(1) else 0
                 }
@@ -611,9 +591,8 @@ class SqliteChatterMemoryStore(
                     LIMIT ?
                     """.trimIndent(),
                 ).use { ps ->
-                    ps.setString(1, guildId)
-                    ps.setString(2, keyParam)
-                    ps.setInt(3, excess)
+                    params.forEachIndexed { index, param -> ps.setString(index + 1, param) }
+                    ps.setInt(params.size + 1, excess)
                     ps.executeQuery().use { rs ->
                         buildList {
                             while (rs.next()) {
@@ -624,7 +603,7 @@ class SqliteChatterMemoryStore(
                 }
 
         for (victimId in victimIds) {
-            deleteMemoryInternal(conn, id = victimId, guildId = guildId)
+            deleteMemoryInternal(conn, id = victimId, guildId = guildId, vecEnabled = vecEnabled)
         }
     }
 
@@ -662,7 +641,6 @@ class SqliteChatterMemoryStore(
     private fun buildScopeFilter(
         scope: SearchScope,
         targetUserId: String?,
-        channelId: String?,
     ): ScopeFilterSql? =
         when (scope) {
             SearchScope.USER -> {
@@ -671,34 +649,19 @@ class SqliteChatterMemoryStore(
                 }
             }
 
-            SearchScope.CHANNEL -> {
-                channelId?.takeIf { it.isNotBlank() }?.let { cid ->
-                    ScopeFilterSql("(m.scope = 'channel' AND m.channel_id = ?)", listOf(cid))
-                }
+            SearchScope.GUILD -> {
+                ScopeFilterSql("(m.scope = 'guild')", emptyList())
             }
 
             SearchScope.BOTH -> {
                 val uid = targetUserId?.takeIf { it.isNotBlank() }
-                val cid = channelId?.takeIf { it.isNotBlank() }
-                when {
-                    uid != null && cid != null -> {
-                        ScopeFilterSql(
-                            "((m.scope = 'user' AND m.target_user_id = ?) OR (m.scope = 'channel' AND m.channel_id = ?))",
-                            listOf(uid, cid),
-                        )
-                    }
-
-                    uid != null -> {
-                        ScopeFilterSql("(m.scope = 'user' AND m.target_user_id = ?)", listOf(uid))
-                    }
-
-                    cid != null -> {
-                        ScopeFilterSql("(m.scope = 'channel' AND m.channel_id = ?)", listOf(cid))
-                    }
-
-                    else -> {
-                        null
-                    }
+                if (uid != null) {
+                    ScopeFilterSql(
+                        "((m.scope = 'user' AND m.target_user_id = ?) OR (m.scope = 'guild'))",
+                        listOf(uid),
+                    )
+                } else {
+                    ScopeFilterSql("(m.scope = 'guild')", emptyList())
                 }
             }
         }
@@ -724,7 +687,7 @@ class SqliteChatterMemoryStore(
                 }
             val sql =
                 """
-                SELECT m.id, m.guild_id, m.scope, m.target_user_id, m.channel_id, m.content, m.created_at, m.updated_at, m.last_accessed_at
+                SELECT m.id, m.guild_id, m.scope, m.target_user_id, m.content, m.created_at, m.updated_at, m.last_accessed_at, m.expires_at
                 FROM chatter_memories_fts f
                 JOIN chatter_memories m ON m.id = f.rowid
                 WHERE chatter_memories_fts MATCH ?
@@ -755,7 +718,7 @@ class SqliteChatterMemoryStore(
             val likeClauses = tokens.joinToString(" OR ") { "m.content LIKE ? ESCAPE '\\'" }
             val sql =
                 """
-                SELECT m.id, m.guild_id, m.scope, m.target_user_id, m.channel_id, m.content, m.created_at, m.updated_at, m.last_accessed_at
+                SELECT m.id, m.guild_id, m.scope, m.target_user_id, m.content, m.created_at, m.updated_at, m.last_accessed_at, m.expires_at
                 FROM chatter_memories m
                 WHERE m.guild_id = ?
                   AND ${scopeFilter.clause}
@@ -837,18 +800,18 @@ class SqliteChatterMemoryStore(
             guildId = rs.getString("guild_id"),
             scope = MemoryScope.fromDbValue(rs.getString("scope")),
             targetUserId = rs.getString("target_user_id"),
-            channelId = rs.getString("channel_id"),
             content = rs.getString("content"),
             createdAt = rs.getLong("created_at"),
             updatedAt = rs.getLong("updated_at"),
             lastAccessedAt = rs.getLong("last_accessed_at"),
+            expiresAt = rs.getObject("expires_at")?.let { (it as Number).toLong() },
         )
 
     companion object {
         const val DEFAULT_RECENCY_EXCLUDE_MINUTES = 10
         const val DEFAULT_SCORE_CUTOFF = 0.55
         const val DEFAULT_MAX_PER_USER = 100
-        const val DEFAULT_MAX_PER_CHANNEL = 200
+        const val DEFAULT_MAX_PER_GUILD = 300
         const val DEFAULT_EMBEDDING_DIMENSION = 768
         private const val RRF_K = 60.0
         private val WHITESPACE_REGEX = Regex("""\s+""")
@@ -862,7 +825,7 @@ class SqliteChatterMemoryStore(
             val prefilterScopeClause = scopeClause.replace("m.", "m2.")
             val prefilterRecencySql = if (hasRecencyFilter) "AND m2.updated_at <= ?" else ""
             return """
-                SELECT m.id, m.guild_id, m.scope, m.target_user_id, m.channel_id, m.content, m.created_at, m.updated_at, m.last_accessed_at, v.distance
+                SELECT m.id, m.guild_id, m.scope, m.target_user_id, m.content, m.created_at, m.updated_at, m.last_accessed_at, m.expires_at, v.distance
                 FROM chatter_memories_vec v
                 JOIN chatter_memories m ON m.id = v.memory_id
                 WHERE v.embedding MATCH ? AND v.k = ?

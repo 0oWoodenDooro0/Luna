@@ -186,10 +186,9 @@ class MemoryDistiller(
         val candidateEmbeddings = embeddingClient.embedDocuments(candidates.map { it.content })
         val hitsPerCandidate =
             candidates.mapIndexed { idx, candidate ->
-                val searchScope = if (candidate.scope == MemoryScope.USER) SearchScope.USER else SearchScope.CHANNEL
+                val searchScope = if (candidate.scope == MemoryScope.USER) SearchScope.USER else SearchScope.GUILD
                 memoryStore.search(
                     guildId = guildId,
-                    channelId = channelId,
                     queryText = candidate.content,
                     queryEmbedding = candidateEmbeddings[idx],
                     scope = searchScope,
@@ -205,7 +204,7 @@ class MemoryDistiller(
             reconcileCandidates(candidates, hitsPerCandidate, session)
                 ?: return DistillOutcome.Failed("Failed to reconcile memory candidates")
 
-        val mutations = buildMutations(guildId, channelId, candidates, candidateEmbeddings, decisions)
+        val mutations = buildMutations(guildId, candidates, candidateEmbeddings, decisions)
         val cursorUpdate =
             ChatterMemoryCursor(
                 channelId = channelId,
@@ -286,7 +285,7 @@ class MemoryDistiller(
             val scope =
                 when (dto.scope.trim().lowercase()) {
                     "user" -> MemoryScope.USER
-                    "channel" -> MemoryScope.CHANNEL
+                    "guild" -> MemoryScope.GUILD
                     else -> return@mapNotNull null
                 }
             val targetUserId = dto.targetUserId?.trim()?.takeIf { it.isNotEmpty() }
@@ -364,7 +363,6 @@ class MemoryDistiller(
 
     private suspend fun buildMutations(
         guildId: String,
-        channelId: String,
         candidates: List<FactCandidate>,
         candidateEmbeddings: List<FloatArray>,
         decisions: List<ReconciliationDecisionDto>,
@@ -408,7 +406,6 @@ class MemoryDistiller(
                                 guildId = guildId,
                                 scope = candidate.scope,
                                 targetUserId = candidate.targetUserId,
-                                channelId = if (candidate.scope == MemoryScope.CHANNEL) channelId else null,
                                 content = finalContent,
                                 embedding = embedding,
                             ),
@@ -513,11 +510,11 @@ class MemoryDistiller(
             You extract durable, self-contained Atomic Facts from a Discord conversation transcript.
             Rules:
             - Speakers are formatted as `Name (uid:<id>): ...`, `BotName [BOT] (uid:<id>): ...`, or `Luna (uid:<selfId>): ...`.
-            - Extract ONLY objective, enduring user preferences, life events, relationships, or shared channel/server facts.
+            - Extract ONLY objective, enduring user preferences, life events, relationships, or shared guild/server facts.
             - NEVER extract Luna's jokes, roleplay, fabrications, or ephemeral small talk.
             - Resolve all pronouns ("I", "my", "he", "she") into explicit names/subjects so each fact is standalone.
             - Output ONLY a valid JSON array of objects:
-              [{"scope": "user" | "channel", "target_user_id": "<uid string or null>", "content": "<atomic fact>"}]
+              [{"scope": "user" | "guild", "target_user_id": "<uid string or null>", "content": "<atomic fact>"}]
             - Return `[]` if there are no durable facts worth remembering.
             """.trimIndent()
 

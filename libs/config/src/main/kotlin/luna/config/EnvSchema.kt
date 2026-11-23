@@ -195,7 +195,7 @@ object EnvSchemaAuditor {
             EnvVarSchema("CHATTER_MEMORY_MAX_TURNS", isRequired = false, defaultValue = "8", section = 3),
             EnvVarSchema("CHATTER_MEMORY_TOOL_TIMEOUT_MS", isRequired = false, defaultValue = "3000", section = 3),
             EnvVarSchema("CHATTER_MEMORY_MAX_PER_USER", isRequired = false, defaultValue = "100", section = 3),
-            EnvVarSchema("CHATTER_MEMORY_MAX_PER_CHANNEL", isRequired = false, defaultValue = "200", section = 3),
+            EnvVarSchema("CHATTER_MEMORY_MAX_PER_GUILD", isRequired = false, defaultValue = "300", section = 3),
             EnvVarSchema("SQLITE_VEC_EXTENSION_PATH", isRequired = false, defaultValue = "/app/lib/vec0.so", section = 3),
             EnvVarSchema("AI_TRACE_ENABLED", isRequired = false, defaultValue = "true", section = 3),
             EnvVarSchema("AI_TRACE_DIR", isRequired = false, defaultValue = "data/logs/ai", section = 3),

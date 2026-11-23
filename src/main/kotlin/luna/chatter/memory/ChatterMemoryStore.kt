@@ -18,9 +18,9 @@ interface ChatterMemoryStore {
         guildId: String,
         scope: MemoryScope,
         targetUserId: String? = null,
-        channelId: String? = null,
         content: String,
         embedding: FloatArray? = null,
+        expiresAt: Long? = null,
     ): ChatterMemoryRecord
 
     fun updateMemory(
@@ -28,6 +28,7 @@ interface ChatterMemoryStore {
         guildId: String,
         content: String,
         embedding: FloatArray? = null,
+        expiresAt: Long? = null,
     ): Boolean
 
     fun deleteMemory(
@@ -53,7 +54,6 @@ interface ChatterMemoryStore {
 
     fun search(
         guildId: String,
-        channelId: String? = null,
         queryText: String,
         queryEmbedding: FloatArray? = null,
         scope: SearchScope = SearchScope.BOTH,

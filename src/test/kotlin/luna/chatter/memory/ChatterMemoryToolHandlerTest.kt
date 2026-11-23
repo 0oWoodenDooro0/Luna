@@ -91,22 +91,19 @@ class ChatterMemoryToolHandlerTest {
                 guildId = "1001",
                 scope = MemoryScope.USER,
                 targetUserId = "999001",
-                channelId = "2002",
                 content = "Alice likes pour-over Ethiopian coffee",
             )
             sharedStore.insertMemory(
                 guildId = "1001",
                 scope = MemoryScope.USER,
                 targetUserId = "999002",
-                channelId = "2002",
                 content = "Bob likes Ethiopian coffee too",
             )
             sharedStore.insertMemory(
                 guildId = "1001",
-                scope = MemoryScope.CHANNEL,
+                scope = MemoryScope.GUILD,
                 targetUserId = null,
-                channelId = "2001",
-                content = "This channel hosts weekly coffee tastings",
+                content = "This guild hosts weekly coffee tastings",
             )
             mutableClock.now = Instant.parse("2026-01-01T01:00:00Z")
 
@@ -139,8 +136,71 @@ class ChatterMemoryToolHandlerTest {
             assertEquals(2, memories.size)
             val contents = memories.map { it.jsonObject["content"]?.jsonPrimitive?.content }
             assertTrue(contents.contains("Alice likes pour-over Ethiopian coffee"), "Expected Alice's user memory in results: $contents")
-            assertTrue(contents.contains("This channel hosts weekly coffee tastings"), "Expected channel memory in results: $contents")
+            assertTrue(contents.contains("This guild hosts weekly coffee tastings"), "Expected guild memory in results: $contents")
             assertTrue(contents.none { it?.contains("Bob") == true }, "Did not expect Bob's memory in results: $contents")
+        }
+
+    @Test
+    fun `scope guild returns shared guild memories without requiring target_user_id`() =
+        runBlocking {
+            val mutableClock =
+                object : Clock() {
+                    var now: Instant = Instant.parse("2026-01-01T00:00:00Z")
+
+                    override fun getZone() = ZoneOffset.UTC
+
+                    override fun withZone(zone: java.time.ZoneId) = this
+
+                    override fun instant(): Instant = now
+                }
+            val store = createStore(mutableClock)
+            store.insertMemory(
+                guildId = "1001",
+                scope = MemoryScope.GUILD,
+                targetUserId = null,
+                content = "Guild Friday movie nights start at 9pm",
+            )
+            store.insertMemory(
+                guildId = "1001",
+                scope = MemoryScope.USER,
+                targetUserId = "999001",
+                content = "Alice watches movie nights with popcorn",
+            )
+            mutableClock.now = Instant.parse("2026-01-01T01:00:00Z")
+
+            val embedCalls = AtomicInteger(0)
+            val handler =
+                ChatterMemoryToolHandler(
+                    embeddingClient = createMockEmbeddingClient(callCounter = embedCalls),
+                    memoryStore = store,
+                    config = ChatterMemoryConfig(),
+                )
+
+            val resultJson =
+                handler.handleToolCall(
+                    arguments =
+                        buildJsonObject {
+                            put("query", "movie nights")
+                            put("scope", "guild")
+                        },
+                    guildId = "1001",
+                    channelId = "2002",
+                    defaultAuthorId = null,
+                )
+
+            assertEquals(1, embedCalls.get())
+            val obj = json.parseToJsonElement(resultJson).jsonObject
+            assertEquals("ok", obj["status"]?.jsonPrimitive?.content)
+            val memories = obj["memories"]?.jsonArray.orEmpty()
+            assertEquals(1, memories.size)
+            assertEquals(
+                "guild",
+                memories
+                    .first()
+                    .jsonObject["scope"]
+                    ?.jsonPrimitive
+                    ?.content,
+            )
         }
 
     @Test
@@ -277,21 +337,23 @@ class ChatterMemoryToolHandlerTest {
                     ).jsonObject
             assertEquals("invalid_argument", blankQueryObj["status"]?.jsonPrimitive?.content)
 
-            val badScopeObj =
-                json
-                    .parseToJsonElement(
-                        handler.handleToolCall(
-                            arguments =
-                                buildJsonObject {
-                                    put("query", "coffee")
-                                    put("scope", "global")
-                                },
-                            guildId = "1001",
-                            channelId = "2001",
-                            defaultAuthorId = "999001",
-                        ),
-                    ).jsonObject
-            assertEquals("invalid_argument", badScopeObj["status"]?.jsonPrimitive?.content)
+            for (invalidScope in listOf("global", "channel")) {
+                val badScopeObj =
+                    json
+                        .parseToJsonElement(
+                            handler.handleToolCall(
+                                arguments =
+                                    buildJsonObject {
+                                        put("query", "coffee")
+                                        put("scope", invalidScope)
+                                    },
+                                guildId = "1001",
+                                channelId = "2001",
+                                defaultAuthorId = "999001",
+                            ),
+                        ).jsonObject
+                assertEquals("invalid_argument", badScopeObj["status"]?.jsonPrimitive?.content, "Expected invalid_argument for scope=$invalidScope")
+            }
             assertEquals(0, embedCalls.get())
         }
 
@@ -314,7 +376,6 @@ class ChatterMemoryToolHandlerTest {
                 guildId = "1001",
                 scope = MemoryScope.USER,
                 targetUserId = "999001",
-                channelId = "2001",
                 content = "Alice prefers pour-over coffee",
             )
             val embeddingClient = createMockEmbeddingClient()

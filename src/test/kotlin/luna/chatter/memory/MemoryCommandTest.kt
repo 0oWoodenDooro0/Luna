@@ -120,7 +120,6 @@ class MemoryCommandTest {
                     guildId = guild1,
                     scope = MemoryScope.USER,
                     targetUserId = user1,
-                    channelId = "10",
                     content = "Likes pour-over coffee",
                 )
             val memB =
@@ -128,7 +127,6 @@ class MemoryCommandTest {
                     guildId = guild1,
                     scope = MemoryScope.USER,
                     targetUserId = user1,
-                    channelId = "20",
                     content = "Lives in Taipei",
                 )
             // Noise that must NOT appear:
@@ -136,21 +134,18 @@ class MemoryCommandTest {
                 guildId = guild1,
                 scope = MemoryScope.USER,
                 targetUserId = user2,
-                channelId = "10",
                 content = "Other user secret",
             )
             store.insertMemory(
                 guildId = guild1,
-                scope = MemoryScope.CHANNEL,
+                scope = MemoryScope.GUILD,
                 targetUserId = null,
-                channelId = "10",
-                content = "Channel-scoped fact",
+                content = "Guild-scoped fact",
             )
             store.insertMemory(
                 guildId = guild2,
                 scope = MemoryScope.USER,
                 targetUserId = user1,
-                channelId = "30",
                 content = "Other guild fact",
             )
 
@@ -165,7 +160,7 @@ class MemoryCommandTest {
             assertTrue(content.contains("[#${memA.id}] Likes pour-over coffee (updated 2026-11-20)"), "Expected memA in list")
             assertTrue(content.contains("[#${memB.id}] Lives in Taipei (updated 2026-11-20)"), "Expected memB from other channel in list")
             assertFalse(content.contains("Other user secret"), "Must not include other user's memory")
-            assertFalse(content.contains("Channel-scoped fact"), "Must not include channel-scoped memory")
+            assertFalse(content.contains("Guild-scoped fact"), "Must not include guild-scoped memory")
             assertFalse(content.contains("Other guild fact"), "Must not include other guild memory")
         }
 
@@ -178,7 +173,6 @@ class MemoryCommandTest {
                     guildId = "100",
                     scope = MemoryScope.USER,
                     targetUserId = "200",
-                    channelId = "10",
                     content = "Memory entry $idx: " + "x".repeat(60),
                 )
             }
@@ -221,7 +215,6 @@ class MemoryCommandTest {
                     guildId = "100",
                     scope = MemoryScope.USER,
                     targetUserId = "200",
-                    channelId = "10",
                     content = "Plays Elden Ring on weekends",
                 )
 
@@ -244,7 +237,6 @@ class MemoryCommandTest {
             val searchHits =
                 store.search(
                     guildId = "100",
-                    channelId = "10",
                     queryText = "Elden Ring",
                     scope = SearchScope.BOTH,
                     targetUserId = "200",
@@ -262,30 +254,27 @@ class MemoryCommandTest {
                     guildId = "100",
                     scope = MemoryScope.USER,
                     targetUserId = "201",
-                    channelId = "10",
                     content = "Other user's fact",
                 )
-            val channelMem =
+            val guildMem =
                 store.insertMemory(
                     guildId = "100",
-                    scope = MemoryScope.CHANNEL,
+                    scope = MemoryScope.GUILD,
                     targetUserId = null,
-                    channelId = "10",
-                    content = "Channel-scoped fact",
+                    content = "Guild-scoped fact",
                 )
             val otherGuildMem =
                 store.insertMemory(
                     guildId = "101",
                     scope = MemoryScope.USER,
                     targetUserId = "200",
-                    channelId = "30",
                     content = "Other guild fact",
                 )
 
             val command = MemoryCommand(store)
 
             val responses =
-                listOf(otherUserMem.id, channelMem.id, otherGuildMem.id, 999999L).map { targetId ->
+                listOf(otherUserMem.id, guildMem.id, otherGuildMem.id, 999999L).map { targetId ->
                     val (interaction, getContent) =
                         setupInteraction(
                             subcommandName = "delete",
@@ -307,15 +296,14 @@ class MemoryCommandTest {
             assertEquals(1, responses.toSet().size, "Refusal messages must not leak whether an ID exists elsewhere")
             assertEquals(1, store.listUserMemories(guildId = "100", userId = "201").size)
             assertEquals(1, store.listUserMemories(guildId = "101", userId = "200").size)
-            val channelHits =
+            val guildHits =
                 store.search(
                     guildId = "100",
-                    channelId = "10",
-                    queryText = "Channel-scoped",
-                    scope = SearchScope.CHANNEL,
+                    queryText = "Guild-scoped",
+                    scope = SearchScope.GUILD,
                     recencyExcludeMinutes = 0,
                 )
-            assertEquals(1, channelHits.size)
+            assertEquals(1, guildHits.size)
         }
 
     @Test

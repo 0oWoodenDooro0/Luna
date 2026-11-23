@@ -70,14 +70,12 @@ class SqliteChatterMemoryStoreTest {
             guildId = "guild-1",
             scope = MemoryScope.USER,
             targetUserId = "user-1",
-            channelId = "chan-a",
             content = "Alice 每天早上都喜歡喝冰美式咖啡，不加糖。",
         )
         store.insertMemory(
             guildId = "guild-1",
             scope = MemoryScope.USER,
             targetUserId = "user-1",
-            channelId = "chan-a",
             content = "Alice 週末常去爬象山看夜景。",
         )
         clock.advanceMinutes(15)
@@ -85,7 +83,6 @@ class SqliteChatterMemoryStoreTest {
         val trigramHits =
             store.search(
                 guildId = "guild-1",
-                channelId = "chan-a",
                 queryText = "喜歡喝冰美式",
                 scope = SearchScope.USER,
                 targetUserId = "user-1",
@@ -103,7 +100,6 @@ class SqliteChatterMemoryStoreTest {
         val shortQueryHits =
             store.search(
                 guildId = "guild-1",
-                channelId = "chan-a",
                 queryText = "象山",
                 scope = SearchScope.USER,
                 targetUserId = "user-1",
@@ -120,7 +116,7 @@ class SqliteChatterMemoryStoreTest {
     }
 
     @Test
-    fun `user memories are shared across channels in same guild and isolated across guilds`() {
+    fun `user and guild memories are shared across channels in same guild and isolated across guilds`() {
         val clock = MutableClock(Instant.parse("2026-01-01T00:00:00Z"))
         val store = createStore(clock)
 
@@ -128,35 +124,36 @@ class SqliteChatterMemoryStoreTest {
             guildId = "guild-1",
             scope = MemoryScope.USER,
             targetUserId = "user-42",
-            channelId = "chan-a",
             content = "Bob prefers dark roast espresso.",
+        )
+        store.insertMemory(
+            guildId = "guild-1",
+            scope = MemoryScope.GUILD,
+            targetUserId = null,
+            content = "Guild 1 hosts Friday espresso tastings.",
         )
         store.insertMemory(
             guildId = "guild-2",
             scope = MemoryScope.USER,
             targetUserId = "user-42",
-            channelId = "chan-a",
             content = "Bob is allergic to peanuts in guild 2.",
         )
         clock.advanceMinutes(15)
 
-        // Searching from chan-b in guild-1 finds the user memory created in chan-a
-        val sameGuildOtherChannel =
+        val sameGuildHits =
             store.search(
                 guildId = "guild-1",
-                channelId = "chan-b",
                 queryText = "espresso",
-                scope = SearchScope.USER,
+                scope = SearchScope.BOTH,
                 targetUserId = "user-42",
             )
-        assertEquals(1, sameGuildOtherChannel.size)
-        assertEquals("guild-1", sameGuildOtherChannel.first().memory.guildId)
+        assertEquals(2, sameGuildHits.size)
+        assertTrue(sameGuildHits.all { it.memory.guildId == "guild-1" }, "Expected all hits to belong to guild-1")
 
         // Negative test: guild-2 search never returns guild-1's memory
         val crossGuildHits =
             store.search(
                 guildId = "guild-2",
-                channelId = "chan-a",
                 queryText = "espresso",
                 scope = SearchScope.BOTH,
                 targetUserId = "user-42",
@@ -165,58 +162,59 @@ class SqliteChatterMemoryStoreTest {
     }
 
     @Test
-    fun `scope filters USER vs CHANNEL vs BOTH accurately`() {
+    fun `scope filters USER vs GUILD vs BOTH accurately and persists nullable expiresAt`() {
         val clock = MutableClock(Instant.parse("2026-01-01T00:00:00Z"))
         val store = createStore(clock)
 
-        store.insertMemory(
-            guildId = "guild-1",
-            scope = MemoryScope.USER,
-            targetUserId = "user-1",
-            channelId = "chan-a",
-            content = "User preference about TypeScript projects.",
-        )
-        store.insertMemory(
-            guildId = "guild-1",
-            scope = MemoryScope.CHANNEL,
-            targetUserId = null,
-            channelId = "chan-a",
-            content = "Channel rule for TypeScript code reviews.",
-        )
+        val userMem =
+            store.insertMemory(
+                guildId = "guild-1",
+                scope = MemoryScope.USER,
+                targetUserId = "user-1",
+                content = "User preference about TypeScript projects.",
+                expiresAt = 1_800_000_000_000L,
+            )
+        val guildMem =
+            store.insertMemory(
+                guildId = "guild-1",
+                scope = MemoryScope.GUILD,
+                targetUserId = null,
+                content = "Guild rule for TypeScript code reviews.",
+            )
+        assertEquals(1_800_000_000_000L, userMem.expiresAt)
+        assertNull(guildMem.expiresAt)
         clock.advanceMinutes(15)
 
         val userOnly =
             store.search(
                 guildId = "guild-1",
-                channelId = "chan-a",
                 queryText = "TypeScript",
                 scope = SearchScope.USER,
                 targetUserId = "user-1",
             )
         assertEquals(1, userOnly.size)
         assertEquals(MemoryScope.USER, userOnly.first().memory.scope)
+        assertEquals(1_800_000_000_000L, userOnly.first().memory.expiresAt)
 
-        val channelOnly =
+        val guildOnly =
             store.search(
                 guildId = "guild-1",
-                channelId = "chan-a",
                 queryText = "TypeScript",
-                scope = SearchScope.CHANNEL,
+                scope = SearchScope.GUILD,
                 targetUserId = "user-1",
             )
-        assertEquals(1, channelOnly.size)
-        assertEquals(MemoryScope.CHANNEL, channelOnly.first().memory.scope)
+        assertEquals(1, guildOnly.size)
+        assertEquals(MemoryScope.GUILD, guildOnly.first().memory.scope)
 
         val both =
             store.search(
                 guildId = "guild-1",
-                channelId = "chan-a",
                 queryText = "TypeScript",
                 scope = SearchScope.BOTH,
                 targetUserId = "user-1",
             )
         assertEquals(2, both.size)
         assertNotNull(both.firstOrNull { it.memory.scope == MemoryScope.USER })
-        assertNotNull(both.firstOrNull { it.memory.scope == MemoryScope.CHANNEL })
+        assertNotNull(both.firstOrNull { it.memory.scope == MemoryScope.GUILD })
     }
 }

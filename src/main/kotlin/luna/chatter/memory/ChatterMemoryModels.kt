@@ -7,7 +7,7 @@ enum class MemoryScope(
     val dbValue: String,
 ) {
     USER("user"),
-    CHANNEL("channel"),
+    GUILD("guild"),
     ;
 
     companion object {
@@ -22,7 +22,7 @@ enum class MemoryScope(
  */
 enum class SearchScope {
     USER,
-    CHANNEL,
+    GUILD,
     BOTH,
 }
 
@@ -34,11 +34,11 @@ data class ChatterMemoryRecord(
     val guildId: String,
     val scope: MemoryScope,
     val targetUserId: String?,
-    val channelId: String?,
     val content: String,
     val createdAt: Long,
     val updatedAt: Long,
     val lastAccessedAt: Long,
+    val expiresAt: Long? = null,
 )
 
 /**
@@ -70,9 +70,9 @@ sealed class MemoryMutation {
         val guildId: String,
         val scope: MemoryScope,
         val targetUserId: String?,
-        val channelId: String?,
         val content: String,
         val embedding: FloatArray?,
+        val expiresAt: Long? = null,
     ) : MemoryMutation()
 
     data class Update(
@@ -80,6 +80,7 @@ sealed class MemoryMutation {
         val guildId: String,
         val content: String,
         val embedding: FloatArray?,
+        val expiresAt: Long? = null,
     ) : MemoryMutation()
 
     data class Delete(
