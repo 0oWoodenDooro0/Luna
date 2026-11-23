@@ -32,6 +32,8 @@ import luna.core.ai.NoOpAiTraceRecorder
 import luna.core.ai.withAiTraceSession
 import org.slf4j.LoggerFactory
 import java.time.Clock
+import java.time.format.TextStyle
+import java.util.Locale
 
 /**
  * Outcome of a single channel `Memory Distillation` run.
@@ -60,6 +62,8 @@ private data class ExtractedFactCandidateDto(
     @SerialName("target_user_id")
     val targetUserId: String? = null,
     val content: String,
+    @SerialName("expires_at")
+    val expiresAt: String? = null,
 )
 
 @Serializable
@@ -70,12 +74,8 @@ private data class ReconciliationDecisionDto(
     @SerialName("candidate_index")
     val candidateIndex: Int? = null,
     val content: String? = null,
-)
-
-private data class FactCandidate(
-    val scope: MemoryScope,
-    val targetUserId: String?,
-    val content: String,
+    @SerialName("expires_at")
+    val expiresAt: String? = null,
 )
 
 /**
@@ -173,9 +173,10 @@ class MemoryDistiller(
         }
 
         val transcript = ChatterPromptBuilder.formatTranscript(chatMessages)
-        val candidates =
+        val rawCandidates =
             extractCandidates(transcript, session)
                 ?: return DistillOutcome.Failed("Failed to extract memory candidates")
+        val candidates = MemoryCandidateProcessor.deduplicateBatchCandidates(rawCandidates)
 
         if (candidates.isEmpty()) {
             memoryStore.upsertCursor(channelId = channelId, guildId = guildId, lastSummarizedMessageId = newestMessageId)
@@ -222,11 +223,23 @@ class MemoryDistiller(
         transcript: String,
         session: AiTraceSession,
     ): List<FactCandidate>? {
+        val nowInstant = clock.instant()
+        val nowMs = nowInstant.toEpochMilli()
+        val zone = clock.zone
+        val zonedNow = nowInstant.atZone(zone)
+        val currentDateIso = zonedNow.toLocalDate().toString()
+        val dayOfWeek = zonedNow.dayOfWeek.getDisplayName(TextStyle.FULL, Locale.ENGLISH)
+
         val request =
             GeminiInteractionRequest(
                 model = config.cleanDistillModel,
                 systemInstruction = EXTRACTION_SYSTEM_INSTRUCTION,
-                input = listOf(GeminiInteractionInput.text("Conversation transcript:\n$transcript")),
+                input =
+                    listOf(
+                        GeminiInteractionInput.text(
+                            "Current date: $currentDateIso ($dayOfWeek)\nConversation transcript:\n$transcript",
+                        ),
+                    ),
                 generationConfig = GeminiInteractionGenerationConfig(maxOutputTokens = MAX_DISTILL_OUTPUT_TOKENS),
                 background = false,
             )
@@ -269,7 +282,7 @@ class MemoryDistiller(
 
         val dtos =
             runCatching {
-                json.decodeFromString<List<ExtractedFactCandidateDto>>(stripJsonFences(responseText))
+                json.decodeFromString<List<ExtractedFactCandidateDto>>(MemoryCandidateProcessor.stripJsonFences(responseText))
             }.getOrElse { ex ->
                 logger.warn("Failed to parse memory extraction JSON: {}", ex.message)
                 session.fail(
@@ -294,6 +307,7 @@ class MemoryDistiller(
                 scope = scope,
                 targetUserId = if (scope == MemoryScope.USER) targetUserId else null,
                 content = content,
+                expiresAt = MemoryCandidateProcessor.parseAndClampExpiresAt(dto.expiresAt, nowMs, zone),
             )
         }
     }
@@ -350,7 +364,7 @@ class MemoryDistiller(
             }
 
         return runCatching {
-            json.decodeFromString<List<ReconciliationDecisionDto>>(stripJsonFences(responseText))
+            json.decodeFromString<List<ReconciliationDecisionDto>>(MemoryCandidateProcessor.stripJsonFences(responseText))
         }.getOrElse { ex ->
             logger.warn("Failed to parse memory reconciliation JSON: {}", ex.message)
             session.fail(
@@ -390,6 +404,8 @@ class MemoryDistiller(
                 emptyList()
             }
 
+        val nowMs = clock.millis()
+        val zone = clock.zone
         val mutations = mutableListOf<MemoryMutation>()
         decisions.forEachIndexed { idx, decision ->
             val action = decision.action.trim().uppercase()
@@ -401,6 +417,12 @@ class MemoryDistiller(
                     if (candidate != null) {
                         val finalContent = decision.content?.trim()?.takeIf { it.isNotBlank() } ?: candidate.content
                         val embedding = embedIndexByDecisionIdx[idx]?.let { reembeddedVectors[it] } ?: candidateEmbedding
+                        val finalExpiresAt =
+                            if (decision.expiresAt != null) {
+                                MemoryCandidateProcessor.parseAndClampExpiresAt(decision.expiresAt, nowMs, zone)
+                            } else {
+                                candidate.expiresAt
+                            }
                         mutations.add(
                             MemoryMutation.Insert(
                                 guildId = guildId,
@@ -408,6 +430,7 @@ class MemoryDistiller(
                                 targetUserId = candidate.targetUserId,
                                 content = finalContent,
                                 embedding = embedding,
+                                expiresAt = finalExpiresAt,
                             ),
                         )
                     }
@@ -418,12 +441,19 @@ class MemoryDistiller(
                     val finalContent = decision.content?.trim()?.takeIf { it.isNotBlank() } ?: candidate?.content
                     if (memoryId != null && finalContent != null) {
                         val embedding = embedIndexByDecisionIdx[idx]?.let { reembeddedVectors[it] } ?: candidateEmbedding
+                        val finalExpiresAt =
+                            if (decision.expiresAt != null) {
+                                MemoryCandidateProcessor.parseAndClampExpiresAt(decision.expiresAt, nowMs, zone)
+                            } else {
+                                candidate?.expiresAt
+                            }
                         mutations.add(
                             MemoryMutation.Update(
                                 id = memoryId,
                                 guildId = guildId,
                                 content = finalContent,
                                 embedding = embedding,
+                                expiresAt = finalExpiresAt,
                             ),
                         )
                     }
@@ -469,21 +499,9 @@ class MemoryDistiller(
             }
         }
 
-    private fun stripJsonFences(raw: String): String {
-        val trimmed = raw.trim()
-        if (!trimmed.startsWith("```")) return trimmed
-        val withoutStart =
-            trimmed
-                .removePrefix("```json")
-                .removePrefix("```JSON")
-                .removePrefix("```")
-                .trimStart()
-        return withoutStart.removeSuffix("```").trim()
-    }
-
     companion object {
         private const val FETCH_BUFFER_SIZE = 20
-        private const val TOP_K_SIMILAR = 3
+        private const val TOP_K_SIMILAR = 6
         private const val MAX_DISTILL_OUTPUT_TOKENS = 2048
         private const val HTTP_REQUEST_TIMEOUT_MS = 30_000L
         private const val HTTP_CONNECT_TIMEOUT_MS = 10_000L
@@ -510,12 +528,14 @@ class MemoryDistiller(
             You extract durable, self-contained Atomic Facts from a Discord conversation transcript.
             Rules:
             - Speakers are formatted as `Name (uid:<id>): ...`, `BotName [BOT] (uid:<id>): ...`, or `Luna (uid:<selfId>): ...`.
-            - Extract ONLY objective, enduring user preferences, life events, relationships, or shared guild/server facts.
+            - Extract ONLY objective, enduring user preferences, life events, relationships, or shared guild/server facts, plus time-bound upcoming plans/events worth remembering until they pass.
             - NEVER extract Luna's jokes, roleplay, fabrications, or ephemeral small talk.
             - Resolve all pronouns ("I", "my", "he", "she") into explicit names/subjects so each fact is standalone.
+            - Use the provided `Current date` to resolve relative time expressions ("tomorrow", "next Friday", "this weekend").
+            - Set `expires_at` to `"YYYY-MM-DD"` for time-bound events/plans (e.g., interviews, trips, exams, weekend events) and `null` for durable preferences or standing facts.
             - Output ONLY a valid JSON array of objects:
-              [{"scope": "user" | "guild", "target_user_id": "<uid string or null>", "content": "<atomic fact>"}]
-            - Return `[]` if there are no durable facts worth remembering.
+              [{"scope": "user" | "guild", "target_user_id": "<uid string or null>", "content": "<atomic fact>", "expires_at": "YYYY-MM-DD" | null}]
+            - Return `[]` if there are no facts worth remembering.
             """.trimIndent()
 
         private val RECONCILIATION_SYSTEM_INSTRUCTION =
@@ -523,11 +543,11 @@ class MemoryDistiller(
             You reconcile newly extracted candidate facts against existing stored memories.
             For each candidate_index, decide one action:
             - `INSERT`: new fact not yet stored.
-            - `UPDATE`: updates/replaces an existing memory (provide `memory_id` and updated `content`).
+            - `UPDATE`: updates/replaces an existing memory (provide `memory_id`, updated `content`, and optional `expires_at`).
             - `DELETE`: invalidates/contradicts an existing memory (provide `memory_id`).
             - `NOOP`: already accurately captured or redundant.
             Output ONLY a valid JSON array of objects:
-            [{"action": "INSERT"|"UPDATE"|"DELETE"|"NOOP", "memory_id": <long or null>, "candidate_index": <int>, "content": "<final fact text or null>"}]
+            [{"action": "INSERT"|"UPDATE"|"DELETE"|"NOOP", "memory_id": <long or null>, "candidate_index": <int>, "content": "<final fact text or null>", "expires_at": "<YYYY-MM-DD or null>"}]
             """.trimIndent()
     }
 }

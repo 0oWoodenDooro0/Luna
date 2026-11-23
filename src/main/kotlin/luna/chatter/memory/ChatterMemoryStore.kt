@@ -52,6 +52,8 @@ interface ChatterMemoryStore {
         userId: String,
     ): Boolean
 
+    fun purgeExpiredMemories(nowMs: Long): Int
+
     fun search(
         guildId: String,
         queryText: String,

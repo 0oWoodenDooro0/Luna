@@ -196,17 +196,20 @@ class SqliteChatterMemoryStore(
     ): List<ChatterMemoryRecord> =
         transaction(database) {
             val conn = currentJdbcConnection()
+            val now = clock.millis()
             conn
                 .prepareStatement(
                     """
                     SELECT id, guild_id, scope, target_user_id, content, created_at, updated_at, last_accessed_at, expires_at
                     FROM chatter_memories
                     WHERE guild_id = ? AND scope = 'user' AND target_user_id = ?
+                      AND (expires_at IS NULL OR expires_at > ?)
                     ORDER BY updated_at DESC, id DESC
                     """.trimIndent(),
                 ).use { ps ->
                     ps.setString(1, guildId)
                     ps.setString(2, userId)
+                    ps.setLong(3, now)
                     ps.executeQuery().use { rs ->
                         buildList {
                             while (rs.next()) {
@@ -241,6 +244,29 @@ class SqliteChatterMemoryStore(
                 deleteVectorRow(conn, id)
             }
             deleted
+        }
+
+    override fun purgeExpiredMemories(nowMs: Long): Int =
+        transaction(database) {
+            val conn = currentJdbcConnection()
+            val expiredIds =
+                conn.prepareStatement("SELECT id FROM chatter_memories WHERE expires_at IS NOT NULL AND expires_at <= ?").use { ps ->
+                    ps.setLong(1, nowMs)
+                    ps.executeQuery().use { rs ->
+                        buildList { while (rs.next()) add(rs.getLong(1)) }
+                    }
+                }
+            if (expiredIds.isEmpty()) return@transaction 0
+
+            val deletedCount =
+                conn.prepareStatement("DELETE FROM chatter_memories WHERE expires_at IS NOT NULL AND expires_at <= ?").use { ps ->
+                    ps.setLong(1, nowMs)
+                    ps.executeUpdate()
+                }
+            if (isVectorSearchEnabled) {
+                expiredIds.forEach { deleteVectorRow(conn, it) }
+            }
+            deletedCount
         }
 
     override fun search(
@@ -283,6 +309,7 @@ class SqliteChatterMemoryStore(
                     conn = conn,
                     guildId = guildId,
                     scopeFilter = scopeFilter,
+                    now = now,
                     maxUpdatedAt = maxUpdatedAt,
                     queryText = queryText,
                     limit = candidateLimit,
@@ -293,6 +320,7 @@ class SqliteChatterMemoryStore(
                         conn = conn,
                         guildId = guildId,
                         scopeFilter = scopeFilter,
+                        now = now,
                         maxUpdatedAt = maxUpdatedAt,
                         queryEmbedding = queryEmbedding,
                         limit = candidateLimit,
@@ -670,6 +698,7 @@ class SqliteChatterMemoryStore(
         conn: Connection,
         guildId: String,
         scopeFilter: ScopeFilterSql,
+        now: Long,
         maxUpdatedAt: Long?,
         queryText: String,
         limit: Int,
@@ -693,6 +722,7 @@ class SqliteChatterMemoryStore(
                 WHERE chatter_memories_fts MATCH ?
                   AND m.guild_id = ?
                   AND ${scopeFilter.clause}
+                  AND (m.expires_at IS NULL OR m.expires_at > ?)
                   $recencySql
                 ORDER BY bm25(chatter_memories_fts), m.updated_at DESC
                 LIMIT ?
@@ -704,6 +734,7 @@ class SqliteChatterMemoryStore(
                 for (p in scopeFilter.params) {
                     ps.setString(idx++, p)
                 }
+                ps.setLong(idx++, now)
                 if (maxUpdatedAt != null) {
                     ps.setLong(idx++, maxUpdatedAt)
                 }
@@ -722,6 +753,7 @@ class SqliteChatterMemoryStore(
                 FROM chatter_memories m
                 WHERE m.guild_id = ?
                   AND ${scopeFilter.clause}
+                  AND (m.expires_at IS NULL OR m.expires_at > ?)
                   $recencySql
                   AND ($likeClauses)
                 ORDER BY m.updated_at DESC, m.id DESC
@@ -733,6 +765,7 @@ class SqliteChatterMemoryStore(
                 for (p in scopeFilter.params) {
                     ps.setString(idx++, p)
                 }
+                ps.setLong(idx++, now)
                 if (maxUpdatedAt != null) {
                     ps.setLong(idx++, maxUpdatedAt)
                 }
@@ -758,6 +791,7 @@ class SqliteChatterMemoryStore(
         conn: Connection,
         guildId: String,
         scopeFilter: ScopeFilterSql,
+        now: Long,
         maxUpdatedAt: Long?,
         queryEmbedding: FloatArray,
         limit: Int,
@@ -769,6 +803,7 @@ class SqliteChatterMemoryStore(
             ps.setInt(idx++, limit)
             ps.setString(idx++, guildId)
             for (p in scopeFilter.params) ps.setString(idx++, p)
+            ps.setLong(idx++, now)
             if (maxUpdatedAt != null) ps.setLong(idx++, maxUpdatedAt)
             ps.setInt(idx, limit)
             ps.executeQuery().use { rs ->
@@ -831,7 +866,7 @@ class SqliteChatterMemoryStore(
                 WHERE v.embedding MATCH ? AND v.k = ?
                   AND v.memory_id IN (
                       SELECT m2.id FROM chatter_memories m2
-                      WHERE m2.guild_id = ? AND $prefilterScopeClause $prefilterRecencySql
+                      WHERE m2.guild_id = ? AND $prefilterScopeClause AND (m2.expires_at IS NULL OR m2.expires_at > ?) $prefilterRecencySql
                   )
                 ORDER BY v.distance ASC
                 LIMIT ?
