@@ -189,12 +189,16 @@ The recency- and count-bounded short-term dialogue history assembled for `Chatte
 _Avoid_: STM buffer, chat cache, sliding log
 
 **Long-Term Memory**:
-The guild-isolated store of persistent `Atomic Fact` records scoped to an individual user or channel within `Chatter Pipeline`, queried on demand rather than unconditionally pre-injected into every reply.
-_Avoid_: LTM dump, user profile DB, RAG store
+The guild-isolated store of persistent `Atomic Fact` records scoped to either an individual user or the shared guild within `Chatter Pipeline`, queried on demand rather than unconditionally pre-injected into every reply.
+_Avoid_: LTM dump, user profile DB, RAG store, channel memory
 
 **Atomic Fact**:
-A self-contained, pronoun-resolved factual statement distilled from channel dialogue capturing a user preference, core fact, or historical event without relying on surrounding messages for meaning.
+A self-contained, pronoun-resolved factual statement distilled from channel dialogue capturing a durable user preference, core fact, or time-bound event (with an optional `Fact Expiration`) without relying on surrounding messages for meaning.
 _Avoid_: Memory snippet, chat summary, factoid
+
+**Fact Expiration**:
+An optional calendar-date expiry assigned during `Memory Distillation` to time-bound `Atomic Fact` records so ephemeral events are excluded from retrieval and purged once elapsed while durable facts remain governed by LRU eviction.
+_Avoid_: Global TTL, blanket memory expiry, inactivity purge
 
 **Memory Distillation**:
 The asynchronous background workflow that extracts `Atomic Fact` records from unprocessed channel dialogue once inactivity or batch thresholds are reached, reconciling new facts against existing `Long-Term Memory` via insert, update, or delete operations.
@@ -205,8 +209,12 @@ The per-channel watermark recording the latest Discord message ID already proces
 _Avoid_: Message offset, sync checkpoint, log pointer
 
 **Agentic Memory Retrieval**:
-The model-driven tool invocation inside `Chatter Pipeline` reply generation that searches `Long-Term Memory` on demand with context-rewritten queries, hybrid lexical-semantic ranking, recency exclusion, and bounded turn and timeout guardrails.
+The model-driven tool invocation inside `Chatter Pipeline` reply generation that searches `Long-Term Memory` on demand with context-rewritten queries, hybrid lexical-semantic ranking, `Recency Decay`, recency exclusion, and bounded turn and timeout guardrails.
 _Avoid_: Pre-prompt RAG, memory injection, auto-recall
+
+**Recency Decay**:
+A bounded age-based damping factor applied during `Agentic Memory Retrieval` ranking so fresher `Atomic Fact` records edge out older ones at comparable relevance without burying durable high-relevance preferences.
+_Avoid_: Time cutoff, hard age filter, linear score penalty
 
 **Dialogue Context Engine**:
 The policy-driven shared module in `luna.core.ai` that provides unified Discord noise evaluation, external `Reply Reference Chaining`, embed and Tenor/Giphy GIF preview formatting, primary social/YouTube link enrichment (with 2-hour duration cap and regex fallback), and image marker formatting for both `Chatter Pipeline` and `Summary Pipeline` without cross-plugin coupling.
