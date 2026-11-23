@@ -168,6 +168,15 @@ class MemoryDistillationCoordinator(
     suspend fun tick() {
         if (!chatterEnabled || !config.enabled) return
 
+        runCatching { memoryStore.purgeExpiredMemories(clock.millis()) }
+            .onSuccess { purged ->
+                if (purged > 0) {
+                    logger.debug("Purged {} expired chatter memories", purged)
+                }
+            }.onFailure { ex ->
+                logger.warn("Failed to purge expired chatter memories: {}", ex.message)
+            }
+
         val eligible = snapshotEligibleChannels()
         for (batch in eligible) {
             val cursor = memoryStore.getCursor(batch.channelId)

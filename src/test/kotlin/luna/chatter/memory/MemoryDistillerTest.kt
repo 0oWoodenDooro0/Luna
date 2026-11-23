@@ -141,7 +141,6 @@ class MemoryDistillerTest {
                     guildId = "2000",
                     scope = MemoryScope.USER,
                     targetUserId = "111",
-                    channelId = "1000",
                     content = "Alice lives in Taipei",
                 )
             val existingToDelete =
@@ -149,7 +148,6 @@ class MemoryDistillerTest {
                     guildId = "2000",
                     scope = MemoryScope.USER,
                     targetUserId = "111",
-                    channelId = "1000",
                     content = "Alice owns a Honda Civic",
                 )
             clock.advanceMinutes(1)
@@ -177,7 +175,7 @@ class MemoryDistillerTest {
                                     [
                                       {"scope": "user", "target_user_id": "111", "content": "Alice moved to Kaohsiung"},
                                       {"scope": "user", "target_user_id": "111", "content": "Alice sold her Honda Civic"},
-                                      {"scope": "channel", "target_user_id": null, "content": "The server hosts weekly Friday movie nights"},
+                                      {"scope": "guild", "target_user_id": null, "content": "The server hosts weekly Friday movie nights"},
                                       {"scope": "user", "target_user_id": "222", "content": "Bob prefers dark mode"}
                                     ]
                                     """.trimIndent()
@@ -270,15 +268,15 @@ class MemoryDistillerTest {
             assertEquals("Alice lives in Kaohsiung", aliceMemories.first().content)
             assertTrue(store.listUserMemories(guildId = "2000", userId = "222").isEmpty(), "NOOP candidate should not be inserted")
 
-            val channelHits =
+            val guildHits =
                 store.search(
                     guildId = "2000",
-                    channelId = "1000",
                     queryText = "Friday movie nights",
-                    scope = SearchScope.CHANNEL,
+                    scope = SearchScope.GUILD,
                     recencyExcludeMinutes = 0,
                 )
-            assertEquals(1, channelHits.size)
+            assertEquals(1, guildHits.size)
+            assertEquals(MemoryScope.GUILD, guildHits.first().memory.scope)
 
             // Verify speaker headers preserved & unsupported params omitted
             assertEquals(2, interactionPayloads.size)
@@ -430,5 +428,105 @@ class MemoryDistillerTest {
             assertTrue(store.listUserMemories(guildId = "2000", userId = "111").isEmpty(), "No memories should be persisted on failure")
             assertEquals(1, traceRecorder.records.size)
             assertEquals(AiTraceOutcome.FAILED, traceRecorder.records.single().outcome)
+        }
+
+    @Test
+    fun `distillChannel reconciles guild-scoped facts across channels in same guild while staying guild-isolated`() =
+        runTest {
+            val clock = MutableClock(Instant.parse("2026-01-01T00:00:00Z"))
+            val store = createStore(clock)
+            store.upsertCursor(channelId = "1002", guildId = "2000", lastSummarizedMessageId = "100")
+            val guild1Mem =
+                store.insertMemory(
+                    guildId = "2000",
+                    scope = MemoryScope.GUILD,
+                    targetUserId = null,
+                    content = "The server hosts weekly Friday movie nights",
+                )
+            store.insertMemory(
+                guildId = "3000",
+                scope = MemoryScope.GUILD,
+                targetUserId = null,
+                content = "Other guild hosts weekly Friday movie nights",
+            )
+            clock.advanceMinutes(1)
+
+            val reconciliationPrompts = mutableListOf<String>()
+            var interactionCallCount = 0
+            val interactionHttp =
+                HttpClient(MockEngine) {
+                    install(ContentNegotiation) {
+                        json(
+                            Json {
+                                ignoreUnknownKeys = true
+                                encodeDefaults = false
+                            },
+                        )
+                    }
+                    engine {
+                        addHandler { request ->
+                            val body = (request.body as io.ktor.http.content.TextContent).text
+                            interactionCallCount++
+                            val responseText =
+                                if (interactionCallCount == 1) {
+                                    """[{"scope": "guild", "target_user_id": null, "content": "The server moved weekly movie nights to Saturday"}]"""
+                                } else {
+                                    reconciliationPrompts.add(body)
+                                    """[{"action": "UPDATE", "memory_id": ${guild1Mem.id}, "candidate_index": 0, "content": "The server hosts weekly Saturday movie nights"}]"""
+                                }
+                            respond(
+                                content = interactionJsonResponse("int-$interactionCallCount", responseText),
+                                status = HttpStatusCode.OK,
+                                headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+                            )
+                        }
+                    }
+                }
+            val embeddingHttp =
+                HttpClient(MockEngine) {
+                    engine {
+                        addHandler {
+                            respond(
+                                content = """{"embeddings": [{"values": ${unitEmbedding(1.0f)}}]}""",
+                                status = HttpStatusCode.OK,
+                                headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+                            )
+                        }
+                    }
+                }
+
+            val distiller =
+                MemoryDistiller(
+                    memoryStore = store,
+                    embeddingClient = GeminiEmbeddingClient(httpClient = embeddingHttp, apiKey = "test-key"),
+                    interactionClient = GeminiInteractionClient(httpClient = interactionHttp),
+                    noiseFilter = ChatterNoiseFilter(),
+                    config = ChatterMemoryConfig(),
+                    apiKey = "test-key",
+                    baseUrl = "https://generativelanguage.googleapis.com",
+                    clock = clock,
+                    messagesAfterFetcher = { _, _, _ ->
+                        listOf(mockMessage(id = 105L, authorId = 111L, username = "Alice", content = "Our server movie nights moved to Saturday"))
+                    },
+                )
+
+            val outcome = distiller.distillChannel(channelId = "1002", guildId = "2000", cursorMessageId = "100")
+            assertTrue(outcome is DistillOutcome.Completed, "Expected Completed, got $outcome")
+            assertEquals(1, reconciliationPrompts.size)
+            assertTrue(
+                reconciliationPrompts.single().contains("id=${guild1Mem.id}, scope=guild"),
+                "Expected guild-1 memory in reconciliation prompt: ${reconciliationPrompts.single()}",
+            )
+            assertFalse(
+                reconciliationPrompts.single().contains("Other guild"),
+                "Other guild memory must never leak into reconciliation prompt",
+            )
+
+            val guild1Hits = store.search(guildId = "2000", queryText = "Saturday movie nights", scope = SearchScope.GUILD, recencyExcludeMinutes = 0)
+            assertEquals(1, guild1Hits.size)
+            assertEquals("The server hosts weekly Saturday movie nights", guild1Hits.first().memory.content)
+
+            val guild2Hits = store.search(guildId = "3000", queryText = "Friday movie nights", scope = SearchScope.GUILD, recencyExcludeMinutes = 0)
+            assertEquals(1, guild2Hits.size)
         }
 }

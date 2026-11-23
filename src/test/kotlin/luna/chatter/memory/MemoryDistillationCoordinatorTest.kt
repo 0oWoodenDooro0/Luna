@@ -288,4 +288,60 @@ class MemoryDistillationCoordinatorTest {
 
             assertEquals(3, coordinator.trackedChannelCount())
         }
+
+    @Test
+    fun `tick purges expired memories even when no distillation batches are eligible`() =
+        runTest {
+            val clock = MutableClock(Instant.parse("2026-11-20T00:00:00Z"))
+            val dbPath = tempDir.resolve("coord-purge-${System.nanoTime()}.db").toString()
+            val db = LunaHost.initDatabase(dbPath = dbPath, vecExtensionPath = tempDir.resolve("missing-vec0.so").toString())
+            val store = SqliteChatterMemoryStore(database = db, clock = clock)
+            val nowMs = clock.millis()
+            val oneDayMs = 86_400_000L
+
+            val durable =
+                store.insertMemory(
+                    guildId = "2000",
+                    scope = MemoryScope.USER,
+                    targetUserId = "111",
+                    content = "Alice loves ramen.",
+                    expiresAt = null,
+                )
+            store.insertMemory(
+                guildId = "2000",
+                scope = MemoryScope.USER,
+                targetUserId = "111",
+                content = "Alice has a flight tomorrow.",
+                expiresAt = nowMs + oneDayMs,
+            )
+
+            val coordinator =
+                MemoryDistillationCoordinator(
+                    memoryStore = store,
+                    noiseFilter = ChatterNoiseFilter(),
+                    config = ChatterMemoryConfig(),
+                    clock = clock,
+                    distillExecutor = { _, _, _ -> DistillOutcome.NoMessages },
+                )
+
+            // Advance past expiration and run tick()
+            clock.advanceMinutes(24 * 60 + 1)
+            coordinator.tick()
+
+            val remainingIds =
+                org.jetbrains.exposed.v1.jdbc.transactions.transaction(db) {
+                    val conn =
+                        org.jetbrains.exposed.v1.jdbc.transactions.TransactionManager
+                            .current()
+                            .connection.connection as java.sql.Connection
+                    conn.createStatement().use { stmt ->
+                        stmt.executeQuery("SELECT id FROM chatter_memories").use { rs ->
+                            buildList {
+                                while (rs.next()) add(rs.getLong(1))
+                            }
+                        }
+                    }
+                }
+            assertEquals(listOf(durable.id), remainingIds)
+        }
 }

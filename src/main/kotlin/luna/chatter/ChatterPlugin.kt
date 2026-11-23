@@ -160,7 +160,7 @@ class ChatterPlugin(
                         defaultRecencyExcludeMinutes = memoryConfig.recencyExcludeMinutes.toInt(),
                         defaultScoreCutoff = memoryConfig.scoreCutoff,
                         maxPerUser = memoryConfig.maxPerUser,
-                        maxPerChannel = memoryConfig.maxPerChannel,
+                        maxPerGuild = memoryConfig.maxPerGuild,
                     )
                 }.onFailure { e ->
                     logger.warn(

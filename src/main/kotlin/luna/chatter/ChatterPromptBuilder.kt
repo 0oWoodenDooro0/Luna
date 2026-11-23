@@ -59,10 +59,10 @@ object ChatterPromptBuilder {
     const val MEMORY_TOOL_INSTRUCTION: String =
         "\n\n12. 長期記憶搜尋（search_long_term_memory）：\n" +
             "- 近期約 10 分鐘的對話已在上下文中。一般日常閒聊或當下對話已足夠接話時，請勿呼叫此工具，直接回覆即可。\n" +
-            "- 僅當話題明確涉及更早之前的使用者偏好、個人經歷、或頻道歷史背景時，才呼叫 search_long_term_memory。\n" +
+            "- 僅當話題明確涉及更早之前的使用者偏好、個人經歷、或伺服器歷史背景時，才呼叫 search_long_term_memory。\n" +
             "- 查詢語句（query）請將代名詞（「他」「她」「那個」「上次那件事」）改寫為獨立具體的關鍵字或語意描述。\n" +
             "- 查詢特定成員時請從對話紀錄中的 (uid:<id>) 取得 Snowflake ID 作為 target_user_id；" +
-            "若使用 scope=\"both\" 且省略 target_user_id，會預設查詢當前發話者的長期記憶與頻道記憶。"
+            "若使用 scope=\"both\" 且省略 target_user_id，會預設查詢當前發話者的長期記憶與伺服器記憶。"
 
     fun buildSystemInstruction(): String = buildSystemInstruction(personaState = null, memoryToolsEnabled = false)
 

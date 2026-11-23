@@ -28,7 +28,7 @@ class ChatterMemoryConfigTest {
         assertEquals(8, config.maxTurns)
         assertEquals(3000L, config.toolTimeoutMs)
         assertEquals(100, config.maxPerUser)
-        assertEquals(200, config.maxPerChannel)
+        assertEquals(300, config.maxPerGuild)
         assertEquals("/app/lib/vec0.so", config.sqliteVecExtensionPath)
     }
 
@@ -51,7 +51,7 @@ class ChatterMemoryConfigTest {
                 "CHATTER_MEMORY_MAX_TURNS" to "9",
                 "CHATTER_MEMORY_TOOL_TIMEOUT_MS" to "4500",
                 "CHATTER_MEMORY_MAX_PER_USER" to "150",
-                "CHATTER_MEMORY_MAX_PER_CHANNEL" to "300",
+                "CHATTER_MEMORY_MAX_PER_GUILD" to "450",
                 "SQLITE_VEC_EXTENSION_PATH" to "/opt/sqlite/vec0.so",
             )
 
@@ -71,7 +71,7 @@ class ChatterMemoryConfigTest {
         assertEquals(9, config.maxTurns)
         assertEquals(4500L, config.toolTimeoutMs)
         assertEquals(150, config.maxPerUser)
-        assertEquals(300, config.maxPerChannel)
+        assertEquals(450, config.maxPerGuild)
         assertEquals("/opt/sqlite/vec0.so", config.sqliteVecExtensionPath)
     }
 
@@ -117,7 +117,7 @@ class ChatterMemoryConfigTest {
                 "CHATTER_MEMORY_MAX_TURNS" to "-2",
                 "CHATTER_MEMORY_TOOL_TIMEOUT_MS" to "0",
                 "CHATTER_MEMORY_MAX_PER_USER" to "-10",
-                "CHATTER_MEMORY_MAX_PER_CHANNEL" to "0",
+                "CHATTER_MEMORY_MAX_PER_GUILD" to "0",
             )
         for ((key, value) in invalidCases) {
             val ex =
@@ -176,7 +176,7 @@ class ChatterMemoryConfigTest {
                 "CHATTER_MEMORY_MAX_TURNS" to "8",
                 "CHATTER_MEMORY_TOOL_TIMEOUT_MS" to "3000",
                 "CHATTER_MEMORY_MAX_PER_USER" to "100",
-                "CHATTER_MEMORY_MAX_PER_CHANNEL" to "200",
+                "CHATTER_MEMORY_MAX_PER_GUILD" to "300",
                 "SQLITE_VEC_EXTENSION_PATH" to "/app/lib/vec0.so",
             )
 

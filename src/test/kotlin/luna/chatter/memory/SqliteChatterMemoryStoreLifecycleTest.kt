@@ -35,7 +35,7 @@ class SqliteChatterMemoryStoreLifecycleTest {
     private fun createStore(
         clock: Clock = MutableClock(Instant.parse("2026-01-01T00:00:00Z")),
         maxPerUser: Int = 100,
-        maxPerChannel: Int = 200,
+        maxPerGuild: Int = 300,
     ): SqliteChatterMemoryStore {
         val dbPath = tempDir.resolve("lifecycle-${System.nanoTime()}.db").toString()
         val db = LunaHost.initDatabase(dbPath = dbPath, vecExtensionPath = tempDir.resolve("missing-vec0.so").toString())
@@ -43,7 +43,7 @@ class SqliteChatterMemoryStoreLifecycleTest {
             database = db,
             clock = clock,
             maxPerUser = maxPerUser,
-            maxPerChannel = maxPerChannel,
+            maxPerGuild = maxPerGuild,
         )
     }
 
@@ -56,7 +56,6 @@ class SqliteChatterMemoryStoreLifecycleTest {
             guildId = "guild-1",
             scope = MemoryScope.USER,
             targetUserId = "user-1",
-            channelId = "chan-1",
             content = "Alice just adopted a golden retriever.",
         )
 
@@ -64,7 +63,6 @@ class SqliteChatterMemoryStoreLifecycleTest {
         val withinWindow =
             store.search(
                 guildId = "guild-1",
-                channelId = "chan-1",
                 queryText = "golden retriever",
                 scope = SearchScope.USER,
                 targetUserId = "user-1",
@@ -74,7 +72,6 @@ class SqliteChatterMemoryStoreLifecycleTest {
         val bypassWindow =
             store.search(
                 guildId = "guild-1",
-                channelId = "chan-1",
                 queryText = "golden retriever",
                 scope = SearchScope.USER,
                 targetUserId = "user-1",
@@ -87,7 +84,6 @@ class SqliteChatterMemoryStoreLifecycleTest {
         val afterWindow =
             store.search(
                 guildId = "guild-1",
-                channelId = "chan-1",
                 queryText = "golden retriever",
                 scope = SearchScope.USER,
                 targetUserId = "user-1",
@@ -99,16 +95,16 @@ class SqliteChatterMemoryStoreLifecycleTest {
     fun `RRF fusion rejects low-similarity non-FTS candidates below scoreCutoff without padding`() {
         val now = 1_700_000_000_000L
         val recordHigh =
-            ChatterMemoryRecord(1L, "g1", MemoryScope.USER, "u1", "c1", "High vector match", now, now, now)
+            ChatterMemoryRecord(1L, "g1", MemoryScope.USER, "u1", "High vector match", now, now, now)
         val recordLow =
-            ChatterMemoryRecord(2L, "g1", MemoryScope.USER, "u1", "c1", "Low vector match", now, now, now)
+            ChatterMemoryRecord(2L, "g1", MemoryScope.USER, "u1", "Low vector match", now, now, now)
         val recordFtsOnly =
-            ChatterMemoryRecord(3L, "g1", MemoryScope.USER, "u1", "c1", "FTS keyword match", now, now, now)
+            ChatterMemoryRecord(3L, "g1", MemoryScope.USER, "u1", "FTS keyword match", now, now, now)
         val recordDual =
-            ChatterMemoryRecord(4L, "g1", MemoryScope.USER, "u1", "c1", "Dual FTS and vector", now, now, now)
+            ChatterMemoryRecord(4L, "g1", MemoryScope.USER, "u1", "Dual FTS and vector", now, now, now)
 
         val hits =
-            SqliteChatterMemoryStore.fuseCandidatesWithRrf(
+            ChatterMemoryRrfRanker.fuseCandidatesWithRrf(
                 lexicalCandidates = listOf(recordFtsOnly, recordDual),
                 vectorCandidates =
                     listOf(
@@ -128,14 +124,13 @@ class SqliteChatterMemoryStoreLifecycleTest {
     @Test
     fun `LRU eviction removes least-recently updated or accessed entry and syncs FTS5`() {
         val clock = MutableClock(Instant.parse("2026-01-01T00:00:00Z"))
-        val store = createStore(clock = clock, maxPerUser = 3, maxPerChannel = 2)
+        val store = createStore(clock = clock, maxPerUser = 3, maxPerGuild = 2)
 
         val first =
             store.insertMemory(
                 guildId = "guild-1",
                 scope = MemoryScope.USER,
                 targetUserId = "user-1",
-                channelId = "chan-1",
                 content = "First memory alpha token",
             )
         clock.advanceMinutes(15)
@@ -144,7 +139,6 @@ class SqliteChatterMemoryStoreLifecycleTest {
                 guildId = "guild-1",
                 scope = MemoryScope.USER,
                 targetUserId = "user-1",
-                channelId = "chan-1",
                 content = "Second memory beta token",
             )
         clock.advanceMinutes(15)
@@ -152,7 +146,6 @@ class SqliteChatterMemoryStoreLifecycleTest {
         val accessed =
             store.search(
                 guildId = "guild-1",
-                channelId = "chan-1",
                 queryText = "alpha",
                 scope = SearchScope.USER,
                 targetUserId = "user-1",
@@ -165,7 +158,6 @@ class SqliteChatterMemoryStoreLifecycleTest {
                 guildId = "guild-1",
                 scope = MemoryScope.USER,
                 targetUserId = "user-1",
-                channelId = "chan-1",
                 content = "Third memory gamma token",
             )
         clock.advanceMinutes(1)
@@ -174,7 +166,6 @@ class SqliteChatterMemoryStoreLifecycleTest {
                 guildId = "guild-1",
                 scope = MemoryScope.USER,
                 targetUserId = "user-1",
-                channelId = "chan-1",
                 content = "Fourth memory delta token",
             )
 
@@ -187,31 +178,29 @@ class SqliteChatterMemoryStoreLifecycleTest {
         val evictedSearch =
             store.search(
                 guildId = "guild-1",
-                channelId = "chan-1",
                 queryText = "beta",
                 scope = SearchScope.USER,
                 targetUserId = "user-1",
             )
         assertTrue(evictedSearch.isEmpty(), "Evicted memory should be removed from FTS5 index")
 
-        // Verify channel cap (maxPerChannel = 2)
-        store.insertMemory("guild-1", MemoryScope.CHANNEL, null, "chan-1", "Channel fact one")
+        // Verify guild cap (maxPerGuild = 2)
+        store.insertMemory("guild-1", MemoryScope.GUILD, null, "Guild fact one")
         clock.advanceMinutes(1)
-        store.insertMemory("guild-1", MemoryScope.CHANNEL, null, "chan-1", "Channel fact two")
+        store.insertMemory("guild-1", MemoryScope.GUILD, null, "Guild fact two")
         clock.advanceMinutes(1)
-        store.insertMemory("guild-1", MemoryScope.CHANNEL, null, "chan-1", "Channel fact three")
+        store.insertMemory("guild-1", MemoryScope.GUILD, null, "Guild fact three")
         clock.advanceMinutes(15)
 
-        val channelHits =
+        val guildHits =
             store.search(
                 guildId = "guild-1",
-                channelId = "chan-1",
-                queryText = "Channel fact",
-                scope = SearchScope.CHANNEL,
+                queryText = "Guild fact",
+                scope = SearchScope.GUILD,
                 limit = 10,
             )
-        assertEquals(2, channelHits.size)
-        assertFalse(channelHits.any { it.memory.content == "Channel fact one" }, "Oldest channel memory should be evicted")
+        assertEquals(2, guildHits.size)
+        assertFalse(guildHits.any { it.memory.content == "Guild fact one" }, "Oldest guild memory should be evicted")
     }
 
     @Test
@@ -223,8 +212,8 @@ class SqliteChatterMemoryStoreLifecycleTest {
             store.applyReconciliation(
                 mutations =
                     listOf(
-                        MemoryMutation.Insert("guild-1", MemoryScope.USER, "user-1", "chan-1", "Valid fact", null),
-                        MemoryMutation.Insert("guild-1", MemoryScope.USER, "user-1", "chan-1", "   ", null),
+                        MemoryMutation.Insert("guild-1", MemoryScope.USER, "user-1", "Valid fact", null),
+                        MemoryMutation.Insert("guild-1", MemoryScope.USER, "user-1", "   ", null),
                     ),
                 cursorUpdate = ChatterMemoryCursor("chan-1", "guild-1", "999", clock.millis()),
             )
@@ -240,15 +229,15 @@ class SqliteChatterMemoryStoreLifecycleTest {
         val store = createStore(clock)
 
         val userMem =
-            store.insertMemory("guild-1", MemoryScope.USER, "user-1", "chan-a", "Owned user memory")
+            store.insertMemory("guild-1", MemoryScope.USER, "user-1", "Owned user memory")
         val otherUserMem =
-            store.insertMemory("guild-1", MemoryScope.USER, "user-2", "chan-a", "Other user memory")
-        val channelMem =
-            store.insertMemory("guild-1", MemoryScope.CHANNEL, null, "chan-a", "Channel memory")
+            store.insertMemory("guild-1", MemoryScope.USER, "user-2", "Other user memory")
+        val guildMem =
+            store.insertMemory("guild-1", MemoryScope.GUILD, null, "Guild memory")
 
         assertFalse(store.deleteOwnedUserMemory(userMem.id, guildId = "guild-2", userId = "user-1"), "Must reject cross-guild delete")
         assertFalse(store.deleteOwnedUserMemory(otherUserMem.id, guildId = "guild-1", userId = "user-1"), "Must reject deleting another user's memory")
-        assertFalse(store.deleteOwnedUserMemory(channelMem.id, guildId = "guild-1", userId = "user-1"), "Must reject deleting channel-scoped memory")
+        assertFalse(store.deleteOwnedUserMemory(guildMem.id, guildId = "guild-1", userId = "user-1"), "Must reject deleting guild-scoped memory")
         assertTrue(store.deleteOwnedUserMemory(userMem.id, guildId = "guild-1", userId = "user-1"), "Owner should be able to delete own user memory")
         assertTrue(store.listUserMemories("guild-1", "user-1").isEmpty(), "Deleted memory should no longer appear in list")
     }
@@ -262,7 +251,6 @@ class SqliteChatterMemoryStoreLifecycleTest {
             guildId = "guild-1",
             scope = MemoryScope.USER,
             targetUserId = "user-1",
-            channelId = "chan-1",
             content = "Alice likes pour-over coffee.",
         )
 
@@ -270,7 +258,6 @@ class SqliteChatterMemoryStoreLifecycleTest {
         val hitsWithDynamicBoundary =
             store.search(
                 guildId = "guild-1",
-                channelId = "chan-1",
                 queryText = "pour-over",
                 scope = SearchScope.USER,
                 targetUserId = "user-1",
@@ -282,7 +269,6 @@ class SqliteChatterMemoryStoreLifecycleTest {
         val hitsBeforeDistill =
             store.search(
                 guildId = "guild-1",
-                channelId = "chan-1",
                 queryText = "pour-over",
                 scope = SearchScope.USER,
                 targetUserId = "user-1",
@@ -304,5 +290,136 @@ class SqliteChatterMemoryStoreLifecycleTest {
             sql.contains("AND m2.updated_at <= ?"),
             "Vector KNN pre-filter subquery must include recency filter when enabled: $sql",
         )
+    }
+
+    @Test
+    fun `recency decay ranks newer facts above older ones at comparable relevance`() {
+        val clock = MutableClock(Instant.parse("2026-01-01T00:00:00Z"))
+        val store = createStore(clock = clock)
+
+        val older =
+            store.insertMemory(
+                guildId = "guild-1",
+                scope = MemoryScope.USER,
+                targetUserId = "user-1",
+                content = "Alice likes pour-over coffee",
+            )
+        clock.advanceMinutes(90L * 24 * 60)
+        val newer =
+            store.insertMemory(
+                guildId = "guild-1",
+                scope = MemoryScope.USER,
+                targetUserId = "user-1",
+                content = "Alice likes espresso coffee",
+            )
+        clock.advanceMinutes(15)
+
+        val hits =
+            store.search(
+                guildId = "guild-1",
+                queryText = "coffee",
+                scope = SearchScope.USER,
+                targetUserId = "user-1",
+            )
+
+        assertEquals(listOf(newer.id, older.id), hits.map { it.memory.id })
+        assertTrue(
+            hits[0].score > hits[1].score,
+            "Newer fact score (${hits[0].score}) must exceed older fact score (${hits[1].score})",
+        )
+    }
+
+    @Test
+    fun `recency decay enforces 0_7 floor so highly relevant durable preference beats less relevant newer fact`() {
+        val nowMs = Instant.parse("2026-11-23T00:00:00Z").toEpochMilli()
+        val yearAgoMs = Instant.parse("2025-11-23T00:00:00Z").toEpochMilli()
+        val durable =
+            ChatterMemoryRecord(1L, "g1", MemoryScope.USER, "u1", "Alice loves pour-over coffee", yearAgoMs, yearAgoMs, yearAgoMs)
+        val recentLessRelevant =
+            ChatterMemoryRecord(2L, "g1", MemoryScope.USER, "u1", "Alice saw a coffee shop", nowMs, nowMs, nowMs)
+
+        val hits =
+            ChatterMemoryRrfRanker.fuseCandidatesWithRrf(
+                lexicalCandidates = listOf(durable, recentLessRelevant),
+                vectorCandidates =
+                    listOf(
+                        SqliteChatterMemoryStore.VectorCandidate(durable, cosineSimilarity = 0.90),
+                    ),
+                scoreCutoff = 0.55,
+                limit = 5,
+                nowMs = nowMs,
+            )
+
+        assertEquals(listOf(1L, 2L), hits.map { it.memory.id })
+        val durableRrf = (1.0 / 61.0) + (1.0 / 61.0)
+        assertTrue(
+            hits[0].score >= durableRrf * 0.7,
+            "Durable score (${hits[0].score}) must respect 0.7 floor of RRF (${durableRrf * 0.7})",
+        )
+        assertTrue(
+            hits[0].score < durableRrf * 0.75,
+            "365-day-old memory should be decayed near the 0.7 floor, got ${hits[0].score}",
+        )
+    }
+
+    @Test
+    fun `recency decay clamps negative age when updatedAt is in the future`() {
+        val nowMs = Instant.parse("2026-11-23T00:00:00Z").toEpochMilli()
+        val futureMs = nowMs + 5L * 86_400_000L
+        val futureRecord =
+            ChatterMemoryRecord(1L, "g1", MemoryScope.USER, "u1", "Future timestamped memory", futureMs, futureMs, futureMs)
+        val presentRecord =
+            ChatterMemoryRecord(2L, "g1", MemoryScope.USER, "u1", "Present timestamped memory", nowMs, nowMs, nowMs)
+
+        val hits =
+            ChatterMemoryRrfRanker.fuseCandidatesWithRrf(
+                lexicalCandidates = listOf(futureRecord, presentRecord),
+                vectorCandidates = emptyList(),
+                scoreCutoff = 0.55,
+                limit = 5,
+                nowMs = nowMs,
+            )
+
+        assertEquals(2, hits.size)
+        val futureHit = hits.first { it.memory.id == 1L }
+        val expectedRrf = 1.0 / 61.0
+        assertEquals(expectedRrf, futureHit.score, 1e-12, "Negative age must clamp to 0.0 so decay multiplier is 1.0")
+    }
+
+    @Test
+    fun `deleteAllOwnedUserMemories hard-deletes only invoking user memories in target guild across FTS5 and returns count`() {
+        val store = createStore()
+        store.insertMemory("guild-1", MemoryScope.USER, "user-1", "User1 fact one in guild1")
+        store.insertMemory("guild-1", MemoryScope.USER, "user-1", "User1 fact two in guild1")
+        val otherUser = store.insertMemory("guild-1", MemoryScope.USER, "user-2", "User2 fact in guild1")
+        val guildMem = store.insertMemory("guild-1", MemoryScope.GUILD, null, "Guild1 shared fact")
+        val otherGuild = store.insertMemory("guild-2", MemoryScope.USER, "user-1", "User1 fact in guild2")
+
+        val deletedCount = store.deleteAllOwnedUserMemories(guildId = "guild-1", userId = "user-1")
+
+        assertEquals(2, deletedCount)
+        assertTrue(store.listUserMemories("guild-1", "user-1").isEmpty(), "Target user memories in guild-1 must be deleted")
+        assertTrue(
+            store
+                .search(
+                    guildId = "guild-1",
+                    queryText = "User1 fact",
+                    scope = SearchScope.USER,
+                    targetUserId = "user-1",
+                    recencyExcludeMinutes = 0,
+                ).isEmpty(),
+            "Deleted user memories must be purged from FTS5",
+        )
+        assertEquals(listOf(otherUser.id), store.listUserMemories("guild-1", "user-2").map { it.id })
+        assertEquals(listOf(otherGuild.id), store.listUserMemories("guild-2", "user-1").map { it.id })
+        val guildHits =
+            store.search(
+                guildId = "guild-1",
+                queryText = "Guild1 shared",
+                scope = SearchScope.GUILD,
+                recencyExcludeMinutes = 0,
+            )
+        assertEquals(listOf(guildMem.id), guildHits.map { it.memory.id })
+        assertEquals(0, store.deleteAllOwnedUserMemories(guildId = "guild-1", userId = "user-1"))
     }
 }
