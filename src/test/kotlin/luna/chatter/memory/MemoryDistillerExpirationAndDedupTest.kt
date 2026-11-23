@@ -149,9 +149,9 @@ class MemoryDistillerExpirationAndDedupTest {
                     content = "Alice is preparing for a job interview",
                 )
 
-            val distillerLogger = LoggerFactory.getLogger(MemoryDistiller::class.java) as Logger
+            val processorLogger = LoggerFactory.getLogger(MemoryCandidateProcessor::class.java) as Logger
             val logAppender = ListAppender<ILoggingEvent>().apply { start() }
-            distillerLogger.addAppender(logAppender)
+            processorLogger.addAppender(logAppender)
 
             try {
                 val interactionPayloads = mutableListOf<String>()
@@ -254,7 +254,7 @@ class MemoryDistillerExpirationAndDedupTest {
                     "Expected observable WARN log for malformed expires_at date",
                 )
             } finally {
-                distillerLogger.detachAppender(logAppender)
+                processorLogger.detachAppender(logAppender)
             }
         }
 

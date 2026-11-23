@@ -683,6 +683,8 @@ fun checkMainSourceLineLimit(projectRoot: File): List<String> {
     if (mainRoots.isEmpty()) return listOf("At least one src/main/kotlin directory must exist")
 
     val violations = mutableListOf<String>()
+    val ratchetSlackLines = 20
+    val seenBaselinePaths = mutableSetOf<String>()
     mainRoots.forEach { root ->
         root
             .walkTopDown()
@@ -690,12 +692,67 @@ fun checkMainSourceLineLimit(projectRoot: File): List<String> {
             .forEach { file ->
                 val relPath = file.relativeTo(projectRoot).path.replace('\\', '/')
                 val lineCount = file.useLines { it.count() }
-                val maxAllowed = baseline[relPath] ?: defaultMaxLines
+                val baselinedMax = baseline[relPath]
+                val maxAllowed = baselinedMax ?: defaultMaxLines
+                if (baselinedMax != null) {
+                    seenBaselinePaths.add(relPath)
+                }
                 if (lineCount > maxAllowed) {
                     violations.add(
                         "[Rule 10: main-source-line-limit] $relPath: $lineCount lines exceeds limit $maxAllowed. " +
                             "Extract cohesive collaborators per CODING_STANDARDS.md §4.",
                     )
+                } else if (baselinedMax != null && lineCount <= defaultMaxLines) {
+                    violations.add(
+                        "[Rule 10: main-source-line-limit] $relPath: $lineCount lines is now <= $defaultMaxLines. " +
+                            "Remove its obsolete entry from gradle/coding-standards-main-lines-baseline.txt.",
+                    )
+                } else if (baselinedMax != null && lineCount <= baselinedMax - ratchetSlackLines) {
+                    violations.add(
+                        "[Rule 10: main-source-line-limit] $relPath: $lineCount lines dropped >= $ratchetSlackLines below baseline $baselinedMax. " +
+                            "Tighten its entry in gradle/coding-standards-main-lines-baseline.txt to $lineCount.",
+                    )
+                }
+            }
+    }
+    (baseline.keys - seenBaselinePaths).sorted().forEach { missingPath ->
+        violations.add(
+            "[Rule 10: main-source-line-limit] Baseline entry '$missingPath' no longer exists. " +
+                "Remove it from gradle/coding-standards-main-lines-baseline.txt.",
+        )
+    }
+    return violations
+}
+
+fun checkLoggerClassMatch(projectRoot: File): List<String> {
+    val mainRoots = findKotlinSourceRoots(projectRoot, "main")
+    if (mainRoots.isEmpty()) return listOf("At least one src/main/kotlin directory must exist")
+
+    val violations = mutableListOf<String>()
+    val loggerCallRegex = Regex("""LoggerFactory\.getLogger\s*\(\s*([A-Za-z0-9_.]+)::class\.java\s*\)""")
+
+    mainRoots.forEach { root ->
+        root
+            .walkTopDown()
+            .filter { it.isFile && it.extension == "kt" }
+            .forEach { file ->
+                val text = file.readText()
+                val relPath = file.relativeTo(projectRoot).path.replace('\\', '/')
+                val fileStem = file.nameWithoutExtension
+                for (match in loggerCallRegex.findAll(text)) {
+                    val targetExpr = match.groupValues[1]
+                    val simpleName = targetExpr.substringAfterLast('.')
+                    val declaredInFile =
+                        Regex("""\b(?:class|object|interface)\s+${Regex.escape(simpleName)}\b""")
+                            .containsMatchIn(text)
+                    if (!declaredInFile && simpleName != fileStem) {
+                        val lineNumber = text.substring(0, match.range.first).count { it == '\n' } + 1
+                        violations.add(
+                            "[Rule 11: logger-class-match] $relPath:$lineNumber: " +
+                                "LoggerFactory.getLogger($targetExpr::class.java) does not match any type declared in this file. " +
+                                "Attribute loggers to their own class/object per CODING_STANDARDS.md §5.",
+                        )
+                    }
                 }
             }
     }
@@ -721,6 +778,7 @@ tasks.register("lintCodingStandards") {
                 addAll(checkTestSuiteLineLimit(codingStandardsRoot))
                 addAll(checkDiagnosticBooleanAssertions(codingStandardsRoot))
                 addAll(checkMainSourceLineLimit(codingStandardsRoot))
+                addAll(checkLoggerClassMatch(codingStandardsRoot))
             }
 
         if (violations.isNotEmpty()) {
@@ -729,6 +787,6 @@ tasks.register("lintCodingStandards") {
                     violations.joinToString("\n\n"),
             )
         }
-        logger.lifecycle("lintCodingStandards: all 10 rules passed.")
+        logger.lifecycle("lintCodingStandards: all 11 rules passed.")
     }
 }

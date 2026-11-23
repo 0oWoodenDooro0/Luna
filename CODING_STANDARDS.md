@@ -1,6 +1,6 @@
 # Coding Standards
 
-Non-mechanical conventions and architectural constraints for Luna services and libraries (mechanical rules are enforced by `lintCodingStandards` and linters).
+Non-mechanical conventions and architectural constraints for Luna services and libraries (mechanical rules are enforced by `lintCodingStandards` and linters—notably: `assertTrue`/`assertFalse` in tests require a diagnostic message [Rule 9], `src/main/*.kt` files are capped at 600 lines or their ratchet baseline in `gradle/coding-standards-main-lines-baseline.txt` [Rule 10], and `LoggerFactory.getLogger` must match a type declared in the same file [Rule 11]).
 
 ## 1. Daemon State & Transient Failure Eviction
 

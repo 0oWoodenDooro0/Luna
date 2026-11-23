@@ -17,7 +17,7 @@ internal data class FactCandidate(
  * semantic `Fact Expiration` date clamping, and LLM JSON fence stripping.
  */
 internal object MemoryCandidateProcessor {
-    private val logger = LoggerFactory.getLogger(MemoryDistiller::class.java)
+    private val logger = LoggerFactory.getLogger(MemoryCandidateProcessor::class.java)
     private val MIN_EXPIRATION_MS = TimeUnit.DAYS.toMillis(1)
     private val MAX_EXPIRATION_MS = TimeUnit.DAYS.toMillis(365)
     private const val MIN_SUBSTRING_DEDUP_CHARS = 6
