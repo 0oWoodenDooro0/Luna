@@ -182,3 +182,34 @@ message.stickers.forEach { sticker -> /* check sticker.formatType */ }
 // embed.image?.url, embed.image?.proxyUrl, embed.thumbnail?.url, embed.thumbnail?.proxyUrl, embed.video?.url
 ```
 
+---
+
+## 7. Gateway Lifecycle & Pre-`ReadyEvent` Guard
+
+In `LunaHost.start()` (`Main.kt`), `pluginLoader.initializePlugins(context)` runs **before** `kordClient.login { ... }`. Any plugin or background loop started during `init()` that calls Gateway-backed APIs (such as `kord.editPresence { ... }`) before the Gateway WebSocket connects will throw `UninitializedPropertyAccessException: lateinit property socket has not been initialized`.
+
+Guard Gateway calls with a `ReadyEvent` gate (see `KordSchedulePresencePort` and `OwnerErrorNotifier`):
+```kotlin
+private val gatewayReady = AtomicBoolean(false)
+private val pendingState = AtomicReference<State?>(null)
+
+fun registerReadyListener(scope: CoroutineScope): Job? =
+    runCatching {
+        kord.on<ReadyEvent>(scope = scope) { onGatewayReady() }
+    }.getOrNull()
+
+suspend fun onGatewayReady() {
+    gatewayReady.set(true)
+    val latest = pendingState.get() ?: return
+    syncToGateway(latest) // also re-syncs after Gateway reconnects
+}
+
+suspend fun update(state: State) {
+    pendingState.set(state)
+    if (!gatewayReady.get()) return // defer until ReadyEvent
+    syncToGateway(state)
+}
+```
+Cancel the `ReadyEvent` listener `Job` in `shutdown()`.
+
+
