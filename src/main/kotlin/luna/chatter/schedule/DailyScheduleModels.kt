@@ -121,6 +121,50 @@ data class CatchUpWatermark(
 )
 
 /**
+ * Cross-day `Schedule Commitment` booked for a future local calendar date (`tomorrow..+7 days`).
+ */
+data class ScheduleCommitment(
+    val id: String,
+    val targetDate: LocalDate,
+    val startMinute: Int,
+    val endMinute: Int,
+    val activityTitle: String,
+    val activityDetail: String,
+    val statusText: String,
+    val availability: AvailabilityState,
+    val createdAtMillis: Long,
+) {
+    init {
+        require(id.isNotBlank()) { "id must not be blank" }
+        require(startMinute in 0 until ScheduleBlock.MINUTES_PER_DAY) {
+            "startMinute must be in 0..1439, got $startMinute"
+        }
+        require(endMinute in 1..ScheduleBlock.MINUTES_PER_DAY) {
+            "endMinute must be in 1..1440, got $endMinute"
+        }
+        require(startMinute < endMinute) {
+            "startMinute ($startMinute) must be < endMinute ($endMinute)"
+        }
+        require(activityTitle.isNotBlank()) { "activityTitle must not be blank" }
+        require(activityDetail.isNotBlank()) { "activityDetail must not be blank" }
+        require(statusText.isNotBlank()) { "statusText must not be blank" }
+    }
+
+    fun formattedTimeRange(): String = "${ScheduleBlock.formatMinute(startMinute)}–${ScheduleBlock.formatMinute(endMinute)}"
+
+    fun toScheduleBlock(adjustedByConversation: Boolean = true): ScheduleBlock =
+        ScheduleBlock(
+            startMinute = startMinute,
+            endMinute = endMinute,
+            activityTitle = activityTitle,
+            activityDetail = activityDetail,
+            statusText = statusText,
+            availability = availability,
+            adjustedByConversation = adjustedByConversation,
+        )
+}
+
+/**
  * Read-only seam exposing Luna's active `Daily Schedule` state to `ChatterService`,
  * `CircadianPersonaDrift`, and `/schedule` without coupling to coordinator lifecycle.
  */
@@ -130,4 +174,6 @@ interface DailyScheduleProvider {
     fun currentSchedule(): DailySchedule?
 
     fun currentBlock(): ScheduleBlock?
+
+    fun upcomingCommitments(): List<ScheduleCommitment> = emptyList()
 }

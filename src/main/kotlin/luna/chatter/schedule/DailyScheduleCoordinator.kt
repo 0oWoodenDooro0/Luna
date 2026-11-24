@@ -16,6 +16,7 @@ import org.slf4j.LoggerFactory
 import java.time.Clock
 import java.time.LocalDate
 import java.time.ZoneId
+import java.util.UUID
 
 /**
  * Coordinates Luna's daily 24-hour [DailySchedule] lifecycle:
@@ -78,6 +79,33 @@ class DailyScheduleCoordinator(
         val schedule = currentSchedule() ?: return null
         val localTime = clock.instant().atZone(timezone).toLocalTime()
         return schedule.blockAt(localTime)
+    }
+
+    override fun upcomingCommitments(): List<ScheduleCommitment> {
+        if (!enabled) return emptyList()
+        val today = currentLocalDate()
+        return runCatching {
+            store.listUpcomingCommitments(
+                fromDate = today.plusDays(1),
+                toDateInclusive = today.plusDays(MAX_COMMITMENT_HORIZON_DAYS),
+            )
+        }.onFailure { ex ->
+            logger.warn("Failed to list upcoming schedule commitments: {}", ex.message)
+        }.getOrDefault(emptyList())
+    }
+
+    sealed interface CommitmentResult {
+        data class Upserted(
+            val commitment: ScheduleCommitment,
+        ) : CommitmentResult
+
+        data class Cancelled(
+            val id: String,
+        ) : CommitmentResult
+
+        data class Rejected(
+            val reason: String,
+        ) : CommitmentResult
     }
 
     /**
@@ -162,6 +190,148 @@ class DailyScheduleCoordinator(
             }
             wakeSignal.trySend(Unit)
             spliceResult
+        }
+    }
+
+    /**
+     * Validates and persists a cross-day [ScheduleCommitment] within the `tomorrow..+7 days`
+     * horizon, enforcing [ScheduleGuardrails], the 10-commitment active cap, and [rateLimiter].
+     */
+    suspend fun upsertCommitment(
+        id: String? = null,
+        targetDate: LocalDate,
+        startMinute: Int,
+        endMinute: Int,
+        activityTitle: String,
+        activityDetail: String,
+        statusText: String,
+        availability: AvailabilityState,
+    ): CommitmentResult {
+        if (!enabled) {
+            return CommitmentResult.Rejected("DailyScheduleCoordinator is disabled.")
+        }
+        return mutationMutex.withLock {
+            val nowMillis = clock.millis()
+            val today = currentLocalDate()
+            val minDate = today.plusDays(1)
+            val maxDate = today.plusDays(MAX_COMMITMENT_HORIZON_DAYS)
+
+            val rateRejection = rateLimiter.checkAllowed(nowMillis)
+            if (rateRejection != null) {
+                return@withLock CommitmentResult.Rejected(rateRejection)
+            }
+
+            if (targetDate <= today) {
+                return@withLock CommitmentResult.Rejected(
+                    "Commitment targetDate ($targetDate) must be in the future ($minDate..$maxDate); " +
+                        "use today's schedule update for $today.",
+                )
+            }
+            if (targetDate > maxDate) {
+                return@withLock CommitmentResult.Rejected(
+                    "Commitment targetDate ($targetDate) exceeds the $MAX_COMMITMENT_HORIZON_DAYS-day horizon ($minDate..$maxDate).",
+                )
+            }
+
+            val patch =
+                SchedulePatch(
+                    startMinute = startMinute,
+                    endMinute = endMinute,
+                    activityTitle = activityTitle,
+                    activityDetail = activityDetail,
+                    statusText = statusText,
+                    availability = availability,
+                )
+            val fieldError = ScheduleGuardrails.validatePatchFields(patch)
+            if (fieldError != null) {
+                return@withLock CommitmentResult.Rejected(fieldError)
+            }
+            val durationError = ScheduleGuardrails.validateDuration(availability, endMinute - startMinute)
+            if (durationError != null) {
+                return@withLock CommitmentResult.Rejected(durationError)
+            }
+
+            val effectiveId = id?.trim()?.takeIf { it.isNotBlank() } ?: UUID.randomUUID().toString()
+            val existingUpcoming =
+                try {
+                    store.listUpcomingCommitments(minDate, maxDate)
+                } catch (ex: CancellationException) {
+                    throw ex
+                } catch (ex: Exception) {
+                    logger.warn("Failed to load upcoming commitments for cap check: {}", ex.message)
+                    return@withLock CommitmentResult.Rejected("Failed to load upcoming commitments: ${ex.message}")
+                }
+
+            val existing = existingUpcoming.firstOrNull { it.id == effectiveId }
+            if (existing == null && existingUpcoming.size >= MAX_ACTIVE_COMMITMENTS) {
+                return@withLock CommitmentResult.Rejected(
+                    "Maximum active commitments cap ($MAX_ACTIVE_COMMITMENTS) reached; cancel or update an existing commitment first.",
+                )
+            }
+
+            val commitment =
+                ScheduleCommitment(
+                    id = effectiveId,
+                    targetDate = targetDate,
+                    startMinute = startMinute,
+                    endMinute = endMinute,
+                    activityTitle = activityTitle.trim(),
+                    activityDetail = activityDetail.trim(),
+                    statusText = statusText.trim(),
+                    availability = availability,
+                    createdAtMillis = existing?.createdAtMillis ?: nowMillis,
+                )
+
+            try {
+                store.upsertCommitment(commitment)
+            } catch (ex: CancellationException) {
+                throw ex
+            } catch (ex: Exception) {
+                logger.warn("Failed to persist ScheduleCommitment {}: {}", effectiveId, ex.message)
+                return@withLock CommitmentResult.Rejected("Failed to persist commitment: ${ex.message}")
+            }
+
+            rateLimiter.recordMutation(nowMillis)
+            CommitmentResult.Upserted(commitment)
+        }
+    }
+
+    /**
+     * Cancels an upcoming [ScheduleCommitment] by [id], enforcing [rateLimiter].
+     */
+    suspend fun cancelCommitment(id: String): CommitmentResult {
+        if (!enabled) {
+            return CommitmentResult.Rejected("DailyScheduleCoordinator is disabled.")
+        }
+        val trimmedId = id.trim()
+        if (trimmedId.isBlank()) {
+            return CommitmentResult.Rejected("Commitment id must not be blank.")
+        }
+        return mutationMutex.withLock {
+            val nowMillis = clock.millis()
+            val rateRejection = rateLimiter.checkAllowed(nowMillis)
+            if (rateRejection != null) {
+                return@withLock CommitmentResult.Rejected(rateRejection)
+            }
+
+            val cancelled =
+                try {
+                    store.cancelCommitment(trimmedId)
+                } catch (ex: CancellationException) {
+                    throw ex
+                } catch (ex: Exception) {
+                    logger.warn("Failed to cancel ScheduleCommitment {}: {}", trimmedId, ex.message)
+                    return@withLock CommitmentResult.Rejected("Failed to cancel commitment: ${ex.message}")
+                }
+
+            if (!cancelled) {
+                return@withLock CommitmentResult.Rejected(
+                    "Schedule commitment '$trimmedId' was not found or already expired.",
+                )
+            }
+
+            rateLimiter.recordMutation(nowMillis)
+            CommitmentResult.Cancelled(trimmedId)
         }
     }
 
@@ -253,9 +423,27 @@ class DailyScheduleCoordinator(
                     logger.warn("Failed to read previous day summary before {}: {}", today, ex.message)
                 }.getOrNull()
 
-        val generated = generator.generate(date = today, previousDaySummary = previousSummary)
+        val todayCommitments =
+            runCatching { store.listCommitmentsForDate(today) }
+                .onFailure { ex ->
+                    logger.warn("Failed to load ScheduleCommitments for {}: {}", today, ex.message)
+                }.getOrDefault(emptyList())
+
+        val generated =
+            generator.generate(
+                date = today,
+                previousDaySummary = previousSummary,
+                commitments = todayCommitments,
+            )
         return generated
-            .onSuccess { schedule ->
+            .map { schedule ->
+                if (todayCommitments.isEmpty()) {
+                    schedule
+                } else {
+                    val commitmentBlocks = todayCommitments.map { it.toScheduleBlock(adjustedByConversation = true) }
+                    schedule.copy(blocks = DailyScheduleSplicer.spliceBlocks(schedule.blocks, commitmentBlocks))
+                }
+            }.onSuccess { schedule ->
                 runCatching { store.saveSchedule(schedule) }
                     .onFailure { ex ->
                         logger.warn("Failed to persist generated DailySchedule for {}: {}", today, ex.message)
@@ -308,5 +496,7 @@ class DailyScheduleCoordinator(
     companion object {
         const val DEFAULT_INITIAL_RETRY_DELAY_MS = 60_000L
         const val DEFAULT_MAX_RETRY_DELAY_MS = 900_000L
+        const val MAX_COMMITMENT_HORIZON_DAYS = 7L
+        const val MAX_ACTIVE_COMMITMENTS = 10
     }
 }

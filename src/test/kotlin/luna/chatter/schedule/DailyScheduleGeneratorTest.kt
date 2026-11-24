@@ -256,4 +256,41 @@ class DailyScheduleGeneratorTest {
                 "Expected system instruction to explicitly encourage leaving ample AVAILABLE/BREAK time for chatting",
             )
         }
+
+    @Test
+    fun `injects ScheduleCommitments into user prompt when provided`() =
+        runTest {
+            var capturedBody = ""
+            val validPayload =
+                """{"summary":"照約定打瓦的一天","blocks":[{"startMinute":0,"endMinute":1440,"activityTitle":"自由時間","activityDetail":"耍廢","statusText":"✨ 耍廢中","availability":"AVAILABLE"}]}"""
+            val engine =
+                MockEngine { request ->
+                    capturedBody = request.body.toByteArray().decodeToString()
+                    respond(
+                        content = interactionSuccessResponse(validPayload),
+                        status = HttpStatusCode.OK,
+                        headers = headersOf(HttpHeaders.ContentType, "application/json"),
+                    )
+                }
+
+            val date = LocalDate.of(2026, 11, 25)
+            val commitment =
+                ScheduleCommitment(
+                    id = "c-gen-1",
+                    targetDate = date,
+                    startMinute = 1140,
+                    endMinute = 1260,
+                    activityTitle = "跟群友打瓦",
+                    activityDetail = "約好晚上七點五排",
+                    statusText = "🎮 打瓦中",
+                    availability = AvailabilityState.AVAILABLE,
+                    createdAtMillis = 1_700_000_000_000L,
+                )
+
+            val result = createGenerator(engine).generate(date = date, commitments = listOf(commitment))
+            assertTrue(result.isSuccess, "Expected schedule generation with commitments to succeed")
+            assertTrue(capturedBody.contains("19:00–21:00"), "Prompt must include commitment time range")
+            assertTrue(capturedBody.contains("跟群友打瓦"), "Prompt must include commitment title")
+            assertTrue(capturedBody.contains("約好晚上七點五排"), "Prompt must include commitment detail")
+        }
 }

@@ -63,6 +63,7 @@ open class DailyScheduleGenerator(
     open suspend fun generate(
         date: LocalDate,
         previousDaySummary: String? = null,
+        commitments: List<ScheduleCommitment> = emptyList(),
     ): Result<DailySchedule> {
         if (apiKey.isBlank()) {
             val err = IllegalStateException("GEMINI_API_KEY is not configured")
@@ -71,7 +72,7 @@ open class DailyScheduleGenerator(
         }
 
         val cleanModel = model.trim().removePrefix("models/").ifBlank { ChatterConfig.DEFAULT_MODEL }
-        val prompt = buildUserPrompt(date, previousDaySummary)
+        val prompt = buildUserPrompt(date, previousDaySummary, commitments)
         val request =
             GeminiInteractionRequest(
                 model = cleanModel,
@@ -157,6 +158,7 @@ open class DailyScheduleGenerator(
     private fun buildUserPrompt(
         date: LocalDate,
         previousDaySummary: String?,
+        commitments: List<ScheduleCommitment>,
     ): String {
         val dayOfWeek = date.dayOfWeek.getDisplayName(TextStyle.FULL, Locale.ENGLISH)
         return buildString {
@@ -165,6 +167,15 @@ open class DailyScheduleGenerator(
                 appendLine("昨日作息摘要：$previousDaySummary")
             } else {
                 appendLine("昨日作息摘要：無（請自然安排今日作息）")
+            }
+            if (commitments.isNotEmpty()) {
+                appendLine("本日已預約的約定行程（請務必在對應時段安排這些活動，其餘時段請自然銜接）：")
+                for (commitment in commitments) {
+                    appendLine(
+                        "- ${commitment.formattedTimeRange()} [${commitment.availability.name}] " +
+                            "${commitment.activityTitle}：${commitment.activityDetail} (狀態: ${commitment.statusText})",
+                    )
+                }
             }
             appendLine("請只輸出合法 JSON，不要包含額外說明文字。")
         }.trim()

@@ -2,6 +2,7 @@ package luna.chatter.schedule
 
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+import luna.chatter.ChatterConfig
 import org.jetbrains.exposed.v1.jdbc.Database
 import org.jetbrains.exposed.v1.jdbc.transactions.TransactionManager
 import org.jetbrains.exposed.v1.jdbc.transactions.transaction
@@ -9,6 +10,7 @@ import java.sql.Connection
 import java.sql.ResultSet
 import java.time.Clock
 import java.time.LocalDate
+import java.time.ZoneId
 
 /**
  * SQLite-backed implementation of [DailyScheduleStore] using Exposed's JDBC connection
@@ -17,6 +19,7 @@ import java.time.LocalDate
 class SqliteDailyScheduleStore(
     private val database: Database,
     private val clock: Clock = Clock.systemUTC(),
+    private val timezone: ZoneId = ZoneId.of(ChatterConfig.DEFAULT_TIMEZONE),
 ) : DailyScheduleStore {
     private val json =
         Json {
@@ -50,6 +53,27 @@ class SqliteDailyScheduleStore(
                         last_pending_at INTEGER NOT NULL,
                         updated_at INTEGER NOT NULL
                     );
+                    """.trimIndent(),
+                )
+                stmt.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS chatter_schedule_commitments (
+                        id TEXT PRIMARY KEY,
+                        target_date TEXT NOT NULL,
+                        start_minute INTEGER NOT NULL,
+                        end_minute INTEGER NOT NULL,
+                        activity_title TEXT NOT NULL,
+                        activity_detail TEXT NOT NULL,
+                        status_text TEXT NOT NULL,
+                        availability TEXT NOT NULL,
+                        created_at INTEGER NOT NULL
+                    );
+                    """.trimIndent(),
+                )
+                stmt.execute(
+                    """
+                    CREATE INDEX IF NOT EXISTS idx_chatter_schedule_commitments_target_date
+                        ON chatter_schedule_commitments(target_date, start_minute);
                     """.trimIndent(),
                 )
             }
@@ -211,6 +235,133 @@ class SqliteDailyScheduleStore(
                 }
         }
     }
+
+    override fun upsertCommitment(commitment: ScheduleCommitment) {
+        transaction(database) {
+            val conn = currentJdbcConnection()
+            pruneExpiredCommitmentsLocked(conn, currentLocalDate())
+            conn
+                .prepareStatement(
+                    """
+                    INSERT INTO chatter_schedule_commitments(
+                        id, target_date, start_minute, end_minute,
+                        activity_title, activity_detail, status_text, availability, created_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(id) DO UPDATE SET
+                        target_date = excluded.target_date,
+                        start_minute = excluded.start_minute,
+                        end_minute = excluded.end_minute,
+                        activity_title = excluded.activity_title,
+                        activity_detail = excluded.activity_detail,
+                        status_text = excluded.status_text,
+                        availability = excluded.availability
+                    """.trimIndent(),
+                ).use { ps ->
+                    ps.setString(1, commitment.id)
+                    ps.setString(2, commitment.targetDate.toString())
+                    ps.setInt(3, commitment.startMinute)
+                    ps.setInt(4, commitment.endMinute)
+                    ps.setString(5, commitment.activityTitle)
+                    ps.setString(6, commitment.activityDetail)
+                    ps.setString(7, commitment.statusText)
+                    ps.setString(8, commitment.availability.name)
+                    ps.setLong(9, commitment.createdAtMillis)
+                    ps.executeUpdate()
+                }
+        }
+    }
+
+    override fun cancelCommitment(id: String): Boolean =
+        transaction(database) {
+            val conn = currentJdbcConnection()
+            conn
+                .prepareStatement("DELETE FROM chatter_schedule_commitments WHERE id = ?")
+                .use { ps ->
+                    ps.setString(1, id)
+                    ps.executeUpdate() > 0
+                }
+        }
+
+    override fun listCommitmentsForDate(date: LocalDate): List<ScheduleCommitment> =
+        transaction(database) {
+            val conn = currentJdbcConnection()
+            pruneExpiredCommitmentsLocked(conn, currentLocalDate())
+            conn
+                .prepareStatement(
+                    """
+                    SELECT id, target_date, start_minute, end_minute,
+                           activity_title, activity_detail, status_text, availability, created_at
+                    FROM chatter_schedule_commitments
+                    WHERE target_date = ?
+                    ORDER BY start_minute ASC, created_at ASC
+                    """.trimIndent(),
+                ).use { ps ->
+                    ps.setString(1, date.toString())
+                    ps.executeQuery().use { rs ->
+                        buildList {
+                            while (rs.next()) {
+                                add(readCommitmentRow(rs))
+                            }
+                        }
+                    }
+                }
+        }
+
+    override fun listUpcomingCommitments(
+        fromDate: LocalDate,
+        toDateInclusive: LocalDate,
+    ): List<ScheduleCommitment> =
+        transaction(database) {
+            val conn = currentJdbcConnection()
+            pruneExpiredCommitmentsLocked(conn, currentLocalDate())
+            conn
+                .prepareStatement(
+                    """
+                    SELECT id, target_date, start_minute, end_minute,
+                           activity_title, activity_detail, status_text, availability, created_at
+                    FROM chatter_schedule_commitments
+                    WHERE target_date >= ? AND target_date <= ?
+                    ORDER BY target_date ASC, start_minute ASC, created_at ASC
+                    """.trimIndent(),
+                ).use { ps ->
+                    ps.setString(1, fromDate.toString())
+                    ps.setString(2, toDateInclusive.toString())
+                    ps.executeQuery().use { rs ->
+                        buildList {
+                            while (rs.next()) {
+                                add(readCommitmentRow(rs))
+                            }
+                        }
+                    }
+                }
+        }
+
+    private fun pruneExpiredCommitmentsLocked(
+        conn: Connection,
+        today: LocalDate,
+    ) {
+        conn
+            .prepareStatement("DELETE FROM chatter_schedule_commitments WHERE target_date < ?")
+            .use { ps ->
+                ps.setString(1, today.toString())
+                ps.executeUpdate()
+            }
+    }
+
+    private fun readCommitmentRow(rs: ResultSet): ScheduleCommitment =
+        ScheduleCommitment(
+            id = rs.getString("id"),
+            targetDate = LocalDate.parse(rs.getString("target_date")),
+            startMinute = rs.getInt("start_minute"),
+            endMinute = rs.getInt("end_minute"),
+            activityTitle = rs.getString("activity_title"),
+            activityDetail = rs.getString("activity_detail"),
+            statusText = rs.getString("status_text"),
+            availability = AvailabilityState.valueOf(rs.getString("availability")),
+            createdAtMillis = rs.getLong("created_at"),
+        )
+
+    private fun currentLocalDate(): LocalDate = clock.instant().atZone(timezone).toLocalDate()
 
     private fun getCatchUpWatermarkInternal(
         conn: Connection,
