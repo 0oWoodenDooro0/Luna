@@ -177,6 +177,13 @@ class ChatterPlugin(
                     traceRecorder = traceRecorder,
                     memoryConfig = memoryConfig,
                     memoryToolHandler = initializedMemoryService?.toolHandler,
+                    understandingPreInjector =
+                        initializedMemoryService?.let {
+                            luna.chatter.memory.UnderstandingPreInjector(
+                                memoryStore = it.memoryStore,
+                                maxChars = memoryConfig.understandingPreInjectMaxChars,
+                            )
+                        },
                 )
         this.chatterGenerator = generator
 

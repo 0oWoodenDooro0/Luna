@@ -154,9 +154,18 @@ object ChatterPromptBuilder {
 
     fun buildUserPrompt(messages: List<ChatMessage>): String = buildUserPrompt(formatTranscript(messages))
 
-    fun buildUserPrompt(input: ChatterInput): String {
+    fun buildUserPrompt(
+        input: ChatterInput,
+        understandingContext: String? = null,
+    ): String {
         val sb = StringBuilder()
         sb.appendTranscriptAndSupplemental(input)
+
+        val cleanUnderstandingContext = understandingContext?.trim()?.takeIf { it.isNotEmpty() }
+        if (cleanUnderstandingContext != null) {
+            sb.append("\n\n")
+            sb.append(cleanUnderstandingContext)
+        }
 
         val boundedAppEmojis = input.applicationEmojis.take(MAX_REPLY_PROMPT_APP_EMOJIS)
         val boundedGuildEmojis = input.guildEmojis.take(MAX_REPLY_PROMPT_GUILD_EMOJIS)
@@ -226,10 +235,11 @@ object ChatterPromptBuilder {
         videoProcessingMode: VideoProcessingMode = VideoProcessingMode.STATIC,
         background: Boolean = false,
         memoryToolsEnabled: Boolean = false,
+        understandingContext: String? = null,
     ): GeminiInteractionRequest {
         val inputs =
             GeminiInteractionClient.buildMultimodalInputs(
-                promptText = buildUserPrompt(input),
+                promptText = buildUserPrompt(input, understandingContext = understandingContext),
                 imageAttachments = input.imageAttachments,
                 videoUri = input.videoUri,
                 videoProcessingMode = videoProcessingMode,
