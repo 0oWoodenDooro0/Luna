@@ -1,6 +1,8 @@
 package luna.chatter
 
 import dev.kord.core.Kord
+import dev.kord.core.event.interaction.ChatInputCommandInteractionCreateEvent
+import dev.kord.core.on
 import io.ktor.client.HttpClient
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -9,10 +11,15 @@ import luna.chatter.emoji.ChatterEmojiService
 import luna.chatter.emoji.ChatterEmojiVisionResolver
 import luna.chatter.emoji.DefaultChatterEmojiService
 import luna.chatter.memory.ChatterMemoryService
+import luna.chatter.schedule.DailySchedule
 import luna.chatter.schedule.DailyScheduleCoordinator
 import luna.chatter.schedule.DailyScheduleGenerator
+import luna.chatter.schedule.DailyScheduleProvider
 import luna.chatter.schedule.KordSchedulePresencePort
+import luna.chatter.schedule.ScheduleBlock
+import luna.chatter.schedule.ScheduleCommand
 import luna.chatter.schedule.SqliteDailyScheduleStore
+import luna.core.JsonLogger
 import luna.core.ai.GeminiHttpClientFactory
 import luna.core.ai.GeminiInteractionClient
 import luna.core.ai.SocialPeekFactory
@@ -78,6 +85,9 @@ class ChatterPlugin(
     var scheduleCoordinator: DailyScheduleCoordinator? = null
         internal set
 
+    var scheduleCommand: ScheduleCommand? = null
+        internal set
+
     var sharedHttpClient: HttpClient? = null
         internal set
 
@@ -88,6 +98,7 @@ class ChatterPlugin(
         internal set
 
     private var registrationJob: Job? = null
+    private var scheduleCommandJob: Job? = null
 
     override suspend fun initialize(context: PluginContext) {
         val chatterConfig = ChatterConfig.from(context.env)
@@ -227,6 +238,7 @@ class ChatterPlugin(
 
         val scope = safeScope(context.kord)
         initializedMemoryService?.start(kord = context.kord, scope = scope, chatterEnabled = chatterEnabled)
+        registerScheduleCommand(kord = context.kord, scope = scope)
 
         if (!chatterConfig.isConfigured) {
             logger.info("GEMINI_API_KEY is not configured; ChatterPlugin running in disabled mode")
@@ -282,6 +294,9 @@ class ChatterPlugin(
 
     override suspend fun shutdown() {
         registrationJob?.cancel()
+        scheduleCommandJob?.cancel()
+        scheduleCommandJob = null
+        scheduleCommand = null
         scheduleCoordinator?.shutdown()
         scheduleCoordinator = null
         memoryService?.close()
@@ -290,6 +305,57 @@ class ChatterPlugin(
         chatterGenerator?.close()
         sharedHttpClient?.close()
         sharedHttpClient = null
+    }
+
+    private suspend fun registerScheduleCommand(
+        kord: Kord,
+        scope: CoroutineScope,
+    ) {
+        val scheduleProvider =
+            object : DailyScheduleProvider {
+                override fun isEnabled(): Boolean = scheduleCoordinator?.isEnabled() == true
+
+                override fun currentSchedule(): DailySchedule? = scheduleCoordinator?.currentSchedule()
+
+                override fun currentBlock(): ScheduleBlock? = scheduleCoordinator?.currentBlock()
+            }
+        val command = ScheduleCommand(scheduleProvider = scheduleProvider)
+        this.scheduleCommand = command
+        try {
+            command.register(kord)
+            scheduleCommandJob =
+                kord.on<ChatInputCommandInteractionCreateEvent>(scope = scope) {
+                    if (interaction.command.rootName == command.name) {
+                        try {
+                            command.handle(interaction)
+                            JsonLogger.log(
+                                layer = "COMMAND",
+                                component = command.javaClass.simpleName,
+                                operation = "handle",
+                                data =
+                                    mapOf(
+                                        "userId" to interaction.user.id.toString(),
+                                        "command" to command.name,
+                                    ),
+                            )
+                        } catch (e: Exception) {
+                            JsonLogger.error(
+                                layer = "COMMAND",
+                                component = command.javaClass.simpleName,
+                                operation = "handle",
+                                data =
+                                    mapOf(
+                                        "userId" to interaction.user.id.toString(),
+                                        "command" to command.name,
+                                    ),
+                                errorMessage = e.message,
+                            )
+                        }
+                    }
+                }
+        } catch (e: Exception) {
+            logger.warn("Could not register /schedule command to Kord: {}", e.message)
+        }
     }
 
     companion object {

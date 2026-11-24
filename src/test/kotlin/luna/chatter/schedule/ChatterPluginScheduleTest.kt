@@ -15,6 +15,7 @@ import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.io.TempDir
 import org.slf4j.LoggerFactory
 import java.nio.file.Path
+import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
@@ -122,5 +123,36 @@ class ChatterPluginScheduleTest {
             } finally {
                 pluginLogger.detachAppender(appender)
             }
+        }
+
+    @Test
+    fun `ChatterPlugin registers ScheduleCommand even when CHATTER_SCHEDULE_ENABLED is false and clears on shutdown`() =
+        runTest {
+            val dbPath = tempDir.resolve("plugin-schedule-cmd.db").toString()
+            val db = LunaHost.initDatabase(dbPath = dbPath, vecExtensionPath = tempDir.resolve("missing-vec0.so").toString())
+
+            val plugin = ChatterPlugin()
+            val context =
+                DefaultPluginContext(
+                    kord = mockk(relaxed = true),
+                    routing = mockk(relaxed = true),
+                    database = db,
+                    env =
+                        EnvReader.of(
+                            mapOf(
+                                "GEMINI_API_KEY" to "test-key",
+                                "CHATTER_ENABLED" to "true",
+                                "CHATTER_SCHEDULE_ENABLED" to "false",
+                            ),
+                        ),
+                )
+
+            plugin.initialize(context)
+
+            val scheduleCommand = assertNotNull(plugin.scheduleCommand, "Expected scheduleCommand to be initialized")
+            assertEquals("schedule", scheduleCommand.name)
+
+            plugin.shutdown()
+            assertNull(plugin.scheduleCommand)
         }
 }
