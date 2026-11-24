@@ -135,4 +135,67 @@ class SqliteDailyScheduleStoreTest {
         assertEquals(1, store2.listPendingCatchUps().size)
         assertEquals("chan-2", store2.listPendingCatchUps().single().channelId)
     }
+
+    @Test
+    fun `persists adjustedByConversation flag and defaults legacy blocks_json without it to false`() {
+        val dbPath = tempDir.resolve("adjusted-flag-${System.nanoTime()}.db").toString()
+        val vecPath = tempDir.resolve("missing-vec0.so").toString()
+        val clock = MutableClock(Instant.parse("2026-11-24T00:00:00Z"))
+
+        val db = LunaHost.initDatabase(dbPath = dbPath, vecExtensionPath = vecPath)
+        val store = SqliteDailyScheduleStore(database = db, clock = clock)
+
+        val dayWithAdjusted = LocalDate.of(2026, 11, 24)
+        val adjustedSchedule =
+            DailySchedule(
+                date = dayWithAdjusted,
+                timezone = "Asia/Taipei",
+                blocks =
+                    listOf(
+                        ScheduleBlock(0, 720, "睡覺", "熟睡中", "💤 睡覺", AvailabilityState.SLEEPING),
+                        ScheduleBlock(
+                            720,
+                            1440,
+                            "跟大家玩",
+                            "臨時約打遊戲",
+                            "🎮 打遊戲",
+                            AvailabilityState.AVAILABLE,
+                            adjustedByConversation = true,
+                        ),
+                    ),
+                summary = "臨時約打遊戲",
+                createdAtMillis = 1_700_000_000_000L,
+            )
+        store.saveSchedule(adjustedSchedule)
+
+        val legacyDate = LocalDate.of(2026, 11, 23)
+        val legacyBlocksJson =
+            """[{"startMinute":0,"endMinute":1440,"activityTitle":"舊排程","activityDetail":"無欄位","statusText":"✨","availability":"AVAILABLE"}]"""
+        org.jetbrains.exposed.v1.jdbc.transactions.transaction(db) {
+            val conn =
+                org.jetbrains.exposed.v1.jdbc.transactions.TransactionManager
+                    .current()
+                    .connection.connection as java.sql.Connection
+            conn
+                .prepareStatement(
+                    "INSERT INTO chatter_daily_schedules(schedule_date, timezone, summary, blocks_json, created_at) VALUES (?, ?, ?, ?, ?)",
+                ).use { ps ->
+                    ps.setString(1, legacyDate.toString())
+                    ps.setString(2, "Asia/Taipei")
+                    ps.setString(3, "legacy")
+                    ps.setString(4, legacyBlocksJson)
+                    ps.setLong(5, 1_699_900_000_000L)
+                    ps.executeUpdate()
+                }
+        }
+
+        val reloadedAdjusted = store.getSchedule(dayWithAdjusted)
+        assertNotNull(reloadedAdjusted)
+        assertEquals(false, reloadedAdjusted.blocks[0].adjustedByConversation)
+        assertEquals(true, reloadedAdjusted.blocks[1].adjustedByConversation)
+
+        val reloadedLegacy = store.getSchedule(legacyDate)
+        assertNotNull(reloadedLegacy)
+        assertEquals(false, reloadedLegacy.blocks.single().adjustedByConversation)
+    }
 }

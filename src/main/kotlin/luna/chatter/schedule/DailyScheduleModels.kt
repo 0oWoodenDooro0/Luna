@@ -40,6 +40,7 @@ data class ScheduleBlock(
     val activityDetail: String,
     val statusText: String,
     val availability: AvailabilityState,
+    val adjustedByConversation: Boolean = false,
 ) {
     init {
         require(startMinute in 0 until MINUTES_PER_DAY) {
