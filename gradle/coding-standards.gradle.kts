@@ -705,12 +705,14 @@ fun checkMainSourceLineLimit(projectRoot: File): List<String> {
                 } else if (baselinedMax != null && lineCount <= defaultMaxLines) {
                     violations.add(
                         "[Rule 10: main-source-line-limit] $relPath: $lineCount lines is now <= $defaultMaxLines. " +
-                            "Remove its obsolete entry from gradle/coding-standards-main-lines-baseline.txt.",
+                            "Remove its obsolete entry from gradle/coding-standards-main-lines-baseline.txt " +
+                            "(or run './gradlew tightenCodingStandardsBaselines').",
                     )
                 } else if (baselinedMax != null && lineCount <= baselinedMax - ratchetSlackLines) {
                     violations.add(
                         "[Rule 10: main-source-line-limit] $relPath: $lineCount lines dropped >= $ratchetSlackLines below baseline $baselinedMax. " +
-                            "Tighten its entry in gradle/coding-standards-main-lines-baseline.txt to $lineCount.",
+                            "Tighten its entry in gradle/coding-standards-main-lines-baseline.txt to $lineCount " +
+                            "(or run './gradlew tightenCodingStandardsBaselines').",
                     )
                 }
             }
@@ -718,7 +720,8 @@ fun checkMainSourceLineLimit(projectRoot: File): List<String> {
     (baseline.keys - seenBaselinePaths).sorted().forEach { missingPath ->
         violations.add(
             "[Rule 10: main-source-line-limit] Baseline entry '$missingPath' no longer exists. " +
-                "Remove it from gradle/coding-standards-main-lines-baseline.txt.",
+                "Remove it from gradle/coding-standards-main-lines-baseline.txt " +
+                "(or run './gradlew tightenCodingStandardsBaselines').",
         )
     }
     return violations
@@ -788,5 +791,75 @@ tasks.register("lintCodingStandards") {
             )
         }
         logger.lifecycle("lintCodingStandards: all 11 rules passed.")
+    }
+}
+
+tasks.register("tightenCodingStandardsBaselines") {
+    group = "verification"
+    description = "Auto-tightens shrunk or obsolete Rule 10 entries in gradle/coding-standards-main-lines-baseline.txt (never increases limits)."
+
+    doLast {
+        val defaultMaxLines = 600
+        val baselineFile = File(codingStandardsRoot, "gradle/coding-standards-main-lines-baseline.txt")
+        if (!baselineFile.exists()) {
+            throw GradleException("Baseline file missing: gradle/coding-standards-main-lines-baseline.txt")
+        }
+
+        val headerLines = mutableListOf<String>()
+        val updatedEntries = linkedMapOf<String, Int>()
+        val changes = mutableListOf<String>()
+
+        baselineFile.readLines().forEachIndexed { idx, raw ->
+            val trimmed = raw.trim()
+            if (trimmed.isEmpty() || trimmed.startsWith("#")) {
+                if (updatedEntries.isEmpty()) headerLines.add(raw)
+                return@forEachIndexed
+            }
+            val sep = trimmed.lastIndexOf('=')
+            if (sep <= 0 || sep == trimmed.length - 1) {
+                throw GradleException(
+                    "Invalid baseline entry at gradle/coding-standards-main-lines-baseline.txt:${idx + 1}: '$trimmed'",
+                )
+            }
+            val relPath = trimmed.substring(0, sep).trim()
+            val baselinedMax =
+                trimmed.substring(sep + 1).trim().toIntOrNull()
+                    ?: throw GradleException(
+                        "Invalid line count at gradle/coding-standards-main-lines-baseline.txt:${idx + 1}: '$trimmed'",
+                    )
+            val file = File(codingStandardsRoot, relPath)
+            if (!file.exists()) {
+                changes.add("removed missing $relPath (was $baselinedMax)")
+                return@forEachIndexed
+            }
+            val lineCount = file.useLines { it.count() }
+            when {
+                lineCount <= defaultMaxLines -> {
+                    changes.add("removed $relPath ($lineCount <= $defaultMaxLines, was $baselinedMax)")
+                }
+                lineCount < baselinedMax -> {
+                    updatedEntries[relPath] = lineCount
+                    changes.add("tightened $relPath: $baselinedMax -> $lineCount")
+                }
+                else -> {
+                    updatedEntries[relPath] = baselinedMax
+                }
+            }
+        }
+
+        if (changes.isEmpty()) {
+            logger.lifecycle("tightenCodingStandardsBaselines: no Rule 10 baseline changes needed.")
+            return@doLast
+        }
+
+        val content =
+            buildString {
+                headerLines.forEach { appendLine(it) }
+                updatedEntries.entries.sortedBy { it.key }.forEach { (path, count) ->
+                    appendLine("$path=$count")
+                }
+            }
+        baselineFile.writeText(content)
+        logger.lifecycle("tightenCodingStandardsBaselines: updated ${changes.size} entry(ies):\n  - " + changes.joinToString("\n  - "))
     }
 }

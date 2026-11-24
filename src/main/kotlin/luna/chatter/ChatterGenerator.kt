@@ -1,6 +1,7 @@
 package luna.chatter
 
 import io.ktor.client.HttpClient
+import kotlinx.serialization.json.JsonPrimitive
 import luna.chatter.memory.ChatterMemoryConfig
 import luna.chatter.memory.ChatterMemoryToolHandler
 import luna.core.ai.AiAttemptStage
@@ -13,10 +14,10 @@ import luna.core.ai.AiTraceTrigger
 import luna.core.ai.ContextUrlClassifier
 import luna.core.ai.GeminiHttpClientFactory
 import luna.core.ai.GeminiInteractionClient
-import luna.core.ai.GeminiInteractionInput
 import luna.core.ai.InteractionExecutionResult
 import luna.core.ai.InteractionTraceContext
 import luna.core.ai.NoOpAiTraceRecorder
+import luna.core.ai.ToolExecutionOutcome
 import luna.core.ai.VideoProcessingMode
 import luna.core.ai.withActiveOrStandaloneSession
 import org.slf4j.LoggerFactory
@@ -163,41 +164,57 @@ open class ChatterGenerator(
             )
 
         val allowedCustomEmojiIds = (effectiveInput.applicationEmojis + effectiveInput.guildEmojis).map { it.id.toString() }.toSet()
-        val initialResult =
-            interactionClient.interact(
-                baseUrl = config.cleanBaseUrl,
-                apiKey = config.apiKey,
-                request = request,
-                traceContext =
-                    InteractionTraceContext(
-                        webUrlCount = effectiveInput.webUrls.size,
-                        inputUrls = inputUrls,
-                        videoDurationSeconds = duration,
-                        transcriptLength = effectiveInput.transcript.length,
-                        stage = stage,
-                        variant = null,
-                        pipeline = AiTracePipeline.CHATTER,
-                        trigger = trigger,
-                        allowedCustomEmojiIds = allowedCustomEmojiIds,
-                    ),
+        val traceContext =
+            InteractionTraceContext(
+                webUrlCount = effectiveInput.webUrls.size,
+                inputUrls = inputUrls,
+                videoDurationSeconds = duration,
+                transcriptLength = effectiveInput.transcript.length,
+                stage = stage,
+                variant = null,
+                pipeline = AiTracePipeline.CHATTER,
+                trigger = trigger,
+                allowedCustomEmojiIds = allowedCustomEmojiIds,
             )
 
         val result =
-            if (initialResult is InteractionExecutionResult.FunctionCall && memoryToolsEnabled && memoryToolHandler != null) {
-                resolveToolContinuations(
-                    initialResult = initialResult,
-                    effectiveInput = effectiveInput,
-                    tools = tools,
-                    inputUrls = inputUrls,
-                    duration = duration,
-                    background = background,
-                    trigger = trigger,
-                    allowedCustomEmojiIds = allowedCustomEmojiIds,
-                    memoryToolHandler = memoryToolHandler,
-                    session = session,
-                ) ?: return null
+            if (memoryToolsEnabled && memoryToolHandler != null) {
+                var memoryCallCount = 0
+                interactionClient.interactWithTools(
+                    baseUrl = config.cleanBaseUrl,
+                    apiKey = config.apiKey,
+                    request = request,
+                    traceContext = traceContext,
+                    maxTurns = memoryConfig.maxTurns.coerceAtLeast(1),
+                    continuationStage = AiAttemptStage.CHATTER_TOOL_CONTINUATION,
+                ) { call ->
+                    memoryCallCount++
+                    val toolOutput =
+                        if (memoryCallCount > memoryConfig.maxToolCalls) {
+                            logger.info(
+                                "Chatter memory tool call cap ({}) reached on call {}; returning limit_reached notice",
+                                memoryConfig.maxToolCalls,
+                                memoryCallCount,
+                            )
+                            ChatterMemoryToolHandler.limitReachedResponse()
+                        } else {
+                            memoryToolHandler.handleToolCall(
+                                arguments = call.arguments,
+                                guildId = effectiveInput.guildId,
+                                channelId = effectiveInput.channelId,
+                                defaultAuthorId = effectiveInput.authorId,
+                                workingMemoryStartMs = effectiveInput.workingMemoryStartMs,
+                            )
+                        }
+                    ToolExecutionOutcome.Result(JsonPrimitive(toolOutput))
+                }
             } else {
-                initialResult
+                interactionClient.interact(
+                    baseUrl = config.cleanBaseUrl,
+                    apiKey = config.apiKey,
+                    request = request,
+                    traceContext = traceContext,
+                )
             }
 
         return when (result) {
@@ -253,117 +270,6 @@ open class ChatterGenerator(
                 null
             }
         }
-    }
-
-    private suspend fun resolveToolContinuations(
-        initialResult: InteractionExecutionResult.FunctionCall,
-        effectiveInput: ChatterInput,
-        tools: List<luna.core.ai.GeminiInteractionTool>,
-        inputUrls: List<String>,
-        duration: Long?,
-        background: Boolean,
-        trigger: AiTraceTrigger,
-        allowedCustomEmojiIds: Set<String>,
-        memoryToolHandler: ChatterMemoryToolHandler,
-        session: AiTraceSession?,
-    ): InteractionExecutionResult? {
-        var currentResult: InteractionExecutionResult = initialResult
-        var turnCount = 1
-        var memoryCallCount = 0
-        val maxTurns = memoryConfig.maxTurns.coerceAtLeast(1)
-        val systemInstruction =
-            ChatterPromptBuilder.buildSystemInstruction(
-                personaState = effectiveInput.personaState,
-                memoryToolsEnabled = true,
-            )
-
-        while (currentResult is InteractionExecutionResult.FunctionCall) {
-            if (turnCount >= maxTurns) {
-                val msg = "ChatterGenerator exceeded maxTurns ($maxTurns) during memory tool continuation"
-                logger.warn(msg)
-                session?.fail(AiTraceFailureCategory.PARSE_ERROR, msg)
-                return null
-            }
-
-            val functionCalls = currentResult.functionCalls
-            if (functionCalls.isEmpty()) {
-                val msg = "Gemini returned function_call step with empty functionCalls for interaction ${currentResult.interactionId}"
-                logger.error(msg)
-                session?.fail(AiTraceFailureCategory.PARSE_ERROR, msg)
-                return null
-            }
-
-            val functionResults = mutableListOf<GeminiInteractionInput>()
-            for (call in functionCalls) {
-                if (call.name.isBlank() || call.id.isBlank()) {
-                    val msg = "Malformed function_call step (name='${call.name}', call_id='${call.id}')"
-                    logger.error(msg)
-                    session?.fail(AiTraceFailureCategory.PARSE_ERROR, msg)
-                    return null
-                }
-                if (call.name != ChatterMemoryToolHandler.TOOL_NAME) {
-                    val msg = "Unknown tool call requested by Gemini in Chatter: ${call.name}"
-                    logger.error(msg)
-                    session?.fail(AiTraceFailureCategory.PARSE_ERROR, msg)
-                    return null
-                }
-
-                memoryCallCount++
-                val toolOutput =
-                    if (memoryCallCount > memoryConfig.maxToolCalls) {
-                        logger.info(
-                            "Chatter memory tool call cap ({}) reached on call {}; returning limit_reached notice",
-                            memoryConfig.maxToolCalls,
-                            memoryCallCount,
-                        )
-                        ChatterMemoryToolHandler.limitReachedResponse()
-                    } else {
-                        memoryToolHandler.handleToolCall(
-                            arguments = call.arguments,
-                            guildId = effectiveInput.guildId,
-                            channelId = effectiveInput.channelId,
-                            defaultAuthorId = effectiveInput.authorId,
-                            workingMemoryStartMs = effectiveInput.workingMemoryStartMs,
-                        )
-                    }
-
-                functionResults.add(
-                    GeminiInteractionInput.functionResult(
-                        name = call.name,
-                        callId = call.id,
-                        result = toolOutput,
-                    ),
-                )
-            }
-
-            turnCount++
-            val continuationPayloadLength = functionResults.sumOf { it.result?.toString()?.length ?: 0 }
-            currentResult =
-                interactionClient.continueInteraction(
-                    baseUrl = config.cleanBaseUrl,
-                    apiKey = config.apiKey,
-                    model = config.cleanModel,
-                    previousInteractionId = currentResult.interactionId,
-                    functionResults = functionResults,
-                    systemInstruction = systemInstruction,
-                    tools = tools,
-                    maxOutputTokens = ChatterPromptBuilder.MAX_OUTPUT_TOKENS,
-                    background = background,
-                    traceContext =
-                        InteractionTraceContext(
-                            webUrlCount = effectiveInput.webUrls.size,
-                            inputUrls = inputUrls,
-                            videoDurationSeconds = duration,
-                            transcriptLength = effectiveInput.transcript.length + continuationPayloadLength,
-                            stage = AiAttemptStage.CHATTER_TOOL_CONTINUATION,
-                            variant = ChatterMemoryToolHandler.TOOL_NAME,
-                            pipeline = AiTracePipeline.CHATTER,
-                            trigger = trigger,
-                            allowedCustomEmojiIds = allowedCustomEmojiIds,
-                        ),
-                )
-        }
-        return currentResult
     }
 
     /**

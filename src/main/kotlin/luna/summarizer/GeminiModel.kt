@@ -1,6 +1,5 @@
 package luna.summarizer
 
-import kotlinx.serialization.json.JsonObject
 import luna.core.ai.AiTraceFailureCategory
 import luna.core.ai.ChatImageAttachment
 import luna.core.ai.GeminiInteractionTool
@@ -51,53 +50,40 @@ sealed class SummaryResult {
     ) : SummaryResult()
 
     /**
-     * Tool call requested by Gemini during summarization.
-     *
-     * @property name Function name requested by the model (e.g. `fetch_earlier_messages`).
-     * @property args Parsed argument key-value map.
-     * @property rawArgs Raw JsonObject arguments.
-     * @property continuation Optional continuation function to resume summarization with tool response.
-     */
-    data class ToolCall(
-        val name: String,
-        val args: Map<String, String> = emptyMap(),
-        val rawArgs: JsonObject = JsonObject(emptyMap()),
-        val continuation: (suspend (String) -> SummaryResult)? = null,
-    ) : SummaryResult()
-
-    /**
      * Error result from summarization.
      *
      * @property message Human-readable error message.
      * @property cause Optional underlying throwable.
+     * @property failureCategory Typed AI trace failure category.
      */
     sealed class Error(
         open val message: String,
         open val cause: Throwable? = null,
+        open val failureCategory: AiTraceFailureCategory,
     ) : SummaryResult() {
         data class MissingApiKey(
             override val message: String = "Gemini API key is not configured",
-        ) : Error(message)
+        ) : Error(message, failureCategory = AiTraceFailureCategory.NOT_CONFIGURED)
 
         data class RateLimitExceeded(
             override val message: String = "Gemini API rate limit exceeded",
             val retryAfterSeconds: Long? = null,
-        ) : Error(message)
+        ) : Error(message, failureCategory = AiTraceFailureCategory.RATE_LIMIT)
 
         data class Timeout(
             override val message: String = "Gemini API request timed out",
             override val cause: Throwable? = null,
-        ) : Error(message, cause)
+        ) : Error(message, cause, failureCategory = AiTraceFailureCategory.TIMEOUT)
 
         data class ApiError(
             val statusCode: Int,
             override val message: String,
-        ) : Error(message)
+        ) : Error(message, failureCategory = AiTraceFailureCategory.HTTP_ERROR)
 
         data class Generic(
             override val message: String,
             override val cause: Throwable? = null,
-            val failureCategory: AiTraceFailureCategory? = null,
-        ) : Error(message, cause)
+            override val failureCategory: AiTraceFailureCategory = AiTraceFailureCategory.UNEXPECTED_ERROR,
+        ) : Error(message, cause, failureCategory)
     }
 }

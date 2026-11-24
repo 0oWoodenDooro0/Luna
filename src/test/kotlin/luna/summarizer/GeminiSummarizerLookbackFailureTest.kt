@@ -122,13 +122,11 @@ class GeminiSummarizerLookbackFailureTest {
 
             val result =
                 summarizer.summarize(
-                    SummaryInput(
-                        content = "Test",
-                        tools = listOf(GeminiInteractionTools.FETCH_EARLIER_MESSAGES),
-                    ),
-                )
+                    SummaryInput(content = "Test"),
+                ) { _ -> "unused" }
 
             assertIs<SummaryResult.Error.Generic>(result)
+            assertEquals(AiTraceFailureCategory.PARSE_ERROR, classifySummaryError(result))
             assertTrue(result.message.contains("Unknown tool call", ignoreCase = true))
             assertTrue(result.message.contains("unsupported_shell_execute"))
         }
@@ -169,13 +167,11 @@ class GeminiSummarizerLookbackFailureTest {
 
             val result =
                 summarizer.summarize(
-                    SummaryInput(
-                        content = "Test",
-                        tools = listOf(GeminiInteractionTools.FETCH_EARLIER_MESSAGES),
-                    ),
-                )
+                    SummaryInput(content = "Test"),
+                ) { _ -> "unused" }
 
             assertIs<SummaryResult.Error.Generic>(result)
+            assertEquals(AiTraceFailureCategory.PARSE_ERROR, classifySummaryError(result))
             assertTrue(result.message.contains("reason", ignoreCase = true))
         }
 
@@ -215,13 +211,11 @@ class GeminiSummarizerLookbackFailureTest {
 
             val result =
                 summarizer.summarize(
-                    SummaryInput(
-                        content = "Test",
-                        tools = listOf(GeminiInteractionTools.FETCH_EARLIER_MESSAGES),
-                    ),
-                )
+                    SummaryInput(content = "Test"),
+                ) { _ -> "unused" }
 
             assertIs<SummaryResult.Error.Generic>(result)
+            assertEquals(AiTraceFailureCategory.PARSE_ERROR, classifySummaryError(result))
             assertTrue(result.message.contains("reason", ignoreCase = true))
         }
 

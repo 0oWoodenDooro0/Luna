@@ -291,16 +291,6 @@ class SummaryService(
                                 errorMessage = result.message,
                             )
                         }
-
-                        is SummaryResult.ToolCall -> {
-                            // Unhandled tool call in standard reaction pipeline
-                            statusCache.remove(event.messageId)
-                            logger.warn("Unhandled tool call received for message {}: {}", event.messageId, result.name)
-                            session.fail(
-                                failureCategory = AiTraceFailureCategory.UNEXPECTED_ERROR,
-                                errorSummary = "Unhandled tool call received: ${result.name}",
-                            )
-                        }
                     }
                 } catch (e: Exception) {
                     statusCache.remove(event.messageId)
