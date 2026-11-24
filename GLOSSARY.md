@@ -161,11 +161,11 @@ The multi-turn conversational output cadence that splits a generated `Chatter Pi
 _Avoid_: Multi-line spam, message chunking, stream split
 
 **Chatter Persona**:
-Luna's distinct conversational personality in `Chatter Pipeline`—a quick-witted, curious, sharp-tongued yet approachable friend who is confident yet occasionally scatterbrained, quick to admit mistakes, mildly thin-skinned when pressed, and naturally helpful without acting like an assistant—modulated by `Circadian Persona Drift` and isolated from `Summary Pipeline`.
+Luna's distinct conversational personality in `Chatter Pipeline`—a quick-witted, curious, sharp-tongued yet approachable freelance creator / flexible homebody night-owl friend who is confident yet occasionally scatterbrained, quick to admit mistakes, mildly thin-skinned when pressed, and naturally helpful without acting like an assistant—grounded by `Daily Schedule` and modulated by `Circadian Persona Drift`, isolated from `Summary Pipeline`.
 _Avoid_: Bot bio, assistant tone, static system prompt
 
 **Circadian Persona Drift**:
-The transient in-memory modulation of Luna's `Chatter Persona` conversational tone and effective `Participation Decision` threshold across local time-of-day periods and periodic mood/energy shifts.
+The transient in-memory modulation of Luna's `Chatter Persona` conversational tone and effective `Participation Decision` threshold via periodic mood/energy shifts layered atop `Daily Schedule` (falling back to fixed local time-of-day periods only when `Daily Schedule` is disabled or not yet generated).
 _Avoid_: Persistent mood store, sleep mode, static persona
 
 **Silent Reaction Path**:
@@ -219,4 +219,24 @@ _Avoid_: Time cutoff, hard age filter, linear score penalty
 **Dialogue Context Engine**:
 The policy-driven shared module in `luna.core.ai` that provides unified Discord noise evaluation, external `Reply Reference Chaining`, embed and Tenor/Giphy GIF preview formatting, primary social/YouTube link enrichment (with 2-hour duration cap and regex fallback), and image marker formatting for both `Chatter Pipeline` and `Summary Pipeline` without cross-plugin coupling.
 _Avoid_: Context helper, shared collector, dialogue utils, enrichment service
+
+**Daily Schedule**:
+Luna's globally shared, day-scoped 24-hour sequence of contiguous `Schedule Block` entries generated from `Chatter Persona`, day-of-week, and prior-day continuity, governing `Chatter Pipeline` availability and Discord presence.
+_Avoid_: Bot calendar, cron timetable, sleep mode, static routine
+
+**Schedule Block**:
+A single non-overlapping time interval within a `Daily Schedule` carrying an activity title, contextual detail, Discord status text, and an `Availability State`.
+_Avoid_: Time slot, event item, activity chunk
+
+**Availability State**:
+The four-tier responsiveness classification of a `Schedule Block` (`AVAILABLE`, `BREAK`, `BUSY`, `SLEEPING`) that determines whether `Chatter Pipeline` replies in real time, defers incoming messages, triggers `Deferred Catch-Up`, and sets Luna's Discord presence indicator.
+_Avoid_: Busy flag, online mode, DND switch
+
+**Deferred Catch-Up**:
+The selective backlog review executed when Luna transitions from `BUSY` or `SLEEPING` into `BREAK` or `AVAILABLE`, inspecting bounded missed channel dialogue to reply to or silently react to only a subset of messages (prioritizing direct mentions) rather than answering everything.
+_Avoid_: Backlog dump, missed-message replay, unread queue flush
+
+**Catch-Up Watermark**:
+The per-channel persisted boundary tracking pending missed activity during unavailable blocks and the latest Discord message ID already reviewed by `Deferred Catch-Up`, preventing duplicate replies across restarts.
+_Avoid_: Unread pointer, backlog offset, catch-up cursor
 

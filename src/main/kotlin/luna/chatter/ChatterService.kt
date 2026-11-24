@@ -14,12 +14,12 @@ import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.launch
 import luna.chatter.emoji.ChatterEmojiService
-import luna.chatter.emoji.ChatterEmojiTurn
 import luna.chatter.emoji.DefaultChatterEmojiService
-import luna.chatter.emoji.ReactionResolution
+import luna.chatter.schedule.ChatterScheduleGate
+import luna.chatter.schedule.DailyScheduleProvider
+import luna.chatter.schedule.DailyScheduleStore
 import luna.core.ai.AiTraceDiscordContext
 import luna.core.ai.AiTraceFailureCategory
-import luna.core.ai.AiTraceOutcome
 import luna.core.ai.AiTracePipeline
 import luna.core.ai.AiTraceRecorder
 import luna.core.ai.AiTraceSession
@@ -54,6 +54,8 @@ class ChatterService(
         Random.nextLong(min, max + 1)
     },
     val config: ChatterConfig = ChatterConfig(),
+    val scheduleProvider: DailyScheduleProvider? = null,
+    val scheduleStore: DailyScheduleStore? = null,
 ) {
     private val logger = LoggerFactory.getLogger(ChatterService::class.java)
 
@@ -63,6 +65,19 @@ class ChatterService(
         ChatterDeliveryEngine(
             channelPort = channelPort,
             randomProvider = randomProvider,
+        )
+    private val silentReactionCoordinator =
+        ChatterSilentReactionCoordinator(
+            chatterGenerator = chatterGenerator,
+            deliveryEngine = deliveryEngine,
+            logger = logger,
+        )
+    private val scheduleGate =
+        ChatterScheduleGate(
+            scheduleProvider = scheduleProvider,
+            scheduleStore = scheduleStore,
+            traceRecorder = traceRecorder,
+            apiKey = config.apiKey,
         )
 
     private data class TriggerSnapshot(
@@ -136,6 +151,19 @@ class ChatterService(
             return false
         }
 
+        // 1b. DailySchedule availability gating: defer BUSY / SLEEPING without debounce or LLM calls
+        scheduleGate.activeUnavailableBlock()?.let { unavailableBlock ->
+            scheduleGate.recordDeferredUnavailableMessage(
+                message = message,
+                guildId = snapshot.guildId,
+                authorId = snapshot.authorId,
+                isBotAuthor = snapshot.isBotAuthor,
+                isDirectMention = isDirectMention,
+                block = unavailableBlock,
+            )
+            return false
+        }
+
         val channelId = message.channelId
 
         return burstCoordinator.executeWithDebounce(
@@ -201,8 +229,19 @@ class ChatterService(
         isDirectMention: Boolean,
         session: AiTraceSession,
         markDispatching: () -> Boolean,
-    ): Boolean =
-        deliveryEngine.withReadingSimulation {
+    ): Boolean {
+        scheduleGate.activeUnavailableBlock()?.let { unavailableBlock ->
+            scheduleGate.recordDeferredInSession(
+                message = message,
+                guildId = snapshot.guildId,
+                isBotAuthor = snapshot.isBotAuthor,
+                session = session,
+                block = unavailableBlock,
+            )
+            return false
+        }
+
+        return deliveryEngine.withReadingSimulation {
             val readingScope = this
             val baseThreshold = config.decision.threshold
             val reactionThreshold = config.reactionThreshold
@@ -213,6 +252,7 @@ class ChatterService(
                 effectiveThreshold = personaState.effectiveThreshold,
                 reactionThreshold = reactionThreshold,
             )
+            scheduleGate.recordActiveScheduleInSession(session, personaState.scheduleBlock)
 
             // 2. Gathers recent messages from channel slice to construct state / history
             val fetchLimit = maxOf(contextCollector.decisionMessageCount, contextCollector.historyMessageCount)
@@ -289,7 +329,7 @@ class ChatterService(
                 if (!decision.shouldParticipate) {
                     val noul = decision.noul
                     if (noul != null && reactionThreshold < effectiveThreshold && noul >= reactionThreshold) {
-                        return@withReadingSimulation handleSilentReactionPath(
+                        return@withReadingSimulation silentReactionCoordinator.handleSilentReactionPath(
                             message = message,
                             decisionContext = annotatedDecisionContext,
                             personaState = personaState,
@@ -432,6 +472,7 @@ class ChatterService(
             logger.info("Chatter sent reply to channel {}: {}", message.channelId, deliveredOutput)
             true
         }
+    }
 
     private fun extractTriggerSnapshot(message: Message): TriggerSnapshot =
         TriggerSnapshot(
@@ -461,130 +502,5 @@ class ChatterService(
             logger.debug("No guild custom emojis available for message {} in channel {}", message.id, message.channelId)
         }
         return guildEmojis
-    }
-
-    private fun resolveAuthorId(message: Message): Snowflake? =
-        runCatching { message.author?.id }.getOrNull() ?: runCatching { message.data.author.id }.getOrNull()
-
-    private suspend fun handleSilentReactionPath(
-        message: Message,
-        decisionContext: ChatterDecisionContext,
-        personaState: PersonaState,
-        noul: Double,
-        confidence: Double?,
-        effectiveThreshold: Double,
-        reactionThreshold: Double,
-        readingScope: ReadingSimulationScope,
-        session: AiTraceSession,
-        markDispatching: () -> Boolean,
-        emojiTurn: ChatterEmojiTurn,
-    ): Boolean {
-        if (emojiTurn.isReactionOnCooldown()) {
-            logger.debug("Silent reaction skipped for message {} in channel {} due to reaction cooldown", message.id, message.channelId)
-            session.skip(reason = "Silent reaction skipped due to channel reaction cooldown")
-            return false
-        }
-
-        val preparedEmojis = emojiTurn.prepareReactionEmojis()
-
-        val reactionInput =
-            ChatterInput(
-                transcript = decisionContext.transcript,
-                imageAttachments = decisionContext.images,
-                isDirectMention = false,
-                personaState = personaState,
-                guildEmojis = preparedEmojis.guildEmojis,
-                applicationEmojis = preparedEmojis.applicationEmojis,
-                recentReactions = preparedEmojis.recentReactions,
-            )
-
-        val rawSelection =
-            try {
-                chatterGenerator.selectReactionEmoji(reactionInput)
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: Exception) {
-                logger.warn("ChatterGenerator failed during silent reaction selection for message {}: {}", message.id, e.message, e)
-                session.skip(reason = "Silent reaction selection failed: ${e.message}", failureCategory = AiTraceFailureCategory.UNEXPECTED_ERROR)
-                return false
-            }
-        currentCoroutineContext().ensureActive()
-
-        if (rawSelection.isNullOrBlank()) {
-            logger.debug("Silent reaction selection returned no valid emoji for message {} (noul={})", message.id, noul)
-            if (session.currentOutcome() != AiTraceOutcome.SKIPPED) {
-                session.skip(
-                    reason =
-                        "Silent reaction selection returned no valid emoji (noul=$noul, " +
-                            "reactionThreshold=$reactionThreshold, effectiveThreshold=$effectiveThreshold)",
-                    failureCategory = AiTraceFailureCategory.EMPTY_OUTPUT,
-                )
-            }
-            return false
-        }
-
-        val resolved =
-            when (val resolution = emojiTurn.resolveReaction(rawSelection)) {
-                is ReactionResolution.Declined -> {
-                    logger.debug("Silent reaction selection explicitly declined to react (NONE) for message {}", message.id)
-                    session.skip(reason = "Reaction selection model declined to react (NONE)")
-                    return false
-                }
-
-                is ReactionResolution.Invalid -> {
-                    logger.warn(
-                        "Silent reaction selection returned invalid or unverified emoji '{}' for message {}",
-                        rawSelection.trim().take(80),
-                        message.id,
-                    )
-                    session.skip(reason = resolution.reason, failureCategory = AiTraceFailureCategory.PARSE_ERROR)
-                    return false
-                }
-
-                is ReactionResolution.Valid -> {
-                    resolution
-                }
-            }
-
-        val outcome =
-            try {
-                deliveryEngine.deliverSilentReaction(
-                    target = message,
-                    emoji = resolved.reactionEmoji,
-                    readingSimulation = readingScope,
-                    markDispatching = markDispatching,
-                )
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: Exception) {
-                logger.warn(
-                    "Failed to add silent reaction '{}' to message {} in channel {}: {}",
-                    resolved.normalizedToken,
-                    message.id,
-                    message.channelId,
-                    e.message,
-                    e,
-                )
-                session.skip(reason = "Failed to add Discord reaction: ${e.message}", failureCategory = AiTraceFailureCategory.UNEXPECTED_ERROR)
-                return false
-            }
-        if (outcome == DeliveryOutcome.CancelledBeforeDispatch) {
-            session.skip(reason = "Cancelled right before silent reaction dispatch in channel ${message.channelId}")
-            return false
-        }
-
-        emojiTurn.recordDeliveredReaction(resolved)
-        session.complete(finalOutput = resolved.normalizedToken)
-        logger.info(
-            "Chatter added silent reaction {} to message {} in channel {} (noul={}, confidence={}, reactionThreshold={}, effectiveThreshold={})",
-            resolved.normalizedToken,
-            message.id,
-            message.channelId,
-            noul,
-            confidence,
-            reactionThreshold,
-            effectiveThreshold,
-        )
-        return true
     }
 }

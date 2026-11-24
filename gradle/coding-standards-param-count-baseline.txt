@@ -1,0 +1,12 @@
+# Per-declaration ratchet baseline for production parameter count limits (Rule 12).
+# Non-data-class constructors and functions not listed here have max allowed = 10 parameters.
+# Reduce counts over time; never increase.
+src/main/kotlin/luna/chatter/ChatterContextCollector.kt#ChatterContextCollector=11
+src/main/kotlin/luna/chatter/ChatterService.kt#ChatterService=13
+src/main/kotlin/luna/chatter/ChatterSilentReactionCoordinator.kt#handleSilentReactionPath=11
+src/main/kotlin/luna/chatter/emoji/DefaultChatterEmojiService.kt#DefaultChatterEmojiService=18
+src/main/kotlin/luna/chatter/memory/MemoryDistiller.kt#MemoryDistiller=14
+src/main/kotlin/luna/chatter/schedule/DeferredCatchUpDeliveryExecutor.kt#DeferredCatchUpDeliveryExecutor=12
+src/main/kotlin/luna/chatter/schedule/DeferredCatchUpService.kt#DeferredCatchUpService=16
+src/main/kotlin/luna/core/ai/AiTraceSession.kt#recordAttempt=18
+src/main/kotlin/luna/summarizer/ConversationSliceCollector.kt#ConversationSliceCollector=13

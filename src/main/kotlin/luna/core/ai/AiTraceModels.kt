@@ -130,6 +130,8 @@ data class AiTraceRecord(
     val personaMood: String? = null,
     val effectiveThreshold: Double? = null,
     val reactionThreshold: Double? = null,
+    val scheduleBlockTitle: String? = null,
+    val scheduleAvailability: String? = null,
 )
 
 /**
