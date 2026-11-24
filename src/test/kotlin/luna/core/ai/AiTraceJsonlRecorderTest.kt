@@ -42,6 +42,30 @@ class AiTraceJsonlRecorderTest {
         val logDir = tempDir.resolve("traces")
         Files.createDirectories(logDir)
 
+        val clock = MutableClock(Instant.parse("2026-11-14T12:00:00Z"))
+
+        // Measure a real serialized trace line size so future AiTraceRecord fields do not break byte-budget pruning assertions
+        val probeDir = tempDir.resolve("probe")
+        val probeRecorder =
+            JsonlAiTraceRecorder(
+                traceDir = probeDir,
+                maxDays = 14,
+                maxTotalBytes = 1024L * 1024L,
+                clock = clock,
+                emitCorrelationLog = false,
+            )
+        probeRecorder
+            .startSession(
+                pipeline = AiTracePipeline.CHATTER,
+                trigger = AiTraceTrigger.AMBIENT,
+                discord = AiTraceDiscordContext(guildId = "g", channelId = "c", messageId = "m1", authorId = "a"),
+            ).apply {
+                skip("Decision probability below threshold")
+                finish()
+            }
+        probeRecorder.flushAndClose()
+        val probeBytes = Files.size(probeDir.resolve("ai-2026-11-14.jsonl")).toInt()
+
         // Pre-populate files: 20 days old (age pruned), 5 days old (kept initially, then size pruned), unrelated file (preserved)
         val oldFile = logDir.resolve("ai-2026-10-20.jsonl")
         val midFile = logDir.resolve("ai-2026-11-09.jsonl")
@@ -49,19 +73,18 @@ class AiTraceJsonlRecorderTest {
         val unrelatedFile = logDir.resolve("notes.txt")
 
         Files.writeString(oldFile, "x".repeat(150) + "\n")
-        Files.writeString(midFile, "y".repeat(600) + "\n")
-        Files.writeString(recentFile, "z".repeat(500) + "\n")
+        Files.writeString(midFile, "y".repeat(probeBytes) + "\n")
+        Files.writeString(recentFile, "z".repeat(probeBytes) + "\n")
         Files.writeString(unrelatedFile, "keep me")
 
-        val clock = MutableClock(Instant.parse("2026-11-14T12:00:00Z"))
         // maxDays = 14 -> 2026-10-20 deleted on startup.
-        // maxTotalBytes = 1300 -> midFile (601B) + recentFile (501B) = 1102B <= 1300B on startup;
-        // writing Day 1 (~560B) + Day 2 (~560B) prunes midFile and recentFile while keeping Day 1 + Day 2 <= 1300B.
+        // maxTotalBytes allows 2 trace-sized files (+ headroom) so midFile + recentFile survive startup,
+        // then writing Day 1 and Day 2 prunes midFile and recentFile while keeping Day 1 + Day 2.
         val recorder =
             JsonlAiTraceRecorder(
                 traceDir = logDir,
                 maxDays = 14,
-                maxTotalBytes = 1300L,
+                maxTotalBytes = probeBytes * 2L + 200L,
                 clock = clock,
                 emitCorrelationLog = false,
             )

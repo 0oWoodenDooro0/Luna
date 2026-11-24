@@ -1,5 +1,6 @@
 package luna.chatter
 
+import dev.kord.common.entity.Snowflake
 import dev.kord.core.behavior.channel.createMessage
 import dev.kord.core.behavior.reply
 import dev.kord.core.entity.CustomEmoji
@@ -151,3 +152,6 @@ internal fun Iterable<CustomEmoji>.toAvailableGuildCustomEmojis(): List<GuildCus
             null
         }
     }
+
+internal fun resolveAuthorId(message: Message): Snowflake? =
+    runCatching { message.author?.id }.getOrNull() ?: runCatching { message.data.author.id }.getOrNull()

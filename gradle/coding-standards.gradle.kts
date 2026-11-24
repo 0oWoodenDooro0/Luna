@@ -765,6 +765,228 @@ fun checkLoggerClassMatch(projectRoot: File): List<String> {
 
 val codingStandardsRoot = project.projectDir.canonicalFile
 
+fun stripCommentsAndStringsForParamScan(text: String): String {
+    val sb = StringBuilder(text.length)
+    var i = 0
+    val n = text.length
+    while (i < n) {
+        val c = text[i]
+        when {
+            c == '"' || c == '\'' -> {
+                val (nextIdx, _) = skipStringOrChar(text, i, 1)
+                for (k in i until nextIdx) {
+                    sb.append(if (text[k] == '\n') '\n' else ' ')
+                }
+                i = nextIdx
+            }
+            text.startsWith("//", i) || text.startsWith("/*", i) -> {
+                val (nextIdx, _) = skipWsAndComments(text, i, 1)
+                for (k in i until nextIdx) {
+                    sb.append(if (text[k] == '\n') '\n' else ' ')
+                }
+                i = nextIdx
+            }
+            else -> {
+                sb.append(c)
+                i++
+            }
+        }
+    }
+    return sb.toString()
+}
+
+fun countTopLevelParameters(paramBlock: String): Int {
+    var depthParen = 0
+    var depthBracket = 0
+    var depthBrace = 0
+    var depthAngle = 0
+    var count = 0
+    var hasToken = false
+    for (ch in paramBlock) {
+        when (ch) {
+            '(' -> {
+                depthParen++
+                hasToken = true
+            }
+            ')' -> {
+                depthParen--
+                hasToken = true
+            }
+            '[' -> {
+                depthBracket++
+                hasToken = true
+            }
+            ']' -> {
+                depthBracket--
+                hasToken = true
+            }
+            '{' -> {
+                depthBrace++
+                hasToken = true
+            }
+            '}' -> {
+                depthBrace--
+                hasToken = true
+            }
+            '<' -> {
+                depthAngle++
+                hasToken = true
+            }
+            '>' -> {
+                depthAngle = maxOf(0, depthAngle - 1)
+                hasToken = true
+            }
+            ',' -> {
+                if (depthParen == 0 && depthBracket == 0 && depthBrace == 0 && depthAngle == 0) {
+                    if (hasToken) count++
+                    hasToken = false
+                }
+            }
+            else -> {
+                if (!ch.isWhitespace()) hasToken = true
+            }
+        }
+    }
+    if (hasToken) count++
+    return count
+}
+
+data class ParamCountDeclaration(
+    val key: String,
+    val relPath: String,
+    val line: Int,
+    val kind: String,
+    val name: String,
+    val paramCount: Int,
+)
+
+fun scanProductionParameterCounts(projectRoot: File): List<ParamCountDeclaration> {
+    val mainRoots = findKotlinSourceRoots(projectRoot, "main")
+    val declRegex =
+        Regex(
+            """(?m)^[ \t]*(?:(?:public|internal|private|protected|open|abstract|sealed|final|override|suspend|inline|tailrec|operator|infix|external|actual|expect|inner|value|enum|annotation|data)\s+)*(class|fun)\s+(?:<[^>]+>\s*)?([A-Za-z_][A-Za-z0-9_.]*)\s*(?:<[^>]+>\s*)?(?:(?:private|internal|protected|public)\s+constructor\s*)?\(""",
+        )
+    val dataClassRegex = Regex("""\bdata\s+class\b""")
+    val results = mutableListOf<ParamCountDeclaration>()
+
+    mainRoots.forEach { root ->
+        root
+            .walkTopDown()
+            .filter { it.isFile && it.extension == "kt" }
+            .forEach { file ->
+                val relPath = file.relativeTo(projectRoot).path.replace('\\', '/')
+                val clean = stripCommentsAndStringsForParamScan(file.readText())
+                for (match in declRegex.findAll(clean)) {
+                    val prefix = clean.substring(match.range.first, match.range.last + 1)
+                    if (dataClassRegex.containsMatchIn(prefix)) continue
+                    val kind = match.groupValues[1]
+                    val name = match.groupValues[2]
+                    var j = match.range.last + 1
+                    var depth = 1
+                    while (j < clean.length && depth > 0) {
+                        when (clean[j]) {
+                            '(' -> depth++
+                            ')' -> depth--
+                        }
+                        j++
+                    }
+                    if (depth != 0) continue
+                    val paramBlock = clean.substring(match.range.last + 1, j - 1)
+                    val paramCount = countTopLevelParameters(paramBlock)
+                    val line = clean.substring(0, match.range.first).count { it == '\n' } + 1
+                    results.add(
+                        ParamCountDeclaration(
+                            key = "$relPath#$name",
+                            relPath = relPath,
+                            line = line,
+                            kind = kind,
+                            name = name,
+                            paramCount = paramCount,
+                        ),
+                    )
+                }
+            }
+    }
+    return results
+}
+
+fun checkParameterCountLimit(projectRoot: File): List<String> {
+    val defaultMaxParams = 10
+    val baselineFile = File(projectRoot, "gradle/coding-standards-param-count-baseline.txt")
+    if (!baselineFile.exists()) {
+        return listOf(
+            "[Rule 12: parameter-count-limit] Baseline file missing: gradle/coding-standards-param-count-baseline.txt",
+        )
+    }
+
+    val baseline = mutableMapOf<String, Int>()
+    baselineFile.useLines { lines ->
+        lines.forEachIndexed { idx, raw ->
+            val trimmed = raw.trim()
+            if (trimmed.isEmpty() || trimmed.startsWith("#")) return@forEachIndexed
+            val sep = trimmed.lastIndexOf('=')
+            if (sep <= 0 || sep == trimmed.length - 1) {
+                throw GradleException(
+                    "Invalid baseline entry at gradle/coding-standards-param-count-baseline.txt:${idx + 1}: '$trimmed'",
+                )
+            }
+            val key = trimmed.substring(0, sep).trim()
+            val maxAllowed =
+                trimmed.substring(sep + 1).trim().toIntOrNull()
+                    ?: throw GradleException(
+                        "Invalid parameter count at gradle/coding-standards-param-count-baseline.txt:${idx + 1}: '$trimmed'",
+                    )
+            baseline[key] = maxAllowed
+        }
+    }
+
+    val declarations = scanProductionParameterCounts(projectRoot)
+    val maxCountByKey =
+        declarations.groupBy { it.key }.mapValues { (_, list) -> list.maxOf { it.paramCount } }
+    val violations = mutableListOf<String>()
+
+    declarations.forEach { decl ->
+        val baselinedMax = baseline[decl.key]
+        val maxAllowed = baselinedMax ?: defaultMaxParams
+        if (decl.paramCount > maxAllowed) {
+            violations.add(
+                "[Rule 12: parameter-count-limit] ${decl.relPath}:${decl.line} (${decl.kind} ${decl.name}): " +
+                    "${decl.paramCount} parameters exceeds limit $maxAllowed. " +
+                    "Bundle cohesive collaborators or request objects per CODING_STANDARDS.md §4.",
+            )
+        }
+    }
+
+    baseline.forEach { (key, baselinedMax) ->
+        val currentMax = maxCountByKey[key]
+        when {
+            currentMax == null -> {
+                violations.add(
+                    "[Rule 12: parameter-count-limit] Baseline entry '$key' no longer exists. " +
+                        "Remove it from gradle/coding-standards-param-count-baseline.txt " +
+                        "(or run './gradlew tightenCodingStandardsBaselines').",
+                )
+            }
+            currentMax <= defaultMaxParams -> {
+                violations.add(
+                    "[Rule 12: parameter-count-limit] '$key' now has $currentMax parameters (<= $defaultMaxParams). " +
+                        "Remove its obsolete entry from gradle/coding-standards-param-count-baseline.txt " +
+                        "(or run './gradlew tightenCodingStandardsBaselines').",
+                )
+            }
+            currentMax < baselinedMax -> {
+                violations.add(
+                    "[Rule 12: parameter-count-limit] '$key' dropped from $baselinedMax to $currentMax parameters. " +
+                        "Tighten its entry in gradle/coding-standards-param-count-baseline.txt to $currentMax " +
+                        "(or run './gradlew tightenCodingStandardsBaselines').",
+                )
+            }
+        }
+    }
+
+    return violations
+}
+
 tasks.register("lintCodingStandards") {
     group = "verification"
     description = "Enforces mechanical CODING_STANDARDS.md rules without compiling Kotlin sources."
@@ -783,6 +1005,7 @@ tasks.register("lintCodingStandards") {
                 addAll(checkDiagnosticBooleanAssertions(codingStandardsRoot))
                 addAll(checkMainSourceLineLimit(codingStandardsRoot))
                 addAll(checkLoggerClassMatch(codingStandardsRoot))
+                addAll(checkParameterCountLimit(codingStandardsRoot))
             }
 
         if (violations.isNotEmpty()) {
@@ -791,13 +1014,13 @@ tasks.register("lintCodingStandards") {
                     violations.joinToString("\n\n"),
             )
         }
-        logger.lifecycle("lintCodingStandards: all 11 rules passed.")
+        logger.lifecycle("lintCodingStandards: all 12 rules passed.")
     }
 }
 
 tasks.register("tightenCodingStandardsBaselines") {
     group = "verification"
-    description = "Auto-tightens shrunk or obsolete Rule 10 entries in gradle/coding-standards-main-lines-baseline.txt (never increases limits)."
+    description = "Auto-tightens shrunk or obsolete Rule 10 and Rule 12 baseline entries (never increases limits)."
 
     doLast {
         val defaultMaxLines = 600
@@ -850,17 +1073,80 @@ tasks.register("tightenCodingStandardsBaselines") {
 
         if (changes.isEmpty()) {
             logger.lifecycle("tightenCodingStandardsBaselines: no Rule 10 baseline changes needed.")
-            return@doLast
+        } else {
+            val content =
+                buildString {
+                    headerLines.forEach { appendLine(it) }
+                    updatedEntries.entries.sortedBy { it.key }.forEach { (path, count) ->
+                        appendLine("$path=$count")
+                    }
+                }
+            baselineFile.writeText(content)
+            logger.lifecycle("tightenCodingStandardsBaselines: updated ${changes.size} Rule 10 entry(ies):\n  - " + changes.joinToString("\n  - "))
         }
 
-        val content =
-            buildString {
-                headerLines.forEach { appendLine(it) }
-                updatedEntries.entries.sortedBy { it.key }.forEach { (path, count) ->
-                    appendLine("$path=$count")
+        // Tighten Rule 12 parameter count baseline
+        val defaultMaxParams = 10
+        val paramBaselineFile = File(codingStandardsRoot, "gradle/coding-standards-param-count-baseline.txt")
+        if (!paramBaselineFile.exists()) {
+            throw GradleException("Baseline file missing: gradle/coding-standards-param-count-baseline.txt")
+        }
+        val maxCountByKey =
+            scanProductionParameterCounts(codingStandardsRoot)
+                .groupBy { it.key }
+                .mapValues { (_, list) -> list.maxOf { it.paramCount } }
+        val paramHeaderLines = mutableListOf<String>()
+        val paramUpdatedEntries = linkedMapOf<String, Int>()
+        val paramChanges = mutableListOf<String>()
+        paramBaselineFile.readLines().forEachIndexed { idx, raw ->
+            val trimmed = raw.trim()
+            if (trimmed.isEmpty() || trimmed.startsWith("#")) {
+                if (paramUpdatedEntries.isEmpty()) paramHeaderLines.add(raw)
+                return@forEachIndexed
+            }
+            val sep = trimmed.lastIndexOf('=')
+            if (sep <= 0 || sep == trimmed.length - 1) {
+                throw GradleException(
+                    "Invalid baseline entry at gradle/coding-standards-param-count-baseline.txt:${idx + 1}: '$trimmed'",
+                )
+            }
+            val key = trimmed.substring(0, sep).trim()
+            val baselinedMax =
+                trimmed.substring(sep + 1).trim().toIntOrNull()
+                    ?: throw GradleException(
+                        "Invalid parameter count at gradle/coding-standards-param-count-baseline.txt:${idx + 1}: '$trimmed'",
+                    )
+            val currentMax = maxCountByKey[key]
+            when {
+                currentMax == null -> {
+                    paramChanges.add("removed missing $key (was $baselinedMax)")
+                }
+                currentMax <= defaultMaxParams -> {
+                    paramChanges.add("removed $key ($currentMax <= $defaultMaxParams, was $baselinedMax)")
+                }
+                currentMax < baselinedMax -> {
+                    paramUpdatedEntries[key] = currentMax
+                    paramChanges.add("tightened $key: $baselinedMax -> $currentMax")
+                }
+                else -> {
+                    paramUpdatedEntries[key] = baselinedMax
                 }
             }
-        baselineFile.writeText(content)
-        logger.lifecycle("tightenCodingStandardsBaselines: updated ${changes.size} entry(ies):\n  - " + changes.joinToString("\n  - "))
+        }
+        if (paramChanges.isEmpty()) {
+            logger.lifecycle("tightenCodingStandardsBaselines: no Rule 12 baseline changes needed.")
+        } else {
+            val content =
+                buildString {
+                    paramHeaderLines.forEach { appendLine(it) }
+                    paramUpdatedEntries.entries.sortedBy { it.key }.forEach { (key, count) ->
+                        appendLine("$key=$count")
+                    }
+                }
+            paramBaselineFile.writeText(content)
+            logger.lifecycle(
+                "tightenCodingStandardsBaselines: updated ${paramChanges.size} Rule 12 entry(ies):\n  - " + paramChanges.joinToString("\n  - "),
+            )
+        }
     }
 }

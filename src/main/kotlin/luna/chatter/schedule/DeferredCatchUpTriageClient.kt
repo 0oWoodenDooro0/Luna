@@ -236,15 +236,6 @@ open class DeferredCatchUpTriageClient(
             appendLine("請只輸出合法 JSON，不要包含額外說明文字。")
         }.trim()
 
-    private fun stripMarkdownCodeFences(raw: String): String {
-        val trimmed = raw.trim()
-        if (!trimmed.startsWith("```")) return trimmed
-        val firstNewline = trimmed.indexOf('\n')
-        val withoutOpen = if (firstNewline >= 0) trimmed.substring(firstNewline + 1) else trimmed.removePrefix("```")
-        val lastFence = withoutOpen.lastIndexOf("```")
-        return if (lastFence >= 0) withoutOpen.substring(0, lastFence).trim() else withoutOpen.trim()
-    }
-
     companion object {
         const val MAX_OUTPUT_TOKENS = 1024
         private const val MAX_CONTENT_PREVIEW_CHARS = 300

@@ -19,6 +19,7 @@ import luna.chatter.DeliveryOutcome
 import luna.chatter.GuildCustomEmoji
 import luna.chatter.PersonaStateProvider
 import luna.chatter.emoji.ChatterEmojiService
+import luna.chatter.resolveAuthorId
 import luna.chatter.toAvailableGuildCustomEmojis
 import luna.core.ai.AiTraceDiscordContext
 import luna.core.ai.AiTraceFailureCategory
@@ -280,7 +281,4 @@ internal class DeferredCatchUpDeliveryExecutor(
             logger.warn("Deferred catch-up failed to resolve guild emojis for channel {}: {}", message.channelId, ex.message)
             emptyList()
         }
-
-    private fun resolveAuthorId(message: Message): Snowflake? =
-        runCatching { message.author?.id }.getOrNull() ?: runCatching { message.data.author.id }.getOrNull()
 }

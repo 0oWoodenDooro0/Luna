@@ -444,9 +444,50 @@ class AiTraceRecorderTest {
                     " " +
                     correlationLogs.first().argumentArray?.joinToString(" ")
             assertFalse(logText.contains("SUPER_SECRET_RAW_PROMPT_MARKER"), "Correlation log must not duplicate raw prompts")
-            assertTrue(logText.contains("DEGRADED_SUCCESS"))
+            assertTrue(logText.contains("DEGRADED_SUCCESS"), "Correlation log must include DEGRADED_SUCCESS")
         } finally {
             jsonLogger.detachAppender(listAppender)
         }
+    }
+
+    @Test
+    fun `AiTraceSession finish defaults to FAILED with UNEXPECTED_ERROR when no outcome was set`() {
+        var recordedTrace: AiTraceRecord? = null
+        val customRecorder =
+            object : AiTraceRecorder {
+                override fun isEnabled(): Boolean = true
+
+                override fun startSession(
+                    pipeline: AiTracePipeline,
+                    trigger: AiTraceTrigger,
+                    discord: AiTraceDiscordContext,
+                ): AiTraceSession =
+                    AiTraceSession(
+                        recorder = this,
+                        pipeline = pipeline,
+                        trigger = trigger,
+                        discord = discord,
+                        isEnabled = true,
+                        emitCorrelationLog = false,
+                    )
+
+                override fun record(trace: AiTraceRecord) {
+                    recordedTrace = trace
+                }
+
+                override suspend fun flushAndClose(timeoutMs: Long) = Unit
+            }
+
+        val session =
+            customRecorder.startSession(
+                pipeline = AiTracePipeline.CHATTER,
+                trigger = AiTraceTrigger.AMBIENT,
+                discord = AiTraceDiscordContext(channelId = "c1", messageId = "m1"),
+            )
+        session.finish()
+
+        val trace = assertNotNull(recordedTrace)
+        assertEquals(AiTraceOutcome.FAILED, trace.outcome)
+        assertEquals(AiTraceFailureCategory.UNEXPECTED_ERROR, trace.failureCategory)
     }
 }

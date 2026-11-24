@@ -503,7 +503,4 @@ class ChatterService(
         }
         return guildEmojis
     }
-
-    private fun resolveAuthorId(message: Message): Snowflake? =
-        runCatching { message.author?.id }.getOrNull() ?: runCatching { message.data.author.id }.getOrNull()
 }

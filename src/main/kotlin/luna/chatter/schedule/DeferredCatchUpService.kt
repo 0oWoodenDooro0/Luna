@@ -17,6 +17,7 @@ import luna.chatter.KordChatterChannelAdapter
 import luna.chatter.PersonaStateProvider
 import luna.chatter.emoji.ChatterEmojiService
 import luna.chatter.emoji.DefaultChatterEmojiService
+import luna.chatter.resolveAuthorId
 import luna.core.ai.AiTraceDiscordContext
 import luna.core.ai.AiTraceFailureCategory
 import luna.core.ai.AiTracePipeline
@@ -375,9 +376,6 @@ class DeferredCatchUpService(
     }
 
     private fun messageTimestampMillis(message: Message): Long = runCatching { message.timestamp.toEpochMilliseconds() }.getOrElse { clock.millis() }
-
-    private fun resolveAuthorId(message: Message): Snowflake? =
-        runCatching { message.author?.id }.getOrNull() ?: runCatching { message.data.author.id }.getOrNull()
 
     private fun resolveAuthorName(message: Message): String =
         runCatching { message.author?.username }.getOrNull()?.ifBlank { null }
