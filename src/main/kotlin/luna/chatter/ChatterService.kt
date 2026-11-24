@@ -205,7 +205,7 @@ class ChatterService(
         deliveryEngine.withReadingSimulation {
             val readingScope = this
             val baseThreshold = runCatching { decisionClient.config.threshold }.getOrDefault(ChatterDecisionConfig.DEFAULT_THRESHOLD)
-            val reactionThreshold = runCatching { chatterGenerator.config.normalizedReactionThreshold }.getOrDefault(ChatterConfig.DEFAULT_REACTION_THRESHOLD)
+            val reactionThreshold = runCatching { chatterGenerator.config.reactionThreshold }.getOrDefault(ChatterConfig.DEFAULT_REACTION_THRESHOLD)
             val personaState = personaStateProvider.currentState(baseThreshold)
             session.recordPersonaState(
                 circadianPeriod = personaState.circadianPeriod?.name,

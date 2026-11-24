@@ -164,7 +164,7 @@ class ChatterSilentReactionConcurrencyAndPluginTest {
                 )
             val plugin = ChatterPlugin()
             plugin.initialize(context)
-            assertEquals(0.52, plugin.chatterGenerator?.config?.normalizedReactionThreshold)
+            assertEquals(0.52, plugin.chatterGenerator?.config?.reactionThreshold)
             plugin.shutdown()
         }
 }

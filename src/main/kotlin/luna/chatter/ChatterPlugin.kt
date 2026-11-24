@@ -141,7 +141,7 @@ class ChatterPlugin(
                 debounceMs = chatterConfig.debounceMillis,
                 mentionDebounceMs = chatterConfig.mentionDebounceMillis,
                 maxDebounceMs = chatterConfig.debounceMaxMillis,
-                maxInterrupts = chatterConfig.normalizedMaxInterrupts,
+                maxInterrupts = chatterConfig.maxInterrupts,
             )
         this.burstCoordinator = coordinator
 

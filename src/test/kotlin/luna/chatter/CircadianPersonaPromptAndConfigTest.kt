@@ -51,6 +51,16 @@ class CircadianPersonaPromptAndConfigTest {
                 )
             }
         assertTrue(ex.message?.contains("CHATTER_DRIFT_ENABLED") == true)
+
+        val invalidTimezone =
+            assertFailsWith<ConfigValidationException> {
+                ChatterConfig.from(
+                    EnvReader.of(
+                        "CHATTER_TIMEZONE" to "Mars/Olympus_Mons",
+                    ),
+                )
+            }
+        assertTrue(invalidTimezone.message?.contains("CHATTER_TIMEZONE") == true)
     }
 
     @Test
