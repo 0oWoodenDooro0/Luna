@@ -1,5 +1,6 @@
 package luna.chatter.schedule
 
+import kotlinx.coroutines.test.runTest
 import luna.chatter.ChatterAiTraceTestSupport
 import luna.chatter.ChatterPromptBuilder
 import luna.chatter.PersonaMood
@@ -98,7 +99,7 @@ class DailySchedulePromptAndTraceTest {
     @Test
     fun `AiTraceSession records and redacts scheduleBlockTitle and scheduleAvailability`(
         @TempDir tempDir: Path,
-    ) {
+    ) = runTest {
         val recorder =
             JsonlAiTraceRecorder(
                 traceDir = tempDir,
@@ -117,6 +118,7 @@ class DailySchedulePromptAndTraceTest {
         )
         session.skip("Deferred by DailySchedule")
         session.finish()
+        recorder.flushAndClose()
 
         val records = ChatterAiTraceTestSupport.readTraceLines(tempDir)
         val parsed = records.single()
