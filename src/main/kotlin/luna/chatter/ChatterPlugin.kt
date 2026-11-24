@@ -9,12 +9,17 @@ import luna.chatter.emoji.ChatterEmojiService
 import luna.chatter.emoji.ChatterEmojiVisionResolver
 import luna.chatter.emoji.DefaultChatterEmojiService
 import luna.chatter.memory.ChatterMemoryService
+import luna.chatter.schedule.DailyScheduleCoordinator
+import luna.chatter.schedule.DailyScheduleGenerator
+import luna.chatter.schedule.KordSchedulePresencePort
+import luna.chatter.schedule.SqliteDailyScheduleStore
 import luna.core.ai.GeminiHttpClientFactory
 import luna.core.ai.GeminiInteractionClient
 import luna.core.ai.SocialPeekFactory
 import luna.plugin.LunaPlugin
 import luna.plugin.PluginContext
 import org.slf4j.LoggerFactory
+import java.time.ZoneId
 
 internal fun safeScope(kord: Kord): CoroutineScope {
     val hasValidContext =
@@ -68,6 +73,9 @@ class ChatterPlugin(
         internal set
 
     var memoryService: ChatterMemoryService? = null
+        internal set
+
+    var scheduleCoordinator: DailyScheduleCoordinator? = null
         internal set
 
     var sharedHttpClient: HttpClient? = null
@@ -236,10 +244,46 @@ class ChatterPlugin(
         } catch (e: Exception) {
             logger.warn("Could not register ChatterPlugin message listener to Kord: {}", e.message)
         }
+
+        if (chatterConfig.schedule.enabled) {
+            runCatching {
+                val scheduleStore = SqliteDailyScheduleStore(context.database)
+                val scheduleGenerator =
+                    DailyScheduleGenerator(
+                        interactionClient =
+                            GeminiInteractionClient(
+                                httpClient = httpClient,
+                                traceRecorder = traceRecorder,
+                            ),
+                        model = chatterConfig.cleanModel,
+                        apiKey = chatterConfig.apiKey,
+                        baseUrl = chatterConfig.cleanBaseUrl,
+                        timezone = chatterConfig.timezone,
+                    )
+                val presencePort = KordSchedulePresencePort(context.kord)
+                val scheduleCoordinatorInstance =
+                    DailyScheduleCoordinator(
+                        store = scheduleStore,
+                        generator = scheduleGenerator,
+                        presencePort = presencePort,
+                        enabled = true,
+                        timezone = ZoneId.of(chatterConfig.timezone),
+                    )
+                this.scheduleCoordinator = scheduleCoordinatorInstance
+                scheduleCoordinatorInstance.start(scope)
+            }.onFailure { e ->
+                logger.warn(
+                    "Failed to initialize DailyScheduleCoordinator; degrading without daily schedule: {}",
+                    e.message,
+                )
+            }
+        }
     }
 
     override suspend fun shutdown() {
         registrationJob?.cancel()
+        scheduleCoordinator?.shutdown()
+        scheduleCoordinator = null
         memoryService?.close()
         memoryService = null
         decisionClient?.close()
