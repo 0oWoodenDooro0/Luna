@@ -29,6 +29,9 @@ class ChatterMemoryConfigTest {
         assertEquals(3000L, config.toolTimeoutMs)
         assertEquals(100, config.maxPerUser)
         assertEquals(300, config.maxPerGuild)
+        assertEquals(15, config.maxUnderstandingsPerUser)
+        assertEquals(20, config.maxUnderstandingsPerGuild)
+        assertEquals(1500, config.understandingPreInjectMaxChars)
         assertEquals("/app/lib/vec0.so", config.sqliteVecExtensionPath)
     }
 
@@ -52,6 +55,9 @@ class ChatterMemoryConfigTest {
                 "CHATTER_MEMORY_TOOL_TIMEOUT_MS" to "4500",
                 "CHATTER_MEMORY_MAX_PER_USER" to "150",
                 "CHATTER_MEMORY_MAX_PER_GUILD" to "450",
+                "CHATTER_MEMORY_MAX_UNDERSTANDINGS_PER_USER" to "25",
+                "CHATTER_MEMORY_MAX_UNDERSTANDINGS_PER_GUILD" to "35",
+                "CHATTER_MEMORY_UNDERSTANDING_PRE_INJECT_MAX_CHARS" to "2000",
                 "SQLITE_VEC_EXTENSION_PATH" to "/opt/sqlite/vec0.so",
             )
 
@@ -72,6 +78,9 @@ class ChatterMemoryConfigTest {
         assertEquals(4500L, config.toolTimeoutMs)
         assertEquals(150, config.maxPerUser)
         assertEquals(450, config.maxPerGuild)
+        assertEquals(25, config.maxUnderstandingsPerUser)
+        assertEquals(35, config.maxUnderstandingsPerGuild)
+        assertEquals(2000, config.understandingPreInjectMaxChars)
         assertEquals("/opt/sqlite/vec0.so", config.sqliteVecExtensionPath)
     }
 
@@ -118,6 +127,9 @@ class ChatterMemoryConfigTest {
                 "CHATTER_MEMORY_TOOL_TIMEOUT_MS" to "0",
                 "CHATTER_MEMORY_MAX_PER_USER" to "-10",
                 "CHATTER_MEMORY_MAX_PER_GUILD" to "0",
+                "CHATTER_MEMORY_MAX_UNDERSTANDINGS_PER_USER" to "0",
+                "CHATTER_MEMORY_MAX_UNDERSTANDINGS_PER_GUILD" to "-1",
+                "CHATTER_MEMORY_UNDERSTANDING_PRE_INJECT_MAX_CHARS" to "0",
             )
         for ((key, value) in invalidCases) {
             val ex =
@@ -177,6 +189,9 @@ class ChatterMemoryConfigTest {
                 "CHATTER_MEMORY_TOOL_TIMEOUT_MS" to "3000",
                 "CHATTER_MEMORY_MAX_PER_USER" to "100",
                 "CHATTER_MEMORY_MAX_PER_GUILD" to "300",
+                "CHATTER_MEMORY_MAX_UNDERSTANDINGS_PER_USER" to "15",
+                "CHATTER_MEMORY_MAX_UNDERSTANDINGS_PER_GUILD" to "20",
+                "CHATTER_MEMORY_UNDERSTANDING_PRE_INJECT_MAX_CHARS" to "1500",
                 "SQLITE_VEC_EXTENSION_PATH" to "/app/lib/vec0.so",
             )
 

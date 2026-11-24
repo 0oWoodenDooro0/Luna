@@ -39,6 +39,23 @@ data class ChatterMemoryRecord(
     val updatedAt: Long,
     val lastAccessedAt: Long,
     val expiresAt: Long? = null,
+    val importance: Int = ChatterMemoryStore.DEFAULT_IMPORTANCE,
+    val keywords: String = "",
+)
+
+/**
+ * Persisted pure-relational `Social Understanding` impression in `Long-Term Memory`.
+ */
+data class SocialUnderstandingRecord(
+    val id: Long,
+    val guildId: String,
+    val scope: MemoryScope,
+    val targetUserId: String?,
+    val subject: String,
+    val content: String,
+    val createdAt: Long,
+    val updatedAt: Long,
+    val lastAccessedAt: Long,
 )
 
 /**
@@ -73,6 +90,8 @@ sealed class MemoryMutation {
         val content: String,
         val embedding: FloatArray?,
         val expiresAt: Long? = null,
+        val importance: Int = ChatterMemoryStore.DEFAULT_IMPORTANCE,
+        val keywords: String = "",
     ) : MemoryMutation()
 
     data class Update(
@@ -81,10 +100,42 @@ sealed class MemoryMutation {
         val content: String,
         val embedding: FloatArray?,
         val expiresAt: Long? = null,
+        val importance: Int = ChatterMemoryStore.DEFAULT_IMPORTANCE,
+        val keywords: String = "",
     ) : MemoryMutation()
 
     data class Delete(
         val id: Long,
         val guildId: String,
     ) : MemoryMutation()
+}
+
+/**
+ * Transactional `Social Understanding` mutation applied during `Memory Distillation` Stage 3.
+ */
+sealed class UnderstandingMutation {
+    data class Add(
+        val guildId: String,
+        val scope: MemoryScope,
+        val targetUserId: String?,
+        val subject: String,
+        val content: String,
+    ) : UnderstandingMutation()
+
+    data class Update(
+        val id: Long,
+        val guildId: String,
+        val subject: String,
+        val content: String,
+    ) : UnderstandingMutation()
+
+    data class Reaffirm(
+        val id: Long,
+        val guildId: String,
+    ) : UnderstandingMutation()
+
+    data class Delete(
+        val id: Long,
+        val guildId: String,
+    ) : UnderstandingMutation()
 }

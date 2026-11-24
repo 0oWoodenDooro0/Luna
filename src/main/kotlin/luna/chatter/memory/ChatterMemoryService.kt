@@ -126,6 +126,8 @@ class ChatterMemoryService internal constructor(
                     defaultScoreCutoff = memoryConfig.scoreCutoff,
                     maxPerUser = memoryConfig.maxPerUser,
                     maxPerGuild = memoryConfig.maxPerGuild,
+                    maxUnderstandingsPerUser = memoryConfig.maxUnderstandingsPerUser,
+                    maxUnderstandingsPerGuild = memoryConfig.maxUnderstandingsPerGuild,
                 )
             val embeddingClient =
                 if (chatterConfig.isConfigured) {
