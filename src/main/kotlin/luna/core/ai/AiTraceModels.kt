@@ -55,6 +55,7 @@ enum class AiAttemptStage {
     AGENTIC_VIDEO,
     MEMORY_DISTILL_EXTRACT,
     MEMORY_DISTILL_RECONCILE,
+    MEMORY_DISTILL_UNDERSTANDING,
 }
 
 @Serializable
