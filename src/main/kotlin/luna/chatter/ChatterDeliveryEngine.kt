@@ -73,6 +73,7 @@ internal class ChatterDeliveryEngine(
         selfId: Snowflake?,
         readingSimulation: ReadingSimulationScope,
         markDispatching: () -> Boolean,
+        forceReplyThreading: Boolean = false,
     ): DeliveryOutcome {
         val boundedSegments = segments.take(MAX_REPLY_SEGMENTS)
         if (boundedSegments.isEmpty()) return DeliveryOutcome.CancelledBeforeDispatch
@@ -98,7 +99,7 @@ internal class ChatterDeliveryEngine(
             return DeliveryOutcome.CancelledBeforeDispatch
         }
 
-        val useReplyThreading = shouldUseReplyThreading(anchor, selfId)
+        val useReplyThreading = forceReplyThreading || shouldUseReplyThreading(anchor, selfId)
         if (useReplyThreading) {
             channelPort.sendReply(anchor, boundedSegments.first())
         } else {

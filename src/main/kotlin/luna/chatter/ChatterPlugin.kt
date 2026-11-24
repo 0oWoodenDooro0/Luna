@@ -15,6 +15,9 @@ import luna.chatter.schedule.DailySchedule
 import luna.chatter.schedule.DailyScheduleCoordinator
 import luna.chatter.schedule.DailyScheduleGenerator
 import luna.chatter.schedule.DailyScheduleProvider
+import luna.chatter.schedule.DeferredCatchUpService
+import luna.chatter.schedule.DeferredCatchUpTriageClient
+import luna.chatter.schedule.KordCatchUpChannelAdapter
 import luna.chatter.schedule.KordSchedulePresencePort
 import luna.chatter.schedule.ScheduleBlock
 import luna.chatter.schedule.ScheduleCommand
@@ -83,6 +86,9 @@ class ChatterPlugin(
         internal set
 
     var scheduleCoordinator: DailyScheduleCoordinator? = null
+        internal set
+
+    var deferredCatchUpService: DeferredCatchUpService? = null
         internal set
 
     var scheduleCommand: ScheduleCommand? = null
@@ -276,6 +282,42 @@ class ChatterPlugin(
         val finalService = serviceFactory?.invoke(chatterService) ?: chatterService
         this.service = finalService
 
+        val scheduleCoord = initializedScheduleCoordinator
+        val scheduleSt = initializedScheduleStore
+        if (scheduleCoord != null && scheduleSt != null) {
+            val triageClient =
+                DeferredCatchUpTriageClient(
+                    interactionClient =
+                        GeminiInteractionClient(
+                            httpClient = httpClient,
+                            traceRecorder = traceRecorder,
+                        ),
+                    model = chatterConfig.cleanModel,
+                    apiKey = chatterConfig.apiKey,
+                    baseUrl = chatterConfig.cleanBaseUrl,
+                )
+            val catchUpService =
+                DeferredCatchUpService(
+                    scheduleStore = scheduleSt,
+                    scheduleProvider = scheduleCoord,
+                    triageClient = triageClient,
+                    chatterGenerator = generator,
+                    filter = noiseFilter,
+                    contextCollector = collector,
+                    channelPort = KordChatterChannelAdapter,
+                    catchUpChannelPort = KordCatchUpChannelAdapter(context.kord),
+                    burstCoordinator = coordinator,
+                    personaStateProvider = drift,
+                    emojiService = emojiServiceInstance,
+                    traceRecorder = traceRecorder,
+                    config = chatterConfig,
+                )
+            this.deferredCatchUpService = catchUpService
+            scheduleCoord.setOnBecomeAvailableListener { previous, current ->
+                catchUpService.onBecomeAvailable(previous, current)
+            }
+        }
+
         val scope = safeScope(context.kord)
         initializedMemoryService?.start(kord = context.kord, scope = scope, chatterEnabled = chatterEnabled)
         registerScheduleCommand(kord = context.kord, scope = scope)
@@ -307,6 +349,7 @@ class ChatterPlugin(
         scheduleCommand = null
         scheduleCoordinator?.shutdown()
         scheduleCoordinator = null
+        deferredCatchUpService = null
         memoryService?.close()
         memoryService = null
         decisionClient?.close()
