@@ -1,6 +1,7 @@
 package luna.chatter
 
 import luna.chatter.memory.ChatterMemoryConfig
+import luna.chatter.schedule.ChatterScheduleConfig
 import luna.config.ConfigValidationException
 import luna.config.EnvReader
 import luna.config.SecretMasker
@@ -51,6 +52,7 @@ data class ChatterConfig(
     val decision: Decision = Decision(),
     val filter: ChatterFilterConfig = ChatterFilterConfig(),
     val memory: ChatterMemoryConfig = ChatterMemoryConfig(),
+    val schedule: ChatterScheduleConfig = ChatterScheduleConfig(),
 ) {
     /**
      * Configuration for `gemini-decision-1` participation evaluation (`POST /v1beta/decisions`).
@@ -308,6 +310,7 @@ data class ChatterConfig(
                 )
             val filter = ChatterFilterConfig.from(env)
             val memory = ChatterMemoryConfig.from(env)
+            val schedule = ChatterScheduleConfig.from(env)
 
             return ChatterConfig(
                 apiKey = key,
@@ -328,6 +331,7 @@ data class ChatterConfig(
                 decision = decision,
                 filter = filter,
                 memory = memory,
+                schedule = schedule,
             )
         }
     }
