@@ -177,7 +177,7 @@ class ChatterAiTraceFailureTest {
             val service =
                 ChatterService(
                     filter = ChatterNoiseFilter(),
-                    decisionClient = GeminiDecisionClient(config = ChatterDecisionConfig(apiKey = ""), traceRecorder = recorder),
+                    decisionClient = GeminiDecisionClient(config = ChatterConfig(apiKey = ""), traceRecorder = recorder),
                     chatterGenerator = ChatterGenerator(config = ChatterConfig(apiKey = ""), traceRecorder = recorder),
                     channelPort = FakeChatterChannelPort(),
                     traceRecorder = recorder,
@@ -204,7 +204,7 @@ class ChatterAiTraceFailureTest {
             val service =
                 ChatterService(
                     filter = ChatterNoiseFilter(),
-                    decisionClient = GeminiDecisionClient(config = ChatterDecisionConfig(apiKey = "k"), traceRecorder = recorder),
+                    decisionClient = GeminiDecisionClient(config = ChatterConfig(apiKey = "k"), traceRecorder = recorder),
                     chatterGenerator = ChatterGenerator(config = ChatterConfig(apiKey = "k"), traceRecorder = recorder),
                     channelPort = FakeChatterChannelPort(),
                     contextCollector = emptyCollector,
@@ -242,7 +242,7 @@ class ChatterAiTraceFailureTest {
                     filter = ChatterNoiseFilter(),
                     decisionClient =
                         GeminiDecisionClient(
-                            config = ChatterDecisionConfig(apiKey = "k"),
+                            config = ChatterConfig(apiKey = "k"),
                             httpClient = ChatterAiTraceTestSupport.createHttpClient(decisionEngine),
                             traceRecorder = recorder,
                         ),
@@ -279,7 +279,7 @@ class ChatterAiTraceFailureTest {
                     filter = ChatterNoiseFilter(),
                     decisionClient =
                         GeminiDecisionClient(
-                            config = ChatterDecisionConfig(apiKey = "k"),
+                            config = ChatterConfig(apiKey = "k"),
                             httpClient = httpClient,
                             traceRecorder = recorder,
                         ),
@@ -346,7 +346,7 @@ class ChatterAiTraceFailureTest {
             val service =
                 ChatterService(
                     filter = ChatterNoiseFilter(),
-                    decisionClient = GeminiDecisionClient(config = ChatterDecisionConfig(apiKey = "k"), traceRecorder = recorder),
+                    decisionClient = GeminiDecisionClient(config = ChatterConfig(apiKey = "k"), traceRecorder = recorder),
                     chatterGenerator = ChatterGenerator(config = ChatterConfig(apiKey = "k"), traceRecorder = recorder),
                     channelPort = FakeChatterChannelPort(),
                     contextCollector = failingDecisionCollector,
@@ -368,7 +368,7 @@ class ChatterAiTraceFailureTest {
             val service =
                 ChatterService(
                     filter = ChatterNoiseFilter(),
-                    decisionClient = GeminiDecisionClient(config = ChatterDecisionConfig(apiKey = "k"), traceRecorder = recorder),
+                    decisionClient = GeminiDecisionClient(config = ChatterConfig(apiKey = "k"), traceRecorder = recorder),
                     chatterGenerator = ChatterGenerator(config = ChatterConfig(apiKey = "k"), traceRecorder = recorder),
                     channelPort = FakeChatterChannelPort(),
                     contextCollector = failingReplyCollector,

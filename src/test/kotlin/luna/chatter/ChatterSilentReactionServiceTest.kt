@@ -111,7 +111,7 @@ class ChatterSilentReactionServiceTest {
         val filter = ChatterNoiseFilter(cooldownCache = cooldownCache)
         val decisionClient =
             GeminiDecisionClient(
-                config = ChatterDecisionConfig(apiKey = "secret-key", threshold = 0.70),
+                config = ChatterConfig(apiKey = "secret-key", decision = ChatterConfig.Decision(threshold = 0.70)),
                 httpClient = createClient(mockEngine),
                 traceRecorder = recorder,
             )
@@ -230,7 +230,7 @@ class ChatterSilentReactionServiceTest {
             val filter = ChatterNoiseFilter(cooldownCache = cooldownCache)
             val decisionClient =
                 GeminiDecisionClient(
-                    config = ChatterDecisionConfig(apiKey = "secret-key", threshold = 0.70),
+                    config = ChatterConfig(apiKey = "secret-key", decision = ChatterConfig.Decision(threshold = 0.70)),
                     httpClient = createClient(mockEngine),
                 )
             val chatterGenerator =
@@ -303,7 +303,7 @@ class ChatterSilentReactionServiceTest {
         val filter = ChatterNoiseFilter(cooldownCache = cooldownCache)
         val decisionClient =
             GeminiDecisionClient(
-                config = ChatterDecisionConfig(apiKey = "secret-key", threshold = 0.70),
+                config = ChatterConfig(apiKey = "secret-key", decision = ChatterConfig.Decision(threshold = 0.70)),
                 httpClient = createClient(mockEngine),
                 traceRecorder = recorder,
             )
@@ -335,9 +335,10 @@ class ChatterSilentReactionServiceTest {
 
         // Case 2: reactionThreshold (0.80) >= effectiveThreshold (0.70) with noul = 0.65 -> bypassed
         nextNoul = 0.65
+        val invertedConfig = ChatterConfig(apiKey = "secret-key", reactionThreshold = 0.80)
         val genInverted =
             ChatterGenerator(
-                config = ChatterConfig(apiKey = "secret-key", reactionThreshold = 0.80),
+                config = invertedConfig,
                 httpClient = createClient(mockEngine),
                 traceRecorder = recorder,
             )
@@ -352,6 +353,7 @@ class ChatterSilentReactionServiceTest {
                 burstCoordinator = BoundedChannelBurstCoordinator(debounceMs = 1L),
                 randomProvider = { _, _ -> 0L },
                 personaStateProvider = fixedPersonaProvider(effectiveThreshold = 0.70),
+                config = invertedConfig,
             )
         assertFalse(
             service2.processMessage(ChatterAiTraceTestSupport.createMockMessage(id = 104L, channelId = 204L)),
@@ -408,7 +410,7 @@ class ChatterSilentReactionServiceTest {
             val filter = ChatterNoiseFilter(cooldownCache = cooldownCache)
             val decisionClient =
                 GeminiDecisionClient(
-                    config = ChatterDecisionConfig(apiKey = "secret-key", threshold = 0.70),
+                    config = ChatterConfig(apiKey = "secret-key", decision = ChatterConfig.Decision(threshold = 0.70)),
                     httpClient = createClient(mockEngine),
                     traceRecorder = recorder,
                 )

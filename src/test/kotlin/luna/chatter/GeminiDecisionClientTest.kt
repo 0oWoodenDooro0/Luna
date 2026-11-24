@@ -86,10 +86,13 @@ class GeminiDecisionClientTest {
                 }
 
             val config =
-                ChatterDecisionConfig(
+                ChatterConfig(
                     apiKey = "gemini-secret-token",
-                    model = "gemini-decision-1",
-                    threshold = 0.7,
+                    decision =
+                        ChatterConfig.Decision(
+                            model = "gemini-decision-1",
+                            threshold = 0.7,
+                        ),
                 )
             val client = GeminiDecisionClient(config = config, httpClient = createTestClient(mockEngine))
 
@@ -151,7 +154,7 @@ class GeminiDecisionClientTest {
 
             val client =
                 GeminiDecisionClient(
-                    config = ChatterDecisionConfig(apiKey = "valid-key"),
+                    config = ChatterConfig(apiKey = "valid-key"),
                     httpClient = createTestClient(mockEngine),
                 )
 
@@ -220,7 +223,7 @@ class GeminiDecisionClientTest {
 
             val client =
                 GeminiDecisionClient(
-                    config = ChatterDecisionConfig(apiKey = "valid-key", threshold = 0.7),
+                    config = ChatterConfig(apiKey = "valid-key", decision = ChatterConfig.Decision(threshold = 0.7)),
                     httpClient = createTestClient(mockEngine),
                 )
 
@@ -277,7 +280,7 @@ class GeminiDecisionClientTest {
 
             val client =
                 GeminiDecisionClient(
-                    config = ChatterDecisionConfig(apiKey = "valid-key", threshold = 0.7),
+                    config = ChatterConfig(apiKey = "valid-key", decision = ChatterConfig.Decision(threshold = 0.7)),
                     httpClient = createTestClient(mockEngine),
                 )
 
@@ -316,7 +319,7 @@ class GeminiDecisionClientTest {
 
             val client =
                 GeminiDecisionClient(
-                    config = ChatterDecisionConfig(apiKey = "valid-key", threshold = 0.7),
+                    config = ChatterConfig(apiKey = "valid-key", decision = ChatterConfig.Decision(threshold = 0.7)),
                     httpClient = createTestClient(mockEngine),
                 )
 
@@ -339,7 +342,7 @@ class GeminiDecisionClientTest {
 
             val client =
                 GeminiDecisionClient(
-                    config = ChatterDecisionConfig(apiKey = "valid-key"),
+                    config = ChatterConfig(apiKey = "valid-key"),
                     httpClient = createTestClient(mockEngine),
                 )
 
@@ -419,7 +422,7 @@ class GeminiDecisionClientTest {
 
             val client =
                 GeminiDecisionClient(
-                    config = ChatterDecisionConfig(apiKey = "valid-key"),
+                    config = ChatterConfig(apiKey = "valid-key"),
                     httpClient = createTestClient(mockEngine),
                 )
 
@@ -446,7 +449,7 @@ class GeminiDecisionClientTest {
 
             val unconfiguredClient =
                 GeminiDecisionClient(
-                    config = ChatterDecisionConfig(apiKey = ""),
+                    config = ChatterConfig(apiKey = ""),
                     httpClient = createTestClient(mockEngine),
                 )
             assertFalse(unconfiguredClient.shouldParticipate("[Alice]: Hello"))
@@ -454,7 +457,7 @@ class GeminiDecisionClientTest {
 
             val configuredClient =
                 GeminiDecisionClient(
-                    config = ChatterDecisionConfig(apiKey = "valid-key"),
+                    config = ChatterConfig(apiKey = "valid-key"),
                     httpClient = createTestClient(mockEngine),
                 )
             assertFalse(configuredClient.shouldParticipate("   "))
@@ -475,7 +478,7 @@ class GeminiDecisionClientTest {
 
             val client =
                 GeminiDecisionClient(
-                    config = ChatterDecisionConfig(apiKey = "valid-key", threshold = 0.70),
+                    config = ChatterConfig(apiKey = "valid-key", decision = ChatterConfig.Decision(threshold = 0.70)),
                     httpClient = createTestClient(mockEngine),
                 )
 
@@ -517,7 +520,7 @@ class GeminiDecisionClientTest {
 
                 val client =
                     GeminiDecisionClient(
-                        config = ChatterDecisionConfig(apiKey = "valid-key"),
+                        config = ChatterConfig(apiKey = "valid-key"),
                         httpClient = createTestClient(mockEngine),
                         traceRecorder = recorder,
                     )

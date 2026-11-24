@@ -1,6 +1,5 @@
 package luna.chatter
 
-import dev.kord.common.entity.Snowflake
 import dev.kord.core.Kord
 import io.ktor.client.HttpClient
 import kotlinx.coroutines.CoroutineScope
@@ -9,9 +8,7 @@ import kotlinx.coroutines.Job
 import luna.chatter.emoji.ChatterEmojiService
 import luna.chatter.emoji.ChatterEmojiVisionResolver
 import luna.chatter.emoji.DefaultChatterEmojiService
-import luna.chatter.memory.ChatterMemoryConfig
 import luna.chatter.memory.ChatterMemoryService
-import luna.config.ConfigValidationException
 import luna.core.ai.GeminiHttpClientFactory
 import luna.core.ai.GeminiInteractionClient
 import luna.core.ai.SocialPeekFactory
@@ -35,7 +32,7 @@ internal fun safeScope(kord: Kord): CoroutineScope {
  * and Google Gemini for persona-grounded conversational dialogue generation.
  */
 class ChatterPlugin(
-    private val decisionClientFactory: ((ChatterDecisionConfig) -> GeminiDecisionClient)? = null,
+    private val decisionClientFactory: ((ChatterConfig) -> GeminiDecisionClient)? = null,
     private val generatorFactory: ((ChatterConfig) -> ChatterGenerator)? = null,
     private val serviceFactory: ((ChatterService) -> ChatterService)? = null,
 ) : LunaPlugin {
@@ -85,55 +82,25 @@ class ChatterPlugin(
     private var registrationJob: Job? = null
 
     override suspend fun initialize(context: PluginContext) {
-        val decisionConfig = ChatterDecisionConfig.from(context.env)
-        val geminiApiKey = decisionConfig.apiKey
-
-        val chatterEnabledConfig = context.env.boolean("CHATTER_ENABLED", true)
-        val chatterEnabled = chatterEnabledConfig && geminiApiKey.isNotBlank()
+        val chatterConfig = ChatterConfig.from(context.env)
+        val memoryConfig = chatterConfig.memory
+        val chatterEnabled = chatterConfig.effectiveEnabled
         this.isChatterEnabled = chatterEnabled
-
-        val allowedChannels: Set<Snowflake> =
-            context.env
-                .csv("CHATTER_ALLOWED_CHANNELS")
-                .map { rawId ->
-                    val idValue =
-                        rawId.toULongOrNull()
-                            ?: throw ConfigValidationException(
-                                "Invalid configuration for CHATTER_ALLOWED_CHANNELS: " +
-                                    "expected comma-separated Discord Snowflake IDs, but got '$rawId'",
-                            )
-                    Snowflake(idValue)
-                }.toSet()
-
-        val cooldownSeconds = context.env.long("CHATTER_COOLDOWN_SECONDS", 5L, 0L..Long.MAX_VALUE)
-        val cooldownDurationMs = cooldownSeconds * 1000L
-
-        val youtubeApiKey = context.env.string("YOUTUBE_API_KEY")
-
-        val imagesLimit =
-            context.env.int(
-                "SUMMARY_MAX_IMAGES",
-                ChatterContextCollector.DEFAULT_MAX_IMAGES,
-                1..Int.MAX_VALUE,
-            )
-        this.maxImages = imagesLimit
+        this.maxImages = chatterConfig.maxImages
 
         val traceRecorder = context.aiTraceRecorder
         val httpClient = GeminiHttpClientFactory.create().also { this.sharedHttpClient = it }
 
         val client =
-            decisionClientFactory?.invoke(decisionConfig)
+            decisionClientFactory?.invoke(chatterConfig)
                 ?: GeminiDecisionClient(
-                    config = decisionConfig,
+                    config = chatterConfig,
                     httpClient = httpClient,
                     traceRecorder = traceRecorder,
                 )
         this.decisionClient = client
 
-        val chatterConfig = ChatterConfig.from(context.env)
-        val memoryConfig = ChatterMemoryConfig.from(context.env)
-
-        val cooldown = BoundedChannelCooldownCache(defaultCooldownDurationMs = cooldownDurationMs)
+        val cooldown = BoundedChannelCooldownCache(defaultCooldownDurationMs = chatterConfig.filter.cooldownDurationMs)
         this.cooldownCache = cooldown
 
         val coordinator =
@@ -148,9 +115,7 @@ class ChatterPlugin(
         val noiseFilter =
             ChatterNoiseFilter(
                 cooldownCache = cooldown,
-                enabled = chatterEnabled,
-                allowedChannels = allowedChannels,
-                cooldownDurationMs = cooldownDurationMs,
+                config = chatterConfig.filter.copy(enabled = chatterEnabled),
             )
         this.filter = noiseFilter
 
@@ -163,7 +128,7 @@ class ChatterPlugin(
                         chatterConfig = chatterConfig,
                         memoryConfig = memoryConfig,
                         noiseFilter = noiseFilter,
-                        allowedChannels = allowedChannels,
+                        allowedChannels = chatterConfig.filter.allowedChannels,
                         chatterEnabled = chatterEnabled,
                         kord = context.kord,
                         traceRecorder = traceRecorder,
@@ -190,13 +155,13 @@ class ChatterPlugin(
                 )
         this.chatterGenerator = generator
 
-        val peekResolver = SocialPeekFactory.buildPeekResolver(youtubeApiKey)
+        val peekResolver = SocialPeekFactory.buildPeekResolver(chatterConfig.youtubeApiKey)
         val collector =
             ChatterContextCollector(
                 noiseFilter = noiseFilter,
-                decisionMessageCount = decisionConfig.decisionMessageCount,
+                decisionMessageCount = chatterConfig.decision.decisionMessageCount,
                 historyMessageCount = memoryConfig.historyMessageCount,
-                maxImages = imagesLimit,
+                maxImages = chatterConfig.maxImages,
                 peekResolver = peekResolver,
                 historyWindowMinutes = memoryConfig.historyWindowMinutes,
             )
@@ -247,6 +212,7 @@ class ChatterPlugin(
                 burstCoordinator = coordinator,
                 personaStateProvider = drift,
                 emojiService = emojiServiceInstance,
+                config = chatterConfig,
             )
         val finalService = serviceFactory?.invoke(chatterService) ?: chatterService
         this.service = finalService
@@ -254,7 +220,7 @@ class ChatterPlugin(
         val scope = safeScope(context.kord)
         initializedMemoryService?.start(kord = context.kord, scope = scope, chatterEnabled = chatterEnabled)
 
-        if (geminiApiKey.isBlank()) {
+        if (!chatterConfig.isConfigured) {
             logger.info("GEMINI_API_KEY is not configured; ChatterPlugin running in disabled mode")
             return
         }

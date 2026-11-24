@@ -119,6 +119,9 @@ data class ChatterConfig(
     val cleanBaseUrl: String
         get() = baseUrl.trim().trimEnd('/').removeSuffix("/v1beta")
 
+    val decisionEndpoint: String
+        get() = "$cleanBaseUrl/v1beta/decisions"
+
     val debounceMillis: Long
         get() = (debounceSeconds * 1000.0).roundToLong()
 

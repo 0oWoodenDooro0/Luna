@@ -57,7 +57,7 @@ class ChatterAiTraceTest {
         val recorder = JsonlAiTraceRecorder(traceDir = tempDir, clock = ChatterAiTraceTestSupport.fixedClock)
         val client =
             GeminiDecisionClient(
-                config = ChatterDecisionConfig(apiKey = "secret-decision-key", threshold = 0.7),
+                config = ChatterConfig(apiKey = "secret-decision-key", decision = ChatterConfig.Decision(threshold = 0.7)),
                 httpClient = ChatterAiTraceTestSupport.createHttpClient(mockEngine),
                 traceRecorder = recorder,
             )
@@ -139,7 +139,7 @@ class ChatterAiTraceTest {
         val recorder = JsonlAiTraceRecorder(traceDir = tempDir, clock = ChatterAiTraceTestSupport.fixedClock)
         val client =
             GeminiDecisionClient(
-                config = ChatterDecisionConfig(apiKey = "secret-decision-key", threshold = 0.7),
+                config = ChatterConfig(apiKey = "secret-decision-key", decision = ChatterConfig.Decision(threshold = 0.7)),
                 httpClient = ChatterAiTraceTestSupport.createHttpClient(mockEngine),
                 traceRecorder = recorder,
             )

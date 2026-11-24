@@ -94,7 +94,7 @@ class ChatterServiceChannelPortTest {
         channelPort: FakeChatterChannelPort,
         decisionClient: GeminiDecisionClient =
             mockk(relaxed = true) {
-                every { config } returns ChatterDecisionConfig()
+                every { config } returns ChatterConfig()
                 coEvery { decide(any(), any(), any()) } returns ParticipationDecision(shouldParticipate = true, noul = 0.9, confidence = 0.9)
             },
         chatterGenerator: ChatterGenerator =
@@ -108,6 +108,7 @@ class ChatterServiceChannelPortTest {
         traceRecorder: luna.core.ai.AiTraceRecorder = luna.core.ai.NoOpAiTraceRecorder,
         emojiService: ChatterEmojiService = DefaultChatterEmojiService(),
         randomProvider: (Long, Long) -> Long = { min, _ -> min },
+        serviceConfig: ChatterConfig = ChatterConfig(),
     ): ChatterService =
         ChatterService(
             filter = filter,
@@ -119,6 +120,7 @@ class ChatterServiceChannelPortTest {
             personaStateProvider = CircadianPersonaDrift(enabled = false),
             emojiService = emojiService,
             channelPort = channelPort,
+            config = serviceConfig,
         )
 
     @Test
@@ -161,7 +163,9 @@ class ChatterServiceChannelPortTest {
                 val service = buildService(channelPort = port, randomProvider = { _, _ -> -25L })
                 val result = service.processMessage(mockMessage(id = 10L))
 
-                assertTrue(result) { "Expected reply to succeed despite fail-open read/typing errors" }
+                assertTrue(
+                    result,
+                ) { "Expected reply to succeed despite fail-open read/typing errors" }
                 assertEquals(listOf("Hi there!"), port.sentMessages.map { it.content })
                 assertTrue(serviceAppender.list.any { it.level == Level.WARN && it.formattedMessage.contains("history") }) {
                     "Expected warning log for history fetch failure"
@@ -232,7 +236,7 @@ class ChatterServiceChannelPortTest {
                 }
             val decisionClient =
                 mockk<GeminiDecisionClient>(relaxed = true) {
-                    every { config } returns ChatterDecisionConfig(threshold = 0.8)
+                    every { config } returns ChatterConfig(decision = ChatterConfig.Decision(threshold = 0.8))
                     coEvery { decide(any(), any(), any()) } returns ParticipationDecision(shouldParticipate = false, noul = 0.6, confidence = 0.7)
                 }
             val generator =
@@ -248,6 +252,7 @@ class ChatterServiceChannelPortTest {
                     chatterGenerator = generator,
                     traceRecorder = recorder,
                     emojiService = emojiService,
+                    serviceConfig = ChatterConfig(reactionThreshold = 0.4, decision = ChatterConfig.Decision(threshold = 0.8)),
                 )
 
             val result = service.processMessage(mockMessage(id = 10L, channelId = 100L))
@@ -303,5 +308,59 @@ class ChatterServiceChannelPortTest {
             }
             io.mockk.verify(exactly = 1) { session.skip(any(), isNull()) }
             io.mockk.verify(exactly = 0) { session.fail(any(), any()) }
+        }
+
+    @Test
+    fun `ChatterService reads apiKey, decision threshold, and reactionThreshold from injected config without collaborator config access`() =
+        runTest {
+            val port = FakeChatterChannelPort()
+            val session = mockk<AiTraceSession>(relaxed = true)
+            val recorder =
+                mockk<luna.core.ai.AiTraceRecorder>(relaxed = true) {
+                    every { startSession(any(), any(), any()) } returns session
+                }
+            val decisionClient =
+                mockk<GeminiDecisionClient>(relaxed = true) {
+                    every { config } throws AssertionError("decisionClient.config must not be accessed")
+                    coEvery { decide(any(), any(), any()) } returns ParticipationDecision(shouldParticipate = false, noul = 0.65, confidence = 0.8)
+                }
+            val generator =
+                mockk<ChatterGenerator>(relaxed = true) {
+                    every { config } throws AssertionError("chatterGenerator.config must not be accessed")
+                    coEvery { selectReactionEmoji(any()) } returns "👍"
+                }
+            val serviceConfig =
+                ChatterConfig(
+                    apiKey = "direct-injected-secret",
+                    reactionThreshold = 0.55,
+                    decision = ChatterConfig.Decision(threshold = 0.82),
+                )
+            val service =
+                buildService(
+                    channelPort = port,
+                    decisionClient = decisionClient,
+                    chatterGenerator = generator,
+                    traceRecorder = recorder,
+                    serviceConfig = serviceConfig,
+                )
+
+            val result = service.processMessage(mockMessage(id = 11L, channelId = 100L))
+
+            assertTrue(result) { "Expected processMessage to return true for silent reaction" }
+            assertEquals(1, port.addedReactions.size)
+            assertEquals(
+                dev.kord.core.entity.ReactionEmoji
+                    .Unicode("👍"),
+                port.addedReactions.single().emoji,
+            )
+            io.mockk.verify(exactly = 1) { session.registerSecret("direct-injected-secret") }
+            io.mockk.verify(exactly = 1) {
+                session.recordPersonaState(
+                    circadianPeriod = any(),
+                    personaMood = any(),
+                    effectiveThreshold = 0.82,
+                    reactionThreshold = 0.55,
+                )
+            }
         }
 }

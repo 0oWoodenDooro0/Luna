@@ -117,7 +117,7 @@ class ChatterAiTraceServiceTest {
                 cooldownCache = cooldownCache,
                 allowedChannels = setOf(Snowflake(200L), Snowflake(201L)),
             )
-        val decisionClient = GeminiDecisionClient(config = ChatterDecisionConfig(apiKey = "k"), traceRecorder = recorder)
+        val decisionClient = GeminiDecisionClient(config = ChatterConfig(apiKey = "k"), traceRecorder = recorder)
         val generator = ChatterGenerator(config = ChatterConfig(apiKey = "k"), traceRecorder = recorder)
         val service =
             ChatterService(
@@ -208,7 +208,7 @@ class ChatterAiTraceServiceTest {
             val filter = ChatterNoiseFilter()
             val decisionClient =
                 GeminiDecisionClient(
-                    config = ChatterDecisionConfig(apiKey = "secret-gemini-key"),
+                    config = ChatterConfig(apiKey = "secret-gemini-key"),
                     httpClient = httpClient,
                     traceRecorder = recorder,
                 )
@@ -328,7 +328,7 @@ class ChatterAiTraceServiceTest {
                     filter = ChatterNoiseFilter(),
                     decisionClient =
                         GeminiDecisionClient(
-                            config = ChatterDecisionConfig(apiKey = "secret-key", threshold = 0.7),
+                            config = ChatterConfig(apiKey = "secret-key", decision = ChatterConfig.Decision(threshold = 0.7)),
                             httpClient = httpClient,
                             traceRecorder = recorder,
                         ),
@@ -437,7 +437,7 @@ class ChatterAiTraceServiceTest {
                 filter = ChatterNoiseFilter(),
                 decisionClient =
                     GeminiDecisionClient(
-                        config = ChatterDecisionConfig(apiKey = "secret-key", threshold = 0.7),
+                        config = ChatterConfig(apiKey = "secret-key", decision = ChatterConfig.Decision(threshold = 0.7)),
                         httpClient = httpClient,
                         traceRecorder = recorder,
                     ),

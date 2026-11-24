@@ -95,7 +95,7 @@ class ChatterAiTraceAgenticAndUrlTest {
                 filter = filter,
                 decisionClient =
                     GeminiDecisionClient(
-                        config = ChatterDecisionConfig(apiKey = apiKey),
+                        config = ChatterConfig(apiKey = apiKey),
                         httpClient = httpClient,
                         traceRecorder = recorder,
                     ),
@@ -216,7 +216,7 @@ class ChatterAiTraceAgenticAndUrlTest {
                 filter = filter,
                 decisionClient =
                     GeminiDecisionClient(
-                        config = ChatterDecisionConfig(apiKey = apiKey),
+                        config = ChatterConfig(apiKey = apiKey),
                         httpClient = httpClient,
                         traceRecorder = recorder,
                     ),
@@ -411,7 +411,7 @@ class ChatterAiTraceAgenticAndUrlTest {
                 filter = filter,
                 decisionClient =
                     GeminiDecisionClient(
-                        config = ChatterDecisionConfig(apiKey = apiKey),
+                        config = ChatterConfig(apiKey = apiKey),
                         httpClient = httpClient,
                         traceRecorder = recorder,
                     ),

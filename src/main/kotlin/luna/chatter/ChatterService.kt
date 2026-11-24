@@ -53,6 +53,7 @@ class ChatterService(
     val randomProvider: (minInclusive: Long, maxInclusive: Long) -> Long = { min, max ->
         Random.nextLong(min, max + 1)
     },
+    val config: ChatterConfig = ChatterConfig(),
 ) {
     private val logger = LoggerFactory.getLogger(ChatterService::class.java)
 
@@ -169,8 +170,7 @@ class ChatterService(
                         isDirectMention = isDirectMention,
                     ),
             )
-        runCatching { session.registerSecret(decisionClient.config.apiKey) }
-        runCatching { session.registerSecret(chatterGenerator.config.apiKey) }
+        session.registerSecret(config.apiKey)
 
         return try {
             withAiTraceSession(session) {
@@ -204,8 +204,8 @@ class ChatterService(
     ): Boolean =
         deliveryEngine.withReadingSimulation {
             val readingScope = this
-            val baseThreshold = runCatching { decisionClient.config.threshold }.getOrDefault(ChatterDecisionConfig.DEFAULT_THRESHOLD)
-            val reactionThreshold = runCatching { chatterGenerator.config.reactionThreshold }.getOrDefault(ChatterConfig.DEFAULT_REACTION_THRESHOLD)
+            val baseThreshold = config.decision.threshold
+            val reactionThreshold = config.reactionThreshold
             val personaState = personaStateProvider.currentState(baseThreshold)
             session.recordPersonaState(
                 circadianPeriod = personaState.circadianPeriod?.name,

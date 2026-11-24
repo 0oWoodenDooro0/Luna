@@ -96,7 +96,7 @@ class ChatterPersonaDriftServiceAndTraceTest {
                 filter = ChatterNoiseFilter(),
                 decisionClient =
                     GeminiDecisionClient(
-                        config = ChatterDecisionConfig(apiKey = "secret-key", threshold = 0.7),
+                        config = ChatterConfig(apiKey = "secret-key", decision = ChatterConfig.Decision(threshold = 0.7)),
                         httpClient = httpClient,
                         traceRecorder = recorder,
                     ),
@@ -168,24 +168,26 @@ class ChatterPersonaDriftServiceAndTraceTest {
 
         val recorder = JsonlAiTraceRecorder(traceDir = tempDir, clock = ChatterAiTraceTestSupport.fixedClock)
         val httpClient = ChatterAiTraceTestSupport.createHttpClient(mockEngine)
+        val chatterConfig = ChatterConfig(apiKey = "secret-key", reactionThreshold = 1.0, decision = ChatterConfig.Decision(threshold = 0.7))
         val service =
             ChatterService(
                 filter = ChatterNoiseFilter(),
                 decisionClient =
                     GeminiDecisionClient(
-                        config = ChatterDecisionConfig(apiKey = "secret-key", threshold = 0.7),
+                        config = chatterConfig,
                         httpClient = httpClient,
                         traceRecorder = recorder,
                     ),
                 chatterGenerator =
                     ChatterGenerator(
-                        config = ChatterConfig(apiKey = "secret-key", reactionThreshold = 1.0),
+                        config = chatterConfig,
                         httpClient = httpClient,
                         traceRecorder = recorder,
                     ),
                 channelPort = FakeChatterChannelPort(),
                 traceRecorder = recorder,
                 personaStateProvider = drift,
+                config = chatterConfig,
             )
 
         val message =
@@ -244,7 +246,7 @@ class ChatterPersonaDriftServiceAndTraceTest {
                 filter = ChatterNoiseFilter(),
                 decisionClient =
                     GeminiDecisionClient(
-                        config = ChatterDecisionConfig(apiKey = "secret-key", threshold = 0.7),
+                        config = ChatterConfig(apiKey = "secret-key", decision = ChatterConfig.Decision(threshold = 0.7)),
                         httpClient = httpClient,
                         traceRecorder = recorder,
                     ),
