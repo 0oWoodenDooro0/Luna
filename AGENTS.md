@@ -12,5 +12,5 @@
 ## Verification
 
 - **Inner loop**: Run targeted tests with `--console=plain -q` (e.g. `./gradlew test --tests "luna.summarizer.*" --console=plain -q`; failed test names and exceptions still print under `-q`).
-- **Pre-review / pre-PR**: Run `./gradlew formatKotlin && ./gradlew check --console=plain -q` across all modules (`.githooks/pre-commit` runs `lintKotlin` + `lintCodingStandards`). When pushing immediately, `.githooks/pre-push` already runs `./gradlew check`—run `./gradlew formatKotlin` (confirm clean diff) and CI-parity Docker build, then `git push` without duplicating `./gradlew check` on the same commit.
+- **Pre-review / pre-PR**: Run `./gradlew formatKotlin check --console=plain -q` across all modules (`.githooks/pre-commit` runs `lintKotlin` + `lintCodingStandards`). When pushing immediately, `.githooks/pre-push` already runs `./gradlew check`—run `./gradlew formatKotlin` (confirm clean diff) and CI-parity Docker build, then `git push` without duplicating `./gradlew check` on the same commit.
 - **CI parity**: Run `docker build -t luna:ci-test .` strictly as the final pre-PR/pre-merge check.
