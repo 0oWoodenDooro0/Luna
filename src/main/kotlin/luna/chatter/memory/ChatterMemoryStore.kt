@@ -21,6 +21,8 @@ interface ChatterMemoryStore {
         content: String,
         embedding: FloatArray? = null,
         expiresAt: Long? = null,
+        importance: Int = DEFAULT_IMPORTANCE,
+        keywords: String = "",
     ): ChatterMemoryRecord
 
     fun updateMemory(
@@ -29,6 +31,8 @@ interface ChatterMemoryStore {
         content: String,
         embedding: FloatArray? = null,
         expiresAt: Long? = null,
+        importance: Int = DEFAULT_IMPORTANCE,
+        keywords: String = "",
     ): Boolean
 
     fun deleteMemory(
@@ -71,4 +75,65 @@ interface ChatterMemoryStore {
         scoreCutoff: Double? = null,
         updateLastAccessed: Boolean = true,
     ): List<ChatterMemorySearchHit>
+
+    fun insertUnderstanding(
+        guildId: String,
+        scope: MemoryScope,
+        targetUserId: String? = null,
+        subject: String,
+        content: String,
+    ): SocialUnderstandingRecord
+
+    fun updateUnderstanding(
+        id: Long,
+        guildId: String,
+        subject: String,
+        content: String,
+    ): Boolean
+
+    fun reaffirmUnderstanding(
+        id: Long,
+        guildId: String,
+    ): Boolean
+
+    fun deleteUnderstanding(
+        id: Long,
+        guildId: String,
+    ): Boolean
+
+    fun deleteOwnedUserUnderstanding(
+        id: Long,
+        guildId: String,
+        userId: String,
+    ): Boolean
+
+    fun deleteAllOwnedUserUnderstandings(
+        guildId: String,
+        userId: String,
+    ): Int
+
+    fun listUserUnderstandings(
+        guildId: String,
+        userId: String,
+        limit: Int = Int.MAX_VALUE,
+    ): List<SocialUnderstandingRecord>
+
+    fun listGuildUnderstandings(
+        guildId: String,
+        limit: Int = Int.MAX_VALUE,
+    ): List<SocialUnderstandingRecord>
+
+    fun touchUnderstandings(
+        guildId: String,
+        ids: List<Long>,
+    )
+
+    fun applyUnderstandingMutations(mutations: List<UnderstandingMutation>)
+
+    companion object {
+        const val DEFAULT_IMPORTANCE = 3
+        const val MIN_IMPORTANCE = 1
+        const val MAX_IMPORTANCE = 5
+        const val MAX_KEYWORDS_CHARS = 120
+    }
 }

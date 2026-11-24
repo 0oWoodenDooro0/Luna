@@ -4,6 +4,7 @@ import io.ktor.client.HttpClient
 import kotlinx.serialization.json.JsonPrimitive
 import luna.chatter.memory.ChatterMemoryConfig
 import luna.chatter.memory.ChatterMemoryToolHandler
+import luna.chatter.memory.UnderstandingPreInjector
 import luna.core.ai.AiAttemptStage
 import luna.core.ai.AiTraceDiscordContext
 import luna.core.ai.AiTraceFailureCategory
@@ -38,6 +39,7 @@ open class ChatterGenerator(
     val traceRecorder: AiTraceRecorder = NoOpAiTraceRecorder,
     private val memoryConfig: ChatterMemoryConfig = ChatterMemoryConfig(),
     private val memoryToolHandler: ChatterMemoryToolHandler? = null,
+    private val understandingPreInjector: UnderstandingPreInjector? = null,
 ) : AutoCloseable {
     private val ownsHttpClient: Boolean = httpClient == null
     private val httpClient: HttpClient = httpClient ?: GeminiHttpClientFactory.create()
@@ -153,6 +155,17 @@ open class ChatterGenerator(
             }.distinct()
         val trigger = if (effectiveInput.isDirectMention) AiTraceTrigger.MENTION else AiTraceTrigger.AMBIENT
 
+        val understandingContext =
+            if (memoryConfig.enabled && understandingPreInjector != null && !effectiveInput.guildId.isNullOrBlank()) {
+                understandingPreInjector.buildPreInjectionSection(
+                    guildId = effectiveInput.guildId,
+                    authorId = effectiveInput.authorId,
+                    transcript = effectiveInput.transcript,
+                )
+            } else {
+                null
+            }
+
         val request =
             ChatterPromptBuilder.buildInteractionRequest(
                 input = effectiveInput,
@@ -161,6 +174,7 @@ open class ChatterGenerator(
                 videoProcessingMode = videoProcessingMode,
                 background = background,
                 memoryToolsEnabled = memoryToolsEnabled,
+                understandingContext = understandingContext,
             )
 
         val allowedCustomEmojiIds = (effectiveInput.applicationEmojis + effectiveInput.guildEmojis).map { it.id.toString() }.toSet()

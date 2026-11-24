@@ -351,53 +351,67 @@ class MemoryDistiller(
                 ?: return DistillOutcome.Failed("Failed to extract memory candidates")
         val candidates = MemoryCandidateProcessor.deduplicateBatchCandidates(rawCandidates)
 
-        if (candidates.isEmpty()) {
-            memoryStore.upsertCursor(channelId = channelId, guildId = guildId, lastSummarizedMessageId = newestMessageId)
-            session.complete(finalOutput = "mutations=0, cursor=$newestMessageId")
-            return DistillOutcome.Completed(mutationsCount = 0, newCursorMessageId = newestMessageId)
-        }
+        val understandingCtx =
+            UnderstandingPatchContext(
+                memoryStore = memoryStore,
+                interactionClient = interactionClient,
+                model = config.cleanDistillModel,
+                baseUrl = baseUrl,
+                apiKey = apiKey,
+                maxOutputTokens = MAX_DISTILL_OUTPUT_TOKENS,
+                guildId = guildId,
+                chatMessages = chatMessages,
+                transcript = transcript,
+                selfId = selfId,
+                session = session,
+            )
 
-        val candidateEmbeddings = embeddingClient.embedDocuments(candidates.map { it.content })
-        val hitsPerCandidate =
-            candidates.mapIndexed { idx, candidate ->
-                val searchScope = if (candidate.scope == MemoryScope.USER) SearchScope.USER else SearchScope.GUILD
-                memoryStore.search(
-                    guildId = guildId,
-                    queryText = candidate.content,
-                    queryEmbedding = candidateEmbeddings[idx],
-                    scope = searchScope,
-                    targetUserId = candidate.targetUserId,
-                    limit = TOP_K_SIMILAR,
-                    recencyExcludeMinutes = 0,
-                    scoreCutoff = null,
-                    updateLastAccessed = false,
-                )
+        val mutationsCount =
+            if (candidates.isEmpty()) {
+                memoryStore.upsertCursor(channelId = channelId, guildId = guildId, lastSummarizedMessageId = newestMessageId)
+                0
+            } else {
+                val candidateEmbeddings =
+                    embeddingClient.embedDocuments(
+                        candidates.map { MemoryDistillationPrompt.buildEmbeddingText(it.content, it.keywords) },
+                    )
+                val hitsPerCandidate =
+                    candidates.mapIndexed { idx, candidate ->
+                        val searchScope = if (candidate.scope == MemoryScope.USER) SearchScope.USER else SearchScope.GUILD
+                        memoryStore.search(
+                            guildId = guildId,
+                            queryText = candidate.content,
+                            queryEmbedding = candidateEmbeddings[idx],
+                            scope = searchScope,
+                            targetUserId = candidate.targetUserId,
+                            limit = TOP_K_SIMILAR,
+                            recencyExcludeMinutes = 0,
+                            scoreCutoff = null,
+                            updateLastAccessed = false,
+                        )
+                    }
+
+                val decisions =
+                    reconcileCandidates(candidates, hitsPerCandidate, session)
+                        ?: return DistillOutcome.Failed("Failed to reconcile memory candidates")
+
+                val mutations =
+                    MemoryDistillationPrompt.buildMutations(
+                        guildId = guildId,
+                        candidates = candidates,
+                        candidateEmbeddings = candidateEmbeddings,
+                        decisions = decisions,
+                        embeddingClient = embeddingClient,
+                        clock = clock,
+                    )
+                val cursorUpdate = ChatterMemoryCursor(channelId, guildId, newestMessageId, clock.millis())
+                memoryStore.applyReconciliation(mutations = mutations, cursorUpdate = cursorUpdate)
+                mutations.size
             }
 
-        val decisions =
-            reconcileCandidates(candidates, hitsPerCandidate, session)
-                ?: return DistillOutcome.Failed("Failed to reconcile memory candidates")
-
-        val mutations =
-            MemoryDistillationPrompt.buildMutations(
-                guildId = guildId,
-                candidates = candidates,
-                candidateEmbeddings = candidateEmbeddings,
-                decisions = decisions,
-                embeddingClient = embeddingClient,
-                clock = clock,
-            )
-        val cursorUpdate =
-            ChatterMemoryCursor(
-                channelId = channelId,
-                guildId = guildId,
-                lastSummarizedMessageId = newestMessageId,
-                updatedAt = clock.millis(),
-            )
-        memoryStore.applyReconciliation(mutations = mutations, cursorUpdate = cursorUpdate)
-
-        session.complete(finalOutput = "mutations=${mutations.size}, cursor=$newestMessageId")
-        return DistillOutcome.Completed(mutationsCount = mutations.size, newCursorMessageId = newestMessageId)
+        UnderstandingPatchPrompt.executeFailOpen(understandingCtx)
+        session.complete(finalOutput = "mutations=$mutationsCount, cursor=$newestMessageId")
+        return DistillOutcome.Completed(mutationsCount = mutationsCount, newCursorMessageId = newestMessageId)
     }
 
     private suspend fun extractCandidates(

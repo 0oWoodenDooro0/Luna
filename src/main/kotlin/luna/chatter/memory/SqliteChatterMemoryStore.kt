@@ -4,10 +4,7 @@ import org.jetbrains.exposed.v1.jdbc.Database
 import org.jetbrains.exposed.v1.jdbc.transactions.TransactionManager
 import org.jetbrains.exposed.v1.jdbc.transactions.transaction
 import org.slf4j.LoggerFactory
-import java.nio.ByteBuffer
-import java.nio.ByteOrder
 import java.sql.Connection
-import java.sql.ResultSet
 import java.sql.Statement
 import java.time.Clock
 import java.util.concurrent.TimeUnit
@@ -24,6 +21,8 @@ class SqliteChatterMemoryStore(
     private val maxPerUser: Int = DEFAULT_MAX_PER_USER,
     private val maxPerGuild: Int = DEFAULT_MAX_PER_GUILD,
     private val embeddingDimension: Int = DEFAULT_EMBEDDING_DIMENSION,
+    private val maxUnderstandingsPerUser: Int = DEFAULT_MAX_UNDERSTANDINGS_PER_USER,
+    private val maxUnderstandingsPerGuild: Int = DEFAULT_MAX_UNDERSTANDINGS_PER_GUILD,
 ) : ChatterMemoryStore {
     private val logger = LoggerFactory.getLogger(SqliteChatterMemoryStore::class.java)
 
@@ -35,6 +34,8 @@ class SqliteChatterMemoryStore(
         require(maxPerUser >= 1) { "maxPerUser must be >= 1" }
         require(maxPerGuild >= 1) { "maxPerGuild must be >= 1" }
         require(embeddingDimension >= 1) { "embeddingDimension must be >= 1" }
+        require(maxUnderstandingsPerUser >= 1) { "maxUnderstandingsPerUser must be >= 1" }
+        require(maxUnderstandingsPerGuild >= 1) { "maxUnderstandingsPerGuild must be >= 1" }
 
         isVectorSearchEnabled =
             transaction(database) {
@@ -100,6 +101,8 @@ class SqliteChatterMemoryStore(
         content: String,
         embedding: FloatArray?,
         expiresAt: Long?,
+        importance: Int,
+        keywords: String,
     ): ChatterMemoryRecord =
         transaction(database) {
             insertMemoryInternal(
@@ -110,6 +113,8 @@ class SqliteChatterMemoryStore(
                 content = content,
                 embedding = embedding,
                 expiresAt = expiresAt,
+                importance = importance,
+                keywords = keywords,
                 now = clock.millis(),
             )
         }
@@ -120,6 +125,8 @@ class SqliteChatterMemoryStore(
         content: String,
         embedding: FloatArray?,
         expiresAt: Long?,
+        importance: Int,
+        keywords: String,
     ): Boolean =
         transaction(database) {
             updateMemoryInternal(
@@ -129,6 +136,8 @@ class SqliteChatterMemoryStore(
                 content = content,
                 embedding = embedding,
                 expiresAt = expiresAt,
+                importance = importance,
+                keywords = keywords,
                 now = clock.millis(),
             )
         }
@@ -159,6 +168,8 @@ class SqliteChatterMemoryStore(
                             content = mutation.content,
                             embedding = mutation.embedding,
                             expiresAt = mutation.expiresAt,
+                            importance = mutation.importance,
+                            keywords = mutation.keywords,
                             now = now,
                         )
                     }
@@ -171,6 +182,8 @@ class SqliteChatterMemoryStore(
                             content = mutation.content,
                             embedding = mutation.embedding,
                             expiresAt = mutation.expiresAt,
+                            importance = mutation.importance,
+                            keywords = mutation.keywords,
                             now = now,
                         )
                     }
@@ -200,7 +213,7 @@ class SqliteChatterMemoryStore(
             conn
                 .prepareStatement(
                     """
-                    SELECT id, guild_id, scope, target_user_id, content, created_at, updated_at, last_accessed_at, expires_at
+                    SELECT id, guild_id, scope, target_user_id, content, created_at, updated_at, last_accessed_at, expires_at, importance, keywords
                     FROM chatter_memories
                     WHERE guild_id = ? AND scope = 'user' AND target_user_id = ?
                       AND (expires_at IS NULL OR expires_at > ?)
@@ -213,7 +226,7 @@ class SqliteChatterMemoryStore(
                     ps.executeQuery().use { rs ->
                         buildList {
                             while (rs.next()) {
-                                add(readMemoryRecord(rs))
+                                add(SqliteMemorySearchHelper.readMemoryRecord(rs))
                             }
                         }
                     }
@@ -241,7 +254,7 @@ class SqliteChatterMemoryStore(
                         ps.executeUpdate() > 0
                     }
             if (deleted && isVectorSearchEnabled) {
-                deleteVectorRow(conn, id)
+                SqliteMemorySearchHelper.deleteVectorRow(conn, id)
             }
             deleted
         }
@@ -281,7 +294,7 @@ class SqliteChatterMemoryStore(
                     ps.executeUpdate()
                 }
             if (isVectorSearchEnabled) {
-                targetIds.forEach { deleteVectorRow(conn, it) }
+                targetIds.forEach { SqliteMemorySearchHelper.deleteVectorRow(conn, it) }
             }
             deletedCount
         }
@@ -305,7 +318,7 @@ class SqliteChatterMemoryStore(
             }
         }
 
-        val scopeFilter = buildScopeFilter(scope = scope, targetUserId = targetUserId) ?: return emptyList()
+        val scopeFilter = SqliteMemorySearchHelper.buildScopeFilter(scope = scope, targetUserId = targetUserId) ?: return emptyList()
         val effectiveRecencyMinutes = (recencyExcludeMinutes ?: defaultRecencyExcludeMinutes).coerceAtLeast(0)
         val effectiveCutoff = (scoreCutoff ?: defaultScoreCutoff).coerceIn(0.0, 1.0)
 
@@ -322,7 +335,7 @@ class SqliteChatterMemoryStore(
 
             val candidateLimit = maxOf(limit * 5, 40)
             val lexicalCandidates =
-                searchLexical(
+                SqliteMemorySearchHelper.searchLexical(
                     conn = conn,
                     guildId = guildId,
                     scopeFilter = scopeFilter,
@@ -333,7 +346,7 @@ class SqliteChatterMemoryStore(
                 )
             val vectorCandidates =
                 if (isVectorSearchEnabled && queryEmbedding != null) {
-                    searchVector(
+                    SqliteMemorySearchHelper.searchVector(
                         conn = conn,
                         guildId = guildId,
                         scopeFilter = scopeFilter,
@@ -356,9 +369,148 @@ class SqliteChatterMemoryStore(
                 )
 
             if (updateLastAccessed && fused.isNotEmpty()) {
-                updateLastAccessedAt(conn, fused.map { it.memory.id }, now)
+                SqliteMemorySearchHelper.updateLastAccessedAt(conn, fused.map { it.memory.id }, now)
             }
             fused
+        }
+    }
+
+    override fun insertUnderstanding(
+        guildId: String,
+        scope: MemoryScope,
+        targetUserId: String?,
+        subject: String,
+        content: String,
+    ): SocialUnderstandingRecord =
+        transaction(database) {
+            SqliteSocialUnderstandingHelper.insert(
+                conn = currentJdbcConnection(),
+                guildId = guildId,
+                scope = scope,
+                targetUserId = targetUserId,
+                subject = subject,
+                content = content,
+                now = clock.millis(),
+                maxPerUser = maxUnderstandingsPerUser,
+                maxPerGuild = maxUnderstandingsPerGuild,
+            )
+        }
+
+    override fun updateUnderstanding(
+        id: Long,
+        guildId: String,
+        subject: String,
+        content: String,
+    ): Boolean =
+        transaction(database) {
+            SqliteSocialUnderstandingHelper.update(
+                conn = currentJdbcConnection(),
+                id = id,
+                guildId = guildId,
+                subject = subject,
+                content = content,
+                now = clock.millis(),
+            )
+        }
+
+    override fun reaffirmUnderstanding(
+        id: Long,
+        guildId: String,
+    ): Boolean =
+        transaction(database) {
+            SqliteSocialUnderstandingHelper.reaffirm(
+                conn = currentJdbcConnection(),
+                id = id,
+                guildId = guildId,
+                now = clock.millis(),
+            )
+        }
+
+    override fun deleteUnderstanding(
+        id: Long,
+        guildId: String,
+    ): Boolean =
+        transaction(database) {
+            SqliteSocialUnderstandingHelper.delete(currentJdbcConnection(), id = id, guildId = guildId)
+        }
+
+    override fun deleteOwnedUserUnderstanding(
+        id: Long,
+        guildId: String,
+        userId: String,
+    ): Boolean =
+        transaction(database) {
+            SqliteSocialUnderstandingHelper.deleteOwnedUser(
+                conn = currentJdbcConnection(),
+                id = id,
+                guildId = guildId,
+                userId = userId,
+            )
+        }
+
+    override fun deleteAllOwnedUserUnderstandings(
+        guildId: String,
+        userId: String,
+    ): Int =
+        transaction(database) {
+            SqliteSocialUnderstandingHelper.deleteAllOwnedUser(
+                conn = currentJdbcConnection(),
+                guildId = guildId,
+                userId = userId,
+            )
+        }
+
+    override fun listUserUnderstandings(
+        guildId: String,
+        userId: String,
+        limit: Int,
+    ): List<SocialUnderstandingRecord> =
+        transaction(database) {
+            SqliteSocialUnderstandingHelper.listUser(
+                conn = currentJdbcConnection(),
+                guildId = guildId,
+                userId = userId,
+                limit = limit,
+            )
+        }
+
+    override fun listGuildUnderstandings(
+        guildId: String,
+        limit: Int,
+    ): List<SocialUnderstandingRecord> =
+        transaction(database) {
+            SqliteSocialUnderstandingHelper.listGuild(
+                conn = currentJdbcConnection(),
+                guildId = guildId,
+                limit = limit,
+            )
+        }
+
+    override fun touchUnderstandings(
+        guildId: String,
+        ids: List<Long>,
+    ) {
+        if (ids.isEmpty()) return
+        transaction(database) {
+            SqliteSocialUnderstandingHelper.touch(
+                conn = currentJdbcConnection(),
+                guildId = guildId,
+                ids = ids,
+                now = clock.millis(),
+            )
+        }
+    }
+
+    override fun applyUnderstandingMutations(mutations: List<UnderstandingMutation>) {
+        if (mutations.isEmpty()) return
+        transaction(database) {
+            SqliteSocialUnderstandingHelper.applyMutations(
+                conn = currentJdbcConnection(),
+                mutations = mutations,
+                now = clock.millis(),
+                maxPerUser = maxUnderstandingsPerUser,
+                maxPerGuild = maxUnderstandingsPerGuild,
+            )
         }
     }
 
@@ -412,6 +564,17 @@ class SqliteChatterMemoryStore(
             }
         if (!vecAvailable) return false
 
+        val existingVecSql =
+            conn
+                .prepareStatement(
+                    "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'chatter_memories_vec'",
+                ).use { ps ->
+                    ps.executeQuery().use { rs -> if (rs.next()) rs.getString("sql") else null }
+                }
+        if (existingVecSql != null && !isVectorDimensionCompatible(existingVecSql, embeddingDimension, logger)) {
+            return false
+        }
+
         conn.createStatement().use { stmt ->
             stmt.execute(
                 """
@@ -456,6 +619,8 @@ class SqliteChatterMemoryStore(
         content: String,
         embedding: FloatArray?,
         expiresAt: Long?,
+        importance: Int,
+        keywords: String,
         now: Long,
     ): ChatterMemoryRecord {
         val effectiveTargetUserId =
@@ -473,13 +638,17 @@ class SqliteChatterMemoryStore(
 
         val cleanContent = content.trim()
         require(cleanContent.isNotEmpty()) { "Memory content must not be blank" }
+        val cleanImportance = sanitizeImportance(importance)
+        val cleanKeywords = sanitizeKeywords(keywords)
 
         val insertedId =
             conn
                 .prepareStatement(
                     """
-                    INSERT INTO chatter_memories(guild_id, scope, target_user_id, content, created_at, updated_at, last_accessed_at, expires_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    INSERT INTO chatter_memories(
+                        guild_id, scope, target_user_id, content, created_at, updated_at, last_accessed_at, expires_at, importance, keywords
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """.trimIndent(),
                     Statement.RETURN_GENERATED_KEYS,
                 ).use { ps ->
@@ -495,6 +664,8 @@ class SqliteChatterMemoryStore(
                     } else {
                         ps.setNull(8, java.sql.Types.INTEGER)
                     }
+                    ps.setInt(9, cleanImportance)
+                    ps.setString(10, cleanKeywords)
                     ps.executeUpdate()
                     ps.generatedKeys.use { keys ->
                         check(keys.next()) { "SQLite did not return generated row ID for chatter_memories insert" }
@@ -503,7 +674,7 @@ class SqliteChatterMemoryStore(
                 }
 
         if (isVectorSearchEnabled && embedding != null) {
-            insertVectorRow(conn, insertedId, embedding)
+            SqliteMemorySearchHelper.insertVectorRow(conn, insertedId, embedding)
         }
 
         evictLruOverflow(
@@ -523,6 +694,8 @@ class SqliteChatterMemoryStore(
             updatedAt = now,
             lastAccessedAt = now,
             expiresAt = expiresAt,
+            importance = cleanImportance,
+            keywords = cleanKeywords,
         )
     }
 
@@ -533,6 +706,8 @@ class SqliteChatterMemoryStore(
         content: String,
         embedding: FloatArray?,
         expiresAt: Long?,
+        importance: Int,
+        keywords: String,
         now: Long,
     ): Boolean {
         if (embedding != null) {
@@ -542,13 +717,15 @@ class SqliteChatterMemoryStore(
         }
         val cleanContent = content.trim()
         require(cleanContent.isNotEmpty()) { "Memory content must not be blank" }
+        val cleanImportance = sanitizeImportance(importance)
+        val cleanKeywords = sanitizeKeywords(keywords)
 
         val updated =
             conn
                 .prepareStatement(
                     """
                     UPDATE chatter_memories
-                    SET content = ?, updated_at = ?, last_accessed_at = ?, expires_at = ?
+                    SET content = ?, updated_at = ?, last_accessed_at = ?, expires_at = ?, importance = ?, keywords = ?
                     WHERE id = ? AND guild_id = ?
                     """.trimIndent(),
                 ).use { ps ->
@@ -560,13 +737,15 @@ class SqliteChatterMemoryStore(
                     } else {
                         ps.setNull(4, java.sql.Types.INTEGER)
                     }
-                    ps.setLong(5, id)
-                    ps.setString(6, guildId)
+                    ps.setInt(5, cleanImportance)
+                    ps.setString(6, cleanKeywords)
+                    ps.setLong(7, id)
+                    ps.setString(8, guildId)
                     ps.executeUpdate() > 0
                 }
         if (updated && isVectorSearchEnabled && embedding != null) {
-            deleteVectorRow(conn, id)
-            insertVectorRow(conn, id, embedding)
+            SqliteMemorySearchHelper.deleteVectorRow(conn, id)
+            SqliteMemorySearchHelper.insertVectorRow(conn, id, embedding)
         }
         return updated
     }
@@ -590,7 +769,7 @@ class SqliteChatterMemoryStore(
                     ps.executeUpdate() > 0
                 }
         if (deleted && vecEnabled) {
-            deleteVectorRow(conn, id)
+            SqliteMemorySearchHelper.deleteVectorRow(conn, id)
         }
         return deleted
     }
@@ -633,7 +812,7 @@ class SqliteChatterMemoryStore(
                     """
                     SELECT id FROM chatter_memories
                     WHERE $scopeWhere
-                    ORDER BY MAX(updated_at, last_accessed_at) ASC, id ASC
+                    ORDER BY CASE WHEN importance >= 4 THEN 1 ELSE 0 END ASC, importance ASC, MAX(updated_at, last_accessed_at) ASC, id ASC
                     LIMIT ?
                     """.trimIndent(),
                 ).use { ps ->
@@ -653,212 +832,10 @@ class SqliteChatterMemoryStore(
         }
     }
 
-    private fun insertVectorRow(
-        conn: Connection,
-        memoryId: Long,
-        embedding: FloatArray,
-    ) {
-        conn
-            .prepareStatement("INSERT INTO chatter_memories_vec(memory_id, embedding) VALUES (?, ?)")
-            .use { ps ->
-                ps.setLong(1, memoryId)
-                ps.setBytes(2, floatArrayToLittleEndianBytes(embedding))
-                ps.executeUpdate()
-            }
-    }
-
-    private fun deleteVectorRow(
-        conn: Connection,
-        memoryId: Long,
-    ) {
-        conn
-            .prepareStatement("DELETE FROM chatter_memories_vec WHERE memory_id = ?")
-            .use { ps ->
-                ps.setLong(1, memoryId)
-                ps.executeUpdate()
-            }
-    }
-
-    private data class ScopeFilterSql(
-        val clause: String,
-        val params: List<String>,
-    )
-
-    private fun buildScopeFilter(
-        scope: SearchScope,
-        targetUserId: String?,
-    ): ScopeFilterSql? =
-        when (scope) {
-            SearchScope.USER -> {
-                targetUserId?.takeIf { it.isNotBlank() }?.let { uid ->
-                    ScopeFilterSql("(m.scope = 'user' AND m.target_user_id = ?)", listOf(uid))
-                }
-            }
-
-            SearchScope.GUILD -> {
-                ScopeFilterSql("(m.scope = 'guild')", emptyList())
-            }
-
-            SearchScope.BOTH -> {
-                val uid = targetUserId?.takeIf { it.isNotBlank() }
-                if (uid != null) {
-                    ScopeFilterSql(
-                        "((m.scope = 'user' AND m.target_user_id = ?) OR (m.scope = 'guild'))",
-                        listOf(uid),
-                    )
-                } else {
-                    ScopeFilterSql("(m.scope = 'guild')", emptyList())
-                }
-            }
-        }
-
-    private fun searchLexical(
-        conn: Connection,
-        guildId: String,
-        scopeFilter: ScopeFilterSql,
-        now: Long,
-        maxUpdatedAt: Long?,
-        queryText: String,
-        limit: Int,
-    ): List<ChatterMemoryRecord> {
-        val tokens = queryText.trim().split(WHITESPACE_REGEX).filter { it.isNotEmpty() }
-        if (tokens.isEmpty()) return emptyList()
-
-        val trigramTokens = tokens.filter { it.length >= 3 }
-        val recencySql = if (maxUpdatedAt != null) "AND m.updated_at <= ?" else ""
-
-        return if (trigramTokens.isNotEmpty()) {
-            val matchQuery =
-                trigramTokens.joinToString(" OR ") { token ->
-                    "\"${token.replace("\"", "\"\"")}\""
-                }
-            val sql =
-                """
-                SELECT m.id, m.guild_id, m.scope, m.target_user_id, m.content, m.created_at, m.updated_at, m.last_accessed_at, m.expires_at
-                FROM chatter_memories_fts f
-                JOIN chatter_memories m ON m.id = f.rowid
-                WHERE chatter_memories_fts MATCH ?
-                  AND m.guild_id = ?
-                  AND ${scopeFilter.clause}
-                  AND (m.expires_at IS NULL OR m.expires_at > ?)
-                  $recencySql
-                ORDER BY bm25(chatter_memories_fts), m.updated_at DESC
-                LIMIT ?
-                """.trimIndent()
-            conn.prepareStatement(sql).use { ps ->
-                var idx = 1
-                ps.setString(idx++, matchQuery)
-                ps.setString(idx++, guildId)
-                for (p in scopeFilter.params) {
-                    ps.setString(idx++, p)
-                }
-                ps.setLong(idx++, now)
-                if (maxUpdatedAt != null) {
-                    ps.setLong(idx++, maxUpdatedAt)
-                }
-                ps.setInt(idx, limit)
-                ps.executeQuery().use { rs ->
-                    buildList {
-                        while (rs.next()) add(readMemoryRecord(rs))
-                    }
-                }
-            }
-        } else {
-            val likeClauses = tokens.joinToString(" OR ") { "m.content LIKE ? ESCAPE '\\'" }
-            val sql =
-                """
-                SELECT m.id, m.guild_id, m.scope, m.target_user_id, m.content, m.created_at, m.updated_at, m.last_accessed_at, m.expires_at
-                FROM chatter_memories m
-                WHERE m.guild_id = ?
-                  AND ${scopeFilter.clause}
-                  AND (m.expires_at IS NULL OR m.expires_at > ?)
-                  $recencySql
-                  AND ($likeClauses)
-                ORDER BY m.updated_at DESC, m.id DESC
-                LIMIT ?
-                """.trimIndent()
-            conn.prepareStatement(sql).use { ps ->
-                var idx = 1
-                ps.setString(idx++, guildId)
-                for (p in scopeFilter.params) {
-                    ps.setString(idx++, p)
-                }
-                ps.setLong(idx++, now)
-                if (maxUpdatedAt != null) {
-                    ps.setLong(idx++, maxUpdatedAt)
-                }
-                for (token in tokens) {
-                    ps.setString(idx++, "%${escapeLikePattern(token)}%")
-                }
-                ps.setInt(idx, limit)
-                ps.executeQuery().use { rs ->
-                    buildList {
-                        while (rs.next()) add(readMemoryRecord(rs))
-                    }
-                }
-            }
-        }
-    }
-
     internal data class VectorCandidate(
         val record: ChatterMemoryRecord,
         val cosineSimilarity: Double,
     )
-
-    private fun searchVector(
-        conn: Connection,
-        guildId: String,
-        scopeFilter: ScopeFilterSql,
-        now: Long,
-        maxUpdatedAt: Long?,
-        queryEmbedding: FloatArray,
-        limit: Int,
-    ): List<VectorCandidate> {
-        val sql = buildVectorSearchSql(scopeClause = scopeFilter.clause, hasRecencyFilter = maxUpdatedAt != null)
-        return conn.prepareStatement(sql).use { ps ->
-            var idx = 1
-            ps.setBytes(idx++, floatArrayToLittleEndianBytes(queryEmbedding))
-            ps.setInt(idx++, limit)
-            ps.setString(idx++, guildId)
-            for (p in scopeFilter.params) ps.setString(idx++, p)
-            ps.setLong(idx++, now)
-            if (maxUpdatedAt != null) ps.setLong(idx++, maxUpdatedAt)
-            ps.setInt(idx, limit)
-            ps.executeQuery().use { rs ->
-                buildList {
-                    while (rs.next()) {
-                        add(VectorCandidate(readMemoryRecord(rs), 1.0 - rs.getDouble("distance")))
-                    }
-                }
-            }
-        }
-    }
-
-    private fun updateLastAccessedAt(
-        conn: Connection,
-        ids: List<Long>,
-        now: Long,
-    ) {
-        val placeholders = ids.joinToString(",") { "?" }
-        conn.prepareStatement("UPDATE chatter_memories SET last_accessed_at = ? WHERE id IN ($placeholders)").use { ps ->
-            ps.setLong(1, now)
-            ids.forEachIndexed { index, id -> ps.setLong(index + 2, id) }
-            ps.executeUpdate()
-        }
-    }
-
-    private fun readMemoryRecord(rs: ResultSet): ChatterMemoryRecord =
-        ChatterMemoryRecord(
-            id = rs.getLong("id"),
-            guildId = rs.getString("guild_id"),
-            scope = MemoryScope.fromDbValue(rs.getString("scope")),
-            targetUserId = rs.getString("target_user_id"),
-            content = rs.getString("content"),
-            createdAt = rs.getLong("created_at"),
-            updatedAt = rs.getLong("updated_at"),
-            lastAccessedAt = rs.getLong("last_accessed_at"),
-            expiresAt = rs.getObject("expires_at")?.let { (it as Number).toLong() },
-        )
 
     companion object {
         const val DEFAULT_RECENCY_EXCLUDE_MINUTES = 10
@@ -866,34 +843,40 @@ class SqliteChatterMemoryStore(
         const val DEFAULT_MAX_PER_USER = 100
         const val DEFAULT_MAX_PER_GUILD = 300
         const val DEFAULT_EMBEDDING_DIMENSION = 768
+        const val DEFAULT_MAX_UNDERSTANDINGS_PER_USER = 15
+        const val DEFAULT_MAX_UNDERSTANDINGS_PER_GUILD = 20
         private val WHITESPACE_REGEX = Regex("""\s+""")
+        private val VECTOR_DIMENSION_REGEX = Regex("""float\[(\d+)]""")
 
-        private fun escapeLikePattern(token: String): String = token.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        internal fun sanitizeImportance(importance: Int): Int = importance.coerceIn(ChatterMemoryStore.MIN_IMPORTANCE, ChatterMemoryStore.MAX_IMPORTANCE)
+
+        internal fun sanitizeKeywords(keywords: String): String {
+            val normalized = keywords.trim().replace(WHITESPACE_REGEX, " ")
+            if (normalized.isEmpty()) return ""
+            return normalized.take(ChatterMemoryStore.MAX_KEYWORDS_CHARS).trim()
+        }
+
+        internal fun isVectorDimensionCompatible(
+            existingTableSql: String,
+            expectedDimension: Int,
+            logger: org.slf4j.Logger,
+        ): Boolean {
+            val match = VECTOR_DIMENSION_REGEX.find(existingTableSql) ?: return true
+            val existingDimension = match.groupValues[1].toIntOrNull() ?: return true
+            if (existingDimension != expectedDimension) {
+                logger.warn(
+                    "chatter_memories_vec embedding dimension mismatch (expected {}, found {}); degrading to lexical FTS5/LIKE fallback mode",
+                    expectedDimension,
+                    existingDimension,
+                )
+                return false
+            }
+            return true
+        }
 
         internal fun buildVectorSearchSql(
             scopeClause: String,
             hasRecencyFilter: Boolean,
-        ): String {
-            val prefilterScopeClause = scopeClause.replace("m.", "m2.")
-            val prefilterRecencySql = if (hasRecencyFilter) "AND m2.updated_at <= ?" else ""
-            return """
-                SELECT m.id, m.guild_id, m.scope, m.target_user_id, m.content, m.created_at, m.updated_at, m.last_accessed_at, m.expires_at, v.distance
-                FROM chatter_memories_vec v
-                JOIN chatter_memories m ON m.id = v.memory_id
-                WHERE v.embedding MATCH ? AND v.k = ?
-                  AND v.memory_id IN (
-                      SELECT m2.id FROM chatter_memories m2
-                      WHERE m2.guild_id = ? AND $prefilterScopeClause AND (m2.expires_at IS NULL OR m2.expires_at > ?) $prefilterRecencySql
-                  )
-                ORDER BY v.distance ASC
-                LIMIT ?
-                """.trimIndent()
-        }
-
-        internal fun floatArrayToLittleEndianBytes(values: FloatArray): ByteArray {
-            val buffer = ByteBuffer.allocate(values.size * 4).order(ByteOrder.LITTLE_ENDIAN)
-            for (v in values) buffer.putFloat(v)
-            return buffer.array()
-        }
+        ): String = SqliteMemorySearchHelper.buildVectorSearchSql(scopeClause, hasRecencyFilter)
     }
 }

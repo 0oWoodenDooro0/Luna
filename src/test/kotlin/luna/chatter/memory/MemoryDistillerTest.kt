@@ -170,24 +170,32 @@ class MemoryDistillerTest {
                             interactionPayloads.add(body)
                             interactionCallCount++
                             val responseText =
-                                if (interactionCallCount == 1) {
-                                    """
-                                    [
-                                      {"scope": "user", "target_user_id": "111", "content": "Alice moved to Kaohsiung"},
-                                      {"scope": "user", "target_user_id": "111", "content": "Alice sold her Honda Civic"},
-                                      {"scope": "guild", "target_user_id": null, "content": "The server hosts weekly Friday movie nights"},
-                                      {"scope": "user", "target_user_id": "222", "content": "Bob prefers dark mode"}
-                                    ]
-                                    """.trimIndent()
-                                } else {
-                                    """
-                                    [
-                                      {"action": "UPDATE", "memory_id": ${existingToUpdate.id}, "candidate_index": 0, "content": "Alice lives in Kaohsiung"},
-                                      {"action": "DELETE", "memory_id": ${existingToDelete.id}, "candidate_index": 1},
-                                      {"action": "INSERT", "candidate_index": 2, "content": "The server hosts weekly Friday movie nights"},
-                                      {"action": "NOOP", "candidate_index": 3}
-                                    ]
-                                    """.trimIndent()
+                                when (interactionCallCount) {
+                                    1 -> {
+                                        """
+                                        [
+                                          {"scope": "user", "target_user_id": "111", "content": "Alice moved to Kaohsiung"},
+                                          {"scope": "user", "target_user_id": "111", "content": "Alice sold her Honda Civic"},
+                                          {"scope": "guild", "target_user_id": null, "content": "The server hosts weekly Friday movie nights"},
+                                          {"scope": "user", "target_user_id": "222", "content": "Bob prefers dark mode"}
+                                        ]
+                                        """.trimIndent()
+                                    }
+
+                                    2 -> {
+                                        """
+                                        [
+                                          {"action": "UPDATE", "memory_id": ${existingToUpdate.id}, "candidate_index": 0, "content": "Alice lives in Kaohsiung"},
+                                          {"action": "DELETE", "memory_id": ${existingToDelete.id}, "candidate_index": 1},
+                                          {"action": "INSERT", "candidate_index": 2, "content": "The server hosts weekly Friday movie nights"},
+                                          {"action": "NOOP", "candidate_index": 3}
+                                        ]
+                                        """.trimIndent()
+                                    }
+
+                                    else -> {
+                                        "[]"
+                                    }
                                 }
                             respond(
                                 content = interactionJsonResponse("int-$interactionCallCount", responseText),
@@ -279,7 +287,7 @@ class MemoryDistillerTest {
             assertEquals(MemoryScope.GUILD, guildHits.first().memory.scope)
 
             // Verify speaker headers preserved & unsupported params omitted
-            assertEquals(2, interactionPayloads.size)
+            assertEquals(3, interactionPayloads.size)
             val extractPayload = interactionPayloads[0]
             assertTrue(extractPayload.contains("Alice (uid:111)"), "Expected Alice uid header")
             assertTrue(extractPayload.contains("NewsBot [BOT] (uid:888)"), "Expected NewsBot [BOT] header")
@@ -298,7 +306,7 @@ class MemoryDistillerTest {
             val trace = traceRecorder.records.single()
             assertEquals(AiTracePipeline.CHATTER_MEMORY_DISTILL, trace.pipeline)
             assertEquals(AiTraceOutcome.SUCCESS, trace.outcome)
-            assertEquals(2, trace.attempts.size)
+            assertEquals(3, trace.attempts.size)
             val jsonLine = AiTraceJson.encodeToString(AiTraceRecord.serializer(), trace)
             assertTrue(jsonLine.contains("\"pipeline\":\"chatter_memory_distill\""), "Expected serialized pipeline name")
         }
@@ -468,11 +476,19 @@ class MemoryDistillerTest {
                             val body = (request.body as io.ktor.http.content.TextContent).text
                             interactionCallCount++
                             val responseText =
-                                if (interactionCallCount == 1) {
-                                    """[{"scope": "guild", "target_user_id": null, "content": "The server moved weekly movie nights to Saturday"}]"""
-                                } else {
-                                    reconciliationPrompts.add(body)
-                                    """[{"action": "UPDATE", "memory_id": ${guild1Mem.id}, "candidate_index": 0, "content": "The server hosts weekly Saturday movie nights"}]"""
+                                when (interactionCallCount) {
+                                    1 -> {
+                                        """[{"scope": "guild", "target_user_id": null, "content": "The server moved weekly movie nights to Saturday"}]"""
+                                    }
+
+                                    2 -> {
+                                        reconciliationPrompts.add(body)
+                                        """[{"action": "UPDATE", "memory_id": ${guild1Mem.id}, "candidate_index": 0, "content": "The server hosts weekly Saturday movie nights"}]"""
+                                    }
+
+                                    else -> {
+                                        "[]"
+                                    }
                                 }
                             respond(
                                 content = interactionJsonResponse("int-$interactionCallCount", responseText),

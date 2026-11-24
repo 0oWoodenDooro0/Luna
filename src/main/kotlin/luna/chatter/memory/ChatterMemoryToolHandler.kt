@@ -107,7 +107,16 @@ open class ChatterMemoryToolHandler(
                         scoreCutoff = config.scoreCutoff,
                         updateLastAccessed = true,
                     )
-                formatHitsResponse(hits)
+                val userUnderstandings =
+                    if (rawTargetUserId != null && resolvedTargetUserId != null) {
+                        fetchAndTouchUserUnderstandingsFailOpen(
+                            guildId = cleanGuildId,
+                            targetUserId = resolvedTargetUserId,
+                        )
+                    } else {
+                        emptyList()
+                    }
+                formatHitsResponse(hits, userUnderstandings)
             }
         } catch (e: TimeoutCancellationException) {
             logger.warn(
@@ -132,7 +141,37 @@ open class ChatterMemoryToolHandler(
         }
     }
 
-    private fun formatHitsResponse(hits: List<ChatterMemorySearchHit>): String =
+    private fun fetchAndTouchUserUnderstandingsFailOpen(
+        guildId: String,
+        targetUserId: String,
+    ): List<SocialUnderstandingRecord> =
+        try {
+            val understandings =
+                memoryStore.listUserUnderstandings(
+                    guildId = guildId,
+                    userId = targetUserId,
+                    limit = MAX_USER_UNDERSTANDINGS_IN_TOOL,
+                )
+            if (understandings.isNotEmpty()) {
+                memoryStore.touchUnderstandings(guildId, understandings.map { it.id })
+            }
+            understandings
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            logger.warn(
+                "Social Understanding lookup failed open in search_long_term_memory (guildId={}, targetUserId={}): {}",
+                guildId,
+                targetUserId,
+                e.message,
+            )
+            emptyList()
+        }
+
+    private fun formatHitsResponse(
+        hits: List<ChatterMemorySearchHit>,
+        userUnderstandings: List<SocialUnderstandingRecord> = emptyList(),
+    ): String =
         buildJsonObject {
             put("status", "ok")
             put("count", hits.size)
@@ -154,6 +193,23 @@ open class ChatterMemoryToolHandler(
                     }
                 },
             )
+            if (userUnderstandings.isNotEmpty()) {
+                put(
+                    "user_understandings",
+                    buildJsonArray {
+                        for (understanding in userUnderstandings) {
+                            add(
+                                buildJsonObject {
+                                    put("id", understanding.id)
+                                    put("subject", understanding.subject)
+                                    put("content", understanding.content)
+                                    put("updated_at", formatTemporalDate(understanding.updatedAt, clampFutureToToday = true))
+                                },
+                            )
+                        }
+                    },
+                )
+            }
             if (hits.isEmpty()) {
                 put("note", EMPTY_RESULTS_NOTE)
             }
@@ -200,6 +256,7 @@ open class ChatterMemoryToolHandler(
         const val MIN_LIMIT = 1
         const val MAX_LIMIT = 8
         const val DEFAULT_LIMIT = 5
+        const val MAX_USER_UNDERSTANDINGS_IN_TOOL = 10
         const val EMPTY_RESULTS_NOTE = "近期 10 分鐘對話已在上下文中，且未找到符合門檻的較早長期記憶。"
         private val DATE_FORMATTER: DateTimeFormatter = DateTimeFormatter.ISO_LOCAL_DATE
 

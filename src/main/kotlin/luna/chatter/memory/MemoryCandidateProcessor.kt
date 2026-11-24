@@ -1,5 +1,11 @@
 package luna.chatter.memory
 
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonNull
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.intOrNull
 import org.slf4j.LoggerFactory
 import java.time.LocalDate
 import java.time.ZoneId
@@ -10,6 +16,8 @@ internal data class FactCandidate(
     val targetUserId: String?,
     val content: String,
     val expiresAt: Long? = null,
+    val importance: Int = ChatterMemoryStore.DEFAULT_IMPORTANCE,
+    val keywords: String = "",
 )
 
 /**
@@ -41,9 +49,17 @@ internal object MemoryCandidateProcessor {
                 val existing = deduplicated[matchIndex]
                 val preferred =
                     if (candidate.content.length > existing.content.length) {
-                        candidate.copy(expiresAt = candidate.expiresAt ?: existing.expiresAt)
+                        candidate.copy(
+                            expiresAt = candidate.expiresAt ?: existing.expiresAt,
+                            importance = maxOf(candidate.importance, existing.importance),
+                            keywords = candidate.keywords.ifBlank { existing.keywords },
+                        )
                     } else {
-                        existing.copy(expiresAt = existing.expiresAt ?: candidate.expiresAt)
+                        existing.copy(
+                            expiresAt = existing.expiresAt ?: candidate.expiresAt,
+                            importance = maxOf(existing.importance, candidate.importance),
+                            keywords = existing.keywords.ifBlank { candidate.keywords },
+                        )
                     }
                 deduplicated[matchIndex] = preferred
             }
@@ -75,6 +91,33 @@ internal object MemoryCandidateProcessor {
                 .toInstant()
                 .toEpochMilli()
         return endOfDayMs.coerceIn(nowMs + MIN_EXPIRATION_MS, nowMs + MAX_EXPIRATION_MS)
+    }
+
+    fun parseAndClampImportance(raw: JsonElement?): Int {
+        if (raw == null || raw is JsonNull) return ChatterMemoryStore.DEFAULT_IMPORTANCE
+        val parsed = (raw as? JsonPrimitive)?.intOrNull
+        if (parsed == null) {
+            logger.warn("Invalid importance value '{}' from memory distillation; defaulting to {}", raw, ChatterMemoryStore.DEFAULT_IMPORTANCE)
+            return ChatterMemoryStore.DEFAULT_IMPORTANCE
+        }
+        return parsed.coerceIn(ChatterMemoryStore.MIN_IMPORTANCE, ChatterMemoryStore.MAX_IMPORTANCE)
+    }
+
+    fun parseAndSanitizeKeywords(raw: JsonElement?): String {
+        val text =
+            when (raw) {
+                null, is JsonNull -> ""
+                is JsonArray -> raw.mapNotNull { (it as? JsonPrimitive)?.contentOrNull?.trim() }.filter { it.isNotEmpty() }.joinToString(" ")
+                is JsonPrimitive -> raw.contentOrNull.orEmpty()
+                else -> ""
+            }
+        return sanitizeKeywords(text)
+    }
+
+    fun sanitizeKeywords(raw: String?): String {
+        val normalized = raw?.trim()?.replace(WHITESPACE_REGEX, " ").orEmpty()
+        if (normalized.isEmpty()) return ""
+        return normalized.take(ChatterMemoryStore.MAX_KEYWORDS_CHARS).trim()
     }
 
     fun stripJsonFences(raw: String): String {

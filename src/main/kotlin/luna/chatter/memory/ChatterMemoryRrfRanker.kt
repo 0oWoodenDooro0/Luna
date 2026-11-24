@@ -12,6 +12,10 @@ internal object ChatterMemoryRrfRanker {
     private const val RECENCY_DECAY_FLOOR = 0.7
     private const val RECENCY_DECAY_AMPLITUDE = 0.3
     private const val RECENCY_DECAY_SCALE_DAYS = 60.0
+    private const val UPDATED_RECENCY_WEIGHT = 0.7
+    private const val ACCESSED_RECENCY_WEIGHT = 0.3
+    private const val IMPORTANCE_MULTIPLIER_BASE = 0.85
+    private const val IMPORTANCE_MULTIPLIER_STEP = 0.075
 
     fun fuseCandidatesWithRrf(
         lexicalCandidates: List<ChatterMemoryRecord>,
@@ -48,9 +52,21 @@ internal object ChatterMemoryRrfRanker {
                 val rrfScore =
                     (if (ftsRank != null) 1.0 / (RRF_K + ftsRank) else 0.0) +
                         (if (vecRank != null) 1.0 / (RRF_K + vecRank) else 0.0)
-                val ageDays = maxOf(0.0, (nowMs - record.updatedAt) / MILLIS_PER_DAY)
-                val decayMultiplier = RECENCY_DECAY_FLOOR + RECENCY_DECAY_AMPLITUDE * exp(-ageDays / RECENCY_DECAY_SCALE_DAYS)
-                val finalScore = rrfScore * decayMultiplier
+                val updatedAgeDays = maxOf(0.0, (nowMs - record.updatedAt) / MILLIS_PER_DAY)
+                val accessedAgeDays = maxOf(0.0, (nowMs - record.lastAccessedAt) / MILLIS_PER_DAY)
+                val blendedRecency =
+                    UPDATED_RECENCY_WEIGHT * exp(-updatedAgeDays / RECENCY_DECAY_SCALE_DAYS) +
+                        ACCESSED_RECENCY_WEIGHT * exp(-accessedAgeDays / RECENCY_DECAY_SCALE_DAYS)
+                val decayMultiplier = RECENCY_DECAY_FLOOR + RECENCY_DECAY_AMPLITUDE * blendedRecency
+                val clampedImportance =
+                    record.importance.coerceIn(
+                        ChatterMemoryStore.MIN_IMPORTANCE,
+                        ChatterMemoryStore.MAX_IMPORTANCE,
+                    )
+                val importanceMultiplier =
+                    IMPORTANCE_MULTIPLIER_BASE +
+                        (clampedImportance - ChatterMemoryStore.MIN_IMPORTANCE) * IMPORTANCE_MULTIPLIER_STEP
+                val finalScore = rrfScore * decayMultiplier * importanceMultiplier
                 ChatterMemorySearchHit(
                     memory = record,
                     score = finalScore,
