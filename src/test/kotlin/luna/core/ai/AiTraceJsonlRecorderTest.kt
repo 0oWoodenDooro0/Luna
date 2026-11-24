@@ -49,19 +49,19 @@ class AiTraceJsonlRecorderTest {
         val unrelatedFile = logDir.resolve("notes.txt")
 
         Files.writeString(oldFile, "x".repeat(150) + "\n")
-        Files.writeString(midFile, "y".repeat(500) + "\n")
-        Files.writeString(recentFile, "z".repeat(400) + "\n")
+        Files.writeString(midFile, "y".repeat(600) + "\n")
+        Files.writeString(recentFile, "z".repeat(500) + "\n")
         Files.writeString(unrelatedFile, "keep me")
 
         val clock = MutableClock(Instant.parse("2026-11-14T12:00:00Z"))
         // maxDays = 14 -> 2026-10-20 deleted on startup.
-        // maxTotalBytes = 1100 -> midFile (501B) + recentFile (401B) = 902B <= 1100B on startup;
-        // writing Day 1 (~420B) + Day 2 (~420B) prunes midFile and recentFile while keeping Day 1 + Day 2 <= 1100B.
+        // maxTotalBytes = 1300 -> midFile (601B) + recentFile (501B) = 1102B <= 1300B on startup;
+        // writing Day 1 (~560B) + Day 2 (~560B) prunes midFile and recentFile while keeping Day 1 + Day 2 <= 1300B.
         val recorder =
             JsonlAiTraceRecorder(
                 traceDir = logDir,
                 maxDays = 14,
-                maxTotalBytes = 1100L,
+                maxTotalBytes = 1300L,
                 clock = clock,
                 emitCorrelationLog = false,
             )
