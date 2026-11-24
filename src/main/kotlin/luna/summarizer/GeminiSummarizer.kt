@@ -1,14 +1,9 @@
 package luna.summarizer
 
 import io.ktor.client.HttpClient
-import io.ktor.client.engine.cio.CIO
 import io.ktor.client.plugins.HttpRequestTimeoutException
-import io.ktor.client.plugins.HttpTimeout
-import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
-import io.ktor.serialization.kotlinx.json.json
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.serialization.SerializationException
-import kotlinx.serialization.json.Json
 import luna.core.ai.AiAttemptStage
 import luna.core.ai.AiTraceDiscordContext
 import luna.core.ai.AiTraceFailureCategory
@@ -17,6 +12,7 @@ import luna.core.ai.AiTraceRecorder
 import luna.core.ai.AiTraceRedactor
 import luna.core.ai.AiTraceTrigger
 import luna.core.ai.ContextUrlClassifier
+import luna.core.ai.GeminiHttpClientFactory
 import luna.core.ai.GeminiInteractionClient
 import luna.core.ai.GeminiInteractionInput
 import luna.core.ai.GeminiInteractionTool
@@ -37,16 +33,18 @@ import java.net.SocketTimeoutException
  */
 open class GeminiSummarizer(
     private val config: GeminiConfig = GeminiConfig.fromEnv(),
-    private val httpClient: HttpClient = createDefaultHttpClient(),
+    httpClient: HttpClient? = null,
     private val pollingDelayMs: Long = 2000L,
     private val maxPollingAttempts: Int = 30,
     val traceRecorder: AiTraceRecorder = NoOpAiTraceRecorder,
 ) : AutoCloseable {
+    private val ownsHttpClient: Boolean = httpClient == null
+    private val httpClient: HttpClient = httpClient ?: GeminiHttpClientFactory.create()
     private val logger = LoggerFactory.getLogger(GeminiSummarizer::class.java)
 
     private val interactionClient =
         GeminiInteractionClient(
-            httpClient = httpClient,
+            httpClient = this.httpClient,
             pollingDelayMs = pollingDelayMs,
             maxPollingAttempts = maxPollingAttempts,
             traceRecorder = traceRecorder,
@@ -458,29 +456,9 @@ open class GeminiSummarizer(
     }
 
     override fun close() {
-        httpClient.close()
-    }
-
-    companion object {
-        private val jsonParser =
-            Json {
-                ignoreUnknownKeys = true
-                isLenient = true
-                encodeDefaults = false
-                explicitNulls = false
-            }
-
-        private fun createDefaultHttpClient(): HttpClient =
-            HttpClient(CIO) {
-                install(ContentNegotiation) {
-                    json(jsonParser)
-                }
-                install(HttpTimeout) {
-                    requestTimeoutMillis = 30_000
-                    connectTimeoutMillis = 10_000
-                    socketTimeoutMillis = 30_000
-                }
-            }
+        if (ownsHttpClient) {
+            httpClient.close()
+        }
     }
 }
 

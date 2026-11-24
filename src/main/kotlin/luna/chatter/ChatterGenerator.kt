@@ -1,11 +1,6 @@
 package luna.chatter
 
 import io.ktor.client.HttpClient
-import io.ktor.client.engine.cio.CIO
-import io.ktor.client.plugins.HttpTimeout
-import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
-import io.ktor.serialization.kotlinx.json.json
-import kotlinx.serialization.json.Json
 import luna.chatter.memory.ChatterMemoryConfig
 import luna.chatter.memory.ChatterMemoryToolHandler
 import luna.core.ai.AiAttemptStage
@@ -16,6 +11,7 @@ import luna.core.ai.AiTraceRecorder
 import luna.core.ai.AiTraceSession
 import luna.core.ai.AiTraceTrigger
 import luna.core.ai.ContextUrlClassifier
+import luna.core.ai.GeminiHttpClientFactory
 import luna.core.ai.GeminiInteractionClient
 import luna.core.ai.GeminiInteractionInput
 import luna.core.ai.InteractionExecutionResult
@@ -35,17 +31,19 @@ import org.slf4j.LoggerFactory
  */
 open class ChatterGenerator(
     val config: ChatterConfig = ChatterConfig(),
-    private val httpClient: HttpClient = createDefaultHttpClient(),
+    httpClient: HttpClient? = null,
     private val pollingDelayMs: Long = GeminiInteractionClient.DEFAULT_POLLING_DELAY_MS,
     private val maxPollingAttempts: Int = GeminiInteractionClient.DEFAULT_MAX_POLLING_ATTEMPTS,
     val traceRecorder: AiTraceRecorder = NoOpAiTraceRecorder,
     private val memoryConfig: ChatterMemoryConfig = ChatterMemoryConfig(),
     private val memoryToolHandler: ChatterMemoryToolHandler? = null,
 ) : AutoCloseable {
+    private val ownsHttpClient: Boolean = httpClient == null
+    private val httpClient: HttpClient = httpClient ?: GeminiHttpClientFactory.create()
     private val logger = LoggerFactory.getLogger(ChatterGenerator::class.java)
     private val interactionClient: GeminiInteractionClient by lazy {
         GeminiInteractionClient(
-            httpClient = httpClient,
+            httpClient = this.httpClient,
             pollingDelayMs = pollingDelayMs,
             maxPollingAttempts = maxPollingAttempts,
             traceRecorder = traceRecorder,
@@ -494,31 +492,13 @@ open class ChatterGenerator(
     }
 
     override fun close() {
-        httpClient.close()
+        if (ownsHttpClient) {
+            httpClient.close()
+        }
     }
 
     companion object {
         const val MAX_STATIC_VIDEO_DURATION_SECONDS: Long = 300L
         const val MAX_VIDEO_DURATION_SECONDS: Long = 7200L
-
-        private val jsonParser =
-            Json {
-                ignoreUnknownKeys = true
-                isLenient = true
-                encodeDefaults = false
-                explicitNulls = false
-            }
-
-        private fun createDefaultHttpClient(): HttpClient =
-            HttpClient(CIO) {
-                install(ContentNegotiation) {
-                    json(jsonParser)
-                }
-                install(HttpTimeout) {
-                    requestTimeoutMillis = 30_000
-                    connectTimeoutMillis = 10_000
-                    socketTimeoutMillis = 30_000
-                }
-            }
     }
 }

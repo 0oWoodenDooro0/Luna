@@ -1,10 +1,5 @@
 package luna.chatter.emoji
 
-import io.ktor.client.HttpClient
-import io.ktor.client.engine.cio.CIO
-import io.ktor.client.plugins.HttpTimeout
-import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
-import io.ktor.serialization.kotlinx.json.json
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Deferred
@@ -18,7 +13,6 @@ import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
-import kotlinx.serialization.json.Json
 import luna.chatter.ChatterConfig
 import luna.core.ai.AiAttemptStage
 import luna.core.ai.AiTracePipeline
@@ -364,6 +358,9 @@ internal class ChatterEmojiVisionResolver(
         const val DEFAULT_MAX_CONCURRENCY = 5
         const val DEFAULT_ROUND_TIMEOUT_MS = 5_000L
         const val DEFAULT_FAILURE_COOLDOWN_MS = 3_600_000L
+        const val DEFAULT_HTTP_REQUEST_TIMEOUT_MS = 10_000L
+        const val DEFAULT_HTTP_CONNECT_TIMEOUT_MS = 5_000L
+        const val DEFAULT_HTTP_SOCKET_TIMEOUT_MS = 10_000L
         private const val MAX_OUTPUT_TOKENS = 64
 
         private const val VISION_SYSTEM_INSTRUCTION =
@@ -372,14 +369,6 @@ internal class ChatterEmojiVisionResolver(
                 "The provided emoji name is only an auxiliary hint—ignore opaque or meaningless names (such as a1, blob3, img01). " +
                 "Output ONLY a single concise Traditional Chinese semantic or emotional meaning (about 5 to 15 characters), " +
                 "with no quotes, markdown, or extra explanation."
-
-        private val jsonParser =
-            Json {
-                ignoreUnknownKeys = true
-                isLenient = true
-                encodeDefaults = false
-                explicitNulls = false
-            }
 
         fun buildCdnUrl(
             emojiId: String,
@@ -408,17 +397,5 @@ internal class ChatterEmojiVisionResolver(
             }
             return stripped
         }
-
-        fun createDefaultHttpClient(): HttpClient =
-            HttpClient(CIO) {
-                install(ContentNegotiation) {
-                    json(jsonParser)
-                }
-                install(HttpTimeout) {
-                    requestTimeoutMillis = 10_000
-                    connectTimeoutMillis = 5_000
-                    socketTimeoutMillis = 10_000
-                }
-            }
     }
 }

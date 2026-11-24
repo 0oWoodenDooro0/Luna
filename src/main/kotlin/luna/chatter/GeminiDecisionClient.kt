@@ -1,11 +1,7 @@
 package luna.chatter
 
 import io.ktor.client.HttpClient
-import io.ktor.client.engine.cio.CIO
 import io.ktor.client.plugins.HttpRequestTimeoutException
-import io.ktor.client.plugins.HttpTimeout
-import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
-import io.ktor.client.plugins.timeout
 import io.ktor.client.request.header
 import io.ktor.client.request.post
 import io.ktor.client.request.setBody
@@ -16,10 +12,8 @@ import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.contentType
 import io.ktor.http.isSuccess
-import io.ktor.serialization.kotlinx.json.json
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.TimeoutCancellationException
-import kotlinx.serialization.json.Json
 import luna.core.ai.AiAttemptOutcome
 import luna.core.ai.AiAttemptRequest
 import luna.core.ai.AiAttemptStage
@@ -30,7 +24,9 @@ import luna.core.ai.AiTraceRecorder
 import luna.core.ai.AiTraceSession
 import luna.core.ai.AiTraceTrigger
 import luna.core.ai.ChatImageAttachment
+import luna.core.ai.GeminiHttpClientFactory
 import luna.core.ai.NoOpAiTraceRecorder
+import luna.core.ai.applyGeminiTimeout
 import luna.core.ai.elapsedMillisFromNanos
 import luna.core.ai.withActiveOrStandaloneSession
 import org.slf4j.LoggerFactory
@@ -48,10 +44,18 @@ import java.net.SocketTimeoutException
  */
 open class GeminiDecisionClient(
     val config: ChatterDecisionConfig = ChatterDecisionConfig(),
-    private val httpClient: HttpClient = createDefaultHttpClient(config.timeoutMillis),
+    httpClient: HttpClient? = null,
     val defaultInstructions: String = config.instructions,
     val traceRecorder: AiTraceRecorder = NoOpAiTraceRecorder,
 ) : AutoCloseable {
+    private val ownsHttpClient: Boolean = httpClient == null
+    private val httpClient: HttpClient =
+        httpClient
+            ?: GeminiHttpClientFactory.create(
+                requestTimeoutMs = config.timeoutMillis,
+                connectTimeoutMs = config.timeoutMillis,
+                socketTimeoutMs = config.timeoutMillis,
+            )
     private val logger = LoggerFactory.getLogger(GeminiDecisionClient::class.java)
 
     private sealed class RequestOutcome {
@@ -256,11 +260,12 @@ open class GeminiDecisionClient(
                     httpClient.post(config.decisionEndpoint) {
                         header(API_KEY_HEADER, config.apiKey)
                         contentType(ContentType.Application.Json)
-                        timeout {
-                            requestTimeoutMillis = config.timeoutMillis
-                            socketTimeoutMillis = config.timeoutMillis
-                            connectTimeoutMillis = config.timeoutMillis
-                        }
+                        applyGeminiTimeout(
+                            httpClient,
+                            requestTimeoutMs = config.timeoutMillis,
+                            connectTimeoutMs = config.timeoutMillis,
+                            socketTimeoutMs = config.timeoutMillis,
+                        )
                         setBody(requestPayload)
                     }
                 httpStatus = response.status.value
@@ -394,7 +399,9 @@ open class GeminiDecisionClient(
     }
 
     override fun close() {
-        httpClient.close()
+        if (ownsHttpClient) {
+            httpClient.close()
+        }
     }
 
     companion object {
@@ -420,24 +427,6 @@ open class GeminiDecisionClient(
                 "(e.g., ok, lol, 我去, 睡著了, 沒看到) with no active Luna thread.\n" +
                 "- [Latest Message] is a bot command or system notice."
 
-        val jsonParser =
-            Json {
-                ignoreUnknownKeys = true
-                isLenient = true
-                encodeDefaults = false
-                explicitNulls = false
-            }
-
-        fun createDefaultHttpClient(timeoutMillis: Long = ChatterDecisionConfig.DEFAULT_TIMEOUT_MILLIS): HttpClient =
-            HttpClient(CIO) {
-                install(ContentNegotiation) {
-                    json(jsonParser)
-                }
-                install(HttpTimeout) {
-                    requestTimeoutMillis = timeoutMillis
-                    connectTimeoutMillis = timeoutMillis
-                    socketTimeoutMillis = timeoutMillis
-                }
-            }
+        val jsonParser = GeminiHttpClientFactory.json
     }
 }

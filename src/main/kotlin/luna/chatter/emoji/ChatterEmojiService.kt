@@ -3,7 +3,6 @@ package luna.chatter.emoji
 import dev.kord.common.entity.Snowflake
 import dev.kord.core.Kord
 import dev.kord.core.entity.ReactionEmoji
-import io.ktor.client.HttpClient
 import kotlinx.coroutines.CoroutineScope
 import luna.chatter.GuildCustomEmoji
 
@@ -91,7 +90,5 @@ interface ChatterEmojiService {
          * Fixed global sentinel scope key for 30-day rolling `Emoji Usage Ranking` of Discord Application Emojis.
          */
         const val APP_EMOJI_USAGE_SCOPE: String = "__app__"
-
-        fun createDefaultVisionHttpClient(): HttpClient = ChatterEmojiVisionResolver.createDefaultHttpClient()
     }
 }

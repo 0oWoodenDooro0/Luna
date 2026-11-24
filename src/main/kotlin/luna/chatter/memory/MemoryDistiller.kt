@@ -1,16 +1,16 @@
 package luna.chatter.memory
 
 import dev.kord.common.entity.Snowflake
+import dev.kord.core.Kord
 import dev.kord.core.entity.Message
-import io.ktor.client.HttpClient
-import io.ktor.client.engine.cio.CIO
-import io.ktor.client.plugins.HttpTimeout
-import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
-import io.ktor.serialization.kotlinx.json.json
+import dev.kord.core.event.message.MessageCreateEvent
+import dev.kord.core.on
 import kotlinx.coroutines.CancellationException
-import kotlinx.serialization.SerialName
-import kotlinx.serialization.Serializable
-import kotlinx.serialization.json.Json
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
 import luna.chatter.ChatterNoiseFilter
 import luna.chatter.ChatterPromptBuilder
 import luna.core.ai.AiAttemptStage
@@ -33,6 +33,7 @@ import luna.core.ai.withAiTraceSession
 import org.slf4j.LoggerFactory
 import java.time.Clock
 import java.time.format.TextStyle
+import java.util.LinkedHashMap
 import java.util.Locale
 
 /**
@@ -56,33 +57,29 @@ sealed class DistillOutcome {
     ) : DistillOutcome()
 }
 
-@Serializable
-private data class ExtractedFactCandidateDto(
-    val scope: String,
-    @SerialName("target_user_id")
-    val targetUserId: String? = null,
-    val content: String,
-    @SerialName("expires_at")
-    val expiresAt: String? = null,
+private data class ChannelActivityState(
+    val channelId: String,
+    val guildId: String,
+    var lastActivityAtMs: Long,
+    var oldestUnprocessedAtMs: Long? = null,
+    var unprocessedHumanCount: Int = 0,
+    var inFlight: Boolean = false,
 )
 
-@Serializable
-private data class ReconciliationDecisionDto(
-    val action: String,
-    @SerialName("memory_id")
-    val memoryId: Long? = null,
-    @SerialName("candidate_index")
-    val candidateIndex: Int? = null,
-    val content: String? = null,
-    @SerialName("expires_at")
-    val expiresAt: String? = null,
+private data class EligibleChannelBatch(
+    val channelId: String,
+    val guildId: String,
+    val countAtStart: Int,
 )
 
 /**
- * Asynchronous `Memory Distillation` worker that fetches unprocessed channel messages after the
- * persisted `Distillation Cursor`, extracts pronoun-resolved `Atomic Fact` candidates using
- * `gemini-3.5-flash-lite`, embeds and searches Top-3 existing memories, reconciles mutations
- * (`INSERT`/`UPDATE`/`DELETE`/`NOOP`), and atomically updates `ChatterMemoryStore` and cursor.
+ * Asynchronous `Memory Distillation` lifecycle and worker for Chatter-enabled guild channels.
+ *
+ * Maintains a bounded LRU channel activity tracker (`maxTrackedChannels = 1000`), cold-starts
+ * new channels at the first observed message without historical backfill, runs eligible
+ * distillation batches sequentially on [tick], extracts pronoun-resolved `Atomic Fact` candidates,
+ * embeds and searches Top-6 existing memories, reconciles mutations (`INSERT`/`UPDATE`/`DELETE`/`NOOP`),
+ * and atomically updates [ChatterMemoryStore] and the persisted `Distillation Cursor`.
  */
 class MemoryDistiller(
     private val memoryStore: ChatterMemoryStore,
@@ -96,13 +93,189 @@ class MemoryDistiller(
     private val clock: Clock = Clock.systemUTC(),
     private val messagesAfterFetcher: suspend (channelId: Snowflake, afterMessageId: Snowflake, limit: Int) -> List<Message>,
     private val kordSelfIdProvider: () -> Snowflake? = { null },
+    private val allowedChannels: Set<Snowflake> = emptySet(),
+    private val chatterEnabled: Boolean = true,
+    private val maxTrackedChannels: Int = DEFAULT_MAX_TRACKED_CHANNELS,
 ) {
     private val logger = LoggerFactory.getLogger(MemoryDistiller::class.java)
-    private val json = Json { ignoreUnknownKeys = true }
+    private val lock = Any()
 
-    /**
-     * Runs one distillation cycle for [channelId] in [guildId] starting after [cursorMessageId].
-     */
+    private val activityTracker: MutableMap<String, ChannelActivityState> =
+        object : LinkedHashMap<String, ChannelActivityState>(maxTrackedChannels, 0.75f, true) {
+            override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, ChannelActivityState>?): Boolean = size > maxTrackedChannels
+        }
+
+    init {
+        require(maxTrackedChannels >= 1) { "maxTrackedChannels must be >= 1" }
+    }
+
+    /** Registers a Kord [MessageCreateEvent] observer for Chatter-enabled guild channels. */
+    fun registerMessageObserver(
+        kord: Kord,
+        scope: CoroutineScope,
+    ): Job =
+        kord.on<MessageCreateEvent>(scope = scope) {
+            val guildId =
+                message.data.guildId.value
+                    ?.toString() ?: return@on
+            observeMessage(message = message, guildId = guildId)
+        }
+
+    /** Starts the periodic background ticker that drains eligible channels sequentially. */
+    fun startTicker(
+        scope: CoroutineScope,
+        intervalMs: Long = DEFAULT_TICK_INTERVAL_MS,
+    ): Job =
+        scope.launch {
+            while (isActive) {
+                delay(intervalMs)
+                try {
+                    tick()
+                } catch (ex: CancellationException) {
+                    throw ex
+                } catch (ex: Exception) {
+                    logger.warn("Memory distillation ticker iteration failed: {}", ex.message)
+                }
+            }
+        }
+
+    /** Observes a Discord message for distillation scheduling or cold-start cursor initialization. */
+    fun observeMessage(
+        message: Message,
+        guildId: String?,
+    ) {
+        if (!chatterEnabled || !config.enabled) return
+        if (guildId.isNullOrBlank()) return
+
+        val channelSnowflake = message.channelId
+        if (allowedChannels.isNotEmpty() && !allowedChannels.contains(channelSnowflake)) return
+
+        val selfId = kordSelfIdProvider()
+        if (!noiseFilter.isContextMessage(message, selfId)) return
+
+        val authorId =
+            runCatching { message.author?.id }.getOrNull()
+                ?: runCatching { message.data.author.id }.getOrNull()
+        val isLunaBot = selfId != null && authorId == selfId
+        val isBot = isLunaBot || (runCatching { message.author?.isBot }.getOrNull() == true)
+        val isHuman = !isBot && message.author != null
+
+        val channelId = channelSnowflake.toString()
+        val messageId = message.id.toString()
+        val nowMs = clock.millis()
+
+        val existingCursor =
+            runCatching { memoryStore.getCursor(channelId) }
+                .onFailure { ex ->
+                    logger.warn("Failed to read distillation cursor for channel {}: {}", channelId, ex.message)
+                }.getOrElse { return }
+
+        if (existingCursor == null) {
+            val coldStarted =
+                runCatching {
+                    memoryStore.upsertCursor(
+                        channelId = channelId,
+                        guildId = guildId,
+                        lastSummarizedMessageId = messageId,
+                    )
+                }.onFailure { ex ->
+                    logger.warn("Failed to cold-start distillation cursor for channel {}: {}", channelId, ex.message)
+                }.isSuccess
+            if (!coldStarted) return
+
+            synchronized(lock) {
+                activityTracker[channelId] =
+                    ChannelActivityState(
+                        channelId = channelId,
+                        guildId = guildId,
+                        lastActivityAtMs = nowMs,
+                        oldestUnprocessedAtMs = null,
+                        unprocessedHumanCount = 0,
+                        inFlight = false,
+                    )
+            }
+            return
+        }
+
+        synchronized(lock) {
+            val state =
+                activityTracker[channelId]
+                    ?: ChannelActivityState(
+                        channelId = channelId,
+                        guildId = guildId,
+                        lastActivityAtMs = nowMs,
+                    ).also { activityTracker[channelId] = it }
+
+            state.lastActivityAtMs = nowMs
+            if (isHuman) {
+                state.unprocessedHumanCount += 1
+                if (state.oldestUnprocessedAtMs == null) {
+                    state.oldestUnprocessedAtMs = nowMs
+                }
+            }
+        }
+    }
+
+    /** Evaluates tracked channels and runs `Memory Distillation` sequentially for eligible batches. */
+    suspend fun tick() {
+        if (!chatterEnabled || !config.enabled) return
+
+        runCatching { memoryStore.purgeExpiredMemories(clock.millis()) }
+            .onSuccess { purged ->
+                if (purged > 0) {
+                    logger.debug("Purged {} expired chatter memories", purged)
+                }
+            }.onFailure { ex ->
+                logger.warn("Failed to purge expired chatter memories: {}", ex.message)
+            }
+
+        val eligible = snapshotEligibleChannels()
+        for (batch in eligible) {
+            val outcome =
+                try {
+                    val cursor = memoryStore.getCursor(batch.channelId)
+                    if (cursor == null) {
+                        clearInFlight(batch.channelId)
+                        continue
+                    }
+                    distillChannel(batch.channelId, batch.guildId, cursor.lastSummarizedMessageId)
+                } catch (ex: CancellationException) {
+                    clearInFlight(batch.channelId)
+                    throw ex
+                } catch (ex: Exception) {
+                    logger.warn(
+                        "Memory distillation threw for channel {} (guild {}): {}",
+                        batch.channelId,
+                        batch.guildId,
+                        ex.message,
+                    )
+                    DistillOutcome.Failed(reason = ex.message ?: "Unexpected failure", cause = ex)
+                }
+
+            when (outcome) {
+                is DistillOutcome.NoMessages,
+                is DistillOutcome.NoExtractableContent,
+                is DistillOutcome.Completed,
+                -> {
+                    markBatchCompleted(batch.channelId, batch.countAtStart)
+                }
+
+                is DistillOutcome.Failed -> {
+                    // Evict transient failure state so the next eligible tick retries cleanly
+                    logger.warn(
+                        "Memory distillation failed transiently for channel {} (leaving cursor unchanged): {}",
+                        batch.channelId,
+                        outcome.reason,
+                    )
+                    clearInFlight(batch.channelId)
+                }
+            }
+        }
+    }
+
+    fun trackedChannelCount(): Int = synchronized(lock) { activityTracker.size }
+
+    /** Runs one distillation cycle for [channelId] in [guildId] starting after [cursorMessageId]. */
     suspend fun distillChannel(
         channelId: String,
         guildId: String,
@@ -205,7 +378,15 @@ class MemoryDistiller(
             reconcileCandidates(candidates, hitsPerCandidate, session)
                 ?: return DistillOutcome.Failed("Failed to reconcile memory candidates")
 
-        val mutations = buildMutations(guildId, candidates, candidateEmbeddings, decisions)
+        val mutations =
+            MemoryDistillationPrompt.buildMutations(
+                guildId = guildId,
+                candidates = candidates,
+                candidateEmbeddings = candidateEmbeddings,
+                decisions = decisions,
+                embeddingClient = embeddingClient,
+                clock = clock,
+            )
         val cursorUpdate =
             ChatterMemoryCursor(
                 channelId = channelId,
@@ -227,89 +408,40 @@ class MemoryDistiller(
         val nowMs = nowInstant.toEpochMilli()
         val zone = clock.zone
         val zonedNow = nowInstant.atZone(zone)
-        val currentDateIso = zonedNow.toLocalDate().toString()
-        val dayOfWeek = zonedNow.dayOfWeek.getDisplayName(TextStyle.FULL, Locale.ENGLISH)
+        val input =
+            MemoryDistillationPrompt.buildExtractionInput(
+                currentDateIso = zonedNow.toLocalDate().toString(),
+                dayOfWeek = zonedNow.dayOfWeek.getDisplayName(TextStyle.FULL, Locale.ENGLISH),
+                zoneId = zonedNow.zone.id,
+                transcript = transcript,
+            )
 
         val request =
             GeminiInteractionRequest(
                 model = config.cleanDistillModel,
-                systemInstruction = EXTRACTION_SYSTEM_INSTRUCTION,
-                input =
-                    listOf(
-                        GeminiInteractionInput.text(
-                            "Current date: $currentDateIso ($dayOfWeek, ${zonedNow.zone.id})\nConversation transcript:\n$transcript",
-                        ),
-                    ),
+                systemInstruction = MemoryDistillationPrompt.EXTRACTION_SYSTEM_INSTRUCTION,
+                input = listOf(GeminiInteractionInput.text(input)),
                 generationConfig = GeminiInteractionGenerationConfig(maxOutputTokens = MAX_DISTILL_OUTPUT_TOKENS),
                 background = false,
             )
-        val result =
-            interactionClient.interact(
-                baseUrl = baseUrl,
-                apiKey = apiKey,
-                request = request,
-                traceContext =
-                    InteractionTraceContext(
-                        stage = AiAttemptStage.MEMORY_DISTILL_EXTRACT,
-                        pipeline = AiTracePipeline.CHATTER_MEMORY_DISTILL,
-                        trigger = AiTraceTrigger.AMBIENT,
-                        transcriptLength = transcript.length,
-                        stripOutputEmojis = false,
-                    ),
-            )
         val responseText =
-            when (result) {
-                is InteractionExecutionResult.Success -> {
-                    result.text
-                }
+            executeInteraction(
+                request = request,
+                stage = AiAttemptStage.MEMORY_DISTILL_EXTRACT,
+                transcriptLength = transcript.length,
+                session = session,
+            ) ?: return null
 
-                is InteractionExecutionResult.FunctionCall -> {
-                    session.fail(
-                        failureCategory = AiTraceFailureCategory.PARSE_ERROR,
-                        errorSummary = "Unexpected function call during extraction",
-                    )
-                    return null
-                }
-
-                is InteractionExecutionResult.Error -> {
-                    session.fail(
-                        failureCategory = result.failureCategory,
-                        errorSummary = result.message,
-                    )
-                    return null
-                }
-            }
-
-        val dtos =
-            runCatching {
-                json.decodeFromString<List<ExtractedFactCandidateDto>>(MemoryCandidateProcessor.stripJsonFences(responseText))
-            }.getOrElse { ex ->
+        return MemoryDistillationPrompt
+            .parseExtractionResponse(responseText, nowMs, zone)
+            .getOrElse { ex ->
                 logger.warn("Failed to parse memory extraction JSON: {}", ex.message)
                 session.fail(
                     failureCategory = AiTraceFailureCategory.PARSE_ERROR,
                     errorSummary = "Extraction JSON parse error: ${ex.message}",
                 )
-                return null
+                null
             }
-
-        return dtos.mapNotNull { dto ->
-            val content = dto.content.trim()
-            if (content.isBlank()) return@mapNotNull null
-            val scope =
-                when (dto.scope.trim().lowercase()) {
-                    "user" -> MemoryScope.USER
-                    "guild" -> MemoryScope.GUILD
-                    else -> return@mapNotNull null
-                }
-            val targetUserId = dto.targetUserId?.trim()?.takeIf { it.isNotEmpty() }
-            if (scope == MemoryScope.USER && targetUserId == null) return@mapNotNull null
-            FactCandidate(
-                scope = scope,
-                targetUserId = if (scope == MemoryScope.USER) targetUserId else null,
-                content = content,
-                expiresAt = MemoryCandidateProcessor.parseAndClampExpiresAt(dto.expiresAt, nowMs, zone),
-            )
-        }
     }
 
     private suspend fun reconcileCandidates(
@@ -317,15 +449,41 @@ class MemoryDistiller(
         hitsPerCandidate: List<List<ChatterMemorySearchHit>>,
         session: AiTraceSession,
     ): List<ReconciliationDecisionDto>? {
-        val prompt = buildReconciliationPrompt(candidates, hitsPerCandidate)
+        val prompt = MemoryDistillationPrompt.buildReconciliationPrompt(candidates, hitsPerCandidate)
         val request =
             GeminiInteractionRequest(
                 model = config.cleanDistillModel,
-                systemInstruction = RECONCILIATION_SYSTEM_INSTRUCTION,
+                systemInstruction = MemoryDistillationPrompt.RECONCILIATION_SYSTEM_INSTRUCTION,
                 input = listOf(GeminiInteractionInput.text(prompt)),
                 generationConfig = GeminiInteractionGenerationConfig(maxOutputTokens = MAX_DISTILL_OUTPUT_TOKENS),
                 background = false,
             )
+        val responseText =
+            executeInteraction(
+                request = request,
+                stage = AiAttemptStage.MEMORY_DISTILL_RECONCILE,
+                transcriptLength = prompt.length,
+                session = session,
+            ) ?: return null
+
+        return MemoryDistillationPrompt
+            .parseReconciliationResponse(responseText)
+            .getOrElse { ex ->
+                logger.warn("Failed to parse memory reconciliation JSON: {}", ex.message)
+                session.fail(
+                    failureCategory = AiTraceFailureCategory.PARSE_ERROR,
+                    errorSummary = "Reconciliation JSON parse error: ${ex.message}",
+                )
+                null
+            }
+    }
+
+    private suspend fun executeInteraction(
+        request: GeminiInteractionRequest,
+        stage: AiAttemptStage,
+        transcriptLength: Int,
+        session: AiTraceSession,
+    ): String? {
         val result =
             interactionClient.interact(
                 baseUrl = baseUrl,
@@ -333,221 +491,96 @@ class MemoryDistiller(
                 request = request,
                 traceContext =
                     InteractionTraceContext(
-                        stage = AiAttemptStage.MEMORY_DISTILL_RECONCILE,
+                        stage = stage,
                         pipeline = AiTracePipeline.CHATTER_MEMORY_DISTILL,
                         trigger = AiTraceTrigger.AMBIENT,
-                        transcriptLength = prompt.length,
+                        transcriptLength = transcriptLength,
                         stripOutputEmojis = false,
                     ),
             )
-        val responseText =
-            when (result) {
-                is InteractionExecutionResult.Success -> {
-                    result.text
-                }
-
-                is InteractionExecutionResult.FunctionCall -> {
-                    session.fail(
-                        failureCategory = AiTraceFailureCategory.PARSE_ERROR,
-                        errorSummary = "Unexpected function call during reconciliation",
-                    )
-                    return null
-                }
-
-                is InteractionExecutionResult.Error -> {
-                    session.fail(
-                        failureCategory = result.failureCategory,
-                        errorSummary = result.message,
-                    )
-                    return null
-                }
+        return when (result) {
+            is InteractionExecutionResult.Success -> {
+                result.text
             }
 
-        return runCatching {
-            json.decodeFromString<List<ReconciliationDecisionDto>>(MemoryCandidateProcessor.stripJsonFences(responseText))
-        }.getOrElse { ex ->
-            logger.warn("Failed to parse memory reconciliation JSON: {}", ex.message)
-            session.fail(
-                failureCategory = AiTraceFailureCategory.PARSE_ERROR,
-                errorSummary = "Reconciliation JSON parse error: ${ex.message}",
-            )
-            null
+            is InteractionExecutionResult.FunctionCall -> {
+                session.fail(
+                    failureCategory = AiTraceFailureCategory.PARSE_ERROR,
+                    errorSummary = "Unexpected function call during ${stage.name.lowercase()}",
+                )
+                null
+            }
+
+            is InteractionExecutionResult.Error -> {
+                session.fail(
+                    failureCategory = result.failureCategory,
+                    errorSummary = result.message,
+                )
+                null
+            }
         }
     }
 
-    private suspend fun buildMutations(
-        guildId: String,
-        candidates: List<FactCandidate>,
-        candidateEmbeddings: List<FloatArray>,
-        decisions: List<ReconciliationDecisionDto>,
-    ): List<MemoryMutation> {
-        // Collect any modified content strings that need fresh embeddings
-        val textsToEmbed = mutableListOf<String>()
-        val embedIndexByDecisionIdx = mutableMapOf<Int, Int>()
-
-        decisions.forEachIndexed { idx, decision ->
-            val action = decision.action.trim().uppercase()
-            if (action == "INSERT" || action == "UPDATE") {
-                val candidate = decision.candidateIndex?.let { candidates.getOrNull(it) }
-                val finalContent = decision.content?.trim()?.takeIf { it.isNotBlank() } ?: candidate?.content
-                if (finalContent != null && (candidate == null || finalContent != candidate.content)) {
-                    embedIndexByDecisionIdx[idx] = textsToEmbed.size
-                    textsToEmbed.add(finalContent)
-                }
-            }
-        }
-
-        val reembeddedVectors =
-            if (textsToEmbed.isNotEmpty()) {
-                embeddingClient.embedDocuments(textsToEmbed)
-            } else {
-                emptyList()
-            }
-
+    private fun snapshotEligibleChannels(): List<EligibleChannelBatch> {
         val nowMs = clock.millis()
-        val zone = clock.zone
-        val mutations = mutableListOf<MemoryMutation>()
-        decisions.forEachIndexed { idx, decision ->
-            val action = decision.action.trim().uppercase()
-            val candidate = decision.candidateIndex?.let { candidates.getOrNull(it) }
-            val candidateEmbedding = decision.candidateIndex?.let { candidateEmbeddings.getOrNull(it) }
+        val quietMs = config.quietMinutes * MILLIS_PER_MINUTE
+        val maxAgeMs = config.maxBatchAgeMinutes * MILLIS_PER_MINUTE
 
-            when (action) {
-                "INSERT" -> {
-                    if (candidate != null) {
-                        val finalContent = decision.content?.trim()?.takeIf { it.isNotBlank() } ?: candidate.content
-                        val embedding = embedIndexByDecisionIdx[idx]?.let { reembeddedVectors[it] } ?: candidateEmbedding
-                        val finalExpiresAt =
-                            if (decision.expiresAt != null) {
-                                MemoryCandidateProcessor.parseAndClampExpiresAt(decision.expiresAt, nowMs, zone)
-                            } else {
-                                candidate.expiresAt
-                            }
-                        mutations.add(
-                            MemoryMutation.Insert(
-                                guildId = guildId,
-                                scope = candidate.scope,
-                                targetUserId = candidate.targetUserId,
-                                content = finalContent,
-                                embedding = embedding,
-                                expiresAt = finalExpiresAt,
-                            ),
-                        )
-                    }
-                }
+        return synchronized(lock) {
+            val batches = mutableListOf<EligibleChannelBatch>()
+            for (state in activityTracker.values) {
+                if (state.inFlight) continue
+                val count = state.unprocessedHumanCount
+                val isQuietTrigger = count >= config.minMessages && (nowMs - state.lastActivityAtMs) >= quietMs
+                val isMaxCountTrigger = count >= config.maxBatchMessages
+                val oldestAt = state.oldestUnprocessedAtMs
+                val isMaxAgeTrigger =
+                    count >= config.minMessages &&
+                        oldestAt != null &&
+                        (nowMs - oldestAt) >= maxAgeMs
 
-                "UPDATE" -> {
-                    val memoryId = decision.memoryId
-                    val finalContent = decision.content?.trim()?.takeIf { it.isNotBlank() } ?: candidate?.content
-                    if (memoryId != null && finalContent != null) {
-                        val embedding = embedIndexByDecisionIdx[idx]?.let { reembeddedVectors[it] } ?: candidateEmbedding
-                        val finalExpiresAt =
-                            if (decision.expiresAt != null) {
-                                MemoryCandidateProcessor.parseAndClampExpiresAt(decision.expiresAt, nowMs, zone)
-                            } else {
-                                candidate?.expiresAt
-                            }
-                        mutations.add(
-                            MemoryMutation.Update(
-                                id = memoryId,
-                                guildId = guildId,
-                                content = finalContent,
-                                embedding = embedding,
-                                expiresAt = finalExpiresAt,
-                            ),
-                        )
-                    }
-                }
-
-                "DELETE" -> {
-                    val memoryId = decision.memoryId
-                    if (memoryId != null) {
-                        mutations.add(
-                            MemoryMutation.Delete(
-                                id = memoryId,
-                                guildId = guildId,
-                            ),
-                        )
-                    }
-                }
-
-                "NOOP" -> {
-                    // Intentionally no-op
+                if (isQuietTrigger || isMaxCountTrigger || isMaxAgeTrigger) {
+                    state.inFlight = true
+                    batches.add(
+                        EligibleChannelBatch(
+                            channelId = state.channelId,
+                            guildId = state.guildId,
+                            countAtStart = count,
+                        ),
+                    )
                 }
             }
+            batches
         }
-        return mutations
     }
 
-    private fun buildReconciliationPrompt(
-        candidates: List<FactCandidate>,
-        hitsPerCandidate: List<List<ChatterMemorySearchHit>>,
-    ): String =
-        buildString {
-            appendLine("Reconcile each extracted candidate fact against existing similar memories.")
-            candidates.forEachIndexed { idx, candidate ->
-                appendLine("Candidate [$idx] (scope=${candidate.scope.dbValue}, target_user_id=${candidate.targetUserId}): ${candidate.content}")
-                val hits = hitsPerCandidate[idx]
-                if (hits.isEmpty()) {
-                    appendLine("  Existing similar memories: (none)")
-                } else {
-                    appendLine("  Existing similar memories:")
-                    hits.forEach { hit ->
-                        appendLine("    - id=${hit.memory.id}, scope=${hit.memory.scope.dbValue}, content=${hit.memory.content}")
-                    }
-                }
+    private fun markBatchCompleted(
+        channelId: String,
+        processedCount: Int,
+    ) {
+        synchronized(lock) {
+            val state = activityTracker[channelId] ?: return
+            state.inFlight = false
+            val remaining = (state.unprocessedHumanCount - processedCount).coerceAtLeast(0)
+            state.unprocessedHumanCount = remaining
+            if (remaining == 0) {
+                state.oldestUnprocessedAtMs = null
             }
         }
+    }
+
+    private fun clearInFlight(channelId: String) {
+        synchronized(lock) {
+            activityTracker[channelId]?.inFlight = false
+        }
+    }
 
     companion object {
+        const val DEFAULT_MAX_TRACKED_CHANNELS = 1000
+        const val DEFAULT_TICK_INTERVAL_MS = 30_000L
+        private const val MILLIS_PER_MINUTE = 60_000L
         private const val FETCH_BUFFER_SIZE = 20
         private const val TOP_K_SIMILAR = 6
         private const val MAX_DISTILL_OUTPUT_TOKENS = 2048
-        private const val HTTP_REQUEST_TIMEOUT_MS = 30_000L
-        private const val HTTP_CONNECT_TIMEOUT_MS = 10_000L
-
-        fun createDefaultHttpClient(): HttpClient =
-            HttpClient(CIO) {
-                install(ContentNegotiation) {
-                    json(
-                        Json {
-                            ignoreUnknownKeys = true
-                            encodeDefaults = false
-                        },
-                    )
-                }
-                install(HttpTimeout) {
-                    requestTimeoutMillis = HTTP_REQUEST_TIMEOUT_MS
-                    connectTimeoutMillis = HTTP_CONNECT_TIMEOUT_MS
-                    socketTimeoutMillis = HTTP_REQUEST_TIMEOUT_MS
-                }
-            }
-
-        private val EXTRACTION_SYSTEM_INSTRUCTION =
-            """
-            You extract durable, self-contained Atomic Facts from a Discord conversation transcript.
-            Rules:
-            - Speakers are formatted as `Name (uid:<id>): ...`, `BotName [BOT] (uid:<id>): ...`, or `Luna (uid:<selfId>): ...`.
-            - Extract ONLY objective, enduring user preferences, life events, relationships, or shared guild/server facts, plus time-bound upcoming plans/events worth remembering until they pass.
-            - NEVER extract Luna's jokes, roleplay, fabrications, or ephemeral small talk.
-            - Resolve all pronouns ("I", "my", "he", "she") into explicit names/subjects so each fact is standalone.
-            - Use the provided `Current date` to resolve relative time expressions ("tomorrow", "next Friday", "this weekend").
-            - Set `expires_at` to `"YYYY-MM-DD"` for time-bound events/plans (e.g., interviews, trips, exams, weekend events) and `null` for durable preferences or standing facts.
-            - Output ONLY a valid JSON array of objects:
-              [{"scope": "user" | "guild", "target_user_id": "<uid string or null>", "content": "<atomic fact>", "expires_at": "YYYY-MM-DD" | null}]
-            - Return `[]` if there are no facts worth remembering.
-            """.trimIndent()
-
-        private val RECONCILIATION_SYSTEM_INSTRUCTION =
-            """
-            You reconcile newly extracted candidate facts against existing stored memories.
-            For each candidate_index, decide one action:
-            - `INSERT`: new fact not yet stored.
-            - `UPDATE`: updates/replaces an existing memory (provide `memory_id`, updated `content`, and optional `expires_at`).
-            - `DELETE`: invalidates/contradicts an existing memory (provide `memory_id`).
-            - `NOOP`: already accurately captured or redundant.
-            Output ONLY a valid JSON array of objects:
-            [{"action": "INSERT"|"UPDATE"|"DELETE"|"NOOP", "memory_id": <long or null>, "candidate_index": <int>, "content": "<final fact text or null>", "expires_at": "<YYYY-MM-DD or null>"}]
-            """.trimIndent()
     }
 }
