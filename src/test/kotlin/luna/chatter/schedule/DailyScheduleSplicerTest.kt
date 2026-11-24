@@ -265,32 +265,36 @@ class DailyScheduleSplicerTest {
 
         // 3 mutations within 10 minutes succeed
         repeat(3) {
-            assertNull(limiter.tryAcquire())
+            assertNull(limiter.checkAllowed())
+            limiter.recordMutation()
         }
         // 4th mutation within 10 minutes is rejected
-        val windowRejection = limiter.tryAcquire()
+        val windowRejection = limiter.checkAllowed()
         assertNotNull(windowRejection)
         assertTrue(windowRejection.contains("10"), "Expected 10-minute window rate-limit rejection reason")
 
         // Advance 11 minutes -> window resets, can do 3 more (total 6)
         clock.advanceMinutes(11)
         repeat(3) {
-            assertNull(limiter.tryAcquire())
+            assertNull(limiter.checkAllowed())
+            limiter.recordMutation()
         }
 
         // Advance 11 minutes -> 3 more (total 9)
         clock.advanceMinutes(11)
         repeat(3) {
-            assertNull(limiter.tryAcquire())
+            assertNull(limiter.checkAllowed())
+            limiter.recordMutation()
         }
 
         // Advance 11 minutes -> 1 more (total 10, daily cap reached)
         clock.advanceMinutes(11)
-        assertNull(limiter.tryAcquire())
+        assertNull(limiter.checkAllowed())
+        limiter.recordMutation()
 
         // 11th mutation on same calendar day is rejected even after advancing 11 minutes
         clock.advanceMinutes(11)
-        val dailyRejection = limiter.tryAcquire()
+        val dailyRejection = limiter.checkAllowed()
         assertNotNull(dailyRejection)
         assertTrue(dailyRejection.contains("10"), "Expected 10-per-day rate-limit rejection reason")
 
@@ -298,6 +302,6 @@ class DailyScheduleSplicerTest {
         val nextDay = ZonedDateTime.of(2026, 11, 25, 0, 5, 0, 0, taipeiZone).toInstant()
         val nextDayClock = MutableClock(nextDay, taipeiZone)
         val nextDayLimiter = ScheduleMutationRateLimiter(clock = nextDayClock, timezone = taipeiZone)
-        assertNull(nextDayLimiter.tryAcquire())
+        assertNull(nextDayLimiter.checkAllowed())
     }
 }

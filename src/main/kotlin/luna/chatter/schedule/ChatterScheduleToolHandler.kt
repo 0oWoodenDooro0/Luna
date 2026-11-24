@@ -3,6 +3,7 @@ package luna.chatter.schedule
 import kotlinx.coroutines.CancellationException
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonObjectBuilder
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
@@ -44,25 +45,20 @@ open class ChatterScheduleToolHandler(
             val obj =
                 element as? JsonObject
                     ?: return invalidArgumentResponse("patches[$index] must be a JSON object.")
-            val parsed =
-                parsePatch(obj, prefix = "patches[$index].")
-                    ?: return invalidArgumentResponse("patches[$index] is invalid.")
-            when (parsed) {
+            when (val parsed = parsePatch(obj, prefix = "patches[$index].")) {
                 is ParseResult.Error -> return invalidArgumentResponse(parsed.message)
                 is ParseResult.Value -> patches.add(parsed.value)
             }
         }
 
-        return try {
+        return runToolSafely(
+            operation = TODAY_TOOL_NAME,
+            unavailableMessage = "今日行程調整暫時無法完成，請依目前對話自然回覆。",
+        ) {
             when (val result = coordinator.applyTodayPatches(patches)) {
                 is DailyScheduleSplicer.SpliceResult.Success -> formatTodaySuccess(result)
                 is DailyScheduleSplicer.SpliceResult.Rejected -> rejectedResponse(result.reason)
             }
-        } catch (ex: CancellationException) {
-            throw ex
-        } catch (ex: Exception) {
-            logger.warn("update_today_schedule failed unexpectedly: {}", ex.message, ex)
-            unavailableResponse("今日行程調整暫時無法完成，請依目前對話自然回覆。")
         }
     }
 
@@ -90,16 +86,16 @@ open class ChatterScheduleToolHandler(
             parseDate(rawDate)
                 ?: return invalidArgumentResponse("Invalid date '$rawDate'; expected YYYY-MM-DD.")
 
-        val parsedPatch =
-            parsePatch(arguments, prefix = "")
-                ?: return invalidArgumentResponse("Invalid commitment fields.")
         val patch =
-            when (parsedPatch) {
+            when (val parsedPatch = parsePatch(arguments, prefix = "")) {
                 is ParseResult.Error -> return invalidArgumentResponse(parsedPatch.message)
                 is ParseResult.Value -> parsedPatch.value
             }
 
-        return try {
+        return runToolSafely(
+            operation = "$COMMITMENT_TOOL_NAME (upsert)",
+            unavailableMessage = "跨日約定更新暫時無法完成，請依目前對話自然回覆。",
+        ) {
             when (
                 val result =
                     coordinator.upsertCommitment(
@@ -117,11 +113,6 @@ open class ChatterScheduleToolHandler(
                 is DailyScheduleCoordinator.CommitmentResult.Rejected -> rejectedResponse(result.reason)
                 is DailyScheduleCoordinator.CommitmentResult.Cancelled -> rejectedResponse("Unexpected cancel result.")
             }
-        } catch (ex: CancellationException) {
-            throw ex
-        } catch (ex: Exception) {
-            logger.warn("manage_schedule_commitment (upsert) failed unexpectedly: {}", ex.message, ex)
-            unavailableResponse("跨日約定更新暫時無法完成，請依目前對話自然回覆。")
         }
     }
 
@@ -152,7 +143,10 @@ open class ChatterScheduleToolHandler(
             return invalidArgumentResponse("id or matching date/start_time/title is required for action='cancel'.")
         }
 
-        return try {
+        return runToolSafely(
+            operation = "$COMMITMENT_TOOL_NAME (cancel)",
+            unavailableMessage = "跨日約定取消暫時無法完成，請依目前對話自然回覆。",
+        ) {
             val matches =
                 coordinator.upcomingCommitments().filter { commitment ->
                     (parsedDate == null || commitment.targetDate == parsedDate) &&
@@ -173,26 +167,33 @@ open class ChatterScheduleToolHandler(
                     invalidArgumentResponse("Multiple commitments matched; specify id explicitly: $candidates")
                 }
             }
-        } catch (ex: CancellationException) {
-            throw ex
-        } catch (ex: Exception) {
-            logger.warn("manage_schedule_commitment (cancel) failed unexpectedly: {}", ex.message, ex)
-            unavailableResponse("跨日約定取消暫時無法完成，請依目前對話自然回覆。")
         }
     }
 
     private suspend fun executeCancelById(id: String): String =
-        try {
+        runToolSafely(
+            operation = "$COMMITMENT_TOOL_NAME (cancel id=$id)",
+            unavailableMessage = "跨日約定取消暫時無法完成，請依目前對話自然回覆。",
+        ) {
             when (val result = coordinator.cancelCommitment(id)) {
                 is DailyScheduleCoordinator.CommitmentResult.Cancelled -> formatCancelledResponse(result.id)
                 is DailyScheduleCoordinator.CommitmentResult.Rejected -> rejectedResponse(result.reason)
                 is DailyScheduleCoordinator.CommitmentResult.Upserted -> rejectedResponse("Unexpected upsert result.")
             }
+        }
+
+    private suspend inline fun runToolSafely(
+        operation: String,
+        unavailableMessage: String,
+        block: suspend () -> String,
+    ): String =
+        try {
+            block()
         } catch (ex: CancellationException) {
             throw ex
         } catch (ex: Exception) {
-            logger.warn("manage_schedule_commitment (cancel id={}) failed unexpectedly: {}", id, ex.message, ex)
-            unavailableResponse("跨日約定取消暫時無法完成，請依目前對話自然回覆。")
+            logger.warn("{} failed unexpectedly: {}", operation, ex.message, ex)
+            unavailableResponse(unavailableMessage)
         }
 
     private sealed interface ParseResult<out T> {
@@ -208,7 +209,7 @@ open class ChatterScheduleToolHandler(
     private fun parsePatch(
         obj: JsonObject,
         prefix: String,
-    ): ParseResult<SchedulePatch>? {
+    ): ParseResult<SchedulePatch> {
         val rawStart =
             extractString(obj, "start_time")
                 ?: return ParseResult.Error("${prefix}start_time (HH:mm) is required.")
@@ -340,6 +341,43 @@ open class ChatterScheduleToolHandler(
         private val STRICT_DATE_FORMATTER: DateTimeFormatter =
             DateTimeFormatter.ISO_LOCAL_DATE.withResolverStyle(ResolverStyle.STRICT)
 
+        private fun JsonObjectBuilder.putBlockFieldProperties(
+            detailDescription: String,
+            statusTextDescription: String,
+            availabilityDescription: String,
+        ) {
+            putJsonObject("start_time") {
+                put("type", "string")
+                put("description", "Start time in 24-hour HH:mm format (00:00..23:59).")
+            }
+            putJsonObject("end_time") {
+                put("type", "string")
+                put("description", "End time in 24-hour HH:mm format (00:01..24:00).")
+            }
+            putJsonObject("title") {
+                put("type", "string")
+                put("description", "Short Traditional Chinese activity title.")
+            }
+            putJsonObject("detail") {
+                put("type", "string")
+                put("description", detailDescription)
+            }
+            putJsonObject("status_text") {
+                put("type", "string")
+                put("description", statusTextDescription)
+            }
+            putJsonObject("availability") {
+                put("type", "string")
+                putJsonArray("enum") {
+                    add(JsonPrimitive("AVAILABLE"))
+                    add(JsonPrimitive("BREAK"))
+                    add(JsonPrimitive("BUSY"))
+                    add(JsonPrimitive("SLEEPING"))
+                }
+                put("description", availabilityDescription)
+            }
+        }
+
         val TODAY_TOOL_DECLARATION: GeminiInteractionTool =
             GeminiInteractionTool.function(
                 name = TODAY_TOOL_NAME,
@@ -357,36 +395,11 @@ open class ChatterScheduleToolHandler(
                                 putJsonObject("items") {
                                     put("type", "object")
                                     putJsonObject("properties") {
-                                        putJsonObject("start_time") {
-                                            put("type", "string")
-                                            put("description", "Start time in 24-hour HH:mm format (00:00..23:59).")
-                                        }
-                                        putJsonObject("end_time") {
-                                            put("type", "string")
-                                            put("description", "End time in 24-hour HH:mm format (00:01..24:00).")
-                                        }
-                                        putJsonObject("title") {
-                                            put("type", "string")
-                                            put("description", "Short Traditional Chinese activity title.")
-                                        }
-                                        putJsonObject("detail") {
-                                            put("type", "string")
-                                            put("description", "Brief description of what Luna is doing.")
-                                        }
-                                        putJsonObject("status_text") {
-                                            put("type", "string")
-                                            put("description", "Short Discord status text.")
-                                        }
-                                        putJsonObject("availability") {
-                                            put("type", "string")
-                                            putJsonArray("enum") {
-                                                add(JsonPrimitive("AVAILABLE"))
-                                                add(JsonPrimitive("BREAK"))
-                                                add(JsonPrimitive("BUSY"))
-                                                add(JsonPrimitive("SLEEPING"))
-                                            }
-                                            put("description", "Availability state for this block.")
-                                        }
+                                        putBlockFieldProperties(
+                                            detailDescription = "Brief description of what Luna is doing.",
+                                            statusTextDescription = "Short Discord status text.",
+                                            availabilityDescription = "Availability state for this block.",
+                                        )
                                     }
                                     put(
                                         "required",
@@ -434,36 +447,11 @@ open class ChatterScheduleToolHandler(
                                 put("type", "string")
                                 put("description", "Target local date in YYYY-MM-DD format (tomorrow..+7 days).")
                             }
-                            putJsonObject("start_time") {
-                                put("type", "string")
-                                put("description", "Start time in 24-hour HH:mm format (00:00..23:59).")
-                            }
-                            putJsonObject("end_time") {
-                                put("type", "string")
-                                put("description", "End time in 24-hour HH:mm format (00:01..24:00).")
-                            }
-                            putJsonObject("title") {
-                                put("type", "string")
-                                put("description", "Short Traditional Chinese activity title.")
-                            }
-                            putJsonObject("detail") {
-                                put("type", "string")
-                                put("description", "Brief description of the planned activity.")
-                            }
-                            putJsonObject("status_text") {
-                                put("type", "string")
-                                put("description", "Short Discord status text for that block.")
-                            }
-                            putJsonObject("availability") {
-                                put("type", "string")
-                                putJsonArray("enum") {
-                                    add(JsonPrimitive("AVAILABLE"))
-                                    add(JsonPrimitive("BREAK"))
-                                    add(JsonPrimitive("BUSY"))
-                                    add(JsonPrimitive("SLEEPING"))
-                                }
-                                put("description", "Availability state for the commitment.")
-                            }
+                            putBlockFieldProperties(
+                                detailDescription = "Brief description of the planned activity.",
+                                statusTextDescription = "Short Discord status text for that block.",
+                                availabilityDescription = "Availability state for the commitment.",
+                            )
                         }
                         put("required", JsonArray(listOf(JsonPrimitive("action"))))
                     },

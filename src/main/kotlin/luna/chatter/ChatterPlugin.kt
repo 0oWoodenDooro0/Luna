@@ -177,7 +177,11 @@ class ChatterPlugin(
         var initializedPresencePort: KordSchedulePresencePort? = null
         if (chatterConfig.isConfigured && chatterEnabled && chatterConfig.schedule.enabled) {
             runCatching {
-                val scheduleStore = SqliteDailyScheduleStore(context.database)
+                val scheduleStore =
+                    SqliteDailyScheduleStore(
+                        database = context.database,
+                        timezone = ZoneId.of(chatterConfig.timezone),
+                    )
                 val scheduleGenerator =
                     DailyScheduleGenerator(
                         interactionClient =

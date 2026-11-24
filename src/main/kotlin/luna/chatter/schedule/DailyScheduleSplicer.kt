@@ -224,18 +224,6 @@ class ScheduleMutationRateLimiter(
         }
     }
 
-    /**
-     * Atomically checks quota and records a mutation if allowed.
-     * Returns `null` if acquired, or a clear model-readable rejection reason.
-     */
-    fun tryAcquire(nowMillis: Long = clock.millis()): String? =
-        synchronized(lock) {
-            val rejection = checkAllowedLocked(nowMillis)
-            if (rejection != null) return rejection
-            timestamps.addLast(nowMillis)
-            null
-        }
-
     private fun checkAllowedLocked(nowMillis: Long): String? {
         pruneLocked(nowMillis)
         val windowCutoff = nowMillis - windowMillis

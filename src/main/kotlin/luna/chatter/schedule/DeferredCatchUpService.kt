@@ -72,7 +72,7 @@ class DeferredCatchUpService(
             emojiService = emojiService,
             traceRecorder = traceRecorder,
             config = config,
-            isUnavailableNow = ::isUnavailableNow,
+            scheduleProvider = scheduleProvider,
             randomProvider = randomProvider,
             logger = logger,
         )
