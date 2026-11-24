@@ -6,6 +6,7 @@ import dev.kord.core.entity.interaction.ChatInputCommandInteraction
 import dev.kord.core.entity.interaction.SubCommand
 import dev.kord.rest.builder.interaction.boolean
 import dev.kord.rest.builder.interaction.integer
+import dev.kord.rest.builder.interaction.string
 import dev.kord.rest.builder.interaction.subCommand
 import luna.core.Command
 import org.slf4j.LoggerFactory
@@ -36,6 +37,11 @@ class MemoryCommand(
                     required = true
                     minValue = 1
                 }
+                string("kind", "記憶類型（預設 fact 事實；understanding 印象）") {
+                    required = false
+                    choice("事實 (fact)", KIND_FACT)
+                    choice("印象 (understanding)", KIND_UNDERSTANDING)
+                }
             }
             subCommand("clear", "清除你在目前伺服器中的所有個人長期記憶") {
                 boolean("confirm", "確認永久刪除所有個人長期記憶（需設為 true）") {
@@ -62,10 +68,26 @@ class MemoryCommand(
 
         val replyContent =
             when (subCommand?.name) {
-                "list" -> handleList(guildId = guildId, userId = userId, requestedPage = subCommand.integers["page"])
-                "delete" -> handleDelete(guildId = guildId, userId = userId, memoryId = subCommand.integers["id"])
-                "clear" -> handleClear(guildId = guildId, userId = userId, confirm = subCommand.booleans["confirm"])
-                else -> "❌ 不支援的子指令。請使用 `/memory list`、`/memory delete <id>` 或 `/memory clear`。"
+                "list" -> {
+                    handleList(guildId = guildId, userId = userId, requestedPage = subCommand.integers["page"])
+                }
+
+                "delete" -> {
+                    handleDelete(
+                        guildId = guildId,
+                        userId = userId,
+                        memoryId = subCommand.integers["id"],
+                        kind = subCommand.strings["kind"],
+                    )
+                }
+
+                "clear" -> {
+                    handleClear(guildId = guildId, userId = userId, confirm = subCommand.booleans["confirm"])
+                }
+
+                else -> {
+                    "❌ 不支援的子指令。請使用 `/memory list`、`/memory delete <id>` 或 `/memory clear`。"
+                }
             }
 
         response.respond {
@@ -78,37 +100,62 @@ class MemoryCommand(
         userId: String,
         requestedPage: Long?,
     ): String {
-        val memories =
+        val items =
             runCatching {
-                memoryStore.listUserMemories(guildId = guildId, userId = userId)
+                val facts =
+                    memoryStore.listUserMemories(guildId = guildId, userId = userId).map { record ->
+                        val updatedDate = formatUtcDate(record.updatedAt)
+                        val expirySuffix = record.expiresAt?.let { ", expires ${formatUtcDate(it)}" }.orEmpty()
+                        ListEntry(
+                            updatedAt = record.updatedAt,
+                            id = record.id,
+                            line = "[事實 #${record.id}] ${record.content} (updated $updatedDate$expirySuffix)",
+                        )
+                    }
+                val understandings =
+                    memoryStore.listUserUnderstandings(guildId = guildId, userId = userId).map { record ->
+                        val updatedDate = formatUtcDate(record.updatedAt)
+                        ListEntry(
+                            updatedAt = record.updatedAt,
+                            id = record.id,
+                            line = "[印象 #${record.id}] ${record.subject}: ${record.content} (updated $updatedDate)",
+                        )
+                    }
+                (facts + understandings).sortedWith(
+                    compareByDescending<ListEntry> { it.updatedAt }.thenByDescending { it.id },
+                )
             }.onFailure { e ->
                 logger.warn("Failed to list user memories for guild={} user={}: {}", guildId, userId, e.message)
             }.getOrElse {
                 return "❌ 讀取長期記憶時發生錯誤，請稍後再試。"
             }
 
-        if (memories.isEmpty()) {
+        if (items.isEmpty()) {
             return "ℹ️ 你在目前伺服器中尚未有任何長期記憶。"
         }
 
-        val totalPages = (memories.size + PAGE_SIZE - 1) / PAGE_SIZE
+        val totalPages = (items.size + PAGE_SIZE - 1) / PAGE_SIZE
         val page = requestedPage ?: 1L
         if (page < 1L || page > totalPages.toLong()) {
             return "❌ 頁碼超出範圍，請輸入 `1` 到 `$totalPages` 之間的頁碼。"
         }
 
         val startIndex = ((page - 1L) * PAGE_SIZE).toInt()
-        val pageItems = memories.subList(startIndex, minOf(startIndex + PAGE_SIZE, memories.size))
+        val pageItems = items.subList(startIndex, minOf(startIndex + PAGE_SIZE, items.size))
 
         return buildString {
-            appendLine("🧠 **你在目前伺服器的長期記憶**（第 $page/$totalPages 頁，共 ${memories.size} 筆）：")
-            for (record in pageItems) {
-                val updatedDate = formatUtcDate(record.updatedAt)
-                val expirySuffix = record.expiresAt?.let { ", expires ${formatUtcDate(it)}" }.orEmpty()
-                appendLine("[#${record.id}] ${record.content} (updated $updatedDate$expirySuffix)")
+            appendLine("🧠 **你在目前伺服器的長期記憶**（第 $page/$totalPages 頁，共 ${items.size} 筆）：")
+            for (item in pageItems) {
+                appendLine(item.line)
             }
         }.trimEnd()
     }
+
+    private data class ListEntry(
+        val updatedAt: Long,
+        val id: Long,
+        val line: String,
+    )
 
     private fun formatUtcDate(epochMs: Long): String = DATE_FORMATTER.format(Instant.ofEpochMilli(epochMs).atZone(ZoneOffset.UTC))
 
@@ -116,21 +163,40 @@ class MemoryCommand(
         guildId: String,
         userId: String,
         memoryId: Long?,
+        kind: String? = null,
     ): String {
         if (memoryId == null || memoryId <= 0L) {
             return "❌ 請提供有效的記憶編號（正整數）。"
         }
 
+        val resolvedKind = kind?.trim()?.lowercase() ?: KIND_FACT
+        if (resolvedKind != KIND_FACT && resolvedKind != KIND_UNDERSTANDING) {
+            return "❌ 不支援的記憶類型 `$kind`，請選擇 `$KIND_FACT` 或 `$KIND_UNDERSTANDING`。"
+        }
+
         val deleted =
             runCatching {
-                memoryStore.deleteOwnedUserMemory(
-                    id = memoryId,
-                    guildId = guildId,
-                    userId = userId,
-                )
+                when (resolvedKind) {
+                    KIND_UNDERSTANDING -> {
+                        memoryStore.deleteOwnedUserUnderstanding(
+                            id = memoryId,
+                            guildId = guildId,
+                            userId = userId,
+                        )
+                    }
+
+                    else -> {
+                        memoryStore.deleteOwnedUserMemory(
+                            id = memoryId,
+                            guildId = guildId,
+                            userId = userId,
+                        )
+                    }
+                }
             }.onFailure { e ->
                 logger.warn(
-                    "Failed to delete memory id={} for guild={} user={}: {}",
+                    "Failed to delete {} id={} for guild={} user={}: {}",
+                    resolvedKind,
                     memoryId,
                     guildId,
                     userId,
@@ -140,10 +206,11 @@ class MemoryCommand(
                 return "❌ 刪除長期記憶時發生錯誤，請稍後再試。"
             }
 
+        val kindLabel = if (resolvedKind == KIND_UNDERSTANDING) "印象" else "記憶"
         return if (deleted) {
-            "✅ 已永久刪除記憶 `#$memoryId`。"
+            "✅ 已永久刪除$kindLabel `#$memoryId`。"
         } else {
-            "❌ 找不到記憶 `#$memoryId`，或你沒有權限刪除此記憶。"
+            "❌ 找不到$kindLabel `#$memoryId`，或你沒有權限刪除此$kindLabel。"
         }
     }
 
@@ -158,7 +225,9 @@ class MemoryCommand(
 
         val deletedCount =
             runCatching {
-                memoryStore.deleteAllOwnedUserMemories(guildId = guildId, userId = userId)
+                val factsDeleted = memoryStore.deleteAllOwnedUserMemories(guildId = guildId, userId = userId)
+                val understandingsDeleted = memoryStore.deleteAllOwnedUserUnderstandings(guildId = guildId, userId = userId)
+                factsDeleted + understandingsDeleted
             }.onFailure { e ->
                 logger.warn("Failed to clear user memories for guild={} user={}: {}", guildId, userId, e.message)
             }.getOrElse {
@@ -173,6 +242,8 @@ class MemoryCommand(
         private val DATE_FORMATTER = DateTimeFormatter.ISO_LOCAL_DATE
         internal const val PAGE_SIZE = 10
         internal const val DISCORD_MAX_MESSAGE_LENGTH = 2000
+        internal const val KIND_FACT = "fact"
+        internal const val KIND_UNDERSTANDING = "understanding"
 
         internal fun truncateForDiscord(
             message: String,

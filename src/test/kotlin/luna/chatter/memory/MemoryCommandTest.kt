@@ -47,6 +47,7 @@ class MemoryCommandTest {
         userId: Snowflake = Snowflake(200L),
         integers: Map<String, Long> = emptyMap(),
         booleans: Map<String, Boolean> = emptyMap(),
+        strings: Map<String, String> = emptyMap(),
     ): Pair<ChatInputCommandInteraction, () -> String?> {
         val capturedModify = slot<MultipartInteractionResponseModifyRequest>()
         var respondedContent: String? = null
@@ -95,6 +96,7 @@ class MemoryCommandTest {
                 every { name } returns subcommandName
                 every { this@mockk.integers } returns integers
                 every { this@mockk.booleans } returns booleans
+                every { this@mockk.strings } returns strings
             }
 
         val mockInteraction =
@@ -117,39 +119,12 @@ class MemoryCommandTest {
             val user1 = "200"
             val user2 = "201"
 
-            val memA =
-                store.insertMemory(
-                    guildId = guild1,
-                    scope = MemoryScope.USER,
-                    targetUserId = user1,
-                    content = "Likes pour-over coffee",
-                )
-            val memB =
-                store.insertMemory(
-                    guildId = guild1,
-                    scope = MemoryScope.USER,
-                    targetUserId = user1,
-                    content = "Lives in Taipei",
-                )
+            val memA = store.insertMemory(guild1, MemoryScope.USER, user1, "Likes pour-over coffee")
+            val memB = store.insertMemory(guild1, MemoryScope.USER, user1, "Lives in Taipei")
             // Noise that must NOT appear:
-            store.insertMemory(
-                guildId = guild1,
-                scope = MemoryScope.USER,
-                targetUserId = user2,
-                content = "Other user secret",
-            )
-            store.insertMemory(
-                guildId = guild1,
-                scope = MemoryScope.GUILD,
-                targetUserId = null,
-                content = "Guild-scoped fact",
-            )
-            store.insertMemory(
-                guildId = guild2,
-                scope = MemoryScope.USER,
-                targetUserId = user1,
-                content = "Other guild fact",
-            )
+            store.insertMemory(guild1, MemoryScope.USER, user2, "Other user secret")
+            store.insertMemory(guild1, MemoryScope.GUILD, null, "Guild-scoped fact")
+            store.insertMemory(guild2, MemoryScope.USER, user1, "Other guild fact")
 
             val command = MemoryCommand(store)
             val (interaction, getContent) = setupInteraction(subcommandName = "list")
@@ -159,8 +134,8 @@ class MemoryCommandTest {
             coVerify(exactly = 1) { interaction.deferEphemeralResponse() }
             val content = getContent()
             assertNotNull(content)
-            assertTrue(content.contains("[#${memA.id}] Likes pour-over coffee (updated 2026-11-20)"), "Expected memA in list")
-            assertTrue(content.contains("[#${memB.id}] Lives in Taipei (updated 2026-11-20)"), "Expected memB from other channel in list")
+            assertTrue(content.contains("[事實 #${memA.id}] Likes pour-over coffee (updated 2026-11-20)"), "Expected memA in list")
+            assertTrue(content.contains("[事實 #${memB.id}] Lives in Taipei (updated 2026-11-20)"), "Expected memB from other channel in list")
             assertFalse(content.contains("Other user secret"), "Must not include other user's memory")
             assertFalse(content.contains("Guild-scoped fact"), "Must not include guild-scoped memory")
             assertFalse(content.contains("Other guild fact"), "Must not include other guild memory")
@@ -171,12 +146,7 @@ class MemoryCommandTest {
         runTest {
             val store = createStore()
             repeat(10) { idx ->
-                store.insertMemory(
-                    guildId = "100",
-                    scope = MemoryScope.USER,
-                    targetUserId = "200",
-                    content = "Memory entry $idx: " + "x".repeat(250),
-                )
+                store.insertMemory("100", MemoryScope.USER, "200", "Memory entry $idx: " + "x".repeat(250))
             }
 
             val command = MemoryCommand(store)
@@ -199,27 +169,16 @@ class MemoryCommandTest {
             val store = createStore()
             val inserted =
                 (1..15).map { idx ->
-                    val expiresAt =
-                        if (idx == 15) {
-                            Instant.parse("2026-11-30T23:59:59Z").toEpochMilli()
-                        } else {
-                            null
-                        }
-                    store.insertMemory(
-                        guildId = "100",
-                        scope = MemoryScope.USER,
-                        targetUserId = "200",
-                        content = "Paginated fact #$idx",
-                        expiresAt = expiresAt,
-                    )
+                    val expiresAt = if (idx == 15) Instant.parse("2026-11-30T23:59:59Z").toEpochMilli() else null
+                    store.insertMemory("100", MemoryScope.USER, "200", "Paginated fact #$idx", expiresAt = expiresAt)
                 }
             // Expired memory should be excluded from total count and pages
             val expired =
                 store.insertMemory(
-                    guildId = "100",
-                    scope = MemoryScope.USER,
-                    targetUserId = "200",
-                    content = "Already expired fact",
+                    "100",
+                    MemoryScope.USER,
+                    "200",
+                    "Already expired fact",
                     expiresAt = Instant.parse("2026-11-19T00:00:00Z").toEpochMilli(),
                 )
 
@@ -231,10 +190,10 @@ class MemoryCommandTest {
             assertNotNull(page1)
             assertTrue(page1.contains("1/2"), "Expected page 1/2 metadata, got: $page1")
             assertTrue(page1.contains("15"), "Expected total count 15, got: $page1")
-            assertTrue(page1.contains("[#${inserted[14].id}] Paginated fact #15"), "Expected newest item on page 1")
+            assertTrue(page1.contains("[事實 #${inserted[14].id}] Paginated fact #15"), "Expected newest item on page 1")
             assertTrue(page1.contains("2026-11-30"), "Expected expiry date 2026-11-30 for expiring memory")
-            assertFalse(page1.contains("[#${inserted[0].id}] Paginated fact #1"), "Oldest item must be on page 2")
-            assertFalse(page1.contains("[#${expired.id}]"), "Expired memory must not appear")
+            assertFalse(page1.contains("[事實 #${inserted[0].id}] Paginated fact #1"), "Oldest item must be on page 2")
+            assertFalse(page1.contains("[事實 #${expired.id}]"), "Expired memory must not appear")
 
             val (page2Interaction, getPage2) =
                 setupInteraction(
@@ -246,8 +205,8 @@ class MemoryCommandTest {
             assertNotNull(page2)
             assertTrue(page2.contains("2/2"), "Expected page 2/2 metadata, got: $page2")
             assertTrue(page2.contains("15"), "Expected total count 15, got: $page2")
-            assertTrue(page2.contains("[#${inserted[0].id}] Paginated fact #1"), "Expected oldest item on page 2")
-            assertFalse(page2.contains("[#${inserted[14].id}] Paginated fact #15"), "Page 1 item must not appear on page 2")
+            assertTrue(page2.contains("[事實 #${inserted[0].id}] Paginated fact #1"), "Expected oldest item on page 2")
+            assertFalse(page2.contains("[事實 #${inserted[14].id}] Paginated fact #15"), "Page 1 item must not appear on page 2")
         }
 
     @Test
@@ -255,22 +214,13 @@ class MemoryCommandTest {
         runTest {
             val store = createStore()
             repeat(12) { idx ->
-                store.insertMemory(
-                    guildId = "100",
-                    scope = MemoryScope.USER,
-                    targetUserId = "200",
-                    content = "Fact $idx",
-                )
+                store.insertMemory("100", MemoryScope.USER, "200", "Fact $idx")
             }
 
             val command = MemoryCommand(store)
 
             for (badPage in listOf(0L, -1L, 3L)) {
-                val (interaction, getContent) =
-                    setupInteraction(
-                        subcommandName = "list",
-                        integers = mapOf("page" to badPage),
-                    )
+                val (interaction, getContent) = setupInteraction("list", integers = mapOf("page" to badPage))
                 command.handle(interaction)
                 coVerify(atLeast = 1) { interaction.deferEphemeralResponse() }
                 val content = getContent()
@@ -292,6 +242,30 @@ class MemoryCommandTest {
             val content = getContent()
             assertNotNull(content)
             assertTrue(content.contains("尚未有任何長期記憶"), "Expected empty-memory notice")
+        }
+
+    @Test
+    fun `list displays both Atomic Fact and Social Understanding owned by user in current guild with pagination`() =
+        runTest {
+            val store = createStore()
+            val fact = store.insertMemory("100", MemoryScope.USER, "200", "Drinks matcha latte")
+            val understanding = store.insertUnderstanding("100", MemoryScope.USER, "200", "說話風格", "喜歡用簡短冷靜的語氣吐槽")
+            // Noise that must NOT appear:
+            store.insertUnderstanding("100", MemoryScope.USER, "201", "其他人的印象", "不該出現的印象")
+            store.insertUnderstanding("100", MemoryScope.GUILD, null, "伺服器文化", "伺服器共識不該出現在個人清單")
+            store.insertUnderstanding("101", MemoryScope.USER, "200", "其他伺服器", "跨伺服器印象不該出現")
+
+            val command = MemoryCommand(store)
+            val (interaction, getContent) = setupInteraction(subcommandName = "list")
+            command.handle(interaction)
+
+            val content = getContent()
+            assertNotNull(content)
+            assertTrue(content.contains("[事實 #${fact.id}] Drinks matcha latte"), "Expected fact entry, got: $content")
+            assertTrue(content.contains("[印象 #${understanding.id}] 說話風格: 喜歡用簡短冷靜的語氣吐槽"), "Expected understanding entry, got: $content")
+            assertFalse(content.contains("不該出現的印象"), "Must not include other user's understanding")
+            assertFalse(content.contains("伺服器共識不該出現在個人清單"), "Must not include guild-scoped understanding")
+            assertFalse(content.contains("跨伺服器印象不該出現"), "Must not include other guild understanding")
         }
 
     @Test
@@ -337,61 +311,97 @@ class MemoryCommandTest {
     fun `delete refuses other user, channel-scoped, and cross-guild memories without leaking existence`() =
         runTest {
             val store = createStore()
-            val otherUserMem =
-                store.insertMemory(
-                    guildId = "100",
-                    scope = MemoryScope.USER,
-                    targetUserId = "201",
-                    content = "Other user's fact",
-                )
-            val guildMem =
-                store.insertMemory(
-                    guildId = "100",
-                    scope = MemoryScope.GUILD,
-                    targetUserId = null,
-                    content = "Guild-scoped fact",
-                )
-            val otherGuildMem =
-                store.insertMemory(
-                    guildId = "101",
-                    scope = MemoryScope.USER,
-                    targetUserId = "200",
-                    content = "Other guild fact",
-                )
+            val otherUserMem = store.insertMemory("100", MemoryScope.USER, "201", "Other user's fact")
+            val guildMem = store.insertMemory("100", MemoryScope.GUILD, null, "Guild-scoped fact")
+            val otherGuildMem = store.insertMemory("101", MemoryScope.USER, "200", "Other guild fact")
 
             val command = MemoryCommand(store)
-
             val responses =
                 listOf(otherUserMem.id, guildMem.id, otherGuildMem.id, 999999L).map { targetId ->
-                    val (interaction, getContent) =
-                        setupInteraction(
-                            subcommandName = "delete",
-                            guildId = Snowflake(100L),
-                            userId = Snowflake(200L),
-                            integers = mapOf("id" to targetId),
-                        )
+                    val (interaction, getContent) = setupInteraction("delete", Snowflake(100L), Snowflake(200L), integers = mapOf("id" to targetId))
                     command.handle(interaction)
                     val content = getContent()
                     assertNotNull(content)
-                    assertTrue(
-                        content.contains("找不到記憶") || content.contains("沒有權限"),
-                        "Expected non-leaking refusal message for targetId=$targetId",
-                    )
-                    // Normalize the echoed ID to verify all four refusals produce the exact same non-leaking message
+                    assertTrue(content.contains("找不到記憶") || content.contains("沒有權限"), "Expected non-leaking refusal for targetId=$targetId")
                     content.replace("#$targetId", "#ID")
                 }
 
             assertEquals(1, responses.toSet().size, "Refusal messages must not leak whether an ID exists elsewhere")
-            assertEquals(1, store.listUserMemories(guildId = "100", userId = "201").size)
-            assertEquals(1, store.listUserMemories(guildId = "101", userId = "200").size)
-            val guildHits =
-                store.search(
-                    guildId = "100",
-                    queryText = "Guild-scoped",
-                    scope = SearchScope.GUILD,
-                    recencyExcludeMinutes = 0,
-                )
-            assertEquals(1, guildHits.size)
+            assertEquals(1, store.listUserMemories("100", "201").size)
+            assertEquals(1, store.listUserMemories("101", "200").size)
+            assertEquals(1, store.search("100", "Guild-scoped", scope = SearchScope.GUILD, recencyExcludeMinutes = 0).size)
+        }
+
+    @Test
+    fun `delete with kind understanding hard-deletes owned user understanding and leaves facts intact`() =
+        runTest {
+            val store = createStore()
+            val fact = store.insertMemory("100", MemoryScope.USER, "200", "Plays Elden Ring")
+            val understanding = store.insertUnderstanding("100", MemoryScope.USER, "200", "遊戲習慣", "週末常熬夜打魂系遊戲")
+
+            val command = MemoryCommand(store)
+            val (interaction, getContent) = setupInteraction("delete", integers = mapOf("id" to understanding.id), strings = mapOf("kind" to "understanding"))
+            command.handle(interaction)
+
+            coVerify(exactly = 1) { interaction.deferEphemeralResponse() }
+            val content = getContent()
+            assertNotNull(content)
+            assertTrue(content.contains("已永久刪除"), "Expected deletion confirmation, got: $content")
+            assertTrue(content.contains("#${understanding.id}"), "Expected deleted understanding ID in confirmation")
+            assertTrue(store.listUserUnderstandings("100", "200").isEmpty(), "Owned understanding must be deleted")
+            assertEquals(listOf(fact.id), store.listUserMemories("100", "200").map { it.id })
+        }
+
+    @Test
+    fun `delete with kind understanding refuses other user, guild-scoped, cross-guild, and missing IDs without leaking existence`() =
+        runTest {
+            val store = createStore()
+            val otherUser = store.insertUnderstanding("100", MemoryScope.USER, "201", "其他人", "別人的印象")
+            val guildShared = store.insertUnderstanding("100", MemoryScope.GUILD, null, "伺服器", "伺服器共享印象")
+            val otherGuild = store.insertUnderstanding("101", MemoryScope.USER, "200", "其他伺服器", "其他伺服器的印象")
+
+            val command = MemoryCommand(store)
+            val responses =
+                listOf(otherUser.id, guildShared.id, otherGuild.id, 999999L).map { targetId ->
+                    val (interaction, getContent) =
+                        setupInteraction(
+                            "delete",
+                            Snowflake(100L),
+                            Snowflake(200L),
+                            integers = mapOf("id" to targetId),
+                            strings =
+                                mapOf("kind" to "understanding"),
+                        )
+                    command.handle(interaction)
+                    val content = getContent()
+                    assertNotNull(content)
+                    assertTrue(content.contains("找不到") || content.contains("沒有權限"), "Expected non-leaking refusal for targetId=$targetId, got: $content")
+                    content.replace("#$targetId", "#ID")
+                }
+
+            assertEquals(1, responses.toSet().size, "Refusal messages must not leak whether an understanding ID exists elsewhere")
+            assertEquals(1, store.listUserUnderstandings("100", "201").size)
+            assertEquals(1, store.listUserUnderstandings("101", "200").size)
+            assertEquals(1, store.listGuildUnderstandings("100").size)
+        }
+
+    @Test
+    fun `delete rejects invalid kind cleanly without deleting`() =
+        runTest {
+            val store = createStore()
+            val fact = store.insertMemory("100", MemoryScope.USER, "200", "Keep this fact")
+            val understanding = store.insertUnderstanding("100", MemoryScope.USER, "200", "Keep", "Keep this understanding")
+
+            val command = MemoryCommand(store)
+            val (interaction, getContent) = setupInteraction("delete", integers = mapOf("id" to fact.id), strings = mapOf("kind" to "invalid_kind"))
+            command.handle(interaction)
+
+            coVerify(exactly = 1) { interaction.deferEphemeralResponse() }
+            val content = getContent()
+            assertNotNull(content)
+            assertTrue(content.contains("不支援") || content.contains("類型"), "Expected invalid kind rejection, got: $content")
+            assertEquals(listOf(fact.id), store.listUserMemories("100", "200").map { it.id })
+            assertEquals(listOf(understanding.id), store.listUserUnderstandings("100", "200").map { it.id })
         }
 
     @Test
@@ -546,5 +556,39 @@ class MemoryCommandTest {
                 assertTrue(content.contains("confirm:true"), "Expected guidance explaining confirm:true is required, got: $content")
                 assertEquals(2, store.listUserMemories("100", "200").size, "Memories must not be deleted when confirm is not true")
             }
+        }
+
+    @Test
+    fun `clear with confirm true deletes both Atomic Fact and Social Understanding owned by user and reports total count`() =
+        runTest {
+            val store = createStore()
+            store.insertMemory("100", MemoryScope.USER, "200", "Fact one")
+            store.insertMemory("100", MemoryScope.USER, "200", "Fact two")
+            store.insertUnderstanding("100", MemoryScope.USER, "200", "風格", "Understanding one")
+            store.insertUnderstanding("100", MemoryScope.USER, "200", "興趣", "Understanding two")
+            store.insertUnderstanding("100", MemoryScope.USER, "200", "話題", "Understanding three")
+
+            val otherUserUnderstanding = store.insertUnderstanding("100", MemoryScope.USER, "201", "其他人", "Keep other user")
+            val guildUnderstanding = store.insertUnderstanding("100", MemoryScope.GUILD, null, "伺服器", "Keep guild")
+            val otherGuildUnderstanding = store.insertUnderstanding("101", MemoryScope.USER, "200", "他服", "Keep other guild")
+
+            val command = MemoryCommand(store)
+            val (interaction, getContent) =
+                setupInteraction(
+                    subcommandName = "clear",
+                    booleans = mapOf("confirm" to true),
+                )
+
+            command.handle(interaction)
+
+            coVerify(exactly = 1) { interaction.deferEphemeralResponse() }
+            val content = getContent()
+            assertNotNull(content)
+            assertTrue(content.contains("5"), "Expected total cleared count 5 (2 facts + 3 understandings), got: $content")
+            assertTrue(store.listUserMemories("100", "200").isEmpty(), "All invoking user facts must be deleted")
+            assertTrue(store.listUserUnderstandings("100", "200").isEmpty(), "All invoking user understandings must be deleted")
+            assertEquals(listOf(otherUserUnderstanding.id), store.listUserUnderstandings("100", "201").map { it.id })
+            assertEquals(listOf(guildUnderstanding.id), store.listGuildUnderstandings("100").map { it.id })
+            assertEquals(listOf(otherGuildUnderstanding.id), store.listUserUnderstandings("101", "200").map { it.id })
         }
 }
