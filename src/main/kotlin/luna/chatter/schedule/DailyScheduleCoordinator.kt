@@ -26,7 +26,7 @@ import java.util.UUID
  * - Syncs Discord presence via [SchedulePresencePort] on startup and on every block transition.
  * - Fires [onBecomeAvailable] when transitioning from `BUSY`/`SLEEPING` into `BREAK`/`AVAILABLE`.
  */
-class DailyScheduleCoordinator(
+open class DailyScheduleCoordinator(
     private val store: DailyScheduleStore,
     private val generator: DailyScheduleGenerator,
     private val presencePort: SchedulePresencePort? = null,
@@ -140,7 +140,7 @@ class DailyScheduleCoordinator(
      * presence immediately if the active block changed, and wakes [runLoop] to recalculate
      * the next boundary timer.
      */
-    suspend fun applyTodayPatches(patches: List<SchedulePatch>): DailyScheduleSplicer.SpliceResult {
+    open suspend fun applyTodayPatches(patches: List<SchedulePatch>): DailyScheduleSplicer.SpliceResult {
         if (!enabled) {
             return DailyScheduleSplicer.SpliceResult.Rejected("DailyScheduleCoordinator is disabled.")
         }
@@ -197,7 +197,7 @@ class DailyScheduleCoordinator(
      * Validates and persists a cross-day [ScheduleCommitment] within the `tomorrow..+7 days`
      * horizon, enforcing [ScheduleGuardrails], the 10-commitment active cap, and [rateLimiter].
      */
-    suspend fun upsertCommitment(
+    open suspend fun upsertCommitment(
         id: String? = null,
         targetDate: LocalDate,
         startMinute: Int,
@@ -299,7 +299,7 @@ class DailyScheduleCoordinator(
     /**
      * Cancels an upcoming [ScheduleCommitment] by [id], enforcing [rateLimiter].
      */
-    suspend fun cancelCommitment(id: String): CommitmentResult {
+    open suspend fun cancelCommitment(id: String): CommitmentResult {
         if (!enabled) {
             return CommitmentResult.Rejected("DailyScheduleCoordinator is disabled.")
         }

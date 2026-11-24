@@ -11,6 +11,7 @@ import luna.chatter.emoji.ChatterEmojiService
 import luna.chatter.emoji.ChatterEmojiVisionResolver
 import luna.chatter.emoji.DefaultChatterEmojiService
 import luna.chatter.memory.ChatterMemoryService
+import luna.chatter.schedule.ChatterScheduleToolHandler
 import luna.chatter.schedule.DailySchedule
 import luna.chatter.schedule.DailyScheduleCoordinator
 import luna.chatter.schedule.DailyScheduleGenerator
@@ -171,36 +172,6 @@ class ChatterPlugin(
             }
         this.memoryService = initializedMemoryService
 
-        val generator =
-            generatorFactory?.invoke(chatterConfig)
-                ?: ChatterGenerator(
-                    config = chatterConfig,
-                    httpClient = httpClient,
-                    traceRecorder = traceRecorder,
-                    memoryConfig = memoryConfig,
-                    memoryToolHandler = initializedMemoryService?.toolHandler,
-                    understandingPreInjector =
-                        initializedMemoryService?.let {
-                            luna.chatter.memory.UnderstandingPreInjector(
-                                memoryStore = it.memoryStore,
-                                maxChars = memoryConfig.understandingPreInjectMaxChars,
-                            )
-                        },
-                )
-        this.chatterGenerator = generator
-
-        val peekResolver = SocialPeekFactory.buildPeekResolver(chatterConfig.youtubeApiKey)
-        val collector =
-            ChatterContextCollector(
-                noiseFilter = noiseFilter,
-                decisionMessageCount = chatterConfig.decision.decisionMessageCount,
-                historyMessageCount = memoryConfig.historyMessageCount,
-                maxImages = chatterConfig.maxImages,
-                peekResolver = peekResolver,
-                historyWindowMinutes = memoryConfig.historyWindowMinutes,
-            )
-        this.contextCollector = collector
-
         var initializedScheduleStore: SqliteDailyScheduleStore? = null
         var initializedScheduleCoordinator: DailyScheduleCoordinator? = null
         var initializedPresencePort: KordSchedulePresencePort? = null
@@ -239,6 +210,38 @@ class ChatterPlugin(
                 )
             }
         }
+
+        val scheduleToolHandler = initializedScheduleCoordinator?.let { ChatterScheduleToolHandler(it) }
+        val generator =
+            generatorFactory?.invoke(chatterConfig)
+                ?: ChatterGenerator(
+                    config = chatterConfig,
+                    httpClient = httpClient,
+                    traceRecorder = traceRecorder,
+                    memoryConfig = memoryConfig,
+                    memoryToolHandler = initializedMemoryService?.toolHandler,
+                    understandingPreInjector =
+                        initializedMemoryService?.let {
+                            luna.chatter.memory.UnderstandingPreInjector(
+                                memoryStore = it.memoryStore,
+                                maxChars = memoryConfig.understandingPreInjectMaxChars,
+                            )
+                        },
+                    scheduleToolHandler = scheduleToolHandler,
+                )
+        this.chatterGenerator = generator
+
+        val peekResolver = SocialPeekFactory.buildPeekResolver(chatterConfig.youtubeApiKey)
+        val collector =
+            ChatterContextCollector(
+                noiseFilter = noiseFilter,
+                decisionMessageCount = chatterConfig.decision.decisionMessageCount,
+                historyMessageCount = memoryConfig.historyMessageCount,
+                maxImages = chatterConfig.maxImages,
+                peekResolver = peekResolver,
+                historyWindowMinutes = memoryConfig.historyWindowMinutes,
+            )
+        this.contextCollector = collector
 
         val drift =
             CircadianPersonaDrift(
