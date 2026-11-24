@@ -1,8 +1,11 @@
 package luna.chatter
 
+import luna.chatter.memory.ChatterMemoryConfig
 import luna.config.ConfigValidationException
 import luna.config.EnvReader
-import org.slf4j.LoggerFactory
+import luna.config.SecretMasker
+import java.time.DateTimeException
+import java.time.ZoneId
 import kotlin.math.roundToLong
 
 /**
@@ -22,6 +25,11 @@ import kotlin.math.roundToLong
  * @property driftEnabled Whether `Circadian Persona Drift` tone cues and threshold offsets are enabled (defaults to `true`).
  * @property reactionThreshold Minimum `noul` probability required for `Silent Reaction Path` (in `[0.0, 1.0]`, defaults to `0.45`).
  * @property emojiVisionModel Optional Gemini Vision model for `Custom Emoji Meaning` resolution (strictly opt-in, no fallback).
+ * @property maxImages Maximum number of image attachments processed per chatter context (defaults to `10`).
+ * @property youtubeApiKey Optional YouTube Data API key for rich video context enrichment.
+ * @property decision Nested configuration for `gemini-decision-1` participation evaluation.
+ * @property filter Nested configuration for `ChatterNoiseFilter` (enable flag, channel whitelist, cooldown).
+ * @property memory Nested configuration for `Working Memory Window` and `Long-Term Memory`.
  */
 data class ChatterConfig(
     val apiKey: String = "",
@@ -38,9 +46,69 @@ data class ChatterConfig(
     val driftEnabled: Boolean = DEFAULT_DRIFT_ENABLED,
     val reactionThreshold: Double = DEFAULT_REACTION_THRESHOLD,
     val emojiVisionModel: String? = null,
+    val maxImages: Int = ChatterContextCollector.DEFAULT_MAX_IMAGES,
+    val youtubeApiKey: String? = null,
+    val decision: Decision = Decision(),
+    val filter: ChatterFilterConfig = ChatterFilterConfig(),
+    val memory: ChatterMemoryConfig = ChatterMemoryConfig(),
 ) {
+    /**
+     * Configuration for `gemini-decision-1` participation evaluation (`POST /v1beta/decisions`).
+     */
+    data class Decision(
+        val model: String = DEFAULT_DECISION_MODEL,
+        val threshold: Double = DEFAULT_DECISION_THRESHOLD,
+        val timeoutMillis: Long = DEFAULT_DECISION_TIMEOUT_MILLIS,
+        val instructions: String = GeminiDecisionClient.DEFAULT_INSTRUCTIONS,
+        val decisionMessageCount: Int = DEFAULT_DECISION_MESSAGE_COUNT,
+    ) {
+        val cleanModel: String
+            get() = model.trim().removePrefix("models/")
+
+        init {
+            if (model.isBlank()) {
+                throw validationError("CHATTER_DECISION_MODEL", "a non-blank model identifier", model)
+            }
+            requireDoubleRange(
+                "CHATTER_DECISION_THRESHOLD",
+                threshold,
+                MIN_DECISION_THRESHOLD..MAX_DECISION_THRESHOLD,
+            )
+            if (timeoutMillis <= 0L) {
+                throw validationError("CHATTER_DECISION_TIMEOUT_SECONDS", "a positive duration", "${timeoutMillis}ms")
+            }
+            requireIntRange(
+                "CHATTER_DECISION_MESSAGE_COUNT",
+                decisionMessageCount,
+                MIN_DECISION_MESSAGE_COUNT..MAX_DECISION_MESSAGE_COUNT,
+            )
+        }
+    }
+
+    init {
+        requireIntRange("CHATTER_MAX_OUTPUT_CHARACTERS", maxOutputCharacters, 1..Int.MAX_VALUE)
+        requirePositive("CHATTER_DEBOUNCE_SECONDS", debounceSeconds)
+        requirePositive("CHATTER_MENTION_DEBOUNCE_SECONDS", mentionDebounceSeconds)
+        requireDoubleRange(
+            "CHATTER_DEBOUNCE_MAX_SECONDS",
+            debounceMaxSeconds,
+            MIN_DEBOUNCE_MAX_SECONDS..MAX_DEBOUNCE_MAX_SECONDS,
+        )
+        requireIntRange("CHATTER_MAX_INTERRUPTS", maxInterrupts, 0..Int.MAX_VALUE)
+        requireTimezone("CHATTER_TIMEZONE", timezone)
+        requireDoubleRange(
+            "CHATTER_REACTION_THRESHOLD",
+            reactionThreshold,
+            MIN_REACTION_THRESHOLD..MAX_REACTION_THRESHOLD,
+        )
+        requireIntRange("SUMMARY_MAX_IMAGES", maxImages, 1..Int.MAX_VALUE)
+    }
+
     val isConfigured: Boolean
         get() = apiKey.isNotBlank()
+
+    val effectiveEnabled: Boolean
+        get() = filter.enabled && isConfigured
 
     val cleanModel: String
         get() = model.trim().removePrefix("models/")
@@ -51,31 +119,19 @@ data class ChatterConfig(
     val cleanBaseUrl: String
         get() = baseUrl.trim().trimEnd('/').removeSuffix("/v1beta")
 
+    val decisionEndpoint: String
+        get() = "$cleanBaseUrl/v1beta/decisions"
+
     val debounceMillis: Long
-        get() = (normalizePositiveSeconds(debounceSeconds, DEFAULT_DEBOUNCE_SECONDS, "CHATTER_DEBOUNCE_SECONDS") * 1000.0).roundToLong()
+        get() = (debounceSeconds * 1000.0).roundToLong()
 
     val mentionDebounceMillis: Long
-        get() =
-            (
-                normalizePositiveSeconds(
-                    mentionDebounceSeconds,
-                    DEFAULT_MENTION_DEBOUNCE_SECONDS,
-                    "CHATTER_MENTION_DEBOUNCE_SECONDS",
-                ) * 1000.0
-            ).roundToLong()
+        get() = (mentionDebounceSeconds * 1000.0).roundToLong()
 
     val debounceMaxMillis: Long
-        get() = (normalizeDebounceMaxSeconds(debounceMaxSeconds) * 1000.0).roundToLong()
-
-    val normalizedMaxInterrupts: Int
-        get() = normalizeMaxInterrupts(maxInterrupts.toLong())
-
-    val normalizedReactionThreshold: Double
-        get() = normalizeReactionThreshold(reactionThreshold)
+        get() = (debounceMaxSeconds * 1000.0).roundToLong()
 
     companion object {
-        private val logger = LoggerFactory.getLogger(ChatterConfig::class.java)
-
         const val DEFAULT_MODEL = "gemini-3.5-flash-lite"
         const val DEFAULT_BASE_URL = "https://generativelanguage.googleapis.com"
         const val DEFAULT_MAX_OUTPUT_CHARACTERS = 2000
@@ -99,88 +155,72 @@ data class ChatterConfig(
         const val MIN_DEBOUNCE_MAX_MILLIS = 6_000L
         const val MAX_DEBOUNCE_MAX_MILLIS = 8_000L
 
-        private fun normalizePositiveSeconds(
-            raw: Double?,
-            defaultValue: Double,
-            keyName: String,
-        ): Double {
-            if (raw == null) return defaultValue
-            if (raw.isNaN() || raw.isInfinite() || raw <= 0.0) {
-                logger.warn("Invalid {} '{}'; falling back to default {}s", keyName, raw, defaultValue)
-                return defaultValue
-            }
-            return raw
-        }
+        const val DEFAULT_DECISION_MODEL = "gemini-decision-1"
+        const val DEFAULT_DECISION_THRESHOLD = 0.7
+        const val MIN_DECISION_THRESHOLD = 0.0
+        const val MAX_DECISION_THRESHOLD = 1.0
+        const val DEFAULT_DECISION_TIMEOUT_SECONDS = 15L
+        const val DEFAULT_DECISION_TIMEOUT_MILLIS = DEFAULT_DECISION_TIMEOUT_SECONDS * 1000L
+        const val DEFAULT_DECISION_MESSAGE_COUNT = 15
+        const val MIN_DECISION_MESSAGE_COUNT = 1
+        const val MAX_DECISION_MESSAGE_COUNT = 100
+        private const val MAX_DECISION_TIMEOUT_SECONDS = Long.MAX_VALUE / 1000L
 
-        private fun normalizeDebounceMaxSeconds(raw: Double?): Double {
-            if (raw == null) return DEFAULT_DEBOUNCE_MAX_SECONDS
-            if (raw.isNaN() || raw.isInfinite() || raw <= 0.0) {
-                logger.warn(
-                    "Invalid CHATTER_DEBOUNCE_MAX_SECONDS '{}'; falling back to default {}s",
-                    raw,
-                    DEFAULT_DEBOUNCE_MAX_SECONDS,
-                )
-                return DEFAULT_DEBOUNCE_MAX_SECONDS
-            }
-            val clamped = raw.coerceIn(MIN_DEBOUNCE_MAX_SECONDS, MAX_DEBOUNCE_MAX_SECONDS)
-            if (clamped != raw) {
-                logger.warn(
-                    "Out-of-range CHATTER_DEBOUNCE_MAX_SECONDS '{}'; clamped to {}s (allowed [{}, {}])",
-                    raw,
-                    clamped,
-                    MIN_DEBOUNCE_MAX_SECONDS,
-                    MAX_DEBOUNCE_MAX_SECONDS,
-                )
-            }
-            return clamped
-        }
-
-        private fun normalizeMaxInterrupts(raw: Long?): Int {
-            if (raw == null) return DEFAULT_MAX_INTERRUPTS
-            if (raw < 0L || raw > Int.MAX_VALUE) {
-                logger.warn(
-                    "Invalid CHATTER_MAX_INTERRUPTS '{}'; falling back to default {}",
-                    raw,
-                    DEFAULT_MAX_INTERRUPTS,
-                )
-                return DEFAULT_MAX_INTERRUPTS
-            }
-            return raw.toInt()
-        }
-
-        private fun normalizeReactionThreshold(raw: Double?): Double {
-            if (raw == null) return DEFAULT_REACTION_THRESHOLD
-            if (raw.isNaN() || raw.isInfinite()) {
-                logger.warn(
-                    "Invalid CHATTER_REACTION_THRESHOLD '{}'; falling back to default {}",
-                    raw,
-                    DEFAULT_REACTION_THRESHOLD,
-                )
-                return DEFAULT_REACTION_THRESHOLD
-            }
-            val clamped = raw.coerceIn(MIN_REACTION_THRESHOLD, MAX_REACTION_THRESHOLD)
-            if (clamped != raw) {
-                logger.warn(
-                    "Out-of-range CHATTER_REACTION_THRESHOLD '{}'; clamped to {} (allowed [{}, {}])",
-                    raw,
-                    clamped,
-                    MIN_REACTION_THRESHOLD,
-                    MAX_REACTION_THRESHOLD,
-                )
-            }
-            return clamped
+        internal fun validationError(
+            key: String,
+            expected: String,
+            actual: Any?,
+        ): ConfigValidationException {
+            val safeValue = SecretMasker.maskValue(key, actual)
+            return ConfigValidationException("Invalid configuration for $key: expected $expected, but got '$safeValue'")
         }
 
         private fun requirePositive(
             key: String,
             value: Double,
         ): Double {
-            if (value <= 0.0) {
-                throw ConfigValidationException(
-                    "Invalid configuration for $key: expected a positive finite number, but got '$value'",
-                )
+            if (!value.isFinite() || value <= 0.0) {
+                throw validationError(key, "a positive finite number", value)
             }
             return value
+        }
+
+        private fun requireDoubleRange(
+            key: String,
+            value: Double,
+            range: ClosedFloatingPointRange<Double>,
+        ): Double {
+            if (!value.isFinite() || value !in range) {
+                throw validationError(key, "a number in ${range.start}..${range.endInclusive}", value)
+            }
+            return value
+        }
+
+        private fun requireIntRange(
+            key: String,
+            value: Int,
+            range: IntRange,
+        ): Int {
+            if (value !in range) {
+                throw validationError(key, "an integer in ${range.first}..${range.last}", value)
+            }
+            return value
+        }
+
+        private fun requireTimezone(
+            key: String,
+            value: String,
+        ): String {
+            val trimmed = value.trim()
+            if (trimmed.isEmpty()) {
+                throw validationError(key, "a valid IANA timezone ID", value)
+            }
+            try {
+                ZoneId.of(trimmed)
+            } catch (_: DateTimeException) {
+                throw validationError(key, "a valid IANA timezone ID", value)
+            }
+            return trimmed
         }
 
         /** Parses [ChatterConfig] from [env] with strict fail-fast validation. */
@@ -231,6 +271,43 @@ data class ChatterConfig(
                     .string("CHATTER_EMOJI_VISION_MODEL")
                     ?.removePrefix("models/")
                     ?.ifBlank { null }
+            val maxImages =
+                env.int(
+                    "SUMMARY_MAX_IMAGES",
+                    ChatterContextCollector.DEFAULT_MAX_IMAGES,
+                    1..Int.MAX_VALUE,
+                )
+            val youtubeApiKey = env.string("YOUTUBE_API_KEY")
+            val decision =
+                Decision(
+                    model =
+                        env
+                            .string("CHATTER_DECISION_MODEL")
+                            ?.removePrefix("models/")
+                            ?.ifBlank { null }
+                            ?: DEFAULT_DECISION_MODEL,
+                    threshold =
+                        env.double(
+                            "CHATTER_DECISION_THRESHOLD",
+                            DEFAULT_DECISION_THRESHOLD,
+                            MIN_DECISION_THRESHOLD..MAX_DECISION_THRESHOLD,
+                        ),
+                    timeoutMillis =
+                        env.long(
+                            "CHATTER_DECISION_TIMEOUT_SECONDS",
+                            DEFAULT_DECISION_TIMEOUT_SECONDS,
+                            1L..MAX_DECISION_TIMEOUT_SECONDS,
+                        ) * 1000L,
+                    instructions = env.string("CHATTER_DECISION_INSTRUCTIONS", GeminiDecisionClient.DEFAULT_INSTRUCTIONS),
+                    decisionMessageCount =
+                        env.int(
+                            "CHATTER_DECISION_MESSAGE_COUNT",
+                            DEFAULT_DECISION_MESSAGE_COUNT,
+                            MIN_DECISION_MESSAGE_COUNT..MAX_DECISION_MESSAGE_COUNT,
+                        ),
+                )
+            val filter = ChatterFilterConfig.from(env)
+            val memory = ChatterMemoryConfig.from(env)
 
             return ChatterConfig(
                 apiKey = key,
@@ -246,6 +323,11 @@ data class ChatterConfig(
                 driftEnabled = driftEnabled,
                 reactionThreshold = reactionThreshold,
                 emojiVisionModel = emojiVisionModel,
+                maxImages = maxImages,
+                youtubeApiKey = youtubeApiKey,
+                decision = decision,
+                filter = filter,
+                memory = memory,
             )
         }
     }

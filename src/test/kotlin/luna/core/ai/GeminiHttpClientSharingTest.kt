@@ -11,7 +11,6 @@ import io.ktor.http.headersOf
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.test.runTest
 import luna.chatter.ChatterConfig
-import luna.chatter.ChatterDecisionConfig
 import luna.chatter.ChatterGenerator
 import luna.chatter.GeminiDecisionClient
 import luna.summarizer.GeminiConfig
@@ -123,7 +122,7 @@ class GeminiHttpClientSharingTest {
             val sharedClient = GeminiHttpClientFactory.create(engine = engine)
             val decisionClient =
                 GeminiDecisionClient(
-                    config = ChatterDecisionConfig(apiKey = "test-key", timeoutMillis = 2_500L),
+                    config = ChatterConfig(apiKey = "test-key", decision = ChatterConfig.Decision(timeoutMillis = 2_500L)),
                     httpClient = sharedClient,
                 )
 
@@ -141,7 +140,7 @@ class GeminiHttpClientSharingTest {
         val sharedClient = GeminiHttpClientFactory.create()
         val decisionClient =
             GeminiDecisionClient(
-                config = ChatterDecisionConfig(apiKey = "test-key"),
+                config = ChatterConfig(apiKey = "test-key"),
                 httpClient = sharedClient,
             )
         val generator =
@@ -171,7 +170,7 @@ class GeminiHttpClientSharingTest {
 
     @Test
     fun `standalone AI clients close their internally created HttpClient without error`() {
-        val decisionClient = GeminiDecisionClient(config = ChatterDecisionConfig(apiKey = "test-key"))
+        val decisionClient = GeminiDecisionClient(config = ChatterConfig(apiKey = "test-key"))
         val generator = ChatterGenerator(config = ChatterConfig(apiKey = "test-key"))
         val embeddingClient = GeminiEmbeddingClient(apiKey = "test-key")
         val summarizer = GeminiSummarizer(config = GeminiConfig(apiKey = "test-key"))

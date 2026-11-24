@@ -4,6 +4,9 @@ import dev.kord.common.entity.MessageType
 import dev.kord.common.entity.Snowflake
 import dev.kord.core.entity.Message
 import dev.kord.core.entity.channel.Channel
+import luna.config.ConfigValidationException
+import luna.config.EnvReader
+import luna.config.SecretMasker
 import luna.core.LunaWebhookRegistry
 import luna.core.SummaryMessageRegistry
 import luna.core.SummaryRegistry
@@ -39,11 +42,49 @@ sealed class ChatterFilterResult {
 }
 
 data class ChatterFilterConfig(
-    val enabled: Boolean = true,
+    val enabled: Boolean = DEFAULT_ENABLED,
     val allowedChannels: Set<Snowflake> = emptySet(),
     val cooldownDurationMs: Long = BoundedChannelCooldownCache.DEFAULT_COOLDOWN_MS,
     val botPrefixes: Set<String> = ChatterNoiseFilter.DEFAULT_BOT_PREFIXES,
-)
+) {
+    init {
+        if (cooldownDurationMs < 0L) {
+            val safeValue = SecretMasker.maskValue("CHATTER_COOLDOWN_SECONDS", cooldownDurationMs)
+            throw ConfigValidationException(
+                "Invalid configuration for CHATTER_COOLDOWN_SECONDS: expected a non-negative duration, but got '${safeValue}ms'",
+            )
+        }
+    }
+
+    companion object {
+        const val DEFAULT_ENABLED = true
+        const val DEFAULT_COOLDOWN_SECONDS = 5L
+        private const val MAX_COOLDOWN_SECONDS = Long.MAX_VALUE / 1000L
+
+        /** Parses [ChatterFilterConfig] from [env] with strict fail-fast validation. */
+        fun from(env: EnvReader): ChatterFilterConfig {
+            val enabled = env.boolean("CHATTER_ENABLED", DEFAULT_ENABLED)
+            val allowedChannels =
+                env
+                    .csv("CHATTER_ALLOWED_CHANNELS")
+                    .map { rawId ->
+                        val idValue =
+                            rawId.toULongOrNull()
+                                ?: throw ConfigValidationException(
+                                    "Invalid configuration for CHATTER_ALLOWED_CHANNELS: " +
+                                        "expected comma-separated Discord Snowflake IDs, but got '$rawId'",
+                                )
+                        Snowflake(idValue)
+                    }.toSet()
+            val cooldownSeconds = env.long("CHATTER_COOLDOWN_SECONDS", DEFAULT_COOLDOWN_SECONDS, 0L..MAX_COOLDOWN_SECONDS)
+            return ChatterFilterConfig(
+                enabled = enabled,
+                allowedChannels = allowedChannels,
+                cooldownDurationMs = cooldownSeconds * 1000L,
+            )
+        }
+    }
+}
 
 open class ChatterNoiseFilter(
     val cooldownCache: BoundedChannelCooldownCache = BoundedChannelCooldownCache(),

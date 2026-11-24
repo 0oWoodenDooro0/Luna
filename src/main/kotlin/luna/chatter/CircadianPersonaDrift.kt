@@ -110,7 +110,7 @@ data class PersonaState(
  * Provider seam supplying current [PersonaState] for Chatter participation evaluation and prompt building.
  */
 interface PersonaStateProvider {
-    fun currentState(baseThreshold: Double = ChatterDecisionConfig.DEFAULT_THRESHOLD): PersonaState
+    fun currentState(baseThreshold: Double = ChatterConfig.DEFAULT_DECISION_THRESHOLD): PersonaState
 }
 
 /**
@@ -228,7 +228,7 @@ class CircadianPersonaDrift(
             moodOffset: Double,
         ): Double {
             if (baseThreshold.isNaN() || baseThreshold.isInfinite()) {
-                return ChatterDecisionConfig.DEFAULT_THRESHOLD
+                return ChatterConfig.DEFAULT_DECISION_THRESHOLD
             }
             val sum =
                 BigDecimal

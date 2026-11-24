@@ -43,18 +43,18 @@ import java.net.SocketTimeoutException
  * once with text-only input before failing closed.
  */
 open class GeminiDecisionClient(
-    val config: ChatterDecisionConfig = ChatterDecisionConfig(),
+    val config: ChatterConfig = ChatterConfig(),
     httpClient: HttpClient? = null,
-    val defaultInstructions: String = config.instructions,
+    val defaultInstructions: String = config.decision.instructions,
     val traceRecorder: AiTraceRecorder = NoOpAiTraceRecorder,
 ) : AutoCloseable {
     private val ownsHttpClient: Boolean = httpClient == null
     private val httpClient: HttpClient =
         httpClient
             ?: GeminiHttpClientFactory.create(
-                requestTimeoutMs = config.timeoutMillis,
-                connectTimeoutMs = config.timeoutMillis,
-                socketTimeoutMs = config.timeoutMillis,
+                requestTimeoutMs = config.decision.timeoutMillis,
+                connectTimeoutMs = config.decision.timeoutMillis,
+                socketTimeoutMs = config.decision.timeoutMillis,
             )
     private val logger = LoggerFactory.getLogger(GeminiDecisionClient::class.java)
 
@@ -129,7 +129,7 @@ open class GeminiDecisionClient(
             effectiveThreshold
                 ?.takeIf { !it.isNaN() && !it.isInfinite() }
                 ?.coerceIn(0.0, 1.0)
-                ?: config.threshold
+                ?: config.decision.threshold
         val initialVariant = if (images.isNotEmpty()) "multimodal" else null
         return when (val initialOutcome = executeDecisionRequest(state, images, session, variant = initialVariant, activeThreshold = activeThreshold)) {
             is RequestOutcome.Success -> {
@@ -223,7 +223,7 @@ open class GeminiDecisionClient(
 
         val requestPayload =
             GeminiDecisionRequest(
-                model = config.cleanModel,
+                model = config.decision.cleanModel,
                 input = inputBlocks,
                 questions =
                     mapOf(
@@ -262,9 +262,9 @@ open class GeminiDecisionClient(
                         contentType(ContentType.Application.Json)
                         applyGeminiTimeout(
                             httpClient,
-                            requestTimeoutMs = config.timeoutMillis,
-                            connectTimeoutMs = config.timeoutMillis,
-                            socketTimeoutMs = config.timeoutMillis,
+                            requestTimeoutMs = config.decision.timeoutMillis,
+                            connectTimeoutMs = config.decision.timeoutMillis,
+                            socketTimeoutMs = config.decision.timeoutMillis,
                         )
                         setBody(requestPayload)
                     }
@@ -272,12 +272,12 @@ open class GeminiDecisionClient(
                 responseRaw = readBodyTextSafely(response)
                 evaluateResponse(response, responseRaw, activeThreshold)
             } catch (e: HttpRequestTimeoutException) {
-                val reason = "request timeout after ${config.timeoutMillis}ms: ${e.message}"
-                logger.warn("Gemini Decisions API request timed out after {}ms: {}", config.timeoutMillis, e.message)
+                val reason = "request timeout after ${config.decision.timeoutMillis}ms: ${e.message}"
+                logger.warn("Gemini Decisions API request timed out after {}ms: {}", config.decision.timeoutMillis, e.message)
                 RequestOutcome.Failure(reason, AiTraceFailureCategory.TIMEOUT, e)
             } catch (e: SocketTimeoutException) {
-                val reason = "socket timeout after ${config.timeoutMillis}ms: ${e.message}"
-                logger.warn("Gemini Decisions API socket timed out after {}ms: {}", config.timeoutMillis, e.message)
+                val reason = "socket timeout after ${config.decision.timeoutMillis}ms: ${e.message}"
+                logger.warn("Gemini Decisions API socket timed out after {}ms: {}", config.decision.timeoutMillis, e.message)
                 RequestOutcome.Failure(reason, AiTraceFailureCategory.TIMEOUT, e)
             } catch (e: TimeoutCancellationException) {
                 val reason = "coroutine timeout: ${e.message}"
@@ -304,7 +304,7 @@ open class GeminiDecisionClient(
         session?.recordAttempt(
             stage = AiAttemptStage.DECISION,
             variant = variant,
-            model = config.cleanModel,
+            model = config.decision.cleanModel,
             endpoint = config.decisionEndpoint,
             latencyMs = elapsedMillisFromNanos(startNano),
             httpStatus = httpStatus,

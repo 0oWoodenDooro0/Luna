@@ -28,7 +28,7 @@ internal class ChatterServiceTestSupport {
         cooldownCache = BoundedChannelCooldownCache(timeSource = { simulatedTime })
         filter = ChatterNoiseFilter(cooldownCache = cooldownCache)
         decisionClient = mockk(relaxed = true)
-        every { decisionClient.config } returns ChatterDecisionConfig()
+        every { decisionClient.config } returns ChatterConfig()
         chatterGenerator = mockk(relaxed = true)
         every { chatterGenerator.config } returns ChatterConfig()
         channelPort = FakeChatterChannelPort()

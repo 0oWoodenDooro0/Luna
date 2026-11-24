@@ -69,9 +69,27 @@ class ChatterServicePluginAndUrlTest {
             assertTrue(plugin.isChatterEnabled)
             assertNotNull(plugin.service)
             assertEquals("gemini-secret-key-456", plugin.decisionClient?.config?.apiKey)
-            assertEquals("gemini-decision-custom", plugin.decisionClient?.config?.model)
-            assertEquals(0.85, plugin.decisionClient?.config?.threshold)
-            assertEquals(15_000L, plugin.decisionClient?.config?.timeoutMillis)
+            assertEquals(
+                "gemini-decision-custom",
+                plugin.decisionClient
+                    ?.config
+                    ?.decision
+                    ?.model,
+            )
+            assertEquals(
+                0.85,
+                plugin.decisionClient
+                    ?.config
+                    ?.decision
+                    ?.threshold,
+            )
+            assertEquals(
+                15_000L,
+                plugin.decisionClient
+                    ?.config
+                    ?.decision
+                    ?.timeoutMillis,
+            )
             assertEquals("gemini-secret-key-456", plugin.chatterGenerator?.config?.apiKey)
             assertEquals("gemini-3.5-flash-test", plugin.chatterGenerator?.config?.model)
             assertEquals(setOf(Snowflake(111L), Snowflake(222L)), plugin.filter?.allowedChannels)
@@ -106,9 +124,21 @@ class ChatterServicePluginAndUrlTest {
             val customPlugin = ChatterPlugin()
             customPlugin.initialize(customContext)
 
-            assertEquals("Custom plugin decision instructions for Luna", customPlugin.decisionClient?.config?.instructions)
+            assertEquals(
+                "Custom plugin decision instructions for Luna",
+                customPlugin.decisionClient
+                    ?.config
+                    ?.decision
+                    ?.instructions,
+            )
             assertEquals("Custom plugin decision instructions for Luna", customPlugin.decisionClient?.defaultInstructions)
-            assertEquals(32, customPlugin.decisionClient?.config?.decisionMessageCount)
+            assertEquals(
+                32,
+                customPlugin.decisionClient
+                    ?.config
+                    ?.decision
+                    ?.decisionMessageCount,
+            )
             assertEquals(32, customPlugin.contextCollector?.decisionMessageCount)
             assertEquals(32, customPlugin.service?.contextCollector?.decisionMessageCount)
             customPlugin.shutdown()
@@ -124,9 +154,21 @@ class ChatterServicePluginAndUrlTest {
             val defaultPlugin = ChatterPlugin()
             defaultPlugin.initialize(defaultContext)
 
-            assertEquals(GeminiDecisionClient.DEFAULT_INSTRUCTIONS, defaultPlugin.decisionClient?.config?.instructions)
+            assertEquals(
+                GeminiDecisionClient.DEFAULT_INSTRUCTIONS,
+                defaultPlugin.decisionClient
+                    ?.config
+                    ?.decision
+                    ?.instructions,
+            )
             assertEquals(GeminiDecisionClient.DEFAULT_INSTRUCTIONS, defaultPlugin.decisionClient?.defaultInstructions)
-            assertEquals(15, defaultPlugin.decisionClient?.config?.decisionMessageCount)
+            assertEquals(
+                15,
+                defaultPlugin.decisionClient
+                    ?.config
+                    ?.decision
+                    ?.decisionMessageCount,
+            )
             assertEquals(15, defaultPlugin.contextCollector?.decisionMessageCount)
             assertEquals(15, defaultPlugin.service?.contextCollector?.decisionMessageCount)
             defaultPlugin.shutdown()

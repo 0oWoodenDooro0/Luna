@@ -199,7 +199,7 @@ class ChatterEmojiCadenceAndReactionPromptTest {
                         filter = filter,
                         decisionClient =
                             GeminiDecisionClient(
-                                ChatterDecisionConfig(apiKey = "secret-key", threshold = 0.70),
+                                ChatterConfig(apiKey = "secret-key", decision = ChatterConfig.Decision(threshold = 0.70)),
                                 createClient(mockEngine),
                                 traceRecorder = recorder,
                             ),
@@ -299,7 +299,11 @@ class ChatterEmojiCadenceAndReactionPromptTest {
             val service =
                 ChatterService(
                     filter = filter,
-                    decisionClient = GeminiDecisionClient(ChatterDecisionConfig(apiKey = "secret-key", threshold = 0.70), createClient(mockEngine)),
+                    decisionClient =
+                        GeminiDecisionClient(
+                            ChatterConfig(apiKey = "secret-key", decision = ChatterConfig.Decision(threshold = 0.70)),
+                            createClient(mockEngine),
+                        ),
                     chatterGenerator = ChatterGenerator(ChatterConfig(apiKey = "secret-key"), createClient(mockEngine)),
                     channelPort = channelPort,
                     contextCollector = ChatterContextCollector(noiseFilter = filter, peekResolver = { null }),
@@ -386,7 +390,7 @@ class ChatterEmojiCadenceAndReactionPromptTest {
                     filter = filter,
                     decisionClient =
                         GeminiDecisionClient(
-                            config = ChatterDecisionConfig(apiKey = "secret-key", threshold = 0.70),
+                            config = ChatterConfig(apiKey = "secret-key", decision = ChatterConfig.Decision(threshold = 0.70)),
                             httpClient = createClient(mockEngine),
                             traceRecorder = recorder,
                         ),
@@ -519,7 +523,11 @@ class ChatterEmojiCadenceAndReactionPromptTest {
             val failingService =
                 ChatterService(
                     filter = filter,
-                    decisionClient = GeminiDecisionClient(ChatterDecisionConfig(apiKey = "secret-key", threshold = 0.70), createClient(mockEngine)),
+                    decisionClient =
+                        GeminiDecisionClient(
+                            ChatterConfig(apiKey = "secret-key", decision = ChatterConfig.Decision(threshold = 0.70)),
+                            createClient(mockEngine),
+                        ),
                     chatterGenerator = ChatterGenerator(ChatterConfig(apiKey = "secret-key"), createClient(mockEngine)),
                     channelPort = replyFailPort,
                     contextCollector = ChatterContextCollector(noiseFilter = filter, peekResolver = { null }),
@@ -565,8 +573,16 @@ class ChatterEmojiCadenceAndReactionPromptTest {
             val reactionFailingService =
                 ChatterService(
                     filter = filter,
-                    decisionClient = GeminiDecisionClient(ChatterDecisionConfig(apiKey = "secret-key", threshold = 0.70), createClient(reactionFailingEngine)),
-                    chatterGenerator = ChatterGenerator(ChatterConfig(apiKey = "secret-key", reactionThreshold = 0.45), createClient(reactionFailingEngine)),
+                    decisionClient =
+                        GeminiDecisionClient(
+                            ChatterConfig(apiKey = "secret-key", decision = ChatterConfig.Decision(threshold = 0.70)),
+                            createClient(reactionFailingEngine),
+                        ),
+                    chatterGenerator =
+                        ChatterGenerator(
+                            ChatterConfig(apiKey = "secret-key", reactionThreshold = 0.45),
+                            createClient(reactionFailingEngine),
+                        ),
                     channelPort = reactionFailPort,
                     contextCollector = ChatterContextCollector(noiseFilter = filter, peekResolver = { null }),
                     burstCoordinator = BoundedChannelBurstCoordinator(debounceMs = 1L),

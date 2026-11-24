@@ -64,7 +64,6 @@ class ChatterReactionSelectionTest {
     fun `ChatterConfig resolves CHATTER_REACTION_THRESHOLD defaults and fails fast on out-of-range or invalid values`() {
         val defaults = ChatterConfig()
         assertEquals(0.45, defaults.reactionThreshold)
-        assertEquals(0.45, defaults.normalizedReactionThreshold)
 
         assertEquals(0.45, ChatterConfig.from(luna.config.EnvReader.of()).reactionThreshold)
         assertEquals(0.55, ChatterConfig.from(luna.config.EnvReader.of("CHATTER_REACTION_THRESHOLD" to "0.55")).reactionThreshold)
@@ -77,9 +76,11 @@ class ChatterReactionSelectionTest {
             }
         }
 
-        assertEquals(0.0, ChatterConfig(reactionThreshold = -0.1).normalizedReactionThreshold)
-        assertEquals(1.0, ChatterConfig(reactionThreshold = 1.4).normalizedReactionThreshold)
-        assertEquals(0.45, ChatterConfig(reactionThreshold = Double.NaN).normalizedReactionThreshold)
+        for (badDirect in listOf(-0.1, 1.4, Double.NaN, Double.POSITIVE_INFINITY)) {
+            kotlin.test.assertFailsWith<luna.config.ConfigValidationException> {
+                ChatterConfig(reactionThreshold = badDirect)
+            }
+        }
     }
 
     @Test

@@ -149,6 +149,150 @@ class ChatterConfigAndPromptBuilderTest {
         }
     }
 
+    @Test
+    fun `ChatterConfig fails fast in init on invalid direct constructor arguments`() {
+        assertFailsWith<ConfigValidationException> { ChatterConfig(maxOutputCharacters = 0) }
+        assertFailsWith<ConfigValidationException> { ChatterConfig(debounceSeconds = 0.0) }
+        assertFailsWith<ConfigValidationException> { ChatterConfig(debounceSeconds = Double.NaN) }
+        assertFailsWith<ConfigValidationException> { ChatterConfig(mentionDebounceSeconds = -1.0) }
+        assertFailsWith<ConfigValidationException> { ChatterConfig(debounceMaxSeconds = 5.9) }
+        assertFailsWith<ConfigValidationException> { ChatterConfig(debounceMaxSeconds = 8.1) }
+        assertFailsWith<ConfigValidationException> { ChatterConfig(maxInterrupts = -1) }
+        assertFailsWith<ConfigValidationException> { ChatterConfig(timezone = "Invalid/Timezone") }
+        assertFailsWith<ConfigValidationException> { ChatterConfig(timezone = "   ") }
+        assertFailsWith<ConfigValidationException> { ChatterConfig(maxImages = 0) }
+    }
+
+    @Test
+    fun `ChatterConfig loads media and YouTube API key settings from EnvReader`() {
+        val defaults = ChatterConfig.from(EnvReader.of())
+        assertEquals(ChatterContextCollector.DEFAULT_MAX_IMAGES, defaults.maxImages)
+        assertNull(defaults.youtubeApiKey)
+
+        val custom =
+            ChatterConfig.from(
+                EnvReader.of(
+                    "SUMMARY_MAX_IMAGES" to "6",
+                    "YOUTUBE_API_KEY" to "  yt-test-key  ",
+                ),
+            )
+        assertEquals(6, custom.maxImages)
+        assertEquals("yt-test-key", custom.youtubeApiKey)
+
+        assertFailsWith<ConfigValidationException> {
+            ChatterConfig.from(EnvReader.of("SUMMARY_MAX_IMAGES" to "0"))
+        }
+        assertFailsWith<ConfigValidationException> {
+            ChatterConfig.from(EnvReader.of("SUMMARY_MAX_IMAGES" to "abc"))
+        }
+    }
+
+    @Test
+    fun `ChatterConfig Decision loads from EnvReader, validates init invariants, and allows reactionThreshold at or above decision threshold`() {
+        val defaults = ChatterConfig()
+        assertEquals("gemini-decision-1", defaults.decision.model)
+        assertEquals(0.7, defaults.decision.threshold)
+        assertEquals(15_000L, defaults.decision.timeoutMillis)
+        assertEquals(GeminiDecisionClient.DEFAULT_INSTRUCTIONS, defaults.decision.instructions)
+        assertEquals(15, defaults.decision.decisionMessageCount)
+
+        val custom =
+            ChatterConfig.from(
+                EnvReader.of(
+                    "CHATTER_DECISION_MODEL" to "models/gemini-decision-2",
+                    "CHATTER_DECISION_THRESHOLD" to "0.6",
+                    "CHATTER_DECISION_TIMEOUT_SECONDS" to "20",
+                    "CHATTER_DECISION_INSTRUCTIONS" to "  Be concise  ",
+                    "CHATTER_DECISION_MESSAGE_COUNT" to "42",
+                    "CHATTER_REACTION_THRESHOLD" to "0.85",
+                ),
+            )
+        assertEquals("gemini-decision-2", custom.decision.cleanModel)
+        assertEquals(0.6, custom.decision.threshold)
+        assertEquals(20_000L, custom.decision.timeoutMillis)
+        assertEquals("Be concise", custom.decision.instructions)
+        assertEquals(42, custom.decision.decisionMessageCount)
+        assertEquals(0.85, custom.reactionThreshold)
+
+        // reactionThreshold == decision.threshold is also allowed
+        val equalThresholds =
+            ChatterConfig(
+                reactionThreshold = 0.7,
+                decision = ChatterConfig.Decision(threshold = 0.7),
+            )
+        assertEquals(0.7, equalThresholds.reactionThreshold)
+
+        // Direct Decision init {} invariants
+        assertFailsWith<ConfigValidationException> { ChatterConfig.Decision(model = "   ") }
+        assertFailsWith<ConfigValidationException> { ChatterConfig.Decision(threshold = -0.1) }
+        assertFailsWith<ConfigValidationException> { ChatterConfig.Decision(threshold = 1.1) }
+        assertFailsWith<ConfigValidationException> { ChatterConfig.Decision(threshold = Double.NaN) }
+        assertFailsWith<ConfigValidationException> { ChatterConfig.Decision(timeoutMillis = 0L) }
+        assertFailsWith<ConfigValidationException> { ChatterConfig.Decision(decisionMessageCount = 0) }
+        assertFailsWith<ConfigValidationException> { ChatterConfig.Decision(decisionMessageCount = 101) }
+
+        // EnvReader Decision validation
+        for ((k, v) in listOf(
+            "CHATTER_DECISION_THRESHOLD" to "1.5",
+            "CHATTER_DECISION_TIMEOUT_SECONDS" to "0",
+            "CHATTER_DECISION_MESSAGE_COUNT" to "101",
+        )) {
+            assertFailsWith<ConfigValidationException> {
+                ChatterConfig.from(EnvReader.of(k to v))
+            }
+        }
+    }
+
+    @Test
+    fun `ChatterConfig composes filter and memory sections from EnvReader and validates Snowflake IDs and cooldown`() {
+        val defaults = ChatterConfig.from(EnvReader.of())
+        assertTrue(defaults.filter.enabled)
+        assertFalse(defaults.effectiveEnabled)
+        assertTrue(defaults.filter.allowedChannels.isEmpty())
+        assertEquals(5_000L, defaults.filter.cooldownDurationMs)
+        assertEquals(10L, defaults.memory.historyWindowMinutes)
+
+        val configured =
+            ChatterConfig.from(
+                EnvReader.of(
+                    "GEMINI_API_KEY" to "secret-gemini-key",
+                    "CHATTER_ENABLED" to "true",
+                    "CHATTER_ALLOWED_CHANNELS" to "111, 222",
+                    "CHATTER_COOLDOWN_SECONDS" to "45",
+                    "CHATTER_HISTORY_WINDOW_MINUTES" to "20",
+                ),
+            )
+        assertTrue(configured.filter.enabled)
+        assertTrue(configured.effectiveEnabled)
+        assertEquals(
+            setOf(
+                dev.kord.common.entity
+                    .Snowflake(111L),
+                dev.kord.common.entity
+                    .Snowflake(222L),
+            ),
+            configured.filter.allowedChannels,
+        )
+        assertEquals(45_000L, configured.filter.cooldownDurationMs)
+        assertEquals(20L, configured.memory.historyWindowMinutes)
+
+        val disabledByFlag =
+            ChatterConfig.from(
+                EnvReader.of(
+                    "GEMINI_API_KEY" to "secret-gemini-key",
+                    "CHATTER_ENABLED" to "false",
+                ),
+            )
+        assertFalse(disabledByFlag.filter.enabled)
+        assertFalse(disabledByFlag.effectiveEnabled)
+
+        assertFailsWith<ConfigValidationException> { ChatterFilterConfig(cooldownDurationMs = -1L) }
+        assertFailsWith<ConfigValidationException> { ChatterConfig.from(EnvReader.of("CHATTER_ENABLED" to "maybe")) }
+        assertFailsWith<ConfigValidationException> { ChatterConfig.from(EnvReader.of("CHATTER_COOLDOWN_SECONDS" to "-1")) }
+        assertFailsWith<ConfigValidationException> { ChatterConfig.from(EnvReader.of("CHATTER_ALLOWED_CHANNELS" to "111,not-a-snowflake")) }
+        assertFailsWith<ConfigValidationException> { ChatterConfig.from(EnvReader.of("CHATTER_ALLOWED_CHANNELS" to "-123")) }
+    }
+
     // --- Prompt Builder & Persona Tests ---
 
     @Test
@@ -375,5 +519,15 @@ class ChatterConfigAndPromptBuilderTest {
 
         assertTrue(replyPrompt.startsWith(expectedPrefix))
         assertTrue(reactionPrompt.startsWith(expectedPrefix))
+    }
+
+    @Test
+    fun `ChatterConfig validationError masks sensitive key values via SecretMasker`() {
+        val rawSecret = "AIzaSySuperSecretKey1234567890"
+        val error = ChatterConfig.validationError("GEMINI_API_KEY", "a valid API key", rawSecret)
+        val message = assertNotNull(error.message)
+        assertContains(message, "GEMINI_API_KEY")
+        assertFalse(message.contains(rawSecret))
+        assertContains(message, "***")
     }
 }

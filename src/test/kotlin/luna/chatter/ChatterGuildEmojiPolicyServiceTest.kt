@@ -91,7 +91,7 @@ class ChatterGuildEmojiPolicyServiceTest {
             val filter = ChatterNoiseFilter(cooldownCache = cooldownCache)
             val decisionClient =
                 GeminiDecisionClient(
-                    config = ChatterDecisionConfig(apiKey = "secret-key", threshold = 0.70),
+                    config = ChatterConfig(apiKey = "secret-key", decision = ChatterConfig.Decision(threshold = 0.70)),
                     httpClient = createClient(mockEngine),
                 )
             val chatterGenerator =
@@ -193,7 +193,7 @@ class ChatterGuildEmojiPolicyServiceTest {
                 val filter = ChatterNoiseFilter(cooldownCache = cooldownCache)
                 val decisionClient =
                     GeminiDecisionClient(
-                        config = ChatterDecisionConfig(apiKey = "secret-key", threshold = 0.70),
+                        config = ChatterConfig(apiKey = "secret-key", decision = ChatterConfig.Decision(threshold = 0.70)),
                         httpClient = createClient(mockEngine),
                     )
                 val chatterGenerator =

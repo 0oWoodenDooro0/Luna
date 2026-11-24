@@ -641,7 +641,8 @@ fun checkDiagnosticBooleanAssertions(projectRoot: File): List<String> {
                     violations.add(
                         "[Rule 9: diagnostic-boolean-assertions] $relPath: ${bareLines.size} bare assertTrue/assertFalse calls " +
                             "(max allowed: $maxAllowed) at lines ${bareLines.joinToString(", ", "[", "]")}. " +
-                            "Add a 2nd message argument or trailing lambda { \"...\" } to each new/edited assertion.",
+                            "Pass a positional 2nd String message argument (e.g. assertTrue(cond, \"reason\") — " +
+                            "works with both JUnit 5 and kotlin.test) to each new/edited assertion.",
                     )
                 }
             }

@@ -325,7 +325,11 @@ class ChatterApplicationEmojiPoolAndValidationTest {
             val service =
                 ChatterService(
                     filter = filter,
-                    decisionClient = GeminiDecisionClient(ChatterDecisionConfig(apiKey = "secret-key", threshold = 0.70), createClient(mockEngine)),
+                    decisionClient =
+                        GeminiDecisionClient(
+                            ChatterConfig(apiKey = "secret-key", decision = ChatterConfig.Decision(threshold = 0.70)),
+                            createClient(mockEngine),
+                        ),
                     chatterGenerator = ChatterGenerator(ChatterConfig(apiKey = "secret-key", reactionThreshold = 0.45), createClient(mockEngine)),
                     channelPort = channelPort,
                     contextCollector = ChatterContextCollector(noiseFilter = filter, peekResolver = { null }),
