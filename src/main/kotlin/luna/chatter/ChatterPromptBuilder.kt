@@ -1,6 +1,9 @@
 package luna.chatter
 
 import luna.chatter.memory.ChatterMemoryToolHandler
+import luna.chatter.schedule.AvailabilityState
+import luna.chatter.schedule.DailySchedule
+import luna.chatter.schedule.ScheduleBlock
 import luna.core.ai.EmojiSanitizer
 import luna.core.ai.GeminiInteractionClient
 import luna.core.ai.GeminiInteractionGenerationConfig
@@ -76,19 +79,50 @@ object ChatterPromptBuilder {
             } else {
                 SYSTEM_INSTRUCTION
             }
-        if (personaState == null ||
-            !personaState.driftEnabled ||
-            personaState.circadianPeriod == null ||
-            personaState.mood == null
-        ) {
-            return base
+        val personaSection = formatPersonaStateSection(personaState) ?: return base
+        return "$base\n\n$personaSection"
+    }
+
+    private fun formatPersonaStateSection(personaState: PersonaState?): String? {
+        if (personaState == null || !personaState.driftEnabled || personaState.mood == null) {
+            return null
         }
-        return "$base\n\n" +
-            "目前社群時間與你的狀態：\n" +
+
+        val activeBlock = personaState.scheduleBlock
+        if (activeBlock != null) {
+            val sb = StringBuilder()
+            sb.append("目前社群時間與你的狀態：\n")
+            sb.append("- 本地時間：${personaState.formattedWeekday} ${personaState.formattedTime}（${personaState.timezone}）\n")
+            sb.append(
+                "- 目前行程（${activeBlock.formattedTimeRange()}，${activeBlock.availability.name}）：" +
+                    "${activeBlock.activityTitle}（${activeBlock.activityDetail}）\n",
+            )
+            if (activeBlock.availability == AvailabilityState.BREAK) {
+                sb.append("- 短暫休息狀態：現在是行程空檔的短暫休息時間，只是抽空滑一下手機看群組，回覆簡短隨性就好\n")
+            }
+            val schedule = personaState.dailySchedule
+            if (schedule != null) {
+                sb.append("- 今日行程概覽：${formatCompactScheduleOutline(schedule, activeBlock)}\n")
+            }
+            sb.append("- 心情與精力（${personaState.mood.label}）：${personaState.mood.promptCue}")
+            return sb.toString()
+        }
+
+        val circadianPeriod = personaState.circadianPeriod ?: return null
+        return "目前社群時間與你的狀態：\n" +
             "- 本地時間：${personaState.formattedWeekday} ${personaState.formattedTime}（${personaState.timezone}）\n" +
-            "- 時段狀態（${personaState.circadianPeriod.label}）：${personaState.circadianPeriod.promptCue}\n" +
+            "- 時段狀態（${circadianPeriod.label}）：${circadianPeriod.promptCue}\n" +
             "- 心情與精力（${personaState.mood.label}）：${personaState.mood.promptCue}"
     }
+
+    private fun formatCompactScheduleOutline(
+        schedule: DailySchedule,
+        activeBlock: ScheduleBlock,
+    ): String =
+        schedule.blocks.joinToString(" / ") { block ->
+            val marker = if (block.startMinute == activeBlock.startMinute) " [目前]" else ""
+            "${block.formattedTimeRange()} ${block.activityTitle}$marker"
+        }
 
     fun formatSpeakerHeader(
         author: String,
@@ -245,17 +279,9 @@ object ChatterPromptBuilder {
             )
         }
 
-        if (personaState != null &&
-            personaState.driftEnabled &&
-            personaState.circadianPeriod != null &&
-            personaState.mood != null
-        ) {
-            sb.append(
-                "\n\n目前社群時間與你的狀態：\n" +
-                    "- 本地時間：${personaState.formattedWeekday} ${personaState.formattedTime}（${personaState.timezone}）\n" +
-                    "- 時段狀態（${personaState.circadianPeriod.label}）：${personaState.circadianPeriod.promptCue}\n" +
-                    "- 心情與精力（${personaState.mood.label}）：${personaState.mood.promptCue}",
-            )
+        formatPersonaStateSection(personaState)?.let { personaSection ->
+            sb.append("\n\n")
+            sb.append(personaSection)
         }
 
         return sb.toString()

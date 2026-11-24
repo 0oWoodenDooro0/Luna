@@ -1,5 +1,9 @@
 package luna.chatter
 
+import luna.chatter.schedule.AvailabilityState
+import luna.chatter.schedule.DailySchedule
+import luna.chatter.schedule.DailyScheduleProvider
+import luna.chatter.schedule.ScheduleBlock
 import org.slf4j.LoggerFactory
 import java.math.BigDecimal
 import java.time.Clock
@@ -104,6 +108,8 @@ data class PersonaState(
     val mood: PersonaMood?,
     val baseThreshold: Double,
     val effectiveThreshold: Double,
+    val scheduleBlock: ScheduleBlock? = null,
+    val dailySchedule: DailySchedule? = null,
 )
 
 /**
@@ -126,6 +132,7 @@ class CircadianPersonaDrift(
     val enabled: Boolean = DEFAULT_DRIFT_ENABLED,
     private val clock: Clock = Clock.systemUTC(),
     private val random: Random = Random.Default,
+    private val scheduleProvider: DailyScheduleProvider? = null,
 ) : PersonaStateProvider {
     val zoneId: ZoneId = resolveZoneId(timezone)
     val resolvedTimezone: String = zoneId.id
@@ -154,8 +161,37 @@ class CircadianPersonaDrift(
             )
         }
 
-        val period = CircadianPeriod.fromHour(localTime.hour)
+        val activeSchedule = scheduleProvider?.takeIf { it.isEnabled() }?.currentSchedule()
+        val activeBlock = scheduleProvider?.takeIf { it.isEnabled() }?.currentBlock()
         val mood = resolveOrRollMood(now)
+
+        if (activeBlock != null) {
+            val scheduleOffset =
+                when (activeBlock.availability) {
+                    AvailabilityState.BREAK -> BREAK_THRESHOLD_OFFSET
+
+                    AvailabilityState.AVAILABLE,
+                    AvailabilityState.BUSY,
+                    AvailabilityState.SLEEPING,
+                    -> 0.0
+                }
+            val effectiveThreshold = computeEffectiveThreshold(baseThreshold, scheduleOffset, mood.thresholdOffset)
+            return PersonaState(
+                driftEnabled = true,
+                timezone = resolvedTimezone,
+                localTime = localTime,
+                formattedWeekday = formattedWeekday,
+                formattedTime = formattedTime,
+                circadianPeriod = null,
+                mood = mood,
+                baseThreshold = baseThreshold,
+                effectiveThreshold = effectiveThreshold,
+                scheduleBlock = activeBlock,
+                dailySchedule = activeSchedule,
+            )
+        }
+
+        val period = CircadianPeriod.fromHour(localTime.hour)
         val effectiveThreshold = computeEffectiveThreshold(baseThreshold, period.thresholdOffset, mood.thresholdOffset)
 
         return PersonaState(
@@ -198,6 +234,7 @@ class CircadianPersonaDrift(
 
         const val DEFAULT_TIMEZONE = "Asia/Taipei"
         const val DEFAULT_DRIFT_ENABLED = true
+        const val BREAK_THRESHOLD_OFFSET = 0.06
         const val MIN_EFFECTIVE_THRESHOLD = 0.05
         const val MAX_EFFECTIVE_THRESHOLD = 0.98
         const val MIN_MOOD_INTERVAL_HOURS = 2L
