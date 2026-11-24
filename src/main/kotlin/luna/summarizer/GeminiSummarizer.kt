@@ -139,10 +139,6 @@ open class GeminiSummarizer(
                         )
                     }
 
-                    is SummaryResult.ToolCall -> {
-                        session.complete(finalOutput = null, citations = emptyList())
-                    }
-
                     is SummaryResult.Error -> {
                         val localRedactor = AiTraceRedactor(listOfNotNull(config.apiKey.takeIf { it.isNotBlank() }))
                         session.fail(
@@ -166,7 +162,10 @@ open class GeminiSummarizer(
 
         if (input.content.isBlank()) {
             logger.warn("Skipping Gemini summarization: content is blank")
-            return SummaryResult.Error.Generic("Content to summarize cannot be blank")
+            return SummaryResult.Error.Generic(
+                message = "Content to summarize cannot be blank",
+                failureCategory = AiTraceFailureCategory.CONTEXT_ERROR,
+            )
         }
 
         val isAgenticVideo =
@@ -177,69 +176,83 @@ open class GeminiSummarizer(
             return summarizeAgentic(input)
         }
 
-        val initialTools = buildTools(input, includeLookback = lookbackProvider != null)
-        val initialVariant = resolveVariant(initialTools)
-        val initialResult = runSyncInteraction(input, tools = initialTools, variant = initialVariant)
-
-        if (lookbackProvider == null) {
-            return initialResult
+        if (lookbackProvider != null) {
+            return summarizeWithLookback(input, lookbackProvider)
         }
 
-        if (initialResult is SummaryResult.ToolCall) {
-            if (initialResult.name == GeminiTools.FETCH_EARLIER_MESSAGES && initialResult.continuation != null) {
-                val reason = initialResult.args["reason"] ?: ""
+        val initialTools = buildTools(input, includeLookback = false)
+        val initialVariant = resolveVariant(initialTools)
+        return runSyncInteraction(input, tools = initialTools, variant = initialVariant)
+    }
+
+    private suspend fun summarizeWithLookback(
+        input: SummaryInput,
+        lookbackProvider: suspend (reason: String) -> String?,
+    ): SummaryResult {
+        val tools = buildTools(input, includeLookback = true)
+        val variant = resolveVariant(tools)
+        val request =
+            GeminiPromptBuilder.buildRequest(
+                input = input,
+                model = config.model,
+                tools = tools,
+                background = false,
+            )
+        val traceContext =
+            InteractionTraceContext(
+                webUrlCount = input.webUrls.size,
+                inputUrls = collectInputUrls(input),
+                imageCount = input.imageAttachments.size,
+                hasImages = input.imageAttachments.isNotEmpty(),
+                hasVideo = !input.videoUri.isNullOrBlank(),
+                videoDurationSeconds = input.videoDurationSeconds,
+                transcriptLength = input.content.length,
+                stage = AiAttemptStage.SUMMARY_GENERATE,
+                variant = variant,
+                pipeline = AiTracePipeline.SUMMARY,
+                trigger = AiTraceTrigger.REACTION,
+            )
+        val result =
+            interactionClient.interactWithTools(
+                baseUrl = config.baseUrl,
+                apiKey = config.apiKey,
+                request = request,
+                traceContext = traceContext,
+                maxTurns = 2,
+                continuationStage = AiAttemptStage.SUMMARY_TOOL_CONTINUATION,
+            ) { call ->
+                if (call.name != GeminiTools.FETCH_EARLIER_MESSAGES) {
+                    return@interactWithTools luna.core.ai.ToolExecutionOutcome.Abort(
+                        message = "Unhandled tool call: ${call.name}",
+                        failureCategory = AiTraceFailureCategory.PARSE_ERROR,
+                    )
+                }
+                val reason = call.argumentsAsStrings()["reason"]
+                if (reason.isNullOrBlank()) {
+                    logger.error("Gemini tool call '{}' missing required 'reason' argument", call.name)
+                    return@interactWithTools luna.core.ai.ToolExecutionOutcome.Abort(
+                        message = "Malformed tool call: missing required 'reason' parameter for ${call.name}",
+                        failureCategory = AiTraceFailureCategory.PARSE_ERROR,
+                    )
+                }
                 logger.info("Model invoked autonomous lookback tool (reason={})", reason)
                 val earlierContext =
                     try {
                         lookbackProvider(reason) ?: ConversationSliceCollector.NO_FURTHER_HISTORY_MESSAGE
+                    } catch (e: kotlinx.coroutines.CancellationException) {
+                        throw e
                     } catch (e: Exception) {
                         logger.error("Lookback provider threw exception while fetching earlier messages", e)
-                        return SummaryResult.Error.Generic(
+                        return@interactWithTools luna.core.ai.ToolExecutionOutcome.Abort(
                             message = "Lookback provider failed: ${e.message}",
-                            cause = e,
                             failureCategory = AiTraceFailureCategory.CONTEXT_ERROR,
-                        )
-                    }
-
-                val lookbackResult =
-                    try {
-                        initialResult.continuation.invoke(earlierContext)
-                    } catch (e: Exception) {
-                        logger.error("Tool continuation threw exception", e)
-                        return SummaryResult.Error.Generic(
-                            message = "Tool continuation failed: ${e.message}",
                             cause = e,
-                            failureCategory = classifySummaryException(e),
                         )
                     }
-
-                return when (lookbackResult) {
-                    is SummaryResult.Success -> {
-                        lookbackResult
-                    }
-
-                    is SummaryResult.ToolCall -> {
-                        logger.error("Model attempted multiple lookback turns after tool response")
-                        SummaryResult.Error.Generic(
-                            message = "Model attempted multiple lookback turns after tool response",
-                            failureCategory = AiTraceFailureCategory.PARSE_ERROR,
-                        )
-                    }
-
-                    is SummaryResult.Error -> {
-                        lookbackResult
-                    }
-                }
-            } else {
-                logger.error("Unhandled tool call or missing continuation for {}", initialResult.name)
-                return SummaryResult.Error.Generic(
-                    message = "Unhandled tool call or missing continuation for ${initialResult.name}",
-                    failureCategory = AiTraceFailureCategory.PARSE_ERROR,
-                )
+                luna.core.ai.ToolExecutionOutcome
+                    .Result(kotlinx.serialization.json.JsonPrimitive(earlierContext))
             }
-        }
-
-        return initialResult
+        return mapInteractionResult(result)
     }
 
     private suspend fun summarizeAgentic(input: SummaryInput): SummaryResult {
@@ -297,14 +310,10 @@ open class GeminiSummarizer(
                         trigger = AiTraceTrigger.REACTION,
                     ),
             )
-        return mapInteractionResult(result, input, tools)
+        return mapInteractionResult(result)
     }
 
-    private fun mapInteractionResult(
-        result: InteractionExecutionResult,
-        input: SummaryInput,
-        tools: List<GeminiInteractionTool>,
-    ): SummaryResult =
+    private fun mapInteractionResult(result: InteractionExecutionResult): SummaryResult =
         when (result) {
             is InteractionExecutionResult.Success -> {
                 SummaryResult.Success(
@@ -363,97 +372,16 @@ open class GeminiSummarizer(
             }
 
             is InteractionExecutionResult.FunctionCall -> {
-                mapFunctionCall(result, input, tools)
+                logger.error(
+                    "Unexpected function_call returned when lookback is disabled (interactionId={})",
+                    result.interactionId,
+                )
+                SummaryResult.Error.Generic(
+                    message = "Unexpected tool call requested by Gemini",
+                    failureCategory = AiTraceFailureCategory.PARSE_ERROR,
+                )
             }
         }
-
-    private fun mapFunctionCall(
-        result: InteractionExecutionResult.FunctionCall,
-        input: SummaryInput,
-        tools: List<GeminiInteractionTool>,
-    ): SummaryResult {
-        val functionCall = result.functionCalls.firstOrNull()
-        if (functionCall == null || functionCall.name.isBlank()) {
-            logger.error("Gemini returned function_call step with missing function name")
-            return SummaryResult.Error.Generic(
-                message = "Malformed tool call: missing function name",
-                failureCategory = AiTraceFailureCategory.PARSE_ERROR,
-            )
-        }
-        if (functionCall.id.isBlank()) {
-            logger.error("Gemini tool call '{}' missing required 'call_id'", functionCall.name)
-            return SummaryResult.Error.Generic(
-                message = "Malformed tool call: missing call_id for ${functionCall.name}",
-                failureCategory = AiTraceFailureCategory.PARSE_ERROR,
-            )
-        }
-
-        val declaredToolNames =
-            tools
-                .filter { it.type == GeminiInteractionTool.TYPE_FUNCTION }
-                .mapNotNull { it.name?.trim()?.takeIf { n -> n.isNotBlank() } }
-                .toSet()
-        if (declaredToolNames.isNotEmpty() && !declaredToolNames.contains(functionCall.name)) {
-            logger.error("Gemini requested unknown tool '{}' which was not declared", functionCall.name)
-            return SummaryResult.Error.Generic(
-                message = "Unknown tool call requested by Gemini: ${functionCall.name}",
-                failureCategory = AiTraceFailureCategory.PARSE_ERROR,
-            )
-        }
-
-        val args = functionCall.argumentsAsStrings()
-        if (functionCall.name == GeminiTools.FETCH_EARLIER_MESSAGES && args["reason"].isNullOrBlank()) {
-            logger.error("Gemini tool call '{}' missing required 'reason' argument", functionCall.name)
-            return SummaryResult.Error.Generic(
-                message = "Malformed tool call: missing required 'reason' parameter for ${functionCall.name}",
-                failureCategory = AiTraceFailureCategory.PARSE_ERROR,
-            )
-        }
-
-        val continuation: suspend (String) -> SummaryResult = { toolOutput ->
-            val contResult =
-                interactionClient.continueInteraction(
-                    baseUrl = config.baseUrl,
-                    apiKey = config.apiKey,
-                    model = config.model,
-                    previousInteractionId = result.interactionId,
-                    functionResults =
-                        listOf(
-                            GeminiInteractionInput.functionResult(
-                                name = functionCall.name,
-                                callId = functionCall.id,
-                                result = toolOutput,
-                            ),
-                        ),
-                    systemInstruction = GeminiPromptBuilder.buildSystemInstruction(input),
-                    tools = tools,
-                    maxOutputTokens = 1024,
-                    background = false,
-                    traceContext =
-                        InteractionTraceContext(
-                            inputUrls = collectInputUrls(input),
-                            webUrlCount = input.webUrls.size,
-                            imageCount = input.imageAttachments.size,
-                            hasImages = input.imageAttachments.isNotEmpty(),
-                            hasVideo = !input.videoUri.isNullOrBlank(),
-                            videoDurationSeconds = input.videoDurationSeconds,
-                            transcriptLength = input.content.length + toolOutput.length,
-                            stage = AiAttemptStage.SUMMARY_TOOL_CONTINUATION,
-                            variant = functionCall.name,
-                            pipeline = AiTracePipeline.SUMMARY,
-                            trigger = AiTraceTrigger.REACTION,
-                        ),
-                )
-            mapInteractionResult(contResult, input, tools)
-        }
-
-        return SummaryResult.ToolCall(
-            name = functionCall.name,
-            args = args,
-            rawArgs = functionCall.arguments,
-            continuation = continuation,
-        )
-    }
 
     override fun close() {
         if (ownsHttpClient) {
@@ -462,62 +390,7 @@ open class GeminiSummarizer(
     }
 }
 
-internal fun classifySummaryError(error: SummaryResult.Error): AiTraceFailureCategory =
-    when (error) {
-        is SummaryResult.Error.MissingApiKey -> {
-            AiTraceFailureCategory.NOT_CONFIGURED
-        }
-
-        is SummaryResult.Error.RateLimitExceeded -> {
-            AiTraceFailureCategory.RATE_LIMIT
-        }
-
-        is SummaryResult.Error.Timeout -> {
-            AiTraceFailureCategory.TIMEOUT
-        }
-
-        is SummaryResult.Error.ApiError -> {
-            AiTraceFailureCategory.HTTP_ERROR
-        }
-
-        is SummaryResult.Error.Generic -> {
-            error.failureCategory?.let { return it }
-            val msg = error.message
-            when {
-                error.cause is SerializationException ||
-                    msg.contains("parse", ignoreCase = true) ||
-                    msg.contains("Malformed tool call", ignoreCase = true) ||
-                    msg.contains("Unknown tool call", ignoreCase = true) -> {
-                    AiTraceFailureCategory.PARSE_ERROR
-                }
-
-                msg.contains("prompt blocked", ignoreCase = true) ||
-                    msg.contains("blocked due to", ignoreCase = true) ||
-                    msg.contains("SAFETY", ignoreCase = false) -> {
-                    AiTraceFailureCategory.SAFETY_BLOCK
-                }
-
-                msg.contains("empty", ignoreCase = true) ||
-                    msg.contains("No summary candidates", ignoreCase = true) -> {
-                    AiTraceFailureCategory.EMPTY_OUTPUT
-                }
-
-                msg.contains("cannot be blank", ignoreCase = true) -> {
-                    AiTraceFailureCategory.CONTEXT_ERROR
-                }
-
-                error.cause is HttpRequestTimeoutException ||
-                    error.cause is SocketTimeoutException ||
-                    error.cause is TimeoutCancellationException -> {
-                    AiTraceFailureCategory.TIMEOUT
-                }
-
-                else -> {
-                    AiTraceFailureCategory.UNEXPECTED_ERROR
-                }
-            }
-        }
-    }
+internal fun classifySummaryError(error: SummaryResult.Error): AiTraceFailureCategory = error.failureCategory
 
 internal fun classifySummaryException(e: Throwable): AiTraceFailureCategory =
     when (e) {

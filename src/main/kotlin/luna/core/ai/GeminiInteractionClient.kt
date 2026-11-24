@@ -23,85 +23,6 @@ import org.slf4j.LoggerFactory
 import java.net.SocketTimeoutException
 
 /**
- * Execution and AI-trace metadata supplied alongside a [GeminiInteractionRequest].
- */
-data class InteractionTraceContext(
-    val webUrlCount: Int = 0,
-    val inputUrls: List<String> = emptyList(),
-    val hasImages: Boolean? = null,
-    val imageCount: Int? = null,
-    val hasVideo: Boolean? = null,
-    val videoDurationSeconds: Long? = null,
-    val transcriptLength: Int? = null,
-    val stage: AiAttemptStage? = null,
-    val variant: String? = null,
-    val pipeline: AiTracePipeline = AiTracePipeline.SUMMARY,
-    val trigger: AiTraceTrigger = AiTraceTrigger.REACTION,
-    val stripOutputEmojis: Boolean = true,
-    val allowedCustomEmojiIds: Set<String> = emptySet(),
-)
-
-/**
- * Rich result returned by [GeminiInteractionClient.interact] and [GeminiInteractionClient.continueInteraction]
- * for synchronous and background `/v1beta/interactions` executions.
- */
-sealed class InteractionExecutionResult {
-    data class Success(
-        val interactionId: String?,
-        val text: String,
-        val citations: List<GroundingCitation> = emptyList(),
-        val rawCitations: List<GroundingCitation> = emptyList(),
-        val urlContextResults: List<UrlContextResultEntry> = emptyList(),
-        val googleSearchQueries: List<String> = emptyList(),
-        val usageMetadata: GeminiUsageMetadata? = null,
-    ) : InteractionExecutionResult()
-
-    data class FunctionCall(
-        val interactionId: String,
-        val functionCalls: List<GeminiInteractionFunctionCall>,
-        val urlContextResults: List<UrlContextResultEntry> = emptyList(),
-        val googleSearchQueries: List<String> = emptyList(),
-        val usageMetadata: GeminiUsageMetadata? = null,
-    ) : InteractionExecutionResult()
-
-    sealed class Error(
-        open val message: String,
-        open val cause: Throwable? = null,
-        open val failureCategory: AiTraceFailureCategory,
-    ) : InteractionExecutionResult() {
-        data class RateLimitExceeded(
-            override val message: String = "Gemini API rate limit exceeded (HTTP 429)",
-            val retryAfterSeconds: Long? = null,
-        ) : Error(message, failureCategory = AiTraceFailureCategory.RATE_LIMIT)
-
-        data class Timeout(
-            override val message: String = "Gemini API request timed out",
-            override val cause: Throwable? = null,
-        ) : Error(message, cause, failureCategory = AiTraceFailureCategory.TIMEOUT)
-
-        data class ApiError(
-            val statusCode: Int,
-            override val message: String,
-        ) : Error(message, failureCategory = AiTraceFailureCategory.HTTP_ERROR)
-
-        data class SafetyBlock(
-            override val message: String,
-            val finishReason: String? = null,
-        ) : Error(message, failureCategory = AiTraceFailureCategory.SAFETY_BLOCK)
-
-        data class EmptyOutput(
-            override val message: String = "Gemini interaction output is empty or sanitized to blank",
-        ) : Error(message, failureCategory = AiTraceFailureCategory.EMPTY_OUTPUT)
-
-        data class Generic(
-            override val message: String,
-            override val cause: Throwable? = null,
-            override val failureCategory: AiTraceFailureCategory = AiTraceFailureCategory.UNEXPECTED_ERROR,
-        ) : Error(message, cause, failureCategory)
-    }
-}
-
-/**
  * Unified client for Google Gemini `/v1beta/interactions` API (`steps` schema), supporting
  * synchronous execution (`background = false`), background polling (`background = true`),
  * multimodal inputs (`video`, `image`, `text`), built-in tools (`url_context`, `google_search`,
@@ -117,6 +38,7 @@ class GeminiInteractionClient(
     private val socketTimeoutMs: Long? = null,
 ) {
     private val logger = LoggerFactory.getLogger(GeminiInteractionClient::class.java)
+    private val toolLoop = GeminiInteractionToolLoop(this)
 
     private class ExecutionTraceState {
         var pollingAttempts: Int = 0
@@ -205,6 +127,77 @@ class GeminiInteractionClient(
             traceContext = effectiveTraceContext,
             validationError = validationError,
         )
+    }
+
+    /**
+     * Executes an interaction and drives the bounded multi-turn tool-continuation loop until the
+     * model produces a final [InteractionExecutionResult.Success], returns an [InteractionExecutionResult.Error],
+     * or hits a protocol/turn guardrail.
+     */
+    suspend fun interactWithTools(
+        baseUrl: String,
+        apiKey: String,
+        request: GeminiInteractionRequest,
+        traceContext: InteractionTraceContext = InteractionTraceContext(),
+        maxTurns: Int = DEFAULT_MAX_TOOL_TURNS,
+        continuationStage: AiAttemptStage = AiAttemptStage.SUMMARY_TOOL_CONTINUATION,
+        toolExecutor: suspend (GeminiInteractionFunctionCall) -> ToolExecutionOutcome,
+    ): InteractionExecutionResult =
+        traceRecorder.withActiveOrStandaloneSession(
+            pipeline = traceContext.pipeline,
+            trigger = traceContext.trigger,
+            discord =
+                AiTraceDiscordContext(
+                    channelId = "standalone",
+                    messageId = "standalone",
+                ),
+            secret = apiKey,
+            onStandaloneException = { session, e ->
+                val localRedactor = AiTraceRedactor(listOfNotNull(apiKey.takeIf { it.isNotBlank() }))
+                session.fail(
+                    failureCategory = AiTraceFailureCategory.UNEXPECTED_ERROR,
+                    errorSummary = localRedactor.redactString(e.message) ?: e::class.simpleName ?: "Unexpected error",
+                )
+            },
+        ) { session, isStandalone ->
+            val result =
+                toolLoop.execute(
+                    baseUrl = baseUrl,
+                    apiKey = apiKey,
+                    request = request,
+                    traceContext = traceContext,
+                    maxTurns = maxTurns,
+                    continuationStage = continuationStage,
+                    toolExecutor = toolExecutor,
+                )
+            if (isStandalone && session != null) {
+                completeStandaloneSession(session = session, apiKey = apiKey, result = result)
+            }
+            result
+        }
+
+    private fun completeStandaloneSession(
+        session: AiTraceSession,
+        apiKey: String,
+        result: InteractionExecutionResult,
+    ) {
+        when (result) {
+            is InteractionExecutionResult.Success -> {
+                session.complete(finalOutput = result.text, citations = result.citations)
+            }
+
+            is InteractionExecutionResult.FunctionCall -> {
+                session.complete(finalOutput = null, citations = emptyList())
+            }
+
+            is InteractionExecutionResult.Error -> {
+                val localRedactor = AiTraceRedactor(listOfNotNull(apiKey.takeIf { it.isNotBlank() }))
+                session.fail(
+                    failureCategory = result.failureCategory,
+                    errorSummary = localRedactor.redactString(result.message),
+                )
+            }
+        }
     }
 
     private suspend fun interactInternal(
@@ -769,6 +762,7 @@ class GeminiInteractionClient(
     companion object {
         const val DEFAULT_POLLING_DELAY_MS = 2000L
         const val DEFAULT_MAX_POLLING_ATTEMPTS = 30
+        const val DEFAULT_MAX_TOOL_TURNS = 8
 
         private val jsonParser = GeminiHttpClientFactory.json
 
