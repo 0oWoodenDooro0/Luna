@@ -5,10 +5,38 @@ on:
     branches:
       - master
       - main
+    paths:
+      - 'src/**'
+      - 'libs/**'
+      - 'mcp-server/**'
+      - 'gradle/**'
+      - 'gradlew'
+      - 'gradlew.bat'
+      - 'build.gradle.kts'
+      - 'settings.gradle.kts'
+      - 'gradle.properties'
+      - 'Dockerfile'
+      - '.env.example'
+      - 'scripts/**'
+      - '.github/workflows/ci.yml'
   pull_request:
     branches:
       - master
       - main
+    paths:
+      - 'src/**'
+      - 'libs/**'
+      - 'mcp-server/**'
+      - 'gradle/**'
+      - 'gradlew'
+      - 'gradlew.bat'
+      - 'build.gradle.kts'
+      - 'settings.gradle.kts'
+      - 'gradle.properties'
+      - 'Dockerfile'
+      - '.env.example'
+      - 'scripts/**'
+      - '.github/workflows/ci.yml'
 
 jobs:
   build:
