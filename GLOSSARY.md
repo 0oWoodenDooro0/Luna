@@ -189,19 +189,27 @@ The recency- and count-bounded short-term dialogue history assembled for `Chatte
 _Avoid_: STM buffer, chat cache, sliding log
 
 **Long-Term Memory**:
-The guild-isolated store of persistent `Atomic Fact` records scoped to either an individual user or the shared guild within `Chatter Pipeline`, queried on demand rather than unconditionally pre-injected into every reply.
+The guild-isolated store of persistent `Atomic Fact` records (queried on demand) and `Social Understanding` records (pre-injected for active participants) scoped to either an individual user or the shared guild within `Chatter Pipeline`.
 _Avoid_: LTM dump, user profile DB, RAG store, channel memory
 
 **Atomic Fact**:
-A self-contained, pronoun-resolved factual statement distilled from channel dialogue capturing a durable user preference, core fact, or time-bound event (with an optional `Fact Expiration`) without relying on surrounding messages for meaning.
+A self-contained, pronoun-resolved factual statement distilled from channel dialogue—carrying an importance rating, retrieval keywords, and an optional `Fact Expiration`—that captures a durable user preference, core fact, or time-bound event without relying on surrounding messages for meaning.
 _Avoid_: Memory snippet, chat summary, factoid
 
+**Social Understanding**:
+A stable, non-decaying relational or behavioral impression distilled from recurring dialogue—capturing how Luna interacts with a specific user or a guild's shared norms and humor—incrementally refined rather than overwritten as isolated events.
+_Avoid_: Memory understanding, user persona, impression note, profile summary
+
+**Understanding Pre-Injection**:
+The zero-embedding reply-time inclusion of compact `Social Understanding` records for the triggering author, recent `Working Memory Window` speakers, and the active guild within a bounded character budget, providing immediate familiarity without invoking `Agentic Memory Retrieval`.
+_Avoid_: Pre-prompt RAG, memory dump, profile injection
+
 **Fact Expiration**:
-An optional calendar-date expiry assigned during `Memory Distillation` to time-bound `Atomic Fact` records so ephemeral events are excluded from retrieval and purged once elapsed while durable facts remain governed by LRU eviction.
+An optional calendar-date expiry assigned during `Memory Distillation` to time-bound `Atomic Fact` records so ephemeral events are excluded from retrieval and purged once elapsed while durable facts remain governed by importance-aware LRU eviction.
 _Avoid_: Global TTL, blanket memory expiry, inactivity purge
 
 **Memory Distillation**:
-The asynchronous background workflow that extracts `Atomic Fact` records from unprocessed channel dialogue once inactivity or batch thresholds are reached, reconciling new facts against existing `Long-Term Memory` via insert, update, or delete operations.
+The asynchronous background workflow that extracts `Atomic Fact` records and refines `Social Understanding` impressions from unprocessed channel dialogue once inactivity or batch thresholds are reached, reconciling changes against existing `Long-Term Memory`.
 _Avoid_: Memory scraper, chat cron, background summarizer
 
 **Distillation Cursor**:
@@ -213,7 +221,7 @@ The model-driven tool invocation inside `Chatter Pipeline` reply generation that
 _Avoid_: Pre-prompt RAG, memory injection, auto-recall
 
 **Recency Decay**:
-A bounded age-based damping factor applied during `Agentic Memory Retrieval` ranking so fresher `Atomic Fact` records edge out older ones at comparable relevance without burying durable high-relevance preferences.
+A bounded dual-signal damping factor applied during `Agentic Memory Retrieval` ranking—blending last-updated age and last-recalled age—so fresher or frequently recalled `Atomic Fact` records stay prominent without burying durable high-relevance preferences (exempting `Social Understanding`).
 _Avoid_: Time cutoff, hard age filter, linear score penalty
 
 **Dialogue Context Engine**:
