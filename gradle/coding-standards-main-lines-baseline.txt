@@ -4,6 +4,5 @@ libs/socialpeek/src/main/kotlin/dev/socialpeek/resolver/facebook/FacebookResolve
 libs/socialpeek/src/main/kotlin/dev/socialpeek/resolver/util/MetaMediaExtractor.kt=655
 src/main/kotlin/luna/chatter/memory/SqliteChatterMemoryStore.kt=899
 src/main/kotlin/luna/core/LunaWebPages.kt=1229
-src/main/kotlin/luna/core/ai/AiTraceRecorder.kt=701
 src/main/kotlin/luna/core/ai/GeminiInteractionClient.kt=791
 src/main/kotlin/luna/core/ai/GeminiModels.kt=788

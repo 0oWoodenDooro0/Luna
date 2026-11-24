@@ -113,6 +113,8 @@ class AiTraceRedactor private constructor(
             attempts = trace.attempts.map { redactAttempt(it) },
             circadianPeriod = redactString(trace.circadianPeriod),
             personaMood = redactString(trace.personaMood),
+            scheduleBlockTitle = redactString(trace.scheduleBlockTitle),
+            scheduleAvailability = redactString(trace.scheduleAvailability),
         )
 
     private fun redactCitation(citation: GroundingCitation): GroundingCitation =

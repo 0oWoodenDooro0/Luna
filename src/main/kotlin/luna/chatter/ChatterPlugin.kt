@@ -175,10 +175,48 @@ class ChatterPlugin(
             )
         this.contextCollector = collector
 
+        var initializedScheduleStore: SqliteDailyScheduleStore? = null
+        var initializedScheduleCoordinator: DailyScheduleCoordinator? = null
+        if (chatterConfig.isConfigured && chatterEnabled && chatterConfig.schedule.enabled) {
+            runCatching {
+                val scheduleStore = SqliteDailyScheduleStore(context.database)
+                val scheduleGenerator =
+                    DailyScheduleGenerator(
+                        interactionClient =
+                            GeminiInteractionClient(
+                                httpClient = httpClient,
+                                traceRecorder = traceRecorder,
+                            ),
+                        model = chatterConfig.cleanModel,
+                        apiKey = chatterConfig.apiKey,
+                        baseUrl = chatterConfig.cleanBaseUrl,
+                        timezone = chatterConfig.timezone,
+                    )
+                val presencePort = KordSchedulePresencePort(context.kord)
+                val scheduleCoordinatorInstance =
+                    DailyScheduleCoordinator(
+                        store = scheduleStore,
+                        generator = scheduleGenerator,
+                        presencePort = presencePort,
+                        enabled = true,
+                        timezone = ZoneId.of(chatterConfig.timezone),
+                    )
+                initializedScheduleStore = scheduleStore
+                initializedScheduleCoordinator = scheduleCoordinatorInstance
+                this.scheduleCoordinator = scheduleCoordinatorInstance
+            }.onFailure { e ->
+                logger.warn(
+                    "Failed to initialize DailyScheduleCoordinator; degrading without daily schedule: {}",
+                    e.message,
+                )
+            }
+        }
+
         val drift =
             CircadianPersonaDrift(
                 timezone = chatterConfig.timezone,
                 enabled = chatterConfig.driftEnabled,
+                scheduleProvider = initializedScheduleCoordinator,
             )
         this.personaStateProvider = drift
 
@@ -221,6 +259,8 @@ class ChatterPlugin(
                 personaStateProvider = drift,
                 emojiService = emojiServiceInstance,
                 config = chatterConfig,
+                scheduleProvider = initializedScheduleCoordinator,
+                scheduleStore = initializedScheduleStore,
             )
         val finalService = serviceFactory?.invoke(chatterService) ?: chatterService
         this.service = finalService
@@ -245,39 +285,7 @@ class ChatterPlugin(
             logger.warn("Could not register ChatterPlugin message listener to Kord: {}", e.message)
         }
 
-        if (chatterConfig.schedule.enabled) {
-            runCatching {
-                val scheduleStore = SqliteDailyScheduleStore(context.database)
-                val scheduleGenerator =
-                    DailyScheduleGenerator(
-                        interactionClient =
-                            GeminiInteractionClient(
-                                httpClient = httpClient,
-                                traceRecorder = traceRecorder,
-                            ),
-                        model = chatterConfig.cleanModel,
-                        apiKey = chatterConfig.apiKey,
-                        baseUrl = chatterConfig.cleanBaseUrl,
-                        timezone = chatterConfig.timezone,
-                    )
-                val presencePort = KordSchedulePresencePort(context.kord)
-                val scheduleCoordinatorInstance =
-                    DailyScheduleCoordinator(
-                        store = scheduleStore,
-                        generator = scheduleGenerator,
-                        presencePort = presencePort,
-                        enabled = true,
-                        timezone = ZoneId.of(chatterConfig.timezone),
-                    )
-                this.scheduleCoordinator = scheduleCoordinatorInstance
-                scheduleCoordinatorInstance.start(scope)
-            }.onFailure { e ->
-                logger.warn(
-                    "Failed to initialize DailyScheduleCoordinator; degrading without daily schedule: {}",
-                    e.message,
-                )
-            }
-        }
+        initializedScheduleCoordinator?.start(scope)
     }
 
     override suspend fun shutdown() {
