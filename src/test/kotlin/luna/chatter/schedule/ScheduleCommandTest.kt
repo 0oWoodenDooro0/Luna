@@ -249,4 +249,202 @@ class ScheduleCommandTest {
         assertEquals(ScheduleCommand.DISCORD_EMBED_DESCRIPTION_MAX_LENGTH, truncated.length)
         assertTrue(truncated.endsWith("..."), "Truncated description should end with ellipsis")
     }
+
+    @Test
+    fun `handle renders pencil marker only on conversation-adjusted blocks`() =
+        runTest {
+            val schedule =
+                DailySchedule(
+                    date = LocalDate.of(2026, 11, 24),
+                    timezone = "Asia/Taipei",
+                    blocks =
+                        listOf(
+                            ScheduleBlock(
+                                startMinute = 0,
+                                endMinute = 480,
+                                activityTitle = "Deep Sleep",
+                                activityDetail = "Sleeping",
+                                statusText = "Zzz...",
+                                availability = AvailabilityState.SLEEPING,
+                                adjustedByConversation = false,
+                            ),
+                            ScheduleBlock(
+                                startMinute = 480,
+                                endMinute = 720,
+                                activityTitle = "Morning Sketching",
+                                activityDetail = "Drawing commission drafts",
+                                statusText = "Sketching drafts",
+                                availability = AvailabilityState.BUSY,
+                                adjustedByConversation = true,
+                            ),
+                            ScheduleBlock(
+                                startMinute = 720,
+                                endMinute = 780,
+                                activityTitle = "Lunch & Coffee Break",
+                                activityDetail = "Taking a quick lunch break",
+                                statusText = "Grabbing lunch",
+                                availability = AvailabilityState.BREAK,
+                                adjustedByConversation = true,
+                            ),
+                            ScheduleBlock(
+                                startMinute = 780,
+                                endMinute = 1440,
+                                activityTitle = "Evening Hangout",
+                                activityDetail = "Chatting on Discord",
+                                statusText = "Hanging out",
+                                availability = AvailabilityState.AVAILABLE,
+                                adjustedByConversation = false,
+                            ),
+                        ),
+                    summary = "Quiet creative morning, relaxing afternoon and evening.",
+                    createdAtMillis = 1_700_000_000_000L,
+                )
+            val provider =
+                object : DailyScheduleProvider {
+                    override fun isEnabled(): Boolean = true
+
+                    override fun currentSchedule(): DailySchedule = schedule
+
+                    override fun currentBlock(): ScheduleBlock = schedule.blocks[2]
+                }
+            val clock = Clock.fixed(Instant.parse("2026-11-24T04:30:00Z"), ZoneOffset.UTC)
+            val command = ScheduleCommand(scheduleProvider = provider, clock = clock)
+            val (interaction, capturedRequest) = setupPublicInteraction()
+
+            command.handle(interaction)
+
+            val request = assertNotNull(capturedRequest())
+            val embed = assertNotNull(request.request.embeds.value).single()
+            val description = assertNotNull(embed.description.value)
+            val lines = description.lines()
+
+            val sleepLine = assertNotNull(lines.firstOrNull { it.contains("00:00–08:00") })
+            assertFalse(sleepLine.contains("✏️"), "Unadjusted block should not render pencil marker: $sleepLine")
+
+            val sketchLine = assertNotNull(lines.firstOrNull { it.contains("08:00–12:00") })
+            assertTrue(sketchLine.contains("✏️"), "Adjusted inactive block should render pencil marker: $sketchLine")
+
+            val lunchLine = assertNotNull(lines.firstOrNull { it.contains("12:00–13:00") })
+            assertTrue(lunchLine.contains("✏️"), "Adjusted active block should render pencil marker: $lunchLine")
+
+            val hangoutLine = assertNotNull(lines.firstOrNull { it.contains("13:00–24:00") })
+            assertFalse(hangoutLine.contains("✏️"), "Unadjusted block should not render pencil marker: $hangoutLine")
+        }
+
+    @Test
+    fun `handle appends compact upcoming commitments section when commitments exist`() =
+        runTest {
+            val schedule =
+                DailySchedule(
+                    date = LocalDate.of(2026, 11, 24),
+                    timezone = "Asia/Taipei",
+                    blocks =
+                        listOf(
+                            ScheduleBlock(
+                                startMinute = 0,
+                                endMinute = 1440,
+                                activityTitle = "Free Day",
+                                activityDetail = "Relaxing",
+                                statusText = "Chilling",
+                                availability = AvailabilityState.AVAILABLE,
+                            ),
+                        ),
+                    summary = "Relaxing day.",
+                    createdAtMillis = 1_700_000_000_000L,
+                )
+            val commitments =
+                listOf(
+                    ScheduleCommitment(
+                        id = "c2",
+                        targetDate = LocalDate.of(2026, 11, 26),
+                        startMinute = 600,
+                        endMinute = 720,
+                        activityTitle = "Team Sync",
+                        activityDetail = "Weekly meeting",
+                        statusText = "In a meeting",
+                        availability = AvailabilityState.BUSY,
+                        createdAtMillis = 1_700_000_000_100L,
+                    ),
+                    ScheduleCommitment(
+                        id = "c1",
+                        targetDate = LocalDate.of(2026, 11, 25),
+                        startMinute = 1200,
+                        endMinute = 1320,
+                        activityTitle = "Watch Party",
+                        activityDetail = "Movie night",
+                        statusText = "Watching movies",
+                        availability = AvailabilityState.BREAK,
+                        createdAtMillis = 1_700_000_000_050L,
+                    ),
+                )
+            val provider =
+                object : DailyScheduleProvider {
+                    override fun isEnabled(): Boolean = true
+
+                    override fun currentSchedule(): DailySchedule = schedule
+
+                    override fun currentBlock(): ScheduleBlock = schedule.blocks.single()
+
+                    override fun upcomingCommitments(): List<ScheduleCommitment> = commitments
+                }
+            val clock = Clock.fixed(Instant.parse("2026-11-24T04:30:00Z"), ZoneOffset.UTC)
+            val command = ScheduleCommand(scheduleProvider = provider, clock = clock)
+            val (interaction, capturedRequest) = setupPublicInteraction()
+
+            command.handle(interaction)
+
+            val request = assertNotNull(capturedRequest())
+            val embed = assertNotNull(request.request.embeds.value).single()
+            val description = assertNotNull(embed.description.value)
+
+            assertTrue(description.contains("近期約定"), "Expected 近期約定 section header, got:\n$description")
+            val firstIdx = description.indexOf("2026-11-25 20:00–22:00 ☕ Watch Party")
+            val secondIdx = description.indexOf("2026-11-26 10:00–12:00 🔴 Team Sync")
+            assertTrue(firstIdx >= 0, "Expected formatted commitment for 2026-11-25, got:\n$description")
+            assertTrue(secondIdx > firstIdx, "Expected commitments sorted chronologically, got:\n$description")
+        }
+
+    @Test
+    fun `handle omits upcoming commitments section when no commitments exist`() =
+        runTest {
+            val schedule =
+                DailySchedule(
+                    date = LocalDate.of(2026, 11, 24),
+                    timezone = "Asia/Taipei",
+                    blocks =
+                        listOf(
+                            ScheduleBlock(
+                                startMinute = 0,
+                                endMinute = 1440,
+                                activityTitle = "Free Day",
+                                activityDetail = "Relaxing",
+                                statusText = "Chilling",
+                                availability = AvailabilityState.AVAILABLE,
+                            ),
+                        ),
+                    summary = "Relaxing day.",
+                    createdAtMillis = 1_700_000_000_000L,
+                )
+            val provider =
+                object : DailyScheduleProvider {
+                    override fun isEnabled(): Boolean = true
+
+                    override fun currentSchedule(): DailySchedule = schedule
+
+                    override fun currentBlock(): ScheduleBlock = schedule.blocks.single()
+
+                    override fun upcomingCommitments(): List<ScheduleCommitment> = emptyList()
+                }
+            val clock = Clock.fixed(Instant.parse("2026-11-24T04:30:00Z"), ZoneOffset.UTC)
+            val command = ScheduleCommand(scheduleProvider = provider, clock = clock)
+            val (interaction, capturedRequest) = setupPublicInteraction()
+
+            command.handle(interaction)
+
+            val request = assertNotNull(capturedRequest())
+            val embed = assertNotNull(request.request.embeds.value).single()
+            val description = assertNotNull(embed.description.value)
+            assertFalse(description.contains("近期約定"), "Expected 近期約定 section omitted when empty, got:\n$description")
+            assertTrue(embed.fields.value.isNullOrEmpty(), "Expected no extra embed fields when commitments empty")
+        }
 }
