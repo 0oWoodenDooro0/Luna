@@ -5,6 +5,7 @@ import kotlinx.serialization.json.JsonPrimitive
 import luna.chatter.memory.ChatterMemoryConfig
 import luna.chatter.memory.ChatterMemoryToolHandler
 import luna.chatter.memory.UnderstandingPreInjector
+import luna.chatter.schedule.ChatterScheduleToolHandler
 import luna.core.ai.AiAttemptStage
 import luna.core.ai.AiTraceDiscordContext
 import luna.core.ai.AiTraceFailureCategory
@@ -40,6 +41,7 @@ open class ChatterGenerator(
     private val memoryConfig: ChatterMemoryConfig = ChatterMemoryConfig(),
     private val memoryToolHandler: ChatterMemoryToolHandler? = null,
     private val understandingPreInjector: UnderstandingPreInjector? = null,
+    private val scheduleToolHandler: ChatterScheduleToolHandler? = null,
 ) : AutoCloseable {
     private val ownsHttpClient: Boolean = httpClient == null
     private val httpClient: HttpClient = httpClient ?: GeminiHttpClientFactory.create()
@@ -140,11 +142,13 @@ open class ChatterGenerator(
             memoryConfig.enabled &&
                 memoryToolHandler != null &&
                 !effectiveInput.guildId.isNullOrBlank()
+        val scheduleToolsEnabled = config.schedule.enabled && scheduleToolHandler != null
         val tools =
             ChatterPromptBuilder.buildTools(
                 config = config,
                 webUrls = effectiveInput.webUrls,
                 includeMemoryTool = memoryToolsEnabled,
+                includeScheduleTools = scheduleToolsEnabled,
             )
         val inputUrls =
             buildList {
@@ -175,6 +179,7 @@ open class ChatterGenerator(
                 background = background,
                 memoryToolsEnabled = memoryToolsEnabled,
                 understandingContext = understandingContext,
+                scheduleToolsEnabled = scheduleToolsEnabled,
             )
 
         val allowedCustomEmojiIds = (effectiveInput.applicationEmojis + effectiveInput.guildEmojis).map { it.id.toString() }.toSet()
@@ -192,7 +197,7 @@ open class ChatterGenerator(
             )
 
         val result =
-            if (memoryToolsEnabled && memoryToolHandler != null) {
+            if ((memoryToolsEnabled && memoryToolHandler != null) || (scheduleToolsEnabled && scheduleToolHandler != null)) {
                 var memoryCallCount = 0
                 interactionClient.interactWithTools(
                     baseUrl = config.cleanBaseUrl,
@@ -202,23 +207,52 @@ open class ChatterGenerator(
                     maxTurns = memoryConfig.maxTurns.coerceAtLeast(1),
                     continuationStage = AiAttemptStage.CHATTER_TOOL_CONTINUATION,
                 ) { call ->
-                    memoryCallCount++
                     val toolOutput =
-                        if (memoryCallCount > memoryConfig.maxToolCalls) {
-                            logger.info(
-                                "Chatter memory tool call cap ({}) reached on call {}; returning limit_reached notice",
-                                memoryConfig.maxToolCalls,
-                                memoryCallCount,
-                            )
-                            ChatterMemoryToolHandler.limitReachedResponse()
-                        } else {
-                            memoryToolHandler.handleToolCall(
-                                arguments = call.arguments,
-                                guildId = effectiveInput.guildId,
-                                channelId = effectiveInput.channelId,
-                                defaultAuthorId = effectiveInput.authorId,
-                                workingMemoryStartMs = effectiveInput.workingMemoryStartMs,
-                            )
+                        when (call.name) {
+                            ChatterMemoryToolHandler.TOOL_NAME -> {
+                                if (memoryToolsEnabled && memoryToolHandler != null) {
+                                    memoryCallCount++
+                                    if (memoryCallCount > memoryConfig.maxToolCalls) {
+                                        logger.info(
+                                            "Chatter memory tool call cap ({}) reached on call {}; returning limit_reached notice",
+                                            memoryConfig.maxToolCalls,
+                                            memoryCallCount,
+                                        )
+                                        ChatterMemoryToolHandler.limitReachedResponse()
+                                    } else {
+                                        memoryToolHandler.handleToolCall(
+                                            arguments = call.arguments,
+                                            guildId = effectiveInput.guildId,
+                                            channelId = effectiveInput.channelId,
+                                            defaultAuthorId = effectiveInput.authorId,
+                                            workingMemoryStartMs = effectiveInput.workingMemoryStartMs,
+                                        )
+                                    }
+                                } else {
+                                    ChatterMemoryToolHandler.unavailableResponse()
+                                }
+                            }
+
+                            ChatterScheduleToolHandler.TODAY_TOOL_NAME -> {
+                                if (scheduleToolsEnabled && scheduleToolHandler != null) {
+                                    scheduleToolHandler.handleTodayScheduleCall(call.arguments)
+                                } else {
+                                    ChatterScheduleToolHandler.unavailableResponse()
+                                }
+                            }
+
+                            ChatterScheduleToolHandler.COMMITMENT_TOOL_NAME -> {
+                                if (scheduleToolsEnabled && scheduleToolHandler != null) {
+                                    scheduleToolHandler.handleCommitmentCall(call.arguments)
+                                } else {
+                                    ChatterScheduleToolHandler.unavailableResponse()
+                                }
+                            }
+
+                            else -> {
+                                logger.warn("ChatterGenerator received unknown tool call '{}'", call.name)
+                                """{"status":"unknown_tool","message":"Unknown tool: ${call.name}"}"""
+                            }
                         }
                     ToolExecutionOutcome.Result(JsonPrimitive(toolOutput))
                 }
