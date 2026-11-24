@@ -187,6 +187,7 @@ open class DailyScheduleGenerator(
                - BREAK：吃飯、泡咖啡、伸懶腰滑手機的短暫休息（會看一眼群組並簡短回幾句）
                - AVAILABLE：自由耍廢、追番、打遊戲或窩在電腦前（正常跟群友聊天）
             3. activityTitle、activityDetail、statusText、summary 請使用自然口語的繁體中文；statusText 請簡短適合當作 Discord 自訂狀態（可帶 1 個 emoji）。
+            4. 作息節奏建議（彈性原則）：單段連續 BUSY 建議控制在約 1–2 小時左右，避免連續排好幾個小時不休息的 BUSY；若趕稿或辦事需要較長時間，請在中間自然穿插 15–45 分鐘的 BREAK（例如喝水、吃點心、伸懶腰、滑群組）或 AVAILABLE 來分段。整天請避免排滿 BUSY，留出足夠的 AVAILABLE 與 BREAK 時段讓 Luna 可以跟群友聊天（此為彈性節奏建議，不需硬性限制每日總時數）。
 
             請嚴格輸出以下 JSON 結構：
             {

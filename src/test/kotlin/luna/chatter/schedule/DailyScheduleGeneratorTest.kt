@@ -217,4 +217,43 @@ class DailyScheduleGeneratorTest {
             val blankKeyResult = createGenerator(errorEngine, apiKey = " ").generate(LocalDate.of(2026, 11, 24))
             assertTrue(blankKeyResult.isFailure, "Blank API key must return failure without fabricating fallback schedule")
         }
+
+    @Test
+    fun `system instruction includes soft guidance for BUSY duration, interleaved BREAK rest, and ample AVAILABLE time`() =
+        runTest {
+            var capturedBody = ""
+            val validPayload =
+                """{"summary":"輕鬆的一天","blocks":[{"startMinute":0,"endMinute":1440,"activityTitle":"自由時間","activityDetail":"耍廢","statusText":"✨ 耍廢中","availability":"AVAILABLE"}]}"""
+            val engine =
+                MockEngine { request ->
+                    capturedBody = request.body.toByteArray().decodeToString()
+                    respond(
+                        content = interactionSuccessResponse(validPayload),
+                        status = HttpStatusCode.OK,
+                        headers = headersOf(HttpHeaders.ContentType, "application/json"),
+                    )
+                }
+
+            val result = createGenerator(engine).generate(LocalDate.of(2026, 11, 24))
+            assertTrue(result.isSuccess, "Expected valid JSON to succeed, got: ${result.exceptionOrNull()}")
+            assertEquals(2048, DailyScheduleGenerator.MAX_OUTPUT_TOKENS)
+
+            assertTrue(
+                capturedBody.contains("1–2 小時") || capturedBody.contains("1-2 小時"),
+                "Expected system instruction to advise keeping continuous BUSY stretches around 1-2 hours",
+            )
+            assertTrue(
+                (capturedBody.contains("15–45 分鐘") || capturedBody.contains("15-45 分鐘")) &&
+                    capturedBody.contains("BREAK"),
+                "Expected system instruction to advise interleaving 15-45 minutes of BREAK rest",
+            )
+            assertTrue(
+                capturedBody.contains("AVAILABLE") && capturedBody.contains("BUSY"),
+                "Expected system instruction to advise leaving ample AVAILABLE and BREAK time instead of packing BUSY",
+            )
+            assertTrue(
+                capturedBody.contains("留出足夠") || capturedBody.contains("充裕"),
+                "Expected system instruction to explicitly encourage leaving ample AVAILABLE/BREAK time for chatting",
+            )
+        }
 }
