@@ -25,4 +25,15 @@ interface DailyScheduleStore {
     fun listPendingCatchUps(): List<CatchUpWatermark>
 
     fun clearCatchUpWatermark(channelId: String)
+
+    fun upsertCommitment(commitment: ScheduleCommitment)
+
+    fun cancelCommitment(id: String): Boolean
+
+    fun listCommitmentsForDate(date: LocalDate): List<ScheduleCommitment>
+
+    fun listUpcomingCommitments(
+        fromDate: LocalDate,
+        toDateInclusive: LocalDate,
+    ): List<ScheduleCommitment>
 }

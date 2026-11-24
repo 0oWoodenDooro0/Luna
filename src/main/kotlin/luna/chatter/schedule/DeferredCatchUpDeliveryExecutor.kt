@@ -44,10 +44,17 @@ internal class DeferredCatchUpDeliveryExecutor(
     private val emojiService: ChatterEmojiService,
     private val traceRecorder: AiTraceRecorder,
     private val config: ChatterConfig,
-    private val isUnavailableNow: () -> Boolean,
+    private val scheduleProvider: DailyScheduleProvider,
     randomProvider: (minInclusive: Long, maxInclusive: Long) -> Long,
     private val logger: Logger = LoggerFactory.getLogger(DeferredCatchUpDeliveryExecutor::class.java),
 ) {
+    private fun isUnavailableNow(): Boolean = scheduleProvider.currentBlock()?.availability?.isUnavailable == true
+
+    private fun isUnavailableWithoutConversationEdit(): Boolean {
+        val block = scheduleProvider.currentBlock() ?: return false
+        return block.availability.isUnavailable && !block.adjustedByConversation
+    }
+
     private val deliveryEngine =
         ChatterDeliveryEngine(
             channelPort = channelPort,
@@ -183,7 +190,7 @@ internal class DeferredCatchUpDeliveryExecutor(
                                     return@withReadingSimulation false
                                 }
 
-                                if (isUnavailableNow()) {
+                                if (isUnavailableWithoutConversationEdit()) {
                                     session.skip(reason = "Deferred catch-up aborted before reply dispatch: schedule unavailable")
                                     return@withReadingSimulation false
                                 }

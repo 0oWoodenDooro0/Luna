@@ -4,6 +4,7 @@ import luna.chatter.schedule.AvailabilityState
 import luna.chatter.schedule.DailySchedule
 import luna.chatter.schedule.DailyScheduleProvider
 import luna.chatter.schedule.ScheduleBlock
+import luna.chatter.schedule.ScheduleCommitment
 import org.slf4j.LoggerFactory
 import java.math.BigDecimal
 import java.time.Clock
@@ -110,6 +111,7 @@ data class PersonaState(
     val effectiveThreshold: Double,
     val scheduleBlock: ScheduleBlock? = null,
     val dailySchedule: DailySchedule? = null,
+    val upcomingCommitments: List<ScheduleCommitment> = emptyList(),
 )
 
 /**
@@ -150,6 +152,7 @@ class CircadianPersonaDrift(
         val activeScheduleProvider = scheduleProvider?.takeIf { it.isEnabled() }
         val activeSchedule = activeScheduleProvider?.currentSchedule()
         val activeBlock = activeScheduleProvider?.currentBlock()
+        val upcomingCommitments = activeScheduleProvider?.upcomingCommitments() ?: emptyList()
 
         if (!enabled) {
             if (activeBlock != null) {
@@ -166,6 +169,7 @@ class CircadianPersonaDrift(
                     effectiveThreshold = computeEffectiveThreshold(baseThreshold, scheduleOffset, 0.0),
                     scheduleBlock = activeBlock,
                     dailySchedule = activeSchedule,
+                    upcomingCommitments = upcomingCommitments,
                 )
             }
             return PersonaState(
@@ -178,6 +182,7 @@ class CircadianPersonaDrift(
                 mood = null,
                 baseThreshold = baseThreshold,
                 effectiveThreshold = baseThreshold,
+                upcomingCommitments = upcomingCommitments,
             )
         }
 
@@ -198,6 +203,7 @@ class CircadianPersonaDrift(
                 effectiveThreshold = effectiveThreshold,
                 scheduleBlock = activeBlock,
                 dailySchedule = activeSchedule,
+                upcomingCommitments = upcomingCommitments,
             )
         }
 
@@ -214,6 +220,7 @@ class CircadianPersonaDrift(
             mood = mood,
             baseThreshold = baseThreshold,
             effectiveThreshold = effectiveThreshold,
+            upcomingCommitments = upcomingCommitments,
         )
     }
 

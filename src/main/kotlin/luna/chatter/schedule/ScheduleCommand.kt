@@ -49,12 +49,16 @@ class ScheduleCommand(
         val currentMinute = localNow.hour * 60 + localNow.minute
         val sortedBlocks = schedule.blocks.sortedBy { it.startMinute }
         val activeBlock = if (isToday) sortedBlocks.firstOrNull { it.containsMinute(currentMinute) } else null
+        val upcomingCommitments = scheduleProvider.upcomingCommitments()
 
         response.respond {
             embed {
                 title = "📅 Luna 的每日行程表 (${schedule.date})"
                 color = activeBlock?.availability?.embedColor() ?: DEFAULT_EMBED_COLOR
-                description = truncateDescription(buildScheduleDescription(schedule, sortedBlocks, activeBlock))
+                description =
+                    truncateDescription(
+                        buildScheduleDescription(schedule, sortedBlocks, activeBlock, upcomingCommitments),
+                    )
                 footer {
                     text = "時區：${schedule.timezone}"
                 }
@@ -66,6 +70,7 @@ class ScheduleCommand(
         schedule: DailySchedule,
         sortedBlocks: List<ScheduleBlock>,
         activeBlock: ScheduleBlock?,
+        upcomingCommitments: List<ScheduleCommitment>,
     ): String =
         buildString {
             if (activeBlock != null) {
@@ -78,10 +83,21 @@ class ScheduleCommand(
             appendLine("**今日時間軸 (00:00–24:00)**")
             for (block in sortedBlocks) {
                 val isCurrent = block == activeBlock
+                val adjustedMarker = if (block.adjustedByConversation) " ✏️" else ""
                 if (isCurrent) {
-                    appendLine("▶ **${block.formattedTimeRange()}** ${block.availability.icon()} **${block.activityTitle}** *(進行中)*")
+                    appendLine("▶ **${block.formattedTimeRange()}** ${block.availability.icon()} **${block.activityTitle}**$adjustedMarker *(進行中)*")
                 } else {
-                    appendLine("${block.formattedTimeRange()} ${block.availability.icon()} ${block.activityTitle}")
+                    appendLine("${block.formattedTimeRange()} ${block.availability.icon()} ${block.activityTitle}$adjustedMarker")
+                }
+            }
+            if (upcomingCommitments.isNotEmpty()) {
+                appendLine()
+                appendLine("**近期約定**")
+                val sortedCommitments = upcomingCommitments.sortedWith(compareBy({ it.targetDate }, { it.startMinute }))
+                for (commitment in sortedCommitments) {
+                    appendLine(
+                        "${commitment.targetDate} ${commitment.formattedTimeRange()} ${commitment.availability.icon()} ${commitment.activityTitle}",
+                    )
                 }
             }
         }.trimEnd()

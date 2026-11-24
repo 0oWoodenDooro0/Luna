@@ -229,16 +229,24 @@ The policy-driven shared module in `luna.core.ai` that provides unified Discord 
 _Avoid_: Context helper, shared collector, dialogue utils, enrichment service
 
 **Daily Schedule**:
-Luna's globally shared, day-scoped 24-hour sequence of contiguous `Schedule Block` entries generated from `Chatter Persona`, day-of-week, and prior-day continuity, governing `Chatter Pipeline` availability and Discord presence.
+Luna's globally shared, day-scoped 24-hour sequence of contiguous `Schedule Block` entries generated from `Chatter Persona`, day-of-week, prior-day continuity, and any `Schedule Commitment` entries for that date, governing `Chatter Pipeline` availability and Discord presence and remaining mutable from the current time onward via `Agentic Schedule Adjustment`.
 _Avoid_: Bot calendar, cron timetable, sleep mode, static routine
 
 **Schedule Block**:
-A single non-overlapping time interval within a `Daily Schedule` carrying an activity title, contextual detail, Discord status text, and an `Availability State`.
+A single non-overlapping time interval within a `Daily Schedule` carrying an activity title, contextual detail, Discord status text, an `Availability State`, and whether it was conversationally adjusted.
 _Avoid_: Time slot, event item, activity chunk
 
 **Availability State**:
 The four-tier responsiveness classification of a `Schedule Block` (`AVAILABLE`, `BREAK`, `BUSY`, `SLEEPING`) that determines whether `Chatter Pipeline` replies in real time, defers incoming messages, triggers `Deferred Catch-Up`, and sets Luna's Discord presence indicator.
 _Avoid_: Busy flag, online mode, DND switch
+
+**Agentic Schedule Adjustment**:
+The model-driven tool capability within `Chatter Pipeline` that modifies the remaining future portion of today's `Daily Schedule` or manages upcoming `Schedule Commitment` entries in response to group conversation, subject to persona judgment and duration/rate guardrails.
+_Avoid_: Schedule hack, chat calendar edit, live timetable override
+
+**Schedule Commitment**:
+A globally shared, cross-day planned activity booked via conversation for an upcoming local calendar date within a bounded horizon, visible to Luna and `/schedule` ahead of time and anchored into that date's `Daily Schedule` upon day rollover.
+_Avoid_: Future event, calendar invite, reminder note, deferred task
 
 **Deferred Catch-Up**:
 The selective backlog review executed when Luna transitions from `BUSY` or `SLEEPING` into `BREAK` or `AVAILABLE`, inspecting bounded missed channel dialogue to reply to or silently react to only a subset of messages (prioritizing direct mentions) rather than answering everything.

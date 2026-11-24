@@ -2,8 +2,10 @@ package luna.chatter
 
 import luna.chatter.memory.ChatterMemoryToolHandler
 import luna.chatter.schedule.AvailabilityState
+import luna.chatter.schedule.ChatterScheduleToolHandler
 import luna.chatter.schedule.DailySchedule
 import luna.chatter.schedule.ScheduleBlock
+import luna.chatter.schedule.ScheduleCommitment
 import luna.core.ai.EmojiSanitizer
 import luna.core.ai.GeminiInteractionClient
 import luna.core.ai.GeminiInteractionGenerationConfig
@@ -67,20 +69,31 @@ object ChatterPromptBuilder {
             "- 查詢特定成員時請從對話紀錄中的 (uid:<id>) 取得 Snowflake ID 作為 target_user_id；" +
             "若使用 scope=\"both\" 且省略 target_user_id，會預設查詢當前發話者的長期記憶與伺服器記憶。"
 
-    fun buildSystemInstruction(): String = buildSystemInstruction(personaState = null, memoryToolsEnabled = false)
+    const val SCHEDULE_TOOL_INSTRUCTION: String =
+        "\n\n13. 行程調整與跨日約定（update_today_schedule / manage_schedule_commitment）：\n" +
+            "- 當群友自然邀約一起做某件事、建議調整你今天接下來的安排、或約好未來 7 天內的計畫時，請以 Luna 自己的性格與當前狀態自然判斷：" +
+            "合拍且合理的邀約可以答應並呼叫工具更新；遇到明顯惡搞、瞎起鬨或離譜要求（例如要你連睡 20 小時、永遠別講話等）請直接吐槽拒絕，不要盲目配合修改行程。\n" +
+            "- update_today_schedule 只能修改「現在時間之後」的今日剩餘行程（過去的時段不可更動），可用於切換 AVAILABLE / BREAK / BUSY（單次最多 4 小時） / SLEEPING（單次最多 8 小時）。\n" +
+            "- manage_schedule_commitment 用於新增、更新（upsert）或取消（cancel）明天起算未來 7 天內的跨日約定。\n" +
+            "- 若工具回傳 rejected（例如時段已過、超過時長上限或修改太頻繁），請自然用 Luna 的口吻回應或吐槽，切勿對群友提及內部系統限制或工具名稱。"
+
+    fun buildSystemInstruction(): String = buildSystemInstruction(personaState = null, memoryToolsEnabled = false, scheduleToolsEnabled = false)
 
     fun buildSystemInstruction(
         personaState: PersonaState?,
         memoryToolsEnabled: Boolean = false,
+        scheduleToolsEnabled: Boolean = false,
     ): String {
-        val base =
-            if (memoryToolsEnabled) {
-                SYSTEM_INSTRUCTION + MEMORY_TOOL_INSTRUCTION
-            } else {
-                SYSTEM_INSTRUCTION
-            }
-        val personaSection = formatPersonaStateSection(personaState) ?: return base
-        return "$base\n\n$personaSection"
+        val sb = StringBuilder(SYSTEM_INSTRUCTION)
+        if (memoryToolsEnabled) {
+            sb.append(MEMORY_TOOL_INSTRUCTION)
+        }
+        if (scheduleToolsEnabled) {
+            sb.append(SCHEDULE_TOOL_INSTRUCTION)
+        }
+        val personaSection = formatPersonaStateSection(personaState) ?: return sb.toString()
+        sb.append("\n\n").append(personaSection)
+        return sb.toString()
     }
 
     private fun formatPersonaStateSection(personaState: PersonaState?): String? {
@@ -104,22 +117,41 @@ object ChatterPromptBuilder {
             if (schedule != null) {
                 sb.append("- 今日行程概覽：${formatCompactScheduleOutline(schedule, activeBlock)}\n")
             }
+            if (personaState.upcomingCommitments.isNotEmpty()) {
+                sb.append("- 近期跨日約定（未來 7 天）：${formatUpcomingCommitments(personaState.upcomingCommitments)}\n")
+            }
             if (personaState.driftEnabled && personaState.mood != null) {
                 sb.append("- 心情與精力（${personaState.mood.label}）：${personaState.mood.promptCue}")
             }
             return sb.toString().trimEnd()
         }
 
-        if (!personaState.driftEnabled || personaState.mood == null) {
+        val hasMood = personaState.driftEnabled && personaState.mood != null && personaState.circadianPeriod != null
+        val hasCommitments = personaState.upcomingCommitments.isNotEmpty()
+        if (!hasMood && !hasCommitments) {
             return null
         }
 
-        val circadianPeriod = personaState.circadianPeriod ?: return null
-        return "目前社群時間與你的狀態：\n" +
-            "- 本地時間：${personaState.formattedWeekday} ${personaState.formattedTime}（${personaState.timezone}）\n" +
-            "- 時段狀態（${circadianPeriod.label}）：${circadianPeriod.promptCue}\n" +
-            "- 心情與精力（${personaState.mood.label}）：${personaState.mood.promptCue}"
+        val sb = StringBuilder()
+        sb.append("目前社群時間與你的狀態：\n")
+        sb.append("- 本地時間：${personaState.formattedWeekday} ${personaState.formattedTime}（${personaState.timezone}）\n")
+        if (hasCommitments) {
+            sb.append("- 近期跨日約定（未來 7 天）：${formatUpcomingCommitments(personaState.upcomingCommitments)}\n")
+        }
+        if (hasMood) {
+            val circadianPeriod = personaState.circadianPeriod!!
+            val mood = personaState.mood!!
+            sb.append("- 時段狀態（${circadianPeriod.label}）：${circadianPeriod.promptCue}\n")
+            sb.append("- 心情與精力（${mood.label}）：${mood.promptCue}")
+        }
+        return sb.toString().trimEnd()
     }
+
+    private fun formatUpcomingCommitments(commitments: List<ScheduleCommitment>): String =
+        commitments.joinToString(" / ") { commitment ->
+            "${commitment.targetDate} ${commitment.formattedTimeRange()} " +
+                "[${commitment.availability.name}] ${commitment.activityTitle} (id:${commitment.id})"
+        }
 
     private fun formatCompactScheduleOutline(
         schedule: DailySchedule,
@@ -215,6 +247,7 @@ object ChatterPromptBuilder {
         config: ChatterConfig,
         webUrls: List<String>,
         includeMemoryTool: Boolean = false,
+        includeScheduleTools: Boolean = false,
     ): List<GeminiInteractionTool> =
         buildList {
             if (config.urlContextEnabled && webUrls.isNotEmpty()) {
@@ -226,6 +259,10 @@ object ChatterPromptBuilder {
             if (includeMemoryTool) {
                 add(ChatterMemoryToolHandler.TOOL_DECLARATION)
             }
+            if (includeScheduleTools) {
+                add(ChatterScheduleToolHandler.TODAY_TOOL_DECLARATION)
+                add(ChatterScheduleToolHandler.COMMITMENT_TOOL_DECLARATION)
+            }
         }
 
     fun buildInteractionRequest(
@@ -236,6 +273,7 @@ object ChatterPromptBuilder {
         background: Boolean = false,
         memoryToolsEnabled: Boolean = false,
         understandingContext: String? = null,
+        scheduleToolsEnabled: Boolean = false,
     ): GeminiInteractionRequest {
         val inputs =
             GeminiInteractionClient.buildMultimodalInputs(
@@ -248,7 +286,12 @@ object ChatterPromptBuilder {
         return GeminiInteractionRequest(
             model = model.trim().removePrefix("models/"),
             input = inputs,
-            systemInstruction = buildSystemInstruction(input.personaState, memoryToolsEnabled = memoryToolsEnabled),
+            systemInstruction =
+                buildSystemInstruction(
+                    personaState = input.personaState,
+                    memoryToolsEnabled = memoryToolsEnabled,
+                    scheduleToolsEnabled = scheduleToolsEnabled,
+                ),
             tools = tools.takeIf { it.isNotEmpty() },
             generationConfig = GeminiInteractionGenerationConfig(maxOutputTokens = MAX_OUTPUT_TOKENS),
             background = background,

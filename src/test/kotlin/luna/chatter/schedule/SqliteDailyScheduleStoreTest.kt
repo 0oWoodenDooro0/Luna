@@ -135,4 +135,146 @@ class SqliteDailyScheduleStoreTest {
         assertEquals(1, store2.listPendingCatchUps().size)
         assertEquals("chan-2", store2.listPendingCatchUps().single().channelId)
     }
+
+    @Test
+    fun `persists adjustedByConversation flag and defaults legacy blocks_json without it to false`() {
+        val dbPath = tempDir.resolve("adjusted-flag-${System.nanoTime()}.db").toString()
+        val vecPath = tempDir.resolve("missing-vec0.so").toString()
+        val clock = MutableClock(Instant.parse("2026-11-24T00:00:00Z"))
+
+        val db = LunaHost.initDatabase(dbPath = dbPath, vecExtensionPath = vecPath)
+        val store = SqliteDailyScheduleStore(database = db, clock = clock)
+
+        val dayWithAdjusted = LocalDate.of(2026, 11, 24)
+        val adjustedSchedule =
+            DailySchedule(
+                date = dayWithAdjusted,
+                timezone = "Asia/Taipei",
+                blocks =
+                    listOf(
+                        ScheduleBlock(0, 720, "睡覺", "熟睡中", "💤 睡覺", AvailabilityState.SLEEPING),
+                        ScheduleBlock(
+                            720,
+                            1440,
+                            "跟大家玩",
+                            "臨時約打遊戲",
+                            "🎮 打遊戲",
+                            AvailabilityState.AVAILABLE,
+                            adjustedByConversation = true,
+                        ),
+                    ),
+                summary = "臨時約打遊戲",
+                createdAtMillis = 1_700_000_000_000L,
+            )
+        store.saveSchedule(adjustedSchedule)
+
+        val legacyDate = LocalDate.of(2026, 11, 23)
+        val legacyBlocksJson =
+            """[{"startMinute":0,"endMinute":1440,"activityTitle":"舊排程","activityDetail":"無欄位","statusText":"✨","availability":"AVAILABLE"}]"""
+        org.jetbrains.exposed.v1.jdbc.transactions.transaction(db) {
+            val conn =
+                org.jetbrains.exposed.v1.jdbc.transactions.TransactionManager
+                    .current()
+                    .connection.connection as java.sql.Connection
+            conn
+                .prepareStatement(
+                    "INSERT INTO chatter_daily_schedules(schedule_date, timezone, summary, blocks_json, created_at) VALUES (?, ?, ?, ?, ?)",
+                ).use { ps ->
+                    ps.setString(1, legacyDate.toString())
+                    ps.setString(2, "Asia/Taipei")
+                    ps.setString(3, "legacy")
+                    ps.setString(4, legacyBlocksJson)
+                    ps.setLong(5, 1_699_900_000_000L)
+                    ps.executeUpdate()
+                }
+        }
+
+        val reloadedAdjusted = store.getSchedule(dayWithAdjusted)
+        assertNotNull(reloadedAdjusted)
+        assertEquals(false, reloadedAdjusted.blocks[0].adjustedByConversation)
+        assertEquals(true, reloadedAdjusted.blocks[1].adjustedByConversation)
+
+        val reloadedLegacy = store.getSchedule(legacyDate)
+        assertNotNull(reloadedLegacy)
+        assertEquals(false, reloadedLegacy.blocks.single().adjustedByConversation)
+    }
+
+    @Test
+    fun `upserts, updates, cancels, lists, and auto-prunes expired ScheduleCommitments across SQLite reopen`() {
+        val dbPath = tempDir.resolve("commitments-${System.nanoTime()}.db").toString()
+        val vecPath = tempDir.resolve("missing-vec0.so").toString()
+        val taipei = java.time.ZoneId.of("Asia/Taipei")
+        // 2026-11-24 10:00 Asia/Taipei
+        val clock =
+            MutableClock(
+                java.time.ZonedDateTime
+                    .of(2026, 11, 24, 10, 0, 0, 0, taipei)
+                    .toInstant(),
+            )
+
+        val db1 = LunaHost.initDatabase(dbPath = dbPath, vecExtensionPath = vecPath)
+        val store1 = SqliteDailyScheduleStore(database = db1, clock = clock, timezone = taipei)
+
+        val day24 = LocalDate.of(2026, 11, 24)
+        val day25 = LocalDate.of(2026, 11, 25)
+        val day26 = LocalDate.of(2026, 11, 26)
+        val day30 = LocalDate.of(2026, 11, 30)
+
+        val c1 =
+            ScheduleCommitment(
+                id = "c-1",
+                targetDate = day25,
+                startMinute = 1140,
+                endMinute = 1260,
+                activityTitle = "打瓦",
+                activityDetail = "跟群友五排特戰英豪",
+                statusText = "🎮 打瓦中",
+                availability = AvailabilityState.AVAILABLE,
+                createdAtMillis = clock.millis(),
+            )
+        val c2 =
+            ScheduleCommitment(
+                id = "c-2",
+                targetDate = day26,
+                startMinute = 600,
+                endMinute = 720,
+                activityTitle = "交稿",
+                activityDetail = "送出插畫完稿",
+                statusText = "🎨 交稿中",
+                availability = AvailabilityState.BUSY,
+                createdAtMillis = clock.millis() + 1000L,
+            )
+        store1.upsertCommitment(c1)
+        store1.upsertCommitment(c2)
+
+        // Update c1 in-place
+        val c1Updated = c1.copy(activityTitle = "打 APEX", statusText = "🎮 打 APEX")
+        store1.upsertCommitment(c1Updated)
+
+        // Reopen DB
+        val db2 = LunaHost.initDatabase(dbPath = dbPath, vecExtensionPath = vecPath)
+        val store2 = SqliteDailyScheduleStore(database = db2, clock = clock, timezone = taipei)
+
+        val for25 = store2.listCommitmentsForDate(day25)
+        assertEquals(1, for25.size)
+        assertEquals("打 APEX", for25.single().activityTitle)
+
+        val upcoming = store2.listUpcomingCommitments(fromDate = day25, toDateInclusive = day30)
+        assertEquals(listOf("c-1", "c-2"), upcoming.map { it.id })
+
+        // Cancel c2
+        assertEquals(true, store2.cancelCommitment("c-2"))
+        assertEquals(false, store2.cancelCommitment("c-2"))
+        assertEquals(listOf("c-1"), store2.listUpcomingCommitments(day25, day30).map { it.id })
+
+        // Advance clock to 2026-11-25 00:05 (day25 is now today; day24 is past)
+        // day25 commitment must STILL be returned by listCommitmentsForDate(day25) for rollover anchoring
+        clock.advanceMinutes(14 * 60 + 5)
+        assertEquals(1, store2.listCommitmentsForDate(day25).size)
+
+        // Advance clock to 2026-11-26 00:05 (day25 is now expired/past) -> auto-pruned
+        clock.advanceMinutes(24 * 60)
+        assertTrue(store2.listCommitmentsForDate(day25).isEmpty(), "Expired commitment for day25 must be auto-pruned")
+        assertTrue(store2.listUpcomingCommitments(day26, day30).isEmpty(), "Upcoming list must be empty after day25 expires")
+    }
 }
