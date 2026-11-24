@@ -88,6 +88,8 @@ class ChatterPlugin(
     var scheduleCoordinator: DailyScheduleCoordinator? = null
         internal set
 
+    private var presenceReadyJob: Job? = null
+
     var deferredCatchUpService: DeferredCatchUpService? = null
         internal set
 
@@ -201,6 +203,7 @@ class ChatterPlugin(
 
         var initializedScheduleStore: SqliteDailyScheduleStore? = null
         var initializedScheduleCoordinator: DailyScheduleCoordinator? = null
+        var initializedPresencePort: KordSchedulePresencePort? = null
         if (chatterConfig.isConfigured && chatterEnabled && chatterConfig.schedule.enabled) {
             runCatching {
                 val scheduleStore = SqliteDailyScheduleStore(context.database)
@@ -227,6 +230,7 @@ class ChatterPlugin(
                     )
                 initializedScheduleStore = scheduleStore
                 initializedScheduleCoordinator = scheduleCoordinatorInstance
+                initializedPresencePort = presencePort
                 this.scheduleCoordinator = scheduleCoordinatorInstance
             }.onFailure { e ->
                 logger.warn(
@@ -346,11 +350,14 @@ class ChatterPlugin(
             logger.warn("Could not register ChatterPlugin message listener to Kord: {}", e.message)
         }
 
+        this.presenceReadyJob = initializedPresencePort?.registerReadyListener(scope)
         initializedScheduleCoordinator?.start(scope)
     }
 
     override suspend fun shutdown() {
         registrationJob?.cancel()
+        presenceReadyJob?.cancel()
+        presenceReadyJob = null
         scheduleCommandJob?.cancel()
         scheduleCommandJob = null
         scheduleCommand = null

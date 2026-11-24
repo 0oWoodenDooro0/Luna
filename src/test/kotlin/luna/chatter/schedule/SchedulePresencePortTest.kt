@@ -31,7 +31,7 @@ class SchedulePresencePortTest {
             val kord = mockk<Kord>(relaxed = true)
             every { kord.gateway } returns gateway
 
-            val port = KordSchedulePresencePort(kord)
+            val port = KordSchedulePresencePort(kord, initiallyReady = true)
 
             port.updatePresence(sampleBlock(AvailabilityState.AVAILABLE, "📺 追番中"))
             port.updatePresence(sampleBlock(AvailabilityState.BREAK, "☕ 泡咖啡"))
@@ -66,13 +66,62 @@ class SchedulePresencePortTest {
                 val kord = mockk<Kord>(relaxed = true)
                 every { kord.gateway } returns gateway
 
-                val port = KordSchedulePresencePort(kord)
+                val port = KordSchedulePresencePort(kord, initiallyReady = true)
                 port.updatePresence(sampleBlock(AvailabilityState.AVAILABLE, "📺 追番中"))
 
                 assertTrue(
                     appender.list.any { it.level == Level.WARN && it.formattedMessage.contains("gateway offline") },
                     "Expected observable WARN log when editPresence fails",
                 )
+            } finally {
+                portLogger.detachAppender(appender)
+            }
+        }
+
+    @Test
+    fun `KordSchedulePresencePort defers presence sync until gateway is ready and flushes latest block on ReadyEvent`() =
+        runTest {
+            val portLogger = LoggerFactory.getLogger(KordSchedulePresencePort::class.java) as Logger
+            val appender = ListAppender<ILoggingEvent>().apply { start() }
+            portLogger.addAppender(appender)
+
+            try {
+                val captured = mutableListOf<UpdateStatus>()
+                val gateway = mockk<MasterGateway>(relaxed = true)
+                var socketInitialized = false
+                coEvery { gateway.sendAll(any()) } coAnswers {
+                    if (!socketInitialized) {
+                        throw UninitializedPropertyAccessException("lateinit property socket has not been initialized")
+                    }
+                    captured += firstArg<UpdateStatus>()
+                }
+                val kord = mockk<Kord>(relaxed = true)
+                every { kord.gateway } returns gateway
+
+                val port = KordSchedulePresencePort(kord)
+
+                // Before ReadyEvent, updatePresence must defer instead of hitting uninitialized gateway socket
+                port.updatePresence(sampleBlock(AvailabilityState.BUSY, "🎨 趕稿中"))
+                port.updatePresence(sampleBlock(AvailabilityState.AVAILABLE, "🎮 深夜遊戲馬拉松"))
+
+                assertTrue(captured.isEmpty(), "Expected no gateway.sendAll calls before ReadyEvent")
+                assertTrue(
+                    appender.list.none { it.level == Level.WARN },
+                    "Expected no WARN logs while deferring pre-ReadyEvent presence sync",
+                )
+
+                // Once gateway connects and ReadyEvent fires, only the latest deferred block is synced
+                socketInitialized = true
+                port.onGatewayReady()
+
+                assertEquals(1, captured.size)
+                val firstActivity = captured.single().activities.firstOrNull { it.type == ActivityType.Custom }
+                assertEquals(PresenceStatus.Online, captured.single().status)
+                assertEquals("🎮 深夜遊戲馬拉松", firstActivity?.state?.value)
+
+                // Subsequent reconnect ReadyEvent re-syncs the latest block
+                port.onGatewayReady()
+                assertEquals(2, captured.size)
             } finally {
                 portLogger.detachAppender(appender)
             }
