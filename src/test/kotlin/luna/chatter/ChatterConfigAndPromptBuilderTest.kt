@@ -520,4 +520,14 @@ class ChatterConfigAndPromptBuilderTest {
         assertTrue(replyPrompt.startsWith(expectedPrefix))
         assertTrue(reactionPrompt.startsWith(expectedPrefix))
     }
+
+    @Test
+    fun `ChatterConfig validationError masks sensitive key values via SecretMasker`() {
+        val rawSecret = "AIzaSySuperSecretKey1234567890"
+        val error = ChatterConfig.validationError("GEMINI_API_KEY", "a valid API key", rawSecret)
+        val message = assertNotNull(error.message)
+        assertContains(message, "GEMINI_API_KEY")
+        assertFalse(message.contains(rawSecret))
+        assertContains(message, "***")
+    }
 }

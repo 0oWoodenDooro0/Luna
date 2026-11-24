@@ -166,7 +166,7 @@ data class ChatterConfig(
         const val MAX_DECISION_MESSAGE_COUNT = 100
         private const val MAX_DECISION_TIMEOUT_SECONDS = Long.MAX_VALUE / 1000L
 
-        private fun validationError(
+        internal fun validationError(
             key: String,
             expected: String,
             actual: Any?,
