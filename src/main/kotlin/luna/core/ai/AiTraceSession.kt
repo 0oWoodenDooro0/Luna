@@ -223,12 +223,16 @@ class AiTraceSession internal constructor(
         val secretsSnapshot: Set<String>
         synchronized(lock) {
             val resolvedOutcome =
-                outcome ?: if (degraded) AiTraceOutcome.DEGRADED_SUCCESS else AiTraceOutcome.SKIPPED
+                outcome ?: if (degraded) {
+                    AiTraceOutcome.DEGRADED_SUCCESS
+                } else {
+                    AiTraceOutcome.FAILED
+                }
             val resolvedFailureCategory =
-                when (resolvedOutcome) {
-                    AiTraceOutcome.FAILED -> failureCategory ?: AiTraceFailureCategory.UNEXPECTED_ERROR
-                    AiTraceOutcome.DEGRADED_SUCCESS, AiTraceOutcome.SKIPPED -> failureCategory
-                    AiTraceOutcome.SUCCESS -> null
+                if (outcome == null && resolvedOutcome == AiTraceOutcome.FAILED && failureCategory == null) {
+                    AiTraceFailureCategory.UNEXPECTED_ERROR
+                } else {
+                    failureCategory
                 }
             val totalLatencyMs = elapsedMillisFromNanos(startNanoTime)
 

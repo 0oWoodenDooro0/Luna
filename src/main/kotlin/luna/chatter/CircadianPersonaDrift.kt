@@ -147,7 +147,27 @@ class CircadianPersonaDrift(
         val formattedWeekday = formatWeekday(localTime.dayOfWeek)
         val formattedTime = TIME_FORMATTER.format(localTime)
 
+        val activeScheduleProvider = scheduleProvider?.takeIf { it.isEnabled() }
+        val activeSchedule = activeScheduleProvider?.currentSchedule()
+        val activeBlock = activeScheduleProvider?.currentBlock()
+
         if (!enabled) {
+            if (activeBlock != null) {
+                val scheduleOffset = scheduleThresholdOffset(activeBlock.availability)
+                return PersonaState(
+                    driftEnabled = false,
+                    timezone = resolvedTimezone,
+                    localTime = localTime,
+                    formattedWeekday = formattedWeekday,
+                    formattedTime = formattedTime,
+                    circadianPeriod = null,
+                    mood = null,
+                    baseThreshold = baseThreshold,
+                    effectiveThreshold = computeEffectiveThreshold(baseThreshold, scheduleOffset, 0.0),
+                    scheduleBlock = activeBlock,
+                    dailySchedule = activeSchedule,
+                )
+            }
             return PersonaState(
                 driftEnabled = false,
                 timezone = resolvedTimezone,
@@ -161,20 +181,10 @@ class CircadianPersonaDrift(
             )
         }
 
-        val activeSchedule = scheduleProvider?.takeIf { it.isEnabled() }?.currentSchedule()
-        val activeBlock = scheduleProvider?.takeIf { it.isEnabled() }?.currentBlock()
         val mood = resolveOrRollMood(now)
 
         if (activeBlock != null) {
-            val scheduleOffset =
-                when (activeBlock.availability) {
-                    AvailabilityState.BREAK -> BREAK_THRESHOLD_OFFSET
-
-                    AvailabilityState.AVAILABLE,
-                    AvailabilityState.BUSY,
-                    AvailabilityState.SLEEPING,
-                    -> 0.0
-                }
+            val scheduleOffset = scheduleThresholdOffset(activeBlock.availability)
             val effectiveThreshold = computeEffectiveThreshold(baseThreshold, scheduleOffset, mood.thresholdOffset)
             return PersonaState(
                 driftEnabled = true,
@@ -258,6 +268,16 @@ class CircadianPersonaDrift(
                 ZoneId.of(DEFAULT_TIMEZONE)
             }
         }
+
+        internal fun scheduleThresholdOffset(availability: AvailabilityState): Double =
+            when (availability) {
+                AvailabilityState.BREAK -> BREAK_THRESHOLD_OFFSET
+
+                AvailabilityState.AVAILABLE,
+                AvailabilityState.BUSY,
+                AvailabilityState.SLEEPING,
+                -> 0.0
+            }
 
         internal fun computeEffectiveThreshold(
             baseThreshold: Double,

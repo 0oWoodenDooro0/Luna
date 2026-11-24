@@ -121,4 +121,27 @@ class DailySchedulePersonaDriftTest {
         assertNotNull(state.circadianPeriod)
         assertEquals(0.78, state.effectiveThreshold, 1e-6)
     }
+
+    @Test
+    fun `disabled drift with active DailySchedule keeps scheduleBlock and BREAK offset while omitting mood and period`() {
+        val instant = Instant.parse("2026-11-19T04:00:00Z")
+        val schedule = sampleSchedule(AvailabilityState.BREAK)
+        val drift =
+            CircadianPersonaDrift(
+                timezone = "Asia/Taipei",
+                enabled = false,
+                clock = Clock.fixed(instant, ZoneId.of("UTC")),
+                random = fixedMoodRandom(PersonaMood.ENERGETIC),
+                scheduleProvider = FakeScheduleProvider(enabled = true, schedule = schedule),
+            )
+
+        val state = drift.currentState(baseThreshold = 0.70)
+
+        assertEquals(false, state.driftEnabled)
+        assertNull(state.circadianPeriod)
+        assertNull(state.mood)
+        assertEquals(schedule.blocks.first(), state.scheduleBlock)
+        assertEquals(schedule, state.dailySchedule)
+        assertEquals(0.70 + CircadianPersonaDrift.BREAK_THRESHOLD_OFFSET, state.effectiveThreshold, 1e-6)
+    }
 }

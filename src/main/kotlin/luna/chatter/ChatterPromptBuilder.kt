@@ -84,7 +84,7 @@ object ChatterPromptBuilder {
     }
 
     private fun formatPersonaStateSection(personaState: PersonaState?): String? {
-        if (personaState == null || !personaState.driftEnabled || personaState.mood == null) {
+        if (personaState == null) {
             return null
         }
 
@@ -104,8 +104,14 @@ object ChatterPromptBuilder {
             if (schedule != null) {
                 sb.append("- 今日行程概覽：${formatCompactScheduleOutline(schedule, activeBlock)}\n")
             }
-            sb.append("- 心情與精力（${personaState.mood.label}）：${personaState.mood.promptCue}")
-            return sb.toString()
+            if (personaState.driftEnabled && personaState.mood != null) {
+                sb.append("- 心情與精力（${personaState.mood.label}）：${personaState.mood.promptCue}")
+            }
+            return sb.toString().trimEnd()
+        }
+
+        if (!personaState.driftEnabled || personaState.mood == null) {
+            return null
         }
 
         val circadianPeriod = personaState.circadianPeriod ?: return null

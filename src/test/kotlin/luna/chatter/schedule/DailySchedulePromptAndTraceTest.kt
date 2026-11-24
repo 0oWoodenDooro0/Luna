@@ -124,4 +124,30 @@ class DailySchedulePromptAndTraceTest {
         assertFalse(parsed.scheduleBlockTitle?.contains("top-secret-token") == true, "Expected secret redaction")
         assertTrue(parsed.scheduleAvailability == "BUSY", "Expected scheduleAvailability to be BUSY")
     }
+
+    @Test
+    fun `buildSystemInstruction injects active ScheduleBlock and today outline even when driftEnabled is false`() {
+        val state =
+            PersonaState(
+                driftEnabled = false,
+                timezone = "Asia/Taipei",
+                localTime = ZonedDateTime.parse("2026-11-19T15:10:00+08:00"),
+                formattedWeekday = "星期四",
+                formattedTime = "15:10",
+                circadianPeriod = null,
+                mood = null,
+                baseThreshold = 0.70,
+                effectiveThreshold = 0.76,
+                scheduleBlock = sampleBlocks[3],
+                dailySchedule = sampleSchedule,
+            )
+
+        val systemInstruction = ChatterPromptBuilder.buildSystemInstruction(state, memoryToolsEnabled = false)
+        assertTrue(systemInstruction.contains("喝水伸展"), "Expected active BREAK block title when driftEnabled=false")
+        assertTrue(systemInstruction.contains("15:00–15:30"), "Expected active block time range when driftEnabled=false")
+        assertTrue(systemInstruction.contains("今日行程概覽："), "Expected compact today's schedule outline when driftEnabled=false")
+        assertTrue(systemInstruction.contains("短暫休息狀態："), "Expected quick-break cue when driftEnabled=false")
+        assertFalse(systemInstruction.contains("心情與精力（"), "Should omit mood cue when driftEnabled=false")
+        assertFalse(systemInstruction.contains("時段狀態（"), "Should omit circadian period cue when driftEnabled=false")
+    }
 }
