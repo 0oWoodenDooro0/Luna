@@ -235,6 +235,8 @@ class GeminiInteractionWithToolsTest {
                 listOf(
                     """{"id": "", "status": "completed", "steps": [{"type": "function_call", "call_id": "c-1", "name": "lookup_context", "arguments": {}}]}""",
                     """{"id": "int-1", "status": "completed", "steps": [{"type": "function_call", "call_id": "", "name": "lookup_context", "arguments": {}}]}""",
+                    """{"id": "int-1", "status": "completed", "steps": [{"type": "function_call", "call_id": "c-1", "name": "", "arguments": {}}]}""",
+                    """{"id": "int-1", "status": "requires_action", "steps": []}""",
                     """{"id": "int-1", "status": "completed", "steps": [{"type": "function_call", "call_id": "c-1", "name": "undeclared_tool", "arguments": {}}]}""",
                 )
 

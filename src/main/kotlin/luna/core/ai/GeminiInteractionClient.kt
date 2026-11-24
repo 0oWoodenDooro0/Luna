@@ -234,23 +234,7 @@ class GeminiInteractionClient(
                     session = session,
                 )
             if (isStandalone && session != null) {
-                when (result) {
-                    is InteractionExecutionResult.Success -> {
-                        session.complete(finalOutput = result.text, citations = result.citations)
-                    }
-
-                    is InteractionExecutionResult.FunctionCall -> {
-                        session.complete(finalOutput = null, citations = emptyList())
-                    }
-
-                    is InteractionExecutionResult.Error -> {
-                        val localRedactor = AiTraceRedactor(listOfNotNull(apiKey.takeIf { it.isNotBlank() }))
-                        session.fail(
-                            failureCategory = result.failureCategory,
-                            errorSummary = localRedactor.redactString(result.message),
-                        )
-                    }
-                }
+                completeStandaloneSession(session, apiKey, result)
             }
             result
         }

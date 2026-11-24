@@ -697,7 +697,7 @@ data class GeminiInteractionResponse(
         val stepList = steps ?: return emptyList()
         return stepList.mapNotNull { step ->
             if (step.type != "function_call") return@mapNotNull null
-            val fnName = step.name?.trim()?.takeIf { it.isNotBlank() } ?: return@mapNotNull null
+            val fnName = step.name?.trim() ?: ""
             val callId = step.callId?.trim()?.takeIf { it.isNotBlank() } ?: step.id?.trim() ?: ""
             GeminiInteractionFunctionCall(
                 id = callId,
