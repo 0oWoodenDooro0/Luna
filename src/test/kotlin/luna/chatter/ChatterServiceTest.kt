@@ -55,7 +55,7 @@ class ChatterServiceTest {
                 fixture.chatterGenerator.generateReply(
                     match<ChatterInput> {
                         it.isDirectMention &&
-                            it.transcript.contains("<@9999> what do you think about Kotlin coroutines?")
+                            it.transcript.contains("@Luna [YOU] (uid:9999) what do you think about Kotlin coroutines?")
                     },
                 )
             }

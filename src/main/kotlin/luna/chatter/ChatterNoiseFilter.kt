@@ -300,6 +300,45 @@ open class ChatterNoiseFilter(
         kordSelfId: Snowflake? = null,
     ): List<ChatMessage> = messages.mapNotNull { toChatMessageOrNull(it, kordSelfId) }
 
+    suspend fun filterAndResolveHistory(
+        messages: List<Message>,
+        kordSelfId: Snowflake? = null,
+    ): List<ChatMessage> {
+        val raw = filterHistory(messages, kordSelfId)
+        if (raw.isEmpty()) return raw
+        return resolveChatMessages(messages, raw, kordSelfId)
+    }
+
+    suspend fun resolveChatMessages(
+        sourceMessages: List<Message>,
+        chatMessages: List<ChatMessage>,
+        kordSelfId: Snowflake? = null,
+    ): List<ChatMessage> {
+        if (chatMessages.isEmpty()) return chatMessages
+        val resolvedMentions =
+            contextEngine.mentionResolver.resolveSlice(
+                messages = sourceMessages,
+                policy = contextPolicy(),
+                kordSelfId = kordSelfId,
+            )
+        return chatMessages.map { msg ->
+            val resolvedAuthor =
+                if (msg.author == "Luna") {
+                    msg.author
+                } else {
+                    msg.authorId
+                        ?.toLongOrNull()
+                        ?.let { Snowflake(it) }
+                        ?.let { resolvedMentions.speakerDisplayName(it) }
+                        ?: msg.author
+                }
+            msg.copy(
+                author = resolvedAuthor,
+                content = resolvedMentions.formatText(msg.content),
+            )
+        }
+    }
+
     fun speakerName(message: Message): String = extractSpeakerName(message)
 
     fun extractSpeakerName(message: Message): String = contextEngine.extractSpeakerName(message)

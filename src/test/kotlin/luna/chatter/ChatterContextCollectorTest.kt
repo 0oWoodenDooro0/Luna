@@ -61,7 +61,7 @@ class ChatterContextCollectorTest {
 
             assertFalse(result.transcript.contains("Earlier oldest message"))
             assertFalse(result.transcript.contains("MusicBot"))
-            assertTrue(result.transcript.contains("Bob (uid:3): <@9999>  second  newest  valid"))
+            assertTrue(result.transcript.contains("Bob (uid:3): @Luna [YOU] (uid:9999)  second  newest  valid"))
             assertTrue(
                 result.transcript.contains(
                     "Charlie (uid:4): Check https://example.com/release [連結預覽: Release Notes - v2.0 highlights]",
@@ -107,7 +107,7 @@ class ChatterContextCollectorTest {
                     kordSelfId = botSelfId,
                 )
 
-            assertTrue(result.transcript.contains("Alice (uid:6): <@!9999>"))
+            assertTrue(result.transcript.contains("Alice (uid:6): @Luna [YOU] (uid:9999)"))
             assertFalse(result.transcript.contains("你好"))
             assertTrue(result.transcript.contains("Bob (uid:7): [連結預覽: Preview Title]"))
             assertFalse(result.transcript.contains("Bob (uid:7): [Embed]"))

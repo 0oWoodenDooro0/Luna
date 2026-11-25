@@ -20,6 +20,7 @@ import org.slf4j.LoggerFactory
 open class DiscordDialogueContextEngine(
     val webhookRegistry: WebhookRegistry = LunaWebhookRegistry,
     val summaryRegistry: SummaryRegistry = SummaryMessageRegistry,
+    val mentionResolver: DiscordMentionResolver = DiscordMentionResolver(),
 ) {
     private val logger = LoggerFactory.getLogger(DiscordDialogueContextEngine::class.java)
 
@@ -139,13 +140,14 @@ open class DiscordDialogueContextEngine(
     fun resolveSpeaker(
         message: Message,
         kordSelfId: Snowflake? = null,
+        resolvedDisplayName: String? = null,
     ): DialogueSpeaker {
         val resolvedSelfId = kordSelfId ?: runCatching { message.kord.selfId }.getOrNull()
         val authorId =
             runCatching { message.author?.id }.getOrNull()
                 ?: runCatching { message.data.author.id }.getOrNull()
         val isLunaBot = resolvedSelfId != null && authorId == resolvedSelfId
-        val name = if (isLunaBot) "Luna" else extractSpeakerName(message)
+        val name = if (isLunaBot) "Luna" else (resolvedDisplayName ?: extractSpeakerName(message))
         val isThirdPartyBot = !isLunaBot && (runCatching { message.author?.isBot }.getOrNull() == true)
         return DialogueSpeaker(
             name = name,
@@ -155,10 +157,7 @@ open class DiscordDialogueContextEngine(
         )
     }
 
-    fun extractSpeakerName(message: Message): String =
-        runCatching { message.author?.username }.getOrNull()
-            ?: runCatching { message.data.author.username }.getOrNull()
-            ?: "Unknown"
+    fun extractSpeakerName(message: Message): String = DiscordMentionResolver.extractSpeakerName(message)
 
     fun selectImages(
         messages: List<Message>,
@@ -227,11 +226,34 @@ open class DiscordDialogueContextEngine(
     }
 
     /**
-     * Formats [messages] into structured dialogue turns with inline reply attribution,
-     * Tenor/Giphy `[GIF: ...]` and `[連結預覽: ...]` embed previews, policy-gated sticker
-     * annotations, and sequential `[附帶圖片 N: filename]` markers.
+     * Resolves Discord user, role, and channel mentions in [text] using [contextMessages]
+     * and [policy] without mutating raw [Message.content].
      */
-    fun formatDialogueMessages(
+    suspend fun resolveTextMentions(
+        text: String,
+        contextMessages: List<Message>,
+        policy: DialogueContextPolicy,
+        kordSelfId: Snowflake? = null,
+    ): String {
+        if (text.isBlank() || !text.contains('<')) return text
+        val resolvedSelfId =
+            kordSelfId ?: contextMessages.firstNotNullOfOrNull { runCatching { it.kord.selfId }.getOrNull() }
+        val resolved =
+            mentionResolver.resolveSlice(
+                messages = contextMessages,
+                extraTexts = listOf(text),
+                policy = policy,
+                kordSelfId = resolvedSelfId,
+            )
+        return resolved.formatText(text)
+    }
+
+    /**
+     * Formats [messages] into structured dialogue turns with inline mention resolution,
+     * reply attribution, Tenor/Giphy `[GIF: ...]` and `[連結預覽: ...]` embed previews,
+     * policy-gated sticker annotations, and sequential `[附帶圖片 N: filename]` markers.
+     */
+    suspend fun formatDialogueMessages(
         messages: List<Message>,
         policy: DialogueContextPolicy,
         imagesByMessage: Map<Snowflake, List<ChatImageAttachment>> = emptyMap(),
@@ -240,17 +262,36 @@ open class DiscordDialogueContextEngine(
         kordSelfId: Snowflake? = null,
         formatSpeakerHeader: (DialogueSpeaker) -> String = { it.name },
     ): FormattedDialogueResult {
+        val resolvedSelfId =
+            kordSelfId ?: messages.firstNotNullOfOrNull { runCatching { it.kord.selfId }.getOrNull() }
+        val allSliceMessages = (messages + replyReferencesByMessage.values).distinctBy { it.id }
+        val resolvedMentions =
+            mentionResolver.resolveSlice(
+                messages = allSliceMessages,
+                policy = policy,
+                kordSelfId = resolvedSelfId,
+            )
+
+        fun resolveMessageSpeaker(msg: Message): DialogueSpeaker {
+            val authorId =
+                runCatching { msg.author?.id }.getOrNull()
+                    ?: runCatching { msg.data.author.id }.getOrNull()
+            val cachedMemberName = authorId?.let { resolvedMentions.speakerDisplayName(it) }
+            return resolveSpeaker(msg, resolvedSelfId, resolvedDisplayName = cachedMemberName)
+        }
+
         var imageIndex = startingImageIndex
         val turns =
             messages.map { msg ->
-                val speaker = resolveSpeaker(msg, kordSelfId)
+                val speaker = resolveMessageSpeaker(msg)
                 val baseHeader = formatSpeakerHeader(speaker)
                 val refMsg = replyReferencesByMessage[msg.id]
                 val rawTurnHeader =
                     if (refMsg != null) {
-                        val refSpeaker = resolveSpeaker(refMsg, kordSelfId)
+                        val refSpeaker = resolveMessageSpeaker(refMsg)
                         val refHeader = formatSpeakerHeader(refSpeaker)
-                        val excerpt = truncateReplyExcerpt(refMsg.content, policy.maxReplyExcerptLength)
+                        val resolvedRefContent = resolvedMentions.formatText(refMsg.content)
+                        val excerpt = truncateReplyExcerpt(resolvedRefContent, policy.maxReplyExcerptLength)
                         "$baseHeader 回覆 $refHeader「$excerpt」"
                     } else {
                         baseHeader
@@ -279,7 +320,7 @@ open class DiscordDialogueContextEngine(
                         ""
                     }
 
-                val rawText = msg.content.takeIf { it.isNotBlank() }
+                val rawText = msg.content.takeIf { it.isNotBlank() }?.let { resolvedMentions.formatText(it) }
                 val parts =
                     listOfNotNull(
                         rawText,

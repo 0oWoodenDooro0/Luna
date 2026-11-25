@@ -48,17 +48,21 @@ data class DialogueContextPolicy(
     val fallbackPrimaryUrlToWeb: Boolean,
     val maxYouTubeDurationSeconds: Long = DEFAULT_MAX_YOUTUBE_DURATION_SECONDS,
     val wrapTurnHeaderInBrackets: Boolean = false,
+    val includeMentionUids: Boolean = false,
+    val maxMentionRestFallbacks: Int = DEFAULT_MAX_MENTION_REST_FALLBACKS,
 ) {
     companion object {
         const val DEFAULT_MAX_EXTERNAL_REFERENCES = 3
         const val DEFAULT_MAX_REPLY_EXCERPT_LENGTH = 120
         const val DEFAULT_MAX_YOUTUBE_DURATION_SECONDS = 7200L
+        const val DEFAULT_MAX_MENTION_REST_FALLBACKS = 10
 
         fun chatter(
             botPrefixes: Set<String> = CommandPrefixRule.DEFAULT_BOT_PREFIXES,
             maxExternalReferences: Int = DEFAULT_MAX_EXTERNAL_REFERENCES,
             maxReplyExcerptLength: Int = DEFAULT_MAX_REPLY_EXCERPT_LENGTH,
             maxYouTubeDurationSeconds: Long = DEFAULT_MAX_YOUTUBE_DURATION_SECONDS,
+            maxMentionRestFallbacks: Int = DEFAULT_MAX_MENTION_REST_FALLBACKS,
         ): DialogueContextPolicy =
             DialogueContextPolicy(
                 allowThirdPartyBots = true,
@@ -73,12 +77,15 @@ data class DialogueContextPolicy(
                 fallbackPrimaryUrlToWeb = false,
                 maxYouTubeDurationSeconds = maxYouTubeDurationSeconds,
                 wrapTurnHeaderInBrackets = false,
+                includeMentionUids = true,
+                maxMentionRestFallbacks = maxMentionRestFallbacks,
             )
 
         fun summary(
             maxExternalReferences: Int = DEFAULT_MAX_EXTERNAL_REFERENCES,
             maxReplyExcerptLength: Int = DEFAULT_MAX_REPLY_EXCERPT_LENGTH,
             maxYouTubeDurationSeconds: Long = DEFAULT_MAX_YOUTUBE_DURATION_SECONDS,
+            maxMentionRestFallbacks: Int = DEFAULT_MAX_MENTION_REST_FALLBACKS,
         ): DialogueContextPolicy =
             DialogueContextPolicy(
                 allowThirdPartyBots = false,
@@ -93,6 +100,8 @@ data class DialogueContextPolicy(
                 fallbackPrimaryUrlToWeb = true,
                 maxYouTubeDurationSeconds = maxYouTubeDurationSeconds,
                 wrapTurnHeaderInBrackets = true,
+                includeMentionUids = false,
+                maxMentionRestFallbacks = maxMentionRestFallbacks,
             )
     }
 }
