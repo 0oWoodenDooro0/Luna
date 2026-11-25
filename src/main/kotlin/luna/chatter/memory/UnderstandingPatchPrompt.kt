@@ -2,9 +2,11 @@ package luna.chatter.memory
 
 import dev.kord.common.entity.Snowflake
 import kotlinx.coroutines.CancellationException
+import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonNames
 import luna.chatter.ChatMessage
 import luna.core.ai.AiAttemptStage
 import luna.core.ai.AiTracePipeline
@@ -18,9 +20,11 @@ import luna.core.ai.InteractionExecutionResult
 import luna.core.ai.InteractionTraceContext
 import org.slf4j.LoggerFactory
 
+@OptIn(ExperimentalSerializationApi::class)
 @Serializable
 internal data class UnderstandingPatchDto(
-    val action: String,
+    @JsonNames("op", "type", "operation", "patch_action")
+    val action: String? = null,
     val id: String? = null,
     val scope: String? = null,
     @SerialName("target_user_id")
@@ -56,11 +60,11 @@ internal object UnderstandingPatchPrompt {
         Rules:
         - Focus ONLY on social/relational understanding and communication style—NOT objective atomic facts (those are handled separately).
         - Existing entries are labeled with short aliases like `[u1]`, `[u2]`.
-        - For each warranted change, output one patch action:
-          - `ADD`: new impression (`scope`: `"user"` or `"guild"`, `target_user_id`: uid string for `"user"` or `null` for `"guild"`, `subject`: short topic label, `content`: concise impression).
-          - `UPDATE`: revise an existing impression (`id`: `"u1"`, `subject`: short topic label, `content`: updated impression).
-          - `REAFFIRM`: timestamp-only touch when an existing impression is clearly reinforced without needing text changes (`id`: `"u1"`).
-          - `DELETE`: remove an existing impression that is clearly contradicted or obsolete (`id`: `"u1"`).
+        - For each warranted change, output one patch object with an `"action"` field:
+          - `ADD`: new impression (`{"action": "ADD", "scope": "user"|"guild", "target_user_id": "<uid string or null>", "subject": "<short topic label>", "content": "<concise impression>"}`).
+          - `UPDATE`: revise an existing impression (`{"action": "UPDATE", "id": "u1", "subject": "<short topic label>", "content": "<updated impression>"}`).
+          - `REAFFIRM`: timestamp-only touch when an existing impression is clearly reinforced without needing text changes (`{"action": "REAFFIRM", "id": "u1"}`).
+          - `DELETE`: remove an existing impression that is clearly contradicted or obsolete (`{"action": "DELETE", "id": "u1"}`).
         - Output ONLY a valid JSON array of patch objects, or `[]` if no understanding changes are warranted.
         """.trimIndent()
 
@@ -135,8 +139,17 @@ internal object UnderstandingPatchPrompt {
         guildId: String,
         dto: UnderstandingPatchDto,
         aliasMap: Map<String, SocialUnderstandingRecord>,
-    ): UnderstandingMutation? =
-        when (dto.action.trim().uppercase()) {
+    ): UnderstandingMutation? {
+        val normalizedAction =
+            dto.action
+                ?.trim()
+                ?.uppercase()
+                ?.takeIf { it.isNotEmpty() }
+        if (normalizedAction == null) {
+            logger.warn("Skipping UnderstandingPatch element missing 'action' field for guild {}", guildId)
+            return null
+        }
+        return when (normalizedAction) {
             "ADD" -> {
                 val scope =
                     when (dto.scope?.trim()?.lowercase()) {
@@ -183,6 +196,7 @@ internal object UnderstandingPatchPrompt {
                 null
             }
         }
+    }
 
     suspend fun executeFailOpen(ctx: UnderstandingPatchContext) {
         val guildId = ctx.guildId
