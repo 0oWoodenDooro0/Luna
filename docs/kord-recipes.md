@@ -113,17 +113,28 @@ withContext(Dispatchers.Default) { delay(10L) }
 
 > Context7 (`/kordlib/kord`) only indexes basic wiki/README snippets and omits Kord `0.19.0-SNAPSHOT` entity/behavior signatures. Use the verified patterns below before inspecting Kord JARs.
 
-### Reply & Intervening Messages (`Message`, `MessageChannelBehavior`)
+### Reply, Allowed Mentions & Intervening Messages (`Message`, `MessageChannelBehavior`)
 ```kotlin
+import dev.kord.common.entity.AllowedMentionType
 import dev.kord.core.behavior.reply
 import dev.kord.core.behavior.channel.createMessage
+import dev.kord.rest.builder.message.allowedMentions
 import kotlinx.coroutines.flow.toList
 
-// Plain channel message vs explicit Discord reply reference
-channel.createMessage { this.content = text }
+// Plain channel message vs explicit Discord reply reference (restrict allowedMentions to prevent @everyone/@here/role pings)
+channel.createMessage {
+    this.content = text
+    allowedMentions {
+        add(AllowedMentionType.UserMentions)
+    }
+}
 triggerMessage.reply {
     this.messageReference = triggerMessage.id
     this.content = text
+    allowedMentions {
+        add(AllowedMentionType.UserMentions)
+        repliedUser = true
+    }
 }
 
 // Fetch messages posted after a trigger message
@@ -131,6 +142,18 @@ val after = message.channel.getMessagesAfter(message.id, limit = 20).toList()
 
 // Resolve a MessageChannel by Snowflake ID (no getChannelOfOrNull / getChannelOrNull in Kord 0.19.0-SNAPSHOT)
 val channel = runCatching { kord.getChannelOf<MessageChannel>(channelId) }.getOrNull()
+// Channel name extraction: prefer GuildChannel.name, fall back to channel.data.name.value
+```
+
+### Cache-Only vs REST Entity Lookups (`EntitySupplyStrategy`)
+```kotlin
+import dev.kord.core.supplier.EntitySupplyStrategy
+
+// Default lookups (message.getGuildOrNull(), kord.getUser(id), kord.getChannel(id)) use cacheWithRestFallback
+// and WILL trigger a REST call when the entity is not cached.
+// Pass EntitySupplyStrategy.cache explicitly whenever REST fallback must be disabled or budgeted:
+val cachedUser = kord.getUser(userId, strategy = EntitySupplyStrategy.cache)
+val cachedChannel = kord.getChannel(channelId, strategy = EntitySupplyStrategy.cache)
 ```
 
 ### Reactions (`ReactionEmoji`, `Message.addReaction`)
@@ -146,7 +169,7 @@ message.addReaction(unicodeEmoji)
 
 ### Guild Custom Emojis (`Message.getGuildOrNull`, `EmojisUpdateEvent`)
 ```kotlin
-val guild = message.getGuildOrNull() // null in DMs or uncached/unavailable guilds
+val guild = message.getGuildOrNull() // null in DMs or unavailable guilds; falls back to REST if uncached (use EntitySupplyStrategy.cache to avoid REST)
 val availableEmojis = guild?.emojis?.toList().orEmpty()
     .filter { it.isAvailable && !it.name.isNullOrBlank() }
 // Canonical Discord tag: if (emoji.isAnimated) "<a:${emoji.name}:${emoji.id.value}>" else "<:${emoji.name}:${emoji.id.value}>"

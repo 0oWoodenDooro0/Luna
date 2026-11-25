@@ -225,7 +225,7 @@ A bounded dual-signal damping factor applied during `Agentic Memory Retrieval` r
 _Avoid_: Time cutoff, hard age filter, linear score penalty
 
 **Dialogue Context Engine**:
-The policy-driven shared module in `luna.core.ai` that provides unified Discord noise evaluation, external `Reply Reference Chaining`, `Mention Resolution`, guild display-name resolution, embed and Tenor/Giphy GIF preview formatting, primary social/YouTube link enrichment (with 2-hour duration cap and regex fallback), and image marker formatting for both `Chatter Pipeline` and `Summary Pipeline` without cross-plugin coupling.
+The policy-driven shared module in `luna.core.ai` that provides unified Discord noise evaluation, external `Reply Reference Chaining`, `Mention Resolution`, guild display-name resolution, embed and Tenor/Giphy GIF preview formatting, primary social/YouTube link enrichment (with 2-hour duration cap and regex fallback), and image marker formatting for both `Chatter Pipeline` and `Summary Pipeline` without cross-plugin coupling. All Discord-to-LLM message formatting entry points (`DiscordDialogueContextEngine`, `ChatterContextCollector`, `DeferredCatchUpService`) route through its formatting and resolution seams.
 _Avoid_: Context helper, shared collector, dialogue utils, enrichment service
 
 **Mention Resolution**:
