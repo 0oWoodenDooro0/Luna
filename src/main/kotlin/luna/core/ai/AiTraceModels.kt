@@ -133,6 +133,9 @@ data class AiTraceRecord(
     val reactionThreshold: Double? = null,
     val scheduleBlockTitle: String? = null,
     val scheduleAvailability: String? = null,
+    val relationshipTier: String? = null,
+    val affinityScore: Int? = null,
+    val affinityThresholdOffset: Double? = null,
 )
 
 /**

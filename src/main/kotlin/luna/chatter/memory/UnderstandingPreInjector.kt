@@ -8,7 +8,7 @@ import org.slf4j.LoggerFactory
  * [ChatterMemoryStore] for `ChatterGenerator` reply prompts within a soft character budget.
  */
 open class UnderstandingPreInjector(
-    private val memoryStore: ChatterMemoryStore,
+    internal val memoryStore: ChatterMemoryStore,
     private val maxChars: Int = ChatterMemoryConfig.DEFAULT_UNDERSTANDING_PRE_INJECT_MAX_CHARS,
 ) {
     private val logger = LoggerFactory.getLogger(UnderstandingPreInjector::class.java)
@@ -49,6 +49,32 @@ open class UnderstandingPreInjector(
                 selfId = selfId,
             )
 
+        val speakerIds =
+            buildList {
+                if (cleanAuthorId != null) add(cleanAuthorId)
+                otherSpeakers.forEach { add(it.userId) }
+            }
+        val relationships =
+            if (speakerIds.isEmpty()) {
+                emptyMap()
+            } else {
+                try {
+                    memoryStore.listUserRelationships(
+                        guildId = cleanGuildId,
+                        userIds = speakerIds,
+                    )
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    logger.warn(
+                        "UnderstandingPreInjector failed open during UserRelationship lookup (guildId={}): {}",
+                        cleanGuildId,
+                        e.message,
+                    )
+                    emptyMap()
+                }
+            }
+
         val groups =
             try {
                 buildList<UnderstandingGroup> {
@@ -59,8 +85,15 @@ open class UnderstandingPreInjector(
                                 userId = cleanAuthorId,
                                 limit = AUTHOR_LIMIT,
                             )
-                        if (entries.isNotEmpty()) {
-                            add(UnderstandingGroup(header = "[當前發言者 (uid:$cleanAuthorId)]", entries = entries))
+                        val relLine = formatRelationshipLine(relationships[cleanAuthorId])
+                        if (relLine != null || entries.isNotEmpty()) {
+                            add(
+                                UnderstandingGroup(
+                                    header = "[當前發言者 (uid:$cleanAuthorId)]",
+                                    relationshipLine = relLine,
+                                    entries = entries,
+                                ),
+                            )
                         }
                     }
                     for (speaker in otherSpeakers) {
@@ -70,10 +103,12 @@ open class UnderstandingPreInjector(
                                 userId = speaker.userId,
                                 limit = OTHER_SPEAKER_ENTRY_LIMIT,
                             )
-                        if (entries.isNotEmpty()) {
+                        val relLine = formatRelationshipLine(relationships[speaker.userId])
+                        if (relLine != null || entries.isNotEmpty()) {
                             add(
                                 UnderstandingGroup(
                                     header = "[近期群友 ${speaker.displayName} (uid:${speaker.userId})]",
+                                    relationshipLine = relLine,
                                     entries = entries,
                                 ),
                             )
@@ -105,11 +140,26 @@ open class UnderstandingPreInjector(
         if (sb.length > maxChars) return null
 
         val touchedIds = mutableListOf<Long>()
+        var hasContent = false
         var budgetExhausted = false
         for (group in groups) {
             if (budgetExhausted) break
             val headerLine = "\n${group.header}"
             var headerAppended = false
+            val relLine = group.relationshipLine
+            if (relLine != null) {
+                val needed = relLine.length + if (headerAppended) 0 else headerLine.length
+                if (sb.length + needed > maxChars) {
+                    budgetExhausted = true
+                    break
+                }
+                if (!headerAppended) {
+                    sb.append(headerLine)
+                    headerAppended = true
+                }
+                sb.append(relLine)
+                hasContent = true
+            }
             for (entry in group.entries) {
                 val entryLine = "\n- ${entry.subject}：${entry.content}"
                 val needed = entryLine.length + if (headerAppended) 0 else headerLine.length
@@ -123,22 +173,25 @@ open class UnderstandingPreInjector(
                 }
                 sb.append(entryLine)
                 touchedIds.add(entry.id)
+                hasContent = true
             }
         }
 
-        if (touchedIds.isEmpty()) return null
+        if (!hasContent) return null
 
-        try {
-            memoryStore.touchUnderstandings(cleanGuildId, touchedIds)
-        } catch (e: CancellationException) {
-            throw e
-        } catch (e: Exception) {
-            logger.warn(
-                "UnderstandingPreInjector failed to touch last_accessed_at (guildId={}, count={}): {}",
-                cleanGuildId,
-                touchedIds.size,
-                e.message,
-            )
+        if (touchedIds.isNotEmpty()) {
+            try {
+                memoryStore.touchUnderstandings(cleanGuildId, touchedIds)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                logger.warn(
+                    "UnderstandingPreInjector failed to touch last_accessed_at (guildId={}, count={}): {}",
+                    cleanGuildId,
+                    touchedIds.size,
+                    e.message,
+                )
+            }
         }
 
         return sb.toString()
@@ -214,8 +267,21 @@ open class UnderstandingPreInjector(
         val displayName: String,
     )
 
+    private fun formatRelationshipLine(relationship: UserRelationship?): String? {
+        if (relationship == null) return null
+        val tier = relationship.tier
+        val cleanTone = relationship.toneStyle.trim()
+        return when {
+            tier != AffinityTier.NEUTRAL && cleanTone.isNotEmpty() -> "\n- 關係與互動語氣：${tier.name}（$cleanTone）"
+            tier != AffinityTier.NEUTRAL -> "\n- 關係傾向：${tier.name}"
+            cleanTone.isNotEmpty() -> "\n- 互動風格：$cleanTone"
+            else -> null
+        }
+    }
+
     private data class UnderstandingGroup(
         val header: String,
+        val relationshipLine: String? = null,
         val entries: List<SocialUnderstandingRecord>,
     )
 

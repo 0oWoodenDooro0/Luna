@@ -252,4 +252,76 @@ class UnderstandingPreInjectorTest {
         assertEquals(1, section.lines().count { it.contains("uid:101") }, "Expected author 101 only once as triggering author")
         assertEquals(1, section.lines().count { it.contains("uid:404") }, "Expected deduplicated Dave 404")
     }
+
+    @Test
+    fun `injects non-NEUTRAL AffinityTier and non-blank toneStyle for author and recent speakers even without understanding entries`() {
+        val store = createStore()
+        // Author 101: FAVORITE + toneStyle, no understanding entries
+        store.applyRelationshipUpdate(guildId = "1001", userId = "101", affinityDelta = 15, toneStyle = "愛互嘴的好朋友")
+        store.applyRelationshipUpdate(guildId = "1001", userId = "101", affinityDelta = 15)
+        store.applyRelationshipUpdate(guildId = "1001", userId = "101", affinityDelta = 15)
+        store.applyRelationshipUpdate(guildId = "1001", userId = "101", affinityDelta = 10) // score 55 -> FAVORITE
+        // Other speaker 202: COOL, no toneStyle, with understanding entry
+        store.applyRelationshipUpdate(guildId = "1001", userId = "202", affinityDelta = -15)
+        store.applyRelationshipUpdate(guildId = "1001", userId = "202", affinityDelta = -5) // score -20 -> COOL
+        store.insertUnderstanding("1001", MemoryScope.USER, "202", "說話方式", "常問重複問題")
+        // Other speaker 303: NEUTRAL + blank toneStyle -> should NOT emit relationship line
+        store.applyRelationshipUpdate(guildId = "1001", userId = "303", affinityDelta = 0, toneStyle = "")
+        store.insertUnderstanding("1001", MemoryScope.USER, "303", "興趣", "喜歡玩 RPG")
+
+        val transcript =
+            """
+            Bob (uid:202): 這個怎麼用
+            Charlie (uid:303): 安安
+            Alice (uid:101): 早安呀
+            """.trimIndent()
+
+        val injector = UnderstandingPreInjector(memoryStore = store, maxChars = 4000)
+        val section = injector.buildPreInjectionSection(guildId = "1001", authorId = "101", transcript = transcript)
+
+        assertNotNull(section)
+        assertTrue(section.contains("uid:101"), "Expected author 101 header even without understanding entries")
+        assertTrue(section.contains("FAVORITE"), "Expected FAVORITE tier for author 101, got: $section")
+        assertTrue(section.contains("愛互嘴的好朋友"), "Expected toneStyle for author 101, got: $section")
+        assertTrue(section.contains("COOL"), "Expected COOL tier for speaker 202, got: $section")
+        assertTrue(section.contains("常問重複問題"), "Expected understanding entry for speaker 202")
+        assertFalse(section.contains("NEUTRAL"), "Expected NEUTRAL tier with blank toneStyle to be omitted")
+    }
+
+    @Test
+    fun `fails open with warning log when listUserRelationships throws while preserving Social Understanding`() {
+        val logger = LoggerFactory.getLogger(UnderstandingPreInjector::class.java) as Logger
+        val appender = ListAppender<ILoggingEvent>().apply { start() }
+        logger.addAppender(appender)
+        try {
+            val baseStore = createStore()
+            baseStore.insertUnderstanding("1001", MemoryScope.USER, "101", "習慣", "晚上常寫扣")
+            val failingStore =
+                object : ChatterMemoryStore by baseStore {
+                    override fun listUserRelationships(
+                        guildId: String,
+                        userIds: Collection<String>,
+                        now: Long?,
+                    ): Map<String, UserRelationship> = throw IllegalStateException("relationship table locked")
+                }
+
+            val injector = UnderstandingPreInjector(memoryStore = failingStore)
+            val section =
+                injector.buildPreInjectionSection(
+                    guildId = "1001",
+                    authorId = "101",
+                    transcript = "Alice (uid:101): hi",
+                )
+
+            assertNotNull(section)
+            assertTrue(section.contains("晚上常寫扣"), "Expected Social Understanding to survive relationship lookup failure")
+            val warnMessages = appender.list.filter { it.level == Level.WARN }.map { it.formattedMessage }
+            assertTrue(
+                warnMessages.any { it.contains("UserRelationship") || it.contains("relationship") },
+                "Expected WARN log on relationship lookup failure, got: $warnMessages",
+            )
+        } finally {
+            logger.detachAppender(appender)
+        }
+    }
 }

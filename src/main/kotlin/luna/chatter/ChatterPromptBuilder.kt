@@ -32,6 +32,18 @@ object ChatterPromptBuilder {
     const val MAX_PROMPT_GUILD_EMOJIS: Int = MAX_REACTION_PROMPT_GUILD_EMOJIS
     const val MAX_REPLY_SEGMENTS: Int = 3
     const val TRUNCATION_ELLIPSIS: String = "..."
+    const val NO_REPLY_SENTINEL: String = "[NO_REPLY]"
+    const val COLD_REACT_SENTINEL: String = "[COLD_REACT]"
+
+    sealed interface DisengagementOutcome {
+        data object NoReply : DisengagementOutcome
+
+        data object ColdReact : DisengagementOutcome
+
+        data class Text(
+            val text: String,
+        ) : DisengagementOutcome
+    }
 
     const val SYSTEM_INSTRUCTION: String =
         "你叫 Luna，是這個 Discord 社群伺服器裡機靈、有好奇心、愛吐槽又親近好相處的女生群友，平常和大家一起打字閒聊，不是客服或制式 AI 助手。\n\n" +
@@ -41,7 +53,9 @@ object ChatterPromptBuilder {
             "被抓包或講錯時會直接大方又幽默地認錯，絕不嘴硬硬拗或找藉口。" +
             "被逼急或遇到麻煩事時會稍微炸毛、慌張抱怨或嘴上小抗拒，但只要被順毛安撫或肯定很快就會消氣。" +
             "平時像朋友一樣自然熱心幫忙，而非公式化服務。" +
-            "所有吐槽、玩笑與嘴上抗拒都僅限輕鬆友善的群友互嘴，絕不進行人身攻擊，也不會在別人認真求助時真的拒絕幫忙。" +
+            "針對不同群友，請依其長期印象（Social Understanding）、關係傾向（FAVORITE / WARM / NEUTRAL / COOL / DISLIKED）與個人互動風格（toneStyle）自然調整親疏與語氣，" +
+            "但所有調整都必須維持 Luna 機靈直率的核心性格：對 FAVORITE／WARM 可更熱絡親近；對 NEUTRAL 維持輕鬆友善；對 COOL／DISLIKED 則可展現有分寸的冷淡、簡短敷衍，甚至明確表示不想回答或拒絕幫忙。" +
+            "無論對誰，絕不進行人身攻擊、言語辱罵或挑起真實伺服器衝突。" +
             "以上性格特質請隨對話情境自然流露，不要在每一則回覆裡刻意硬演或硬塞。\n" +
             "2. 表情符號規範：嚴格禁止使用任何標準 Unicode emoji 或顏文字（包含 😂、👍、XD、Orz、(｡･ω･｡) 等一律禁止）。" +
             "中性閒聊維持純文字回覆即可；當對話提示中提供可用自訂表情清單，且回覆帶有明顯情緒（例如得意、吐槽、認錯、小抱怨、驚訝等）時，" +
@@ -253,6 +267,15 @@ object ChatterPromptBuilder {
                 "不加逗號與句號（可自然使用問號？與驚嘆號！表達語氣；不同短想法或換口氣時一律用單一換行 \\n 分行，不要用空格分隔）、$emojiDirective、" +
                 "切勿使用制式 AI 開場白與套話、不可輸出任何摘要標題、Markdown 網址列表或引用來源標註：",
         )
+        if (input.allowMentionDisengagement) {
+            sb.append(
+                "\n\n補充選擇性回應權限：目前點名你的對象與你的關係較疏離或冷淡（COOL / DISLIKED）。" +
+                    "請先看完整段對話脈絡（區分對方是真誠道歉／重要正事，還是刻意挑釁／無理煩人）：\n" +
+                    "- 若值得回應，請正常或冷淡簡短回覆，或直接表明不想回答／拒絕幫忙（切勿在一般回覆文字中夾帶下方標記）。\n" +
+                    "- 若決定已讀不回，請「只輸出」單獨一行 $NO_REPLY_SENTINEL（不要任何其他文字）。\n" +
+                    "- 若決定不打字只丟一個冷淡反應表情，請「只輸出」單獨一行 $COLD_REACT_SENTINEL（不要任何其他文字）。",
+            )
+        }
         return sb.toString().trim()
     }
 
@@ -318,6 +341,7 @@ object ChatterPromptBuilder {
         guildEmojis: List<GuildCustomEmoji> = emptyList(),
         recentReactions: List<String> = emptyList(),
         applicationEmojis: List<GuildCustomEmoji> = emptyList(),
+        coldReaction: Boolean = false,
     ): String {
         val sb = StringBuilder()
         sb.append(
@@ -356,6 +380,10 @@ object ChatterPromptBuilder {
         formatPersonaStateSection(personaState)?.let { personaSection ->
             sb.append("\n\n")
             sb.append(personaSection)
+        }
+
+        if (coldReaction) {
+            sb.append("\n\n目前語氣情境：你對這位發言者保持冷淡疏離或有點無言，不打算打字回覆，請挑選最貼合冷淡、敷衍、無奈或已讀反應的一個表情（若無合適者仍可輸出 NONE）。")
         }
 
         return sb.toString()
@@ -449,6 +477,7 @@ object ChatterPromptBuilder {
                     guildEmojis = input.guildEmojis,
                     recentReactions = input.recentReactions,
                     applicationEmojis = input.applicationEmojis,
+                    coldReaction = input.coldReaction,
                 ),
             tools = null,
             generationConfig = GeminiInteractionGenerationConfig(maxOutputTokens = REACTION_MAX_OUTPUT_TOKENS),
@@ -486,6 +515,27 @@ object ChatterPromptBuilder {
         text = EmojiSanitizer.stripEmojis(text, allowedCustomEmojiIds = allowedCustomEmojiIds).trim()
 
         return truncateToDiscordLimit(text, maxLength = maxLength)
+    }
+
+    /**
+     * Parses disengagement sentinels (`[NO_REPLY]` / `[COLD_REACT]`) when [allowDisengagement] is true,
+     * and strips any stray sentinel tokens from normal text so they never leak to Discord.
+     */
+    fun parseDisengagementOutcome(
+        text: String,
+        allowDisengagement: Boolean,
+    ): DisengagementOutcome {
+        val trimmed = text.trim()
+        if (allowDisengagement) {
+            if (trimmed == NO_REPLY_SENTINEL) return DisengagementOutcome.NoReply
+            if (trimmed == COLD_REACT_SENTINEL) return DisengagementOutcome.ColdReact
+        }
+        val stripped =
+            trimmed
+                .replace(NO_REPLY_SENTINEL, "")
+                .replace(COLD_REACT_SENTINEL, "")
+                .trim()
+        return DisengagementOutcome.Text(stripped)
     }
 
     /**

@@ -51,6 +51,7 @@ internal class ChatterSilentReactionCoordinator(
                 guildEmojis = preparedEmojis.guildEmojis,
                 applicationEmojis = preparedEmojis.applicationEmojis,
                 recentReactions = preparedEmojis.recentReactions,
+                coldReaction = decisionContext.coldReaction,
             )
 
         val rawSelection =

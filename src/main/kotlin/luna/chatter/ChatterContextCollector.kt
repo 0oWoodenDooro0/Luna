@@ -18,6 +18,7 @@ import kotlin.time.Duration.Companion.minutes
 data class ChatterDecisionContext(
     val transcript: String,
     val images: List<ChatImageAttachment> = emptyList(),
+    val coldReaction: Boolean = false,
 )
 
 /**
