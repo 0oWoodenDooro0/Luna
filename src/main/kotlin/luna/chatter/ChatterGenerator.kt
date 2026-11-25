@@ -42,7 +42,7 @@ open class ChatterGenerator(
     private val memoryToolHandler: ChatterMemoryToolHandler? = null,
     private val understandingPreInjector: UnderstandingPreInjector? = null,
     private val scheduleToolHandler: ChatterScheduleToolHandler? = null,
-    private val kordSelfIdProvider: () -> String? = { null },
+    internal val kordSelfIdProvider: () -> String? = { null },
 ) : AutoCloseable {
     private val ownsHttpClient: Boolean = httpClient == null
     private val httpClient: HttpClient = httpClient ?: GeminiHttpClientFactory.create()

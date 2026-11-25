@@ -6,6 +6,7 @@ import dev.kord.core.entity.Guild
 import dev.kord.core.entity.Member
 import dev.kord.core.entity.Message
 import dev.kord.core.entity.User
+import dev.kord.core.entity.channel.Channel
 import dev.kord.core.entity.channel.GuildChannel
 import dev.kord.core.supplier.EntitySupplyStrategy
 import kotlinx.coroutines.flow.toList
@@ -126,15 +127,11 @@ open class DiscordMentionResolver {
         val unresolvedChannelIds = state.targetChannelIds.filterNot { it in state.channelNames }
 
         if (unresolvedUserIds.isNotEmpty() || unresolvedRoleIds.isNotEmpty() || unresolvedChannelIds.isNotEmpty()) {
-            val restGuild =
-                messages.firstNotNullOfOrNull { msg ->
-                    runCatching { msg.getGuildOrNull() }.getOrNull()
-                }
             resolveViaBoundedRest(
                 unresolvedUserIds = unresolvedUserIds,
                 unresolvedRoleIds = unresolvedRoleIds,
                 unresolvedChannelIds = unresolvedChannelIds,
-                restGuild = restGuild,
+                messages = messages,
                 kord = kord,
                 policy = policy,
                 state = state,
@@ -198,10 +195,7 @@ open class DiscordMentionResolver {
 
         val mentionedChannels = runCatching { msg.mentionedChannels.toList() }.getOrDefault(emptyList())
         for (channel in mentionedChannels) {
-            val name =
-                (channel as? GuildChannel)?.let { runCatching { it.name }.getOrNull() }
-                    ?: runCatching { channel.data.name.value }.getOrNull()
-            name?.takeIf { it.isNotBlank() }?.let { validName ->
+            extractChannelName(channel)?.let { validName ->
                 state.channelNames.putIfAbsent(channel.id.toString(), validName)
             }
         }
@@ -270,16 +264,12 @@ open class DiscordMentionResolver {
             val snowflake = Snowflake(idStr)
             val channelName =
                 cachedGuild?.let {
-                    runCatching { it.getChannelOrNull(snowflake)?.name }.getOrNull()?.takeIf { n -> n.isNotBlank() }
+                    extractChannelName(runCatching { it.getChannelOrNull(snowflake) }.getOrNull())
                 }
                     ?: kord?.let {
-                        runCatching {
-                            it
-                                .getChannel(snowflake, strategy = EntitySupplyStrategy.cache)
-                                ?.data
-                                ?.name
-                                ?.value
-                        }.getOrNull()?.takeIf { n -> n.isNotBlank() }
+                        extractChannelName(
+                            runCatching { it.getChannel(snowflake, strategy = EntitySupplyStrategy.cache) }.getOrNull(),
+                        )
                     }
             if (channelName != null) {
                 state.channelNames[idStr] = channelName
@@ -291,12 +281,20 @@ open class DiscordMentionResolver {
         unresolvedUserIds: List<String>,
         unresolvedRoleIds: List<String>,
         unresolvedChannelIds: List<String>,
-        restGuild: Guild?,
+        messages: List<Message>,
         kord: Kord?,
         policy: DialogueContextPolicy,
         state: SliceResolutionState,
     ) {
         val restCap = policy.maxMentionRestFallbacks.coerceAtLeast(0)
+        val restGuild: Guild? =
+            if (restCap > 0) {
+                messages.firstNotNullOfOrNull { msg ->
+                    runCatching { msg.getGuildOrNull() }.getOrNull()
+                }
+            } else {
+                null
+            }
         var restFallbacksUsed = 0
 
         suspend fun attemptRest(
@@ -367,12 +365,8 @@ open class DiscordMentionResolver {
             val snowflake = Snowflake(idStr)
             val name =
                 attemptRest("channel", idStr) {
-                    val guildChannelName = restGuild?.getChannelOrNull(snowflake)?.name
-                    guildChannelName ?: kord
-                        ?.getChannel(snowflake)
-                        ?.data
-                        ?.name
-                        ?.value
+                    extractChannelName(restGuild?.getChannelOrNull(snowflake))
+                        ?: extractChannelName(kord?.getChannel(snowflake))
                 }
             if (name != null) {
                 state.channelNames[idStr] = name
@@ -389,6 +383,12 @@ open class DiscordMentionResolver {
             (user as? Member)?.effectiveName?.takeIf { it.isNotBlank() }
                 ?: user.globalName?.takeIf { it.isNotBlank() }
                 ?: user.username.takeIf { it.isNotBlank() }
+
+        private fun extractChannelName(channel: Channel?): String? {
+            if (channel == null) return null
+            return (channel as? GuildChannel)?.let { runCatching { it.name }.getOrNull() }?.takeIf { it.isNotBlank() }
+                ?: runCatching { channel.data.name.value }.getOrNull()?.takeIf { it.isNotBlank() }
+        }
 
         fun extractSpeakerName(message: Message): String {
             val author = runCatching { message.author }.getOrNull()

@@ -23,7 +23,9 @@ import luna.core.ai.AiTraceFailureCategory
 import luna.core.ai.AiTracePipeline
 import luna.core.ai.AiTraceRecorder
 import luna.core.ai.AiTraceTrigger
+import luna.core.ai.DiscordMentionResolver
 import luna.core.ai.NoOpAiTraceRecorder
+import luna.core.ai.ResolvedSliceMentions
 import luna.core.ai.withAiTraceSession
 import org.slf4j.LoggerFactory
 import java.time.Clock
@@ -171,12 +173,21 @@ class DeferredCatchUpService(
             return
         }
 
+        val mentionContext =
+            filter.contextEngine.mentionResolver.resolveSlice(
+                messages = eligibleMessages,
+                policy = filter.contextPolicy(),
+                kordSelfId = selfId,
+            )
+
         val candidates =
             eligibleMessages.map { msg ->
+                val rawContent = runCatching { msg.content }.getOrNull().orEmpty()
+                val resolvedContent = mentionContext.formatText(rawContent).ifBlank { "[attachment]" }
                 CatchUpCandidateMessage(
                     messageId = msg.id.toString(),
-                    authorName = resolveAuthorName(msg),
-                    content = runCatching { msg.content }.getOrNull().orEmpty().ifBlank { "[attachment]" },
+                    authorName = resolveAuthorName(msg, mentionContext),
+                    content = resolvedContent,
                     timestampMillis = messageTimestampMillis(msg),
                     isDirectMention = filter.isDirectBotMention(msg, selfId),
                     isReplyToLuna = isReplyToLuna(msg, selfId),
@@ -377,10 +388,14 @@ class DeferredCatchUpService(
 
     private fun messageTimestampMillis(message: Message): Long = runCatching { message.timestamp.toEpochMilliseconds() }.getOrElse { clock.millis() }
 
-    private fun resolveAuthorName(message: Message): String =
-        runCatching { message.author?.username }.getOrNull()?.ifBlank { null }
-            ?: runCatching { message.data.author.username }.getOrNull()?.ifBlank { null }
-            ?: "Unknown"
+    private fun resolveAuthorName(
+        message: Message,
+        mentionContext: ResolvedSliceMentions,
+    ): String {
+        val authorId = resolveAuthorId(message)
+        val cachedDisplayName = authorId?.let { mentionContext.speakerDisplayName(it) }
+        return cachedDisplayName ?: DiscordMentionResolver.extractSpeakerName(message)
+    }
 
     private fun recordSkippedChannelTrace(
         watermark: CatchUpWatermark,

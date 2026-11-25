@@ -232,6 +232,7 @@ class ChatterPlugin(
                             )
                         },
                     scheduleToolHandler = scheduleToolHandler,
+                    kordSelfIdProvider = { context.kord.selfId.toString() },
                 )
         this.chatterGenerator = generator
 

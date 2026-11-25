@@ -331,4 +331,44 @@ class DiscordMentionResolutionTest {
                 logger.level = previousLevel
             }
         }
+
+    @Test
+    fun `maxMentionRestFallbacks zero or negative does not invoke REST getGuildOrNull`() =
+        runTest {
+            val alice = mockUser(id = 101L, username = "alice", globalName = "Alice")
+            val kordMock =
+                mockk<Kord>(relaxed = true).apply {
+                    every { selfId } returns this@DiscordMentionResolutionTest.selfId
+                    coEvery { getUser(any(), any()) } returns null
+                }
+            val msg =
+                mockk<Message>(relaxed = true).apply {
+                    every { id } returns Snowflake(1L)
+                    every { author } returns alice
+                    every { content } returns "Ping <@202> and <@&303> in <#404>"
+                    every { mentionedUsers } returns flowOf()
+                    every { mentionedRoles } returns flowOf()
+                    every { mentionedChannels } returns flowOf()
+                    every { kord } returns kordMock
+                }
+
+            val zeroCapResult =
+                engine.formatDialogueMessages(
+                    messages = listOf(msg),
+                    policy = DialogueContextPolicy.chatter(maxMentionRestFallbacks = 0),
+                    kordSelfId = selfId,
+                    formatSpeakerHeader = { "${it.name} (uid:${it.authorId})" },
+                )
+            val negativeCapResult =
+                engine.formatDialogueMessages(
+                    messages = listOf(msg),
+                    policy = DialogueContextPolicy.chatter(maxMentionRestFallbacks = -1),
+                    kordSelfId = selfId,
+                    formatSpeakerHeader = { "${it.name} (uid:${it.authorId})" },
+                )
+
+            assertEquals("Alice (uid:101): Ping <@202> and <@&303> in <#404>", zeroCapResult.transcript)
+            assertEquals("Alice (uid:101): Ping <@202> and <@&303> in <#404>", negativeCapResult.transcript)
+            coVerify(exactly = 0) { msg.getGuildOrNull() }
+        }
 }
