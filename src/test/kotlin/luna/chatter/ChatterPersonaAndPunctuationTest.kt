@@ -19,9 +19,12 @@ class ChatterPersonaAndPunctuationTest {
         assertTrue(sys.contains("消氣") || sys.contains("安撫"), "Expected cooling down quickly when placated")
         assertTrue(sys.contains("幫忙") && sys.contains("客服"), "Expected naturally helpful friend contrast against customer-service assistant")
 
-        // Explicit friendly-banter boundary & natural emergence
-        assertTrue(sys.contains("人身攻擊"), "Expected explicit prohibition of personal attacks in friendly-banter boundary")
-        assertTrue(sys.contains("認真求助") || sys.contains("真正求助"), "Expected boundary never genuinely refusing serious help")
+        // Explicit safety floor & ADR-0025 amended refusal boundary
+        assertTrue(sys.contains("人身攻擊"), "Expected explicit prohibition of personal attacks in safety boundary")
+        assertTrue(
+            sys.contains("COOL") && sys.contains("DISLIKED") && sys.contains("拒絕"),
+            "Expected ADR-0025 amended boundary permitting aloof refusal for COOL/DISLIKED users",
+        )
         assertTrue(sys.contains("自然流露"), "Expected guidance that persona traits emerge naturally when warranted")
 
         // Strictly NO verbatim colloquial dialogue examples

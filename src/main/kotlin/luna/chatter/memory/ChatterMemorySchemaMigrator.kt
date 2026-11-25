@@ -61,6 +61,7 @@ internal object ChatterMemorySchemaMigrator {
             }
             createMemoriesIndexesAndFts(conn)
             ensureUnderstandingsSchema(conn)
+            ensureRelationshipsSchema(conn)
             return false
         }
 
@@ -96,6 +97,7 @@ internal object ChatterMemorySchemaMigrator {
             }
             createMemoriesIndexesAndFts(conn)
             ensureUnderstandingsSchema(conn)
+            ensureRelationshipsSchema(conn)
             return false
         }
 
@@ -163,6 +165,7 @@ internal object ChatterMemorySchemaMigrator {
 
         createMemoriesIndexesAndFts(conn)
         ensureUnderstandingsSchema(conn)
+        ensureRelationshipsSchema(conn)
         conn.createStatement().use { stmt ->
             stmt.execute("INSERT INTO chatter_memories_fts(chatter_memories_fts) VALUES('rebuild');")
         }
@@ -199,6 +202,45 @@ internal object ChatterMemorySchemaMigrator {
                 """.trimIndent(),
             )
         }
+    }
+
+    private fun ensureRelationshipsSchema(conn: Connection) {
+        conn.createStatement().use { stmt ->
+            stmt.execute(
+                """
+                CREATE TABLE IF NOT EXISTS chatter_relationships (
+                    guild_id TEXT NOT NULL,
+                    user_id TEXT NOT NULL,
+                    affinity_score INTEGER NOT NULL DEFAULT 0,
+                    tone_style TEXT NOT NULL DEFAULT '',
+                    created_at INTEGER NOT NULL,
+                    updated_at INTEGER NOT NULL,
+                    last_interaction_at INTEGER NOT NULL,
+                    PRIMARY KEY (guild_id, user_id)
+                );
+                """.trimIndent(),
+            )
+        }
+    }
+
+    private val VECTOR_DIMENSION_REGEX = Regex("""float\[(\d+)]""")
+
+    fun isVectorDimensionCompatible(
+        existingTableSql: String,
+        expectedDimension: Int,
+        logger: org.slf4j.Logger,
+    ): Boolean {
+        val match = VECTOR_DIMENSION_REGEX.find(existingTableSql) ?: return true
+        val existingDimension = match.groupValues[1].toIntOrNull() ?: return true
+        if (existingDimension != expectedDimension) {
+            logger.warn(
+                "chatter_memories_vec embedding dimension mismatch (expected {}, found {}); degrading to lexical FTS5/LIKE fallback mode",
+                expectedDimension,
+                existingDimension,
+            )
+            return false
+        }
+        return true
     }
 
     private fun createMemoriesIndexesAndFts(conn: Connection) {

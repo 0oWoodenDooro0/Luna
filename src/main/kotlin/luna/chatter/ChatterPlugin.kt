@@ -328,6 +328,7 @@ class ChatterPlugin(
                     burstCoordinator = coordinator,
                     personaStateProvider = drift,
                     emojiService = emojiServiceInstance,
+                    memoryStore = initializedMemoryService?.memoryStore,
                     traceRecorder = traceRecorder,
                     config = chatterConfig,
                 )

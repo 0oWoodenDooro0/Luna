@@ -227,7 +227,8 @@ class MemoryCommand(
             runCatching {
                 val factsDeleted = memoryStore.deleteAllOwnedUserMemories(guildId = guildId, userId = userId)
                 val understandingsDeleted = memoryStore.deleteAllOwnedUserUnderstandings(guildId = guildId, userId = userId)
-                factsDeleted + understandingsDeleted
+                val relationshipDeleted = if (memoryStore.deleteUserRelationship(guildId = guildId, userId = userId)) 1 else 0
+                factsDeleted + understandingsDeleted + relationshipDeleted
             }.onFailure { e ->
                 logger.warn("Failed to clear user memories for guild={} user={}: {}", guildId, userId, e.message)
             }.getOrElse {

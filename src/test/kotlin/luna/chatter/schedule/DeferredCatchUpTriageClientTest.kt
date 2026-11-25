@@ -18,6 +18,7 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
+import luna.chatter.memory.AffinityTier
 import luna.core.ai.GeminiInteractionClient
 import org.junit.jupiter.api.Test
 import org.slf4j.LoggerFactory
@@ -229,5 +230,57 @@ class DeferredCatchUpTriageClientTest {
             } finally {
                 logger.detachAppender(appender)
             }
+        }
+
+    @Test
+    fun `includes non-neutral affinity tier tags and prioritization guidance in triage request`() =
+        runTest {
+            var capturedBody = ""
+            val engine =
+                MockEngine { request ->
+                    capturedBody = request.body.toByteArray().decodeToString()
+                    respond(
+                        content = interactionSuccessResponse("""{"selections":[]}"""),
+                        status = HttpStatusCode.OK,
+                        headers = headersOf(HttpHeaders.ContentType, "application/json"),
+                    )
+                }
+
+            val candidates =
+                listOf(
+                    CatchUpCandidateMessage("101", "Alice", "fav msg", 1_000L, isDirectMention = false, isReplyToLuna = false, authorId = "u1"),
+                    CatchUpCandidateMessage("102", "Bob", "warm msg", 2_000L, isDirectMention = true, isReplyToLuna = false, authorId = "u2"),
+                    CatchUpCandidateMessage("103", "Carol", "cool msg", 3_000L, isDirectMention = false, isReplyToLuna = false, authorId = "u3"),
+                    CatchUpCandidateMessage("104", "Dave", "disliked msg", 4_000L, isDirectMention = false, isReplyToLuna = false, authorId = "u4"),
+                    CatchUpCandidateMessage("105", "Eve", "neutral msg", 5_000L, isDirectMention = false, isReplyToLuna = false, authorId = "u5"),
+                )
+
+            val result =
+                createClient(engine).triage(
+                    candidates = candidates,
+                    previousAvailability = AvailabilityState.BUSY,
+                    currentBlock = currentBlock,
+                    maxAmbient = 2,
+                    authorAffinities =
+                        mapOf(
+                            "u1" to AffinityTier.FAVORITE,
+                            "u2" to AffinityTier.WARM,
+                            "u3" to AffinityTier.COOL,
+                            "u4" to AffinityTier.DISLIKED,
+                            "u5" to AffinityTier.NEUTRAL,
+                        ),
+                )
+
+            assertTrue(result.isSuccess, "Expected triage success")
+            assertTrue(capturedBody.contains("[FAVORITE] Alice: fav msg"), "Expected [FAVORITE] tag for Alice")
+            assertTrue(capturedBody.contains("[DIRECT_MENTION, WARM] Bob: warm msg"), "Expected [DIRECT_MENTION, WARM] tag for Bob")
+            assertTrue(capturedBody.contains("[COOL] Carol: cool msg"), "Expected [COOL] tag for Carol")
+            assertTrue(capturedBody.contains("[DISLIKED] Dave: disliked msg"), "Expected [DISLIKED] tag for Dave")
+            assertTrue(capturedBody.contains("id=105 Eve: neutral msg"), "Expected no affinity tag for NEUTRAL speaker Eve")
+            assertTrue(
+                DeferredCatchUpTriageClient.SYSTEM_INSTRUCTION.contains("FAVORITE") &&
+                    DeferredCatchUpTriageClient.SYSTEM_INSTRUCTION.contains("DISLIKED"),
+                "Expected SYSTEM_INSTRUCTION to include affinity tier prioritization guidance",
+            )
         }
 }

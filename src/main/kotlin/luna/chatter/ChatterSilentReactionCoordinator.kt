@@ -34,9 +34,10 @@ internal class ChatterSilentReactionCoordinator(
         markDispatching: () -> Boolean,
         emojiTurn: ChatterEmojiTurn,
     ): Boolean {
+        val tracePrefix = if (decisionContext.coldReaction) "[COLD_REACT] " else ""
         if (emojiTurn.isReactionOnCooldown()) {
             logger.debug("Silent reaction skipped for message {} in channel {} due to reaction cooldown", message.id, message.channelId)
-            session.skip(reason = "Silent reaction skipped due to channel reaction cooldown")
+            session.skip(reason = "${tracePrefix}Silent reaction skipped due to channel reaction cooldown")
             return false
         }
 
@@ -51,6 +52,7 @@ internal class ChatterSilentReactionCoordinator(
                 guildEmojis = preparedEmojis.guildEmojis,
                 applicationEmojis = preparedEmojis.applicationEmojis,
                 recentReactions = preparedEmojis.recentReactions,
+                coldReaction = decisionContext.coldReaction,
             )
 
         val rawSelection =
@@ -70,7 +72,7 @@ internal class ChatterSilentReactionCoordinator(
             if (session.currentOutcome() != AiTraceOutcome.SKIPPED) {
                 session.skip(
                     reason =
-                        "Silent reaction selection returned no valid emoji (noul=$noul, " +
+                        "${tracePrefix}Silent reaction selection returned no valid emoji (noul=$noul, " +
                             "reactionThreshold=$reactionThreshold, effectiveThreshold=$effectiveThreshold)",
                     failureCategory = AiTraceFailureCategory.EMPTY_OUTPUT,
                 )
@@ -82,7 +84,7 @@ internal class ChatterSilentReactionCoordinator(
             when (val resolution = emojiTurn.resolveReaction(rawSelection)) {
                 is ReactionResolution.Declined -> {
                     logger.debug("Silent reaction selection explicitly declined to react (NONE) for message {}", message.id)
-                    session.skip(reason = "Reaction selection model declined to react (NONE)")
+                    session.skip(reason = "${tracePrefix}Reaction selection model declined to react (NONE)")
                     return false
                 }
 
@@ -129,7 +131,7 @@ internal class ChatterSilentReactionCoordinator(
         }
 
         emojiTurn.recordDeliveredReaction(resolved)
-        session.complete(finalOutput = resolved.normalizedToken)
+        session.complete(finalOutput = "$tracePrefix${resolved.normalizedToken}")
         logger.info(
             "Chatter added silent reaction {} to message {} in channel {} (noul={}, confidence={}, reactionThreshold={}, effectiveThreshold={})",
             resolved.normalizedToken,

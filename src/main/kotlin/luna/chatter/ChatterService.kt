@@ -246,11 +246,28 @@ class ChatterService(
             val baseThreshold = config.decision.threshold
             val reactionThreshold = config.reactionThreshold
             val personaState = personaStateProvider.currentState(baseThreshold)
+            val relationship =
+                ChatterAffinityHelper.resolveAuthorRelationship(
+                    memoryStore = chatterGenerator.memoryStore,
+                    guildId = snapshot.guildId,
+                    authorId = snapshot.authorId,
+                    logger = logger,
+                )
+            val effectiveThreshold =
+                ChatterAffinityHelper.computeEffectiveThreshold(
+                    baseEffectiveThreshold = personaState.effectiveThreshold,
+                    relationship = relationship,
+                )
             session.recordPersonaState(
                 circadianPeriod = personaState.circadianPeriod?.name,
                 personaMood = personaState.mood?.label,
-                effectiveThreshold = personaState.effectiveThreshold,
+                effectiveThreshold = effectiveThreshold,
                 reactionThreshold = reactionThreshold,
+            )
+            session.recordRelationship(
+                relationshipTier = relationship.tier.name,
+                affinityScore = relationship.affinityScore,
+                affinityThresholdOffset = relationship.tier.ambientThresholdOffset,
             )
             scheduleGate.recordActiveScheduleInSession(session, personaState.scheduleBlock)
 
@@ -306,7 +323,6 @@ class ChatterService(
                 currentCoroutineContext().ensureActive()
                 val annotatedDecisionContext = decisionContext.copy(transcript = annotatedDecisionTranscript)
 
-                val effectiveThreshold = personaState.effectiveThreshold
                 val decision =
                     try {
                         decisionClient.decide(
@@ -329,6 +345,24 @@ class ChatterService(
                 if (!decision.shouldParticipate) {
                     val noul = decision.noul
                     if (noul != null && reactionThreshold < effectiveThreshold && noul >= reactionThreshold) {
+                        if (relationship.tier.suppressFriendlySilentReaction) {
+                            logger.debug(
+                                "Silent reaction suppressed for {} user {} on message {} (noul={}, effectiveThreshold={}, reactionThreshold={})",
+                                relationship.tier,
+                                snapshot.authorId,
+                                message.id,
+                                noul,
+                                effectiveThreshold,
+                                reactionThreshold,
+                            )
+                            session.skip(
+                                reason =
+                                    "Silent reaction suppressed for ${relationship.tier.name} user " +
+                                        "(noul=$noul, confidence=${decision.confidence}, " +
+                                        "threshold=$effectiveThreshold, reactionThreshold=$reactionThreshold)",
+                            )
+                            return@withReadingSimulation false
+                        }
                         return@withReadingSimulation silentReactionCoordinator.handleSilentReactionPath(
                             message = message,
                             decisionContext = annotatedDecisionContext,
@@ -393,6 +427,8 @@ class ChatterService(
             }
 
             val preparedEmojis = emojiTurn.prepareReplyEmojis(replyContext.transcript)
+            val allowMentionDisengagement =
+                ChatterAffinityHelper.allowsMentionDisengagement(isDirectMention = isDirectMention, relationship = relationship)
 
             val chatterInput =
                 replyContext
@@ -405,6 +441,7 @@ class ChatterService(
                         guildId = snapshot.guildId?.toString(),
                         channelId = message.channelId.toString(),
                         authorId = snapshot.authorId?.toString(),
+                        allowMentionDisengagement = allowMentionDisengagement,
                     )
 
             // Calls chatterGenerator.generateReply(chatterInput) while reading simulation runs concurrently
@@ -423,18 +460,68 @@ class ChatterService(
                 }
             currentCoroutineContext().ensureActive()
 
-            if (replyText.isNullOrBlank()) {
-                logger.debug("ChatterGenerator returned null or blank reply for message {}", message.id)
-                if (replyText != null) {
-                    session.fail(
-                        AiTraceFailureCategory.EMPTY_OUTPUT,
-                        "ChatterGenerator returned blank reply",
-                    )
-                }
+            if (replyText == null) {
+                logger.debug("ChatterGenerator returned null reply for message {}", message.id)
                 return@withReadingSimulation false
             }
 
-            val segments = ChatterPromptBuilder.splitReplySegments(replyText)
+            val cleanedReplyText =
+                when (
+                    val outcome =
+                        ChatterPromptBuilder.parseDisengagementOutcome(
+                            replyText,
+                            allowDisengagement = allowMentionDisengagement,
+                        )
+                ) {
+                    is ChatterPromptBuilder.DisengagementOutcome.NoReply -> {
+                        logger.info(
+                            "Direct mention disengaged with [NO_REPLY] for {} user {} in channel {}",
+                            relationship.tier,
+                            snapshot.authorId,
+                            message.channelId,
+                        )
+                        session.skip(
+                            reason = "Direct mention disengaged with [NO_REPLY] for ${relationship.tier.name} user",
+                        )
+                        return@withReadingSimulation false
+                    }
+
+                    is ChatterPromptBuilder.DisengagementOutcome.ColdReact -> {
+                        return@withReadingSimulation silentReactionCoordinator.handleSilentReactionPath(
+                            message = message,
+                            decisionContext =
+                                ChatterDecisionContext(
+                                    transcript = preparedEmojis.transcript,
+                                    images = replyContext.imageAttachments,
+                                    coldReaction = true,
+                                ),
+                            personaState = personaState,
+                            noul = 0.0,
+                            confidence = null,
+                            effectiveThreshold = effectiveThreshold,
+                            reactionThreshold = reactionThreshold,
+                            readingScope = readingScope,
+                            session = session,
+                            markDispatching = markDispatching,
+                            emojiTurn = emojiTurn,
+                        )
+                    }
+
+                    is ChatterPromptBuilder.DisengagementOutcome.Text -> {
+                        outcome.text
+                    }
+                }
+
+            if (cleanedReplyText.isBlank()) {
+                logger.debug("ChatterGenerator returned blank reply for message {}", message.id)
+                session.fail(
+                    AiTraceFailureCategory.EMPTY_OUTPUT,
+                    "ChatterGenerator returned blank reply",
+                )
+                return@withReadingSimulation false
+            }
+
+            val segments = ChatterPromptBuilder.splitReplySegments(cleanedReplyText)
             if (segments.isEmpty()) {
                 logger.debug("ChatterPromptBuilder.splitReplySegments returned no segments for message {}", message.id)
                 session.fail(

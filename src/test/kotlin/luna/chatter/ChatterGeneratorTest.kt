@@ -409,4 +409,58 @@ class ChatterGeneratorTest {
             val obj3 = json.parseToJsonElement(capturedBodies[2]).jsonObject
             assertFalse(obj3.containsKey("tools"))
         }
+
+    @Test
+    fun `generateReply preserves standalone sentinels when allowMentionDisengagement is true and strips stray sentinels`() =
+        runTest {
+            val responses = ArrayDeque(listOf("[NO_REPLY]", "[COLD_REACT]", "先不要 [NO_REPLY]", "早安 [NO_REPLY]", "[COLD_REACT]"))
+            val engine =
+                MockEngine {
+                    val nextText = responses.removeFirst()
+                    respond(
+                        content =
+                            """
+                            {
+                              "id": "int-disengage-1",
+                              "status": "completed",
+                              "steps": [
+                                {
+                                  "type": "model_output",
+                                  "content": [{ "type": "text", "text": "$nextText" }]
+                                }
+                              ]
+                            }
+                            """.trimIndent(),
+                        status = HttpStatusCode.OK,
+                        headers = headersOf(HttpHeaders.ContentType, "application/json"),
+                    )
+                }
+
+            val generator =
+                ChatterGenerator(
+                    config = ChatterConfig(apiKey = "valid-key"),
+                    httpClient = createTestClient(engine),
+                )
+
+            assertEquals(
+                "[NO_REPLY]",
+                generator.generateReply(ChatterInput(transcript = "Troll: hey", isDirectMention = true, allowMentionDisengagement = true)),
+            )
+            assertEquals(
+                "[COLD_REACT]",
+                generator.generateReply(ChatterInput(transcript = "Troll: hey", isDirectMention = true, allowMentionDisengagement = true)),
+            )
+            assertEquals(
+                "先不要",
+                generator.generateReply(ChatterInput(transcript = "Troll: hey", isDirectMention = true, allowMentionDisengagement = true)),
+            )
+            // When allowMentionDisengagement = false, sentinels are always stripped
+            assertEquals(
+                "早安",
+                generator.generateReply(ChatterInput(transcript = "Alice: hi", isDirectMention = true, allowMentionDisengagement = false)),
+            )
+            assertNull(
+                generator.generateReply(ChatterInput(transcript = "Alice: hi", isDirectMention = true, allowMentionDisengagement = false)),
+            )
+        }
 }
