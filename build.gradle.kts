@@ -14,6 +14,7 @@ plugins {
 
 allprojects {
     tasks.withType<Test> {
+        maxHeapSize = "1g"
         timeout.set(Duration.ofSeconds(60))
         testLogging {
             events(TestLogEvent.FAILED)
