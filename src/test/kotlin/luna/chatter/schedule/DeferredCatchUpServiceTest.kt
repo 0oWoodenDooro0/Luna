@@ -205,9 +205,12 @@ class DeferredCatchUpServiceTest {
             personaStateProvider = personaStateProvider,
             traceRecorder = traceRecorder,
             config = config,
-            clock = fixedClock,
-            randomProvider = { _, _ -> 0L },
-            staggerDelayFn = { },
+            timing =
+                CatchUpTimingPort(
+                    clock = fixedClock,
+                    randomProvider = { _, _ -> 0L },
+                    staggerDelayFn = { },
+                ),
         )
     }
 

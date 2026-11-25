@@ -17,6 +17,8 @@ import luna.chatter.KordChatterChannelAdapter
 import luna.chatter.PersonaStateProvider
 import luna.chatter.emoji.ChatterEmojiService
 import luna.chatter.emoji.DefaultChatterEmojiService
+import luna.chatter.memory.AffinityTier
+import luna.chatter.memory.ChatterMemoryStore
 import luna.chatter.resolveAuthorId
 import luna.core.ai.AiTraceDiscordContext
 import luna.core.ai.AiTraceFailureCategory
@@ -30,6 +32,17 @@ import luna.core.ai.withAiTraceSession
 import org.slf4j.LoggerFactory
 import java.time.Clock
 import kotlin.random.Random
+
+/**
+ * Timing and stagger-delay port for [DeferredCatchUpService] to keep test seams cohesive.
+ */
+data class CatchUpTimingPort(
+    val clock: Clock = Clock.systemUTC(),
+    val randomProvider: (minInclusive: Long, maxInclusive: Long) -> Long = { min, max ->
+        Random.nextLong(min, max + 1)
+    },
+    val staggerDelayFn: suspend (Long) -> Unit = { delay(it) },
+)
 
 /**
  * Orchestrates `Deferred Catch-Up` when Luna transitions from `BUSY` or `SLEEPING`
@@ -54,13 +67,10 @@ class DeferredCatchUpService(
     private val burstCoordinator: BoundedChannelBurstCoordinator,
     private val personaStateProvider: PersonaStateProvider,
     private val emojiService: ChatterEmojiService = DefaultChatterEmojiService(),
+    private val memoryStore: ChatterMemoryStore? = null,
     private val traceRecorder: AiTraceRecorder = NoOpAiTraceRecorder,
     private val config: ChatterConfig = ChatterConfig(),
-    private val clock: Clock = Clock.systemUTC(),
-    private val randomProvider: (minInclusive: Long, maxInclusive: Long) -> Long = { min, max ->
-        Random.nextLong(min, max + 1)
-    },
-    private val staggerDelayFn: suspend (Long) -> Unit = { delay(it) },
+    private val timing: CatchUpTimingPort = CatchUpTimingPort(),
 ) {
     private val logger = LoggerFactory.getLogger(DeferredCatchUpService::class.java)
     private val deliveryExecutor =
@@ -75,7 +85,7 @@ class DeferredCatchUpService(
             traceRecorder = traceRecorder,
             config = config,
             scheduleProvider = scheduleProvider,
-            randomProvider = randomProvider,
+            randomProvider = timing.randomProvider,
             logger = logger,
         )
 
@@ -158,7 +168,7 @@ class DeferredCatchUpService(
             }
 
         val boundedByCount = rawMissed.distinctBy { it.id }.sortedBy { it.id }.takeLast(maxMessages)
-        val cutoffMillis = clock.millis() - config.schedule.catchUpMaxAgeHours * MILLIS_PER_HOUR
+        val cutoffMillis = timing.clock.millis() - config.schedule.catchUpMaxAgeHours * MILLIS_PER_HOUR
         val freshMessages = boundedByCount.filter { messageTimestampMillis(it) >= cutoffMillis }
         val selfId = freshMessages.firstNotNullOfOrNull { runCatching { it.kord.selfId }.getOrNull() }
         val eligibleMessages = freshMessages.filter { isEligibleCandidate(it, selfId) }
@@ -191,8 +201,10 @@ class DeferredCatchUpService(
                     timestampMillis = messageTimestampMillis(msg),
                     isDirectMention = filter.isDirectBotMention(msg, selfId),
                     isReplyToLuna = isReplyToLuna(msg, selfId),
+                    authorId = resolveAuthorId(msg)?.toString(),
                 )
             }
+        val authorAffinities = resolveAuthorAffinities(watermark.guildId, candidates)
 
         val triageSession =
             traceRecorder.startSession(
@@ -222,6 +234,7 @@ class DeferredCatchUpService(
                         previousAvailability = previous,
                         currentBlock = current,
                         maxAmbient = config.schedule.catchUpMaxAmbient,
+                        authorAffinities = authorAffinities,
                     )
                 }
             } catch (ex: CancellationException) {
@@ -288,7 +301,7 @@ class DeferredCatchUpService(
             if (index > 0) {
                 val delayMs = sampleStaggerDelayMs()
                 if (delayMs > 0L) {
-                    staggerDelayFn(delayMs)
+                    timing.staggerDelayFn(delayMs)
                 }
                 currentCoroutineContext().ensureActive()
                 if (isUnavailableNow()) {
@@ -386,7 +399,34 @@ class DeferredCatchUpService(
         return referencedAuthorId == selfId
     }
 
-    private fun messageTimestampMillis(message: Message): Long = runCatching { message.timestamp.toEpochMilliseconds() }.getOrElse { clock.millis() }
+    private fun messageTimestampMillis(message: Message): Long = runCatching { message.timestamp.toEpochMilliseconds() }.getOrElse { timing.clock.millis() }
+
+    private fun resolveAuthorAffinities(
+        guildId: String,
+        candidates: List<CatchUpCandidateMessage>,
+    ): Map<String, AffinityTier> {
+        val store = memoryStore ?: return emptyMap()
+        if (guildId.isBlank()) return emptyMap()
+        val authorIds = candidates.mapNotNull { it.authorId }.distinct()
+        if (authorIds.isEmpty()) return emptyMap()
+        return try {
+            store
+                .listUserRelationships(
+                    guildId = guildId,
+                    userIds = authorIds,
+                    now = timing.clock.millis(),
+                ).mapValues { (_, relationship) -> relationship.tier }
+        } catch (ex: CancellationException) {
+            throw ex
+        } catch (ex: Exception) {
+            logger.warn(
+                "Deferred catch-up failed to load user relationships for guild {}: {}",
+                guildId,
+                ex.message,
+            )
+            emptyMap()
+        }
+    }
 
     private fun resolveAuthorName(
         message: Message,
@@ -444,7 +484,7 @@ class DeferredCatchUpService(
         return Snowflake(value)
     }
 
-    private fun sampleStaggerDelayMs(): Long = randomProvider(MIN_STAGGER_DELAY_MS, MAX_STAGGER_DELAY_MS).coerceAtLeast(0L)
+    private fun sampleStaggerDelayMs(): Long = timing.randomProvider(MIN_STAGGER_DELAY_MS, MAX_STAGGER_DELAY_MS).coerceAtLeast(0L)
 
     companion object {
         private const val MILLIS_PER_HOUR = 3_600_000L

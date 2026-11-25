@@ -4,6 +4,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import luna.chatter.ChatterConfig
+import luna.chatter.memory.AffinityTier
 import luna.core.ai.AiAttemptStage
 import luna.core.ai.AiTracePipeline
 import luna.core.ai.AiTraceTrigger
@@ -34,6 +35,7 @@ data class CatchUpCandidateMessage(
     val timestampMillis: Long,
     val isDirectMention: Boolean,
     val isReplyToLuna: Boolean,
+    val authorId: String? = null,
 ) {
     val isDirectTarget: Boolean
         get() = isDirectMention || isReplyToLuna
@@ -86,6 +88,7 @@ open class DeferredCatchUpTriageClient(
         previousAvailability: AvailabilityState,
         currentBlock: ScheduleBlock,
         maxAmbient: Int,
+        authorAffinities: Map<String, AffinityTier> = emptyMap(),
     ): Result<List<CatchUpTriageSelection>> {
         if (candidates.isEmpty()) {
             return Result.success(emptyList())
@@ -97,7 +100,14 @@ open class DeferredCatchUpTriageClient(
         }
 
         val cleanModel = model.trim().removePrefix("models/").ifBlank { ChatterConfig.DEFAULT_MODEL }
-        val prompt = buildUserPrompt(candidates, previousAvailability, currentBlock, maxAmbient.coerceAtLeast(0))
+        val prompt =
+            buildUserPrompt(
+                candidates = candidates,
+                previousAvailability = previousAvailability,
+                currentBlock = currentBlock,
+                maxAmbient = maxAmbient.coerceAtLeast(0),
+                authorAffinities = authorAffinities,
+            )
         val request =
             GeminiInteractionRequest(
                 model = cleanModel,
@@ -211,6 +221,7 @@ open class DeferredCatchUpTriageClient(
         previousAvailability: AvailabilityState,
         currentBlock: ScheduleBlock,
         maxAmbient: Int,
+        authorAffinities: Map<String, AffinityTier> = emptyMap(),
     ): String =
         buildString {
             appendLine("Luna 剛從 ${previousAvailability.name} 狀態回到 ${currentBlock.availability.name}。")
@@ -219,10 +230,12 @@ open class DeferredCatchUpTriageClient(
             appendLine()
             appendLine("以下是錯過期間的頻道訊息（依時間順序）：")
             for (candidate in candidates) {
+                val tier = candidate.authorId?.let { authorAffinities[it] }
                 val tags =
                     buildList {
                         if (candidate.isDirectMention) add("DIRECT_MENTION")
                         if (candidate.isReplyToLuna) add("REPLY_TO_LUNA")
+                        if (tier != null && tier != AffinityTier.NEUTRAL) add(tier.name)
                     }
                 val tagSuffix = if (tags.isNotEmpty()) " [${tags.joinToString(", ")}]" else ""
                 val snippet =
@@ -250,7 +263,8 @@ open class DeferredCatchUpTriageClient(
             3. 每則選中的訊息請決定動作：
                - REPLY：用文字回覆（適合提問、邀請、有共鳴的話題）
                - REACT：只按一個表情符號反應（適合梗圖、近況分享、輕量致意）
-            4. 只能輸出清單中存在的 messageId，不可捏造 ID。
+            4. 參考說話者的好感度標籤（[FAVORITE]、[WARM]、[COOL]、[DISLIKED]；未標記為一般關係）：自然優先回應好感度高的人（FAVORITE / WARM），對好感度低的人（COOL / DISLIKED）可更果斷地略過不回。
+            5. 只能輸出清單中存在的 messageId，不可捏造 ID。
 
             請嚴格輸出以下 JSON 結構：
             {
