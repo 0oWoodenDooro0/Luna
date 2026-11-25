@@ -6,7 +6,10 @@ import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonNames
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.decodeFromJsonElement
 import luna.chatter.ChatMessage
 import luna.core.ai.AiAttemptStage
 import luna.core.ai.AiTracePipeline
@@ -33,6 +36,40 @@ internal data class UnderstandingPatchDto(
     val content: String? = null,
 )
 
+@OptIn(ExperimentalSerializationApi::class)
+@Serializable
+internal data class RelationshipUpdateDto(
+    @SerialName("targetUserId")
+    @JsonNames("target_user_id", "user_id", "userId")
+    val targetUserId: String? = null,
+    @SerialName("affinityDelta")
+    @JsonNames("affinity_delta", "delta")
+    val affinityDelta: Int? = null,
+    @SerialName("toneStyle")
+    @JsonNames("tone_style")
+    val toneStyle: String? = null,
+)
+
+@OptIn(ExperimentalSerializationApi::class)
+@Serializable
+internal data class UnderstandingPatchEnvelopeDto(
+    @JsonNames("understanding_patches", "patches", "understandings")
+    val understandingPatches: List<UnderstandingPatchDto> = emptyList(),
+    @JsonNames("relationship_updates")
+    val relationshipUpdates: List<RelationshipUpdateDto> = emptyList(),
+)
+
+internal data class ValidatedRelationshipUpdate(
+    val targetUserId: String,
+    val affinityDelta: Int,
+    val toneStyle: String?,
+)
+
+internal data class Stage3PatchResult(
+    val understandingMutations: List<UnderstandingMutation>,
+    val relationshipUpdates: List<ValidatedRelationshipUpdate>,
+)
+
 internal data class UnderstandingPatchContext(
     val memoryStore: ChatterMemoryStore,
     val interactionClient: GeminiInteractionClient,
@@ -56,16 +93,19 @@ internal object UnderstandingPatchPrompt {
 
     val SYSTEM_INSTRUCTION: String =
         """
-        You maintain concise Social Understanding impressions (communication style, humor, tone, interpersonal dynamics, and guild inside jokes/norms) from a Discord conversation transcript.
+        You maintain concise Social Understanding impressions (communication style, humor, tone, interpersonal dynamics, and guild inside jokes/norms) and per-user User Relationship updates from a Discord conversation transcript.
         Rules:
-        - Focus ONLY on social/relational understanding and communication style—NOT objective atomic facts (those are handled separately).
-        - Existing entries are labeled with short aliases like `[u1]`, `[u2]`.
-        - For each warranted change, output one patch object with an `"action"` field:
+        - Focus ONLY on social/relational understanding, communication style, and interpersonal rapport—NOT objective atomic facts (those are handled separately).
+        - Existing Social Understanding entries are labeled with short aliases like `[u1]`, `[u2]`.
+        - For each warranted understanding change, add a patch object to `"understandingPatches"` with an `"action"` field:
           - `ADD`: new impression (`{"action": "ADD", "scope": "user"|"guild", "target_user_id": "<uid string or null>", "subject": "<short topic label>", "content": "<concise impression>"}`).
           - `UPDATE`: revise an existing impression (`{"action": "UPDATE", "id": "u1", "subject": "<short topic label>", "content": "<updated impression>"}`).
           - `REAFFIRM`: timestamp-only touch when an existing impression is clearly reinforced without needing text changes (`{"action": "REAFFIRM", "id": "u1"}`).
           - `DELETE`: remove an existing impression that is clearly contradicted or obsolete (`{"action": "DELETE", "id": "u1"}`).
-        - Output ONLY a valid JSON array of patch objects, or `[]` if no understanding changes are warranted.
+        - For each human speaker in this batch whose interaction meaningfully shifts Luna's rapport or warrants updating her subjective tone cue, add an entry to `"relationshipUpdates"`:
+          - `{"targetUserId": "<uid>", "affinityDelta": <int in -15..15>, "toneStyle": "<optional concise feeling/interaction tone cue, <=120 chars>"}`
+          - Omit unchanged speakers or use `[]`.
+        - Output ONLY a valid JSON object `{"understandingPatches": [...], "relationshipUpdates": [...]}` (or `{"understandingPatches": [], "relationshipUpdates": []}` if no changes are warranted).
         """.trimIndent()
 
     fun buildPrompt(
@@ -73,6 +113,7 @@ internal object UnderstandingPatchPrompt {
         userUnderstandings: Map<String, List<SocialUnderstandingRecord>>,
         guildUnderstandings: List<SocialUnderstandingRecord>,
         transcript: String,
+        userRelationships: Map<String, UserRelationship> = emptyMap(),
     ): Pair<String, Map<String, SocialUnderstandingRecord>> {
         val aliasMap = linkedMapOf<String, SocialUnderstandingRecord>()
         var nextIndex = 1
@@ -84,7 +125,11 @@ internal object UnderstandingPatchPrompt {
                     appendLine("  (none)")
                 } else {
                     humanSpeakers.forEach { (uid, name) ->
-                        appendLine("  - $name (uid:$uid)")
+                        val rel = userRelationships[uid] ?: UserRelationship.neutral(guildId = "", userId = uid)
+                        val toneCue = rel.toneStyle.ifBlank { "(none)" }
+                        appendLine(
+                            "  - $name (uid:$uid) [relationship: tier=${rel.tier.name}, score=${rel.affinityScore}, toneStyle=\"$toneCue\"]",
+                        )
                     }
                 }
 
@@ -127,13 +172,71 @@ internal object UnderstandingPatchPrompt {
         responseText: String,
         aliasMap: Map<String, SocialUnderstandingRecord>,
     ): Result<List<UnderstandingMutation>> =
+        parsePatchResponse(
+            guildId = guildId,
+            responseText = responseText,
+            aliasMap = aliasMap,
+        ).map { it.understandingMutations }
+
+    fun parsePatchResponse(
+        guildId: String,
+        responseText: String,
+        aliasMap: Map<String, SocialUnderstandingRecord>,
+        validSpeakerIds: Set<String>? = null,
+    ): Result<Stage3PatchResult> =
         runCatching {
-            val dtos =
-                json.decodeFromString<List<UnderstandingPatchDto>>(
-                    MemoryCandidateProcessor.stripJsonFences(responseText),
-                )
-            dtos.mapNotNull { dto -> toMutationOrNull(guildId, dto, aliasMap) }
+            val stripped = MemoryCandidateProcessor.stripJsonFences(responseText)
+            val element = json.parseToJsonElement(stripped)
+            val envelope =
+                when (element) {
+                    is JsonArray -> {
+                        UnderstandingPatchEnvelopeDto(
+                            understandingPatches = json.decodeFromJsonElement<List<UnderstandingPatchDto>>(element),
+                            relationshipUpdates = emptyList(),
+                        )
+                    }
+
+                    is JsonObject -> {
+                        json.decodeFromJsonElement<UnderstandingPatchEnvelopeDto>(element)
+                    }
+
+                    else -> {
+                        throw IllegalArgumentException("Expected JSON array or object for UnderstandingPatch response")
+                    }
+                }
+            val mutations = envelope.understandingPatches.mapNotNull { dto -> toMutationOrNull(guildId, dto, aliasMap) }
+            val relationshipUpdates =
+                envelope.relationshipUpdates.mapNotNull { dto ->
+                    toRelationshipUpdateOrNull(guildId, dto, validSpeakerIds)
+                }
+            Stage3PatchResult(
+                understandingMutations = mutations,
+                relationshipUpdates = relationshipUpdates,
+            )
         }
+
+    private fun toRelationshipUpdateOrNull(
+        guildId: String,
+        dto: RelationshipUpdateDto,
+        validSpeakerIds: Set<String>?,
+    ): ValidatedRelationshipUpdate? {
+        val targetUserId = dto.targetUserId?.trim()?.takeIf { it.isNotEmpty() }
+        if (targetUserId == null) {
+            logger.debug("Ignoring relationshipUpdate with blank targetUserId for guild {}", guildId)
+            return null
+        }
+        if (validSpeakerIds != null && targetUserId !in validSpeakerIds) {
+            logger.debug("Ignoring relationshipUpdate for unknown speaker {} in guild {}", targetUserId, guildId)
+            return null
+        }
+        val clampedDelta = NegativeAffinityDecay.clampDelta(dto.affinityDelta ?: 0)
+        val sanitizedToneStyle = dto.toneStyle?.let { NegativeAffinityDecay.sanitizeToneStyle(it) }
+        return ValidatedRelationshipUpdate(
+            targetUserId = targetUserId,
+            affinityDelta = clampedDelta,
+            toneStyle = sanitizedToneStyle,
+        )
+    }
 
     private fun toMutationOrNull(
         guildId: String,
@@ -215,12 +318,26 @@ internal object UnderstandingPatchPrompt {
                     ctx.memoryStore.listUserUnderstandings(guildId = guildId, userId = uid)
                 }
             val guildUnderstandings = ctx.memoryStore.listGuildUnderstandings(guildId = guildId)
+            val userRelationships =
+                if (humanSpeakers.isEmpty()) {
+                    emptyMap()
+                } else {
+                    runCatching {
+                        ctx.memoryStore.listUserRelationships(guildId = guildId, userIds = humanSpeakers.keys)
+                    }.getOrElse { ex ->
+                        if (ex is CancellationException) throw ex
+                        logger.warn("Failed to load UserRelationships for guild {} (failing open): {}", guildId, ex.message)
+                        ctx.session.markDegraded("UserRelationship load failed: ${ex.message}")
+                        emptyMap()
+                    }
+                }
             val (prompt, aliasMap) =
                 buildPrompt(
                     humanSpeakers = humanSpeakers,
                     userUnderstandings = userUnderstandings,
                     guildUnderstandings = guildUnderstandings,
                     transcript = ctx.transcript,
+                    userRelationships = userRelationships,
                 )
 
             val request =
@@ -259,16 +376,46 @@ internal object UnderstandingPatchPrompt {
                 return
             }
 
-            val mutations =
-                parseAndBuildMutations(guildId = guildId, responseText = responseText, aliasMap = aliasMap)
-                    .getOrElse { ex ->
-                        logger.warn("Failed to parse UnderstandingPatch JSON for guild {} (failing open): {}", guildId, ex.message)
-                        ctx.session.markDegraded("UnderstandingPatch JSON parse error: ${ex.message}")
-                        return
-                    }
+            val stage3Result =
+                parsePatchResponse(
+                    guildId = guildId,
+                    responseText = responseText,
+                    aliasMap = aliasMap,
+                    validSpeakerIds = humanSpeakers.keys,
+                ).getOrElse { ex ->
+                    logger.warn("Failed to parse UnderstandingPatch JSON for guild {} (failing open): {}", guildId, ex.message)
+                    ctx.session.markDegraded("UnderstandingPatch JSON parse error: ${ex.message}")
+                    return
+                }
 
-            if (mutations.isNotEmpty()) {
-                ctx.memoryStore.applyUnderstandingMutations(mutations)
+            if (stage3Result.understandingMutations.isNotEmpty()) {
+                runCatching {
+                    ctx.memoryStore.applyUnderstandingMutations(stage3Result.understandingMutations)
+                }.onFailure { ex ->
+                    if (ex is CancellationException) throw ex
+                    logger.warn("Failed to apply UnderstandingPatch mutations for guild {} (failing open): {}", guildId, ex.message)
+                    ctx.session.markDegraded("UnderstandingPatch apply failed: ${ex.message}")
+                }
+            }
+
+            for (update in stage3Result.relationshipUpdates) {
+                runCatching {
+                    ctx.memoryStore.applyRelationshipUpdate(
+                        guildId = guildId,
+                        userId = update.targetUserId,
+                        affinityDelta = update.affinityDelta,
+                        toneStyle = update.toneStyle,
+                    )
+                }.onFailure { ex ->
+                    if (ex is CancellationException) throw ex
+                    logger.warn(
+                        "Failed to apply UserRelationship update for guild {} user {} (failing open): {}",
+                        guildId,
+                        update.targetUserId,
+                        ex.message,
+                    )
+                    ctx.session.markDegraded("UserRelationship update failed: ${ex.message}")
+                }
             }
         } catch (ex: CancellationException) {
             throw ex
