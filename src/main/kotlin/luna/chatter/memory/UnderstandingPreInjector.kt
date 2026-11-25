@@ -24,12 +24,30 @@ open class UnderstandingPreInjector(
         guildId: String?,
         authorId: String?,
         transcript: String,
+    ): String? =
+        buildPreInjectionSection(
+            guildId = guildId,
+            authorId = authorId,
+            transcript = transcript,
+            selfId = null,
+        )
+
+    open fun buildPreInjectionSection(
+        guildId: String?,
+        authorId: String?,
+        transcript: String,
+        selfId: String? = null,
     ): String? {
         val cleanGuildId = guildId?.trim()?.takeIf { it.isNotEmpty() } ?: return null
         if (maxChars <= 0) return null
 
         val cleanAuthorId = authorId?.trim()?.takeIf { it.isNotEmpty() }
-        val otherSpeakers = extractRecentOtherHumanSpeakers(transcript, excludeAuthorId = cleanAuthorId)
+        val otherSpeakers =
+            extractRecentOtherHumanSpeakers(
+                transcript = transcript,
+                excludeAuthorId = cleanAuthorId,
+                selfId = selfId,
+            )
 
         val groups =
             try {
@@ -129,18 +147,50 @@ open class UnderstandingPreInjector(
     internal fun extractRecentOtherHumanSpeakers(
         transcript: String,
         excludeAuthorId: String?,
+        selfId: String? = null,
     ): List<SpeakerRef> {
         if (transcript.isBlank()) return emptyList()
+        val lines = transcript.lines()
+        val nonHumanIds = HashSet<String>()
+        selfId?.trim()?.takeIf { it.isNotEmpty() }?.let { nonHumanIds.add(it) }
+        for (line in lines) {
+            val match = SPEAKER_HEADER_REGEX.find(line) ?: continue
+            val rawName = match.groupValues[1].trim()
+            val uid = match.groupValues[2].trim()
+            if (uid.isNotEmpty() && isNonHumanName(rawName)) {
+                nonHumanIds.add(uid)
+            }
+        }
+
         val seenIds = HashSet<String>()
         if (excludeAuthorId != null) {
             seenIds.add(excludeAuthorId)
         }
         val speakers = mutableListOf<SpeakerRef>()
-        for (line in transcript.lines().asReversed()) {
+
+        val lastSpeakerIdx = lines.indexOfLast { SPEAKER_HEADER_REGEX.containsMatchIn(it) }
+        val latestMessageLines = if (lastSpeakerIdx >= 0) lines.subList(lastSpeakerIdx, lines.size) else lines.takeLast(1)
+        for (line in latestMessageLines) {
+            for (match in MENTION_REGEX.findAll(line)) {
+                val rawName = match.groupValues[1].trim()
+                val uid = match.groupValues[2].trim()
+                if (uid.isEmpty() || isNonHumanName(rawName) || uid in nonHumanIds) {
+                    continue
+                }
+                if (seenIds.add(uid)) {
+                    speakers.add(SpeakerRef(userId = uid, displayName = rawName))
+                    if (speakers.size >= OTHER_SPEAKER_COUNT_LIMIT) {
+                        return speakers
+                    }
+                }
+            }
+        }
+
+        for (line in lines.asReversed()) {
             val match = SPEAKER_HEADER_REGEX.find(line) ?: continue
             val rawName = match.groupValues[1].trim()
             val uid = match.groupValues[2].trim()
-            if (uid.isEmpty() || rawName.endsWith(BOT_SUFFIX) || rawName == LUNA_NAME) {
+            if (uid.isEmpty() || isNonHumanName(rawName) || uid in nonHumanIds) {
                 continue
             }
             if (seenIds.add(uid)) {
@@ -152,6 +202,12 @@ open class UnderstandingPreInjector(
         }
         return speakers
     }
+
+    private fun isNonHumanName(rawName: String): Boolean =
+        rawName.endsWith(BOT_SUFFIX) ||
+            rawName == LUNA_NAME ||
+            rawName == LUNA_YOU_NAME ||
+            rawName.endsWith(YOU_SUFFIX)
 
     internal data class SpeakerRef(
         val userId: String,
@@ -169,9 +225,12 @@ open class UnderstandingPreInjector(
         const val OTHER_SPEAKER_ENTRY_LIMIT = 5
         const val GUILD_LIMIT = 8
         private const val BOT_SUFFIX = "[BOT]"
+        private const val YOU_SUFFIX = "[YOU]"
         private const val LUNA_NAME = "Luna"
+        private const val LUNA_YOU_NAME = "Luna [YOU]"
         private const val SECTION_HEADER =
             "以下為你對相關群友與本伺服器的長期印象（僅作自然語氣與互動參考，勿生硬複述）："
         private val SPEAKER_HEADER_REGEX = Regex("""^(.+?)\s+\(uid:(\d+)\)(?::|\s|$)""")
+        private val MENTION_REGEX = Regex("""@([^@\n]+?)\s+\(uid:(\d+)\)""")
     }
 }

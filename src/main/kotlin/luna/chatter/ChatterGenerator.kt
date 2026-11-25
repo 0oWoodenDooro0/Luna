@@ -42,6 +42,7 @@ open class ChatterGenerator(
     private val memoryToolHandler: ChatterMemoryToolHandler? = null,
     private val understandingPreInjector: UnderstandingPreInjector? = null,
     private val scheduleToolHandler: ChatterScheduleToolHandler? = null,
+    private val kordSelfIdProvider: () -> String? = { null },
 ) : AutoCloseable {
     private val ownsHttpClient: Boolean = httpClient == null
     private val httpClient: HttpClient = httpClient ?: GeminiHttpClientFactory.create()
@@ -159,12 +160,14 @@ open class ChatterGenerator(
             }.distinct()
         val trigger = if (effectiveInput.isDirectMention) AiTraceTrigger.MENTION else AiTraceTrigger.AMBIENT
 
+        val kordSelfId = kordSelfIdProvider()
         val understandingContext =
             if (memoryConfig.enabled && understandingPreInjector != null && !effectiveInput.guildId.isNullOrBlank()) {
                 understandingPreInjector.buildPreInjectionSection(
                     guildId = effectiveInput.guildId,
                     authorId = effectiveInput.authorId,
                     transcript = effectiveInput.transcript,
+                    selfId = kordSelfId,
                 )
             } else {
                 null
@@ -180,6 +183,7 @@ open class ChatterGenerator(
                 memoryToolsEnabled = memoryToolsEnabled,
                 understandingContext = understandingContext,
                 scheduleToolsEnabled = scheduleToolsEnabled,
+                kordSelfId = kordSelfId,
             )
 
         val allowedCustomEmojiIds = (effectiveInput.applicationEmojis + effectiveInput.guildEmojis).map { it.id.toString() }.toSet()

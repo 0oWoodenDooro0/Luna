@@ -170,4 +170,86 @@ class UnderstandingPreInjectorTest {
             logger.detachAppender(appender)
         }
     }
+
+    @Test
+    fun `prioritizes human users mentioned in latest message ahead of older bystander speakers within count and budget limits`() {
+        val store = createStore()
+        // Author 101
+        store.insertUnderstanding("1001", MemoryScope.USER, "101", "author_note", "愛喝拿鐵")
+        // Older bystanders 202, 303 in Working Memory Window
+        store.insertUnderstanding("1001", MemoryScope.USER, "202", "bystander_bob", "舊群友 Bob 印象")
+        store.insertUnderstanding("1001", MemoryScope.USER, "303", "bystander_charlie", "舊群友 Charlie 印象")
+        // Mentioned users 404, 505 in latest message (never spoke in transcript)
+        repeat(6) { idx ->
+            store.insertUnderstanding("1001", MemoryScope.USER, "404", "dave_s$idx", "被提及 Dave 印象 $idx")
+        }
+        store.insertUnderstanding("1001", MemoryScope.USER, "505", "eve_note", "被提及 Eve 印象")
+
+        val transcript =
+            """
+            Bob (uid:202): 早安
+            Charlie (uid:303): 午安
+            Alice (uid:101): 找一下 @Dave (uid:404) 跟 @Eve (uid:505) 討論這件事
+            """.trimIndent()
+
+        val injector = UnderstandingPreInjector(memoryStore = store, maxChars = 4000)
+        val section = injector.buildPreInjectionSection(guildId = "1001", authorId = "101", transcript = transcript)
+
+        assertNotNull(section)
+        assertTrue(section.contains("uid:404"), "Expected mentioned user uid:404 in section")
+        assertTrue(section.contains("uid:505"), "Expected mentioned user uid:505 in section")
+        assertFalse(section.contains("bystander_bob"), "Expected older bystander Bob to be displaced by 2 mentioned users")
+        assertFalse(section.contains("bystander_charlie"), "Expected older bystander Charlie to be displaced by 2 mentioned users")
+        assertEquals(5, section.lines().count { it.startsWith("- dave_s") }, "Expected per-speaker entry cap of 5")
+    }
+
+    @Test
+    fun `fills remaining speaker slots with recent bystanders when latest message mentions only one human user`() {
+        val store = createStore()
+        store.insertUnderstanding("1001", MemoryScope.USER, "202", "bystander_bob", "較早 Bob")
+        store.insertUnderstanding("1001", MemoryScope.USER, "303", "bystander_charlie", "較近 Charlie")
+        store.insertUnderstanding("1001", MemoryScope.USER, "404", "mentioned_dave", "被提及 Dave")
+
+        val transcript =
+            """
+            Bob (uid:202): 較早發言
+            Charlie (uid:303): 較近發言
+            Alice (uid:101): @Dave (uid:404) 來看看
+            """.trimIndent()
+
+        val injector = UnderstandingPreInjector(memoryStore = store, maxChars = 4000)
+        val section = injector.buildPreInjectionSection(guildId = "1001", authorId = "101", transcript = transcript)
+
+        assertNotNull(section)
+        assertTrue(section.contains("mentioned_dave"), "Expected mentioned user Dave to be included")
+        assertTrue(section.contains("bystander_charlie"), "Expected recent bystander Charlie to fill remaining slot")
+        assertFalse(section.contains("bystander_bob"), "Expected older bystander Bob to be excluded")
+    }
+
+    @Test
+    fun `excludes triggering author, Luna, bots, roles, and channels when extracting mentions from latest message`() {
+        val store = createStore()
+        store.insertUnderstanding("1001", MemoryScope.USER, "101", "author_self", "作者自己")
+        store.insertUnderstanding("1001", MemoryScope.USER, "505", "bot_helper", "機器人印象")
+        store.insertUnderstanding("1001", MemoryScope.USER, "606", "luna_self", "Luna 自己")
+        store.insertUnderstanding("1001", MemoryScope.USER, "404", "human_dave", "人類 Dave")
+
+        val transcript =
+            """
+            Helper [BOT] (uid:505): 系統通知
+            Luna (uid:606): 我在這裡
+            Alice (uid:101): @Alice (uid:101) @Luna [YOU] (uid:606) @Helper (uid:505) @Admin (role) #general
+            這行接續上一則訊息提到了 @Dave (uid:404) 跟重複的 @Dave (uid:404)
+            """.trimIndent()
+
+        val injector = UnderstandingPreInjector(memoryStore = store, maxChars = 4000)
+        val section = injector.buildPreInjectionSection(guildId = "1001", authorId = "101", transcript = transcript)
+
+        assertNotNull(section)
+        assertTrue(section.contains("human_dave"), "Expected multi-line latest message mention Dave to be included")
+        assertFalse(section.contains("bot_helper"), "Expected bot mentioned in latest message to be excluded")
+        assertFalse(section.contains("luna_self"), "Expected Luna mentioned in latest message to be excluded")
+        assertEquals(1, section.lines().count { it.contains("uid:101") }, "Expected author 101 only once as triggering author")
+        assertEquals(1, section.lines().count { it.contains("uid:404") }, "Expected deduplicated Dave 404")
+    }
 }

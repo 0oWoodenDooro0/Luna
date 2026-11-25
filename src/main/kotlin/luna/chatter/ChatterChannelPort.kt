@@ -1,5 +1,6 @@
 package luna.chatter
 
+import dev.kord.common.entity.AllowedMentionType
 import dev.kord.common.entity.Snowflake
 import dev.kord.core.behavior.channel.createMessage
 import dev.kord.core.behavior.reply
@@ -7,6 +8,7 @@ import dev.kord.core.entity.CustomEmoji
 import dev.kord.core.entity.GuildEmoji
 import dev.kord.core.entity.Message
 import dev.kord.core.entity.ReactionEmoji
+import dev.kord.rest.builder.message.allowedMentions
 import kotlinx.coroutines.flow.toList
 
 /**
@@ -108,7 +110,12 @@ object KordChatterChannelAdapter : ChatterChannelPort {
         anchor: Message,
         content: String,
     ) {
-        anchor.channel.createMessage(content)
+        anchor.channel.createMessage {
+            this.content = content
+            allowedMentions {
+                add(AllowedMentionType.UserMentions)
+            }
+        }
     }
 
     override suspend fun sendReply(
@@ -118,6 +125,10 @@ object KordChatterChannelAdapter : ChatterChannelPort {
         target.reply {
             this.messageReference = target.id
             this.content = content
+            allowedMentions {
+                add(AllowedMentionType.UserMentions)
+                repliedUser = true
+            }
         }
     }
 

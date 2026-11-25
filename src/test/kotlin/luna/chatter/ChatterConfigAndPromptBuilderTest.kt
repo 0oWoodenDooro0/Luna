@@ -530,4 +530,35 @@ class ChatterConfigAndPromptBuilderTest {
         assertFalse(message.contains(rawSecret))
         assertContains(message, "***")
     }
+
+    @Test
+    fun `ChatterPromptBuilder system instruction explains inline mention formats, restrained ping etiquette, and includes kordSelfId when provided`() {
+        val baseInstruction = ChatterPromptBuilder.buildSystemInstruction()
+        assertContains(baseInstruction, "@Name (uid:<id>)")
+        assertContains(baseInstruction, "@Luna [YOU] (uid:<selfId>)")
+        assertContains(baseInstruction, "@Role (role)")
+        assertContains(baseInstruction, "#channel")
+        assertContains(baseInstruction, "<@uid>")
+
+        val withSelfId =
+            ChatterPromptBuilder.buildSystemInstruction(
+                personaState = null,
+                kordSelfId = "999888777",
+            )
+        assertContains(withSelfId, "999888777")
+
+        val withBlankSelfId =
+            ChatterPromptBuilder.buildSystemInstruction(
+                personaState = null,
+                kordSelfId = "   ",
+            )
+        assertEquals(ChatterPromptBuilder.SYSTEM_INSTRUCTION, withBlankSelfId)
+
+        val requestWithSelfId =
+            ChatterPromptBuilder.buildInteractionRequest(
+                input = ChatterInput(transcript = "Alice (uid:101): @Luna [YOU] (uid:999888777) 早安"),
+                kordSelfId = "999888777",
+            )
+        assertContains(assertNotNull(requestWithSelfId.systemInstruction), "999888777")
+    }
 }
