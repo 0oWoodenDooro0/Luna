@@ -490,4 +490,58 @@ class AiTraceRecorderTest {
         assertEquals(AiTraceOutcome.FAILED, trace.outcome)
         assertEquals(AiTraceFailureCategory.UNEXPECTED_ERROR, trace.failureCategory)
     }
+
+    @Test
+    fun `AiTraceSession records relationshipTier, affinityScore, and affinityThresholdOffset in JSONL`() {
+        var recordedTrace: AiTraceRecord? = null
+        val customRecorder =
+            object : AiTraceRecorder {
+                override fun isEnabled(): Boolean = true
+
+                override fun startSession(
+                    pipeline: AiTracePipeline,
+                    trigger: AiTraceTrigger,
+                    discord: AiTraceDiscordContext,
+                ): AiTraceSession =
+                    AiTraceSession(
+                        recorder = this,
+                        pipeline = pipeline,
+                        trigger = trigger,
+                        discord = discord,
+                        isEnabled = true,
+                        emitCorrelationLog = false,
+                    )
+
+                override fun record(trace: AiTraceRecord) {
+                    recordedTrace = trace
+                }
+
+                override suspend fun flushAndClose(timeoutMs: Long) = Unit
+            }
+
+        val session =
+            customRecorder.startSession(
+                pipeline = AiTracePipeline.CHATTER,
+                trigger = AiTraceTrigger.AMBIENT,
+                discord = AiTraceDiscordContext(guildId = "g1", channelId = "c1", messageId = "m1", authorId = "u1"),
+            )
+        session.recordRelationship(
+            relationshipTier = "COOL",
+            affinityScore = -25,
+            affinityThresholdOffset = 0.10,
+        )
+        session.skip(reason = "Threshold raised by COOL affinity")
+        session.finish()
+
+        val trace = assertNotNull(recordedTrace)
+        assertEquals("COOL", trace.relationshipTier)
+        assertEquals(-25, trace.affinityScore)
+        assertEquals(0.10, trace.affinityThresholdOffset)
+
+        val line = AiTraceJson.encodeToString(AiTraceRecord.serializer(), trace)
+        val parsed = Json.parseToJsonElement(line).jsonObject
+        assertEquals("COOL", parsed["relationshipTier"]?.jsonPrimitive?.content)
+        assertEquals(-25, parsed["affinityScore"]?.jsonPrimitive?.content?.toInt())
+        assertEquals(0.10, parsed["affinityThresholdOffset"]?.jsonPrimitive?.content?.toDouble())
+    }
 }

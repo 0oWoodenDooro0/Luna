@@ -42,6 +42,9 @@ class AiTraceSession internal constructor(
     private var reactionThreshold: Double? = null
     private var scheduleBlockTitle: String? = null
     private var scheduleAvailability: String? = null
+    private var relationshipTier: String? = null
+    private var affinityScore: Int? = null
+    private var affinityThresholdOffset: Double? = null
 
     fun registerSecret(secret: String?) {
         if (!isEnabled || secret.isNullOrBlank()) return
@@ -75,6 +78,19 @@ class AiTraceSession internal constructor(
         synchronized(lock) {
             this.scheduleBlockTitle = scheduleBlockTitle
             this.scheduleAvailability = scheduleAvailability
+        }
+    }
+
+    fun recordRelationship(
+        relationshipTier: String?,
+        affinityScore: Int?,
+        affinityThresholdOffset: Double?,
+    ) {
+        if (!isEnabled) return
+        synchronized(lock) {
+            this.relationshipTier = relationshipTier
+            this.affinityScore = affinityScore
+            this.affinityThresholdOffset = affinityThresholdOffset
         }
     }
 
@@ -259,6 +275,9 @@ class AiTraceSession internal constructor(
                     reactionThreshold = reactionThreshold,
                     scheduleBlockTitle = scheduleBlockTitle,
                     scheduleAvailability = scheduleAvailability,
+                    relationshipTier = relationshipTier,
+                    affinityScore = affinityScore,
+                    affinityThresholdOffset = affinityThresholdOffset,
                 )
             secretsSnapshot = extraSecrets.toSet()
         }

@@ -3,6 +3,7 @@ package luna.chatter
 import io.ktor.client.HttpClient
 import kotlinx.serialization.json.JsonPrimitive
 import luna.chatter.memory.ChatterMemoryConfig
+import luna.chatter.memory.ChatterMemoryStore
 import luna.chatter.memory.ChatterMemoryToolHandler
 import luna.chatter.memory.UnderstandingPreInjector
 import luna.chatter.schedule.ChatterScheduleToolHandler
@@ -44,6 +45,8 @@ open class ChatterGenerator(
     private val scheduleToolHandler: ChatterScheduleToolHandler? = null,
     internal val kordSelfIdProvider: () -> String? = { null },
 ) : AutoCloseable {
+    internal open val memoryStore: ChatterMemoryStore?
+        get() = understandingPreInjector?.memoryStore
     private val ownsHttpClient: Boolean = httpClient == null
     private val httpClient: HttpClient = httpClient ?: GeminiHttpClientFactory.create()
     private val logger = LoggerFactory.getLogger(ChatterGenerator::class.java)
@@ -278,18 +281,42 @@ open class ChatterGenerator(
                         guildEmojis = effectiveInput.guildEmojis,
                         applicationEmojis = effectiveInput.applicationEmojis,
                     )
-                if (sanitized.isBlank()) {
-                    logger.error("ChatterGenerator response was sanitized to blank")
-                    session?.fail(
-                        AiTraceFailureCategory.EMPTY_OUTPUT,
-                        "Chatter response was sanitized to blank",
-                    )
-                    return null
+                when (
+                    val outcome =
+                        ChatterPromptBuilder.parseDisengagementOutcome(
+                            sanitized,
+                            allowDisengagement = effectiveInput.allowMentionDisengagement,
+                        )
+                ) {
+                    is ChatterPromptBuilder.DisengagementOutcome.NoReply -> {
+                        if (isStandalone) {
+                            session?.complete(finalOutput = ChatterPromptBuilder.NO_REPLY_SENTINEL, citations = emptyList())
+                        }
+                        ChatterPromptBuilder.NO_REPLY_SENTINEL
+                    }
+
+                    is ChatterPromptBuilder.DisengagementOutcome.ColdReact -> {
+                        if (isStandalone) {
+                            session?.complete(finalOutput = ChatterPromptBuilder.COLD_REACT_SENTINEL, citations = emptyList())
+                        }
+                        ChatterPromptBuilder.COLD_REACT_SENTINEL
+                    }
+
+                    is ChatterPromptBuilder.DisengagementOutcome.Text -> {
+                        if (outcome.text.isBlank()) {
+                            logger.error("ChatterGenerator response was sanitized to blank")
+                            session?.fail(
+                                AiTraceFailureCategory.EMPTY_OUTPUT,
+                                "Chatter response was sanitized to blank",
+                            )
+                            return null
+                        }
+                        if (isStandalone) {
+                            session?.complete(finalOutput = outcome.text, citations = emptyList())
+                        }
+                        outcome.text
+                    }
                 }
-                if (isStandalone) {
-                    session?.complete(finalOutput = sanitized, citations = emptyList())
-                }
-                sanitized
             }
 
             is InteractionExecutionResult.Error.SafetyBlock -> {

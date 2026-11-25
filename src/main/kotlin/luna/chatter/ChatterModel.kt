@@ -84,4 +84,6 @@ data class ChatterInput(
     val authorId: String? = null,
     val recentReactions: List<String> = emptyList(),
     val workingMemoryStartMs: Long? = null,
+    val allowMentionDisengagement: Boolean = false,
+    val coldReaction: Boolean = false,
 )
