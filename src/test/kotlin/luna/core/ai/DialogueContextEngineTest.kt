@@ -206,60 +206,61 @@ class DialogueContextEngineTest {
         }
 
     @Test
-    fun `formatDialogueMessages truncates reply excerpts at 120 chars by default and respects custom cap`() {
-        val logger = LoggerFactory.getLogger(DiscordDialogueContextEngine::class.java) as Logger
-        val previousLevel = logger.level
-        val listAppender = ListAppender<ILoggingEvent>().apply { start() }
-        logger.level = Level.DEBUG
-        logger.addAppender(listAppender)
+    fun `formatDialogueMessages truncates reply excerpts at 120 chars by default and respects custom cap`() =
+        runTest {
+            val logger = LoggerFactory.getLogger(DiscordDialogueContextEngine::class.java) as Logger
+            val previousLevel = logger.level
+            val listAppender = ListAppender<ILoggingEvent>().apply { start() }
+            logger.level = Level.DEBUG
+            logger.addAppender(listAppender)
 
-        try {
-            val longRefText = "A".repeat(130)
-            val refMsg = mockMessage(10L, content = longRefText, authorName = "Bob")
-            val replyMsg = mockMessage(11L, content = "Look at this", authorName = "Alice")
-            val refs = mapOf(replyMsg.id to refMsg)
+            try {
+                val longRefText = "A".repeat(130)
+                val refMsg = mockMessage(10L, content = longRefText, authorName = "Bob")
+                val replyMsg = mockMessage(11L, content = "Look at this", authorName = "Alice")
+                val refs = mapOf(replyMsg.id to refMsg)
 
-            val defaultFormatted =
-                engine.formatDialogueMessages(
-                    messages = listOf(replyMsg),
-                    policy = DialogueContextPolicy.summary(),
-                    replyReferencesByMessage = refs,
-                    formatSpeakerHeader = { it.name },
-                    kordSelfId = selfId,
+                val defaultFormatted =
+                    engine.formatDialogueMessages(
+                        messages = listOf(replyMsg),
+                        policy = DialogueContextPolicy.summary(),
+                        replyReferencesByMessage = refs,
+                        formatSpeakerHeader = { it.name },
+                        kordSelfId = selfId,
+                    )
+                val expectedDefaultExcerpt = "A".repeat(117) + "..."
+                assertEquals("[Alice 回覆 Bob「$expectedDefaultExcerpt」]: Look at this", defaultFormatted.transcript)
+                assertTrue(
+                    listAppender.list.any {
+                        it.level == Level.DEBUG && it.formattedMessage.contains("maxReplyExcerptLength=120")
+                    },
+                    "Expected DEBUG log when reply excerpt is truncated at default 120 chars",
                 )
-            val expectedDefaultExcerpt = "A".repeat(117) + "..."
-            assertEquals("[Alice 回覆 Bob「$expectedDefaultExcerpt」]: Look at this", defaultFormatted.transcript)
-            assertTrue(
-                listAppender.list.any {
-                    it.level == Level.DEBUG && it.formattedMessage.contains("maxReplyExcerptLength=120")
-                },
-                "Expected DEBUG log when reply excerpt is truncated at default 120 chars",
-            )
 
-            listAppender.list.clear()
+                listAppender.list.clear()
 
-            val customFormatted =
-                engine.formatDialogueMessages(
-                    messages = listOf(replyMsg),
-                    policy = DialogueContextPolicy.summary(maxReplyExcerptLength = 20),
-                    replyReferencesByMessage = refs,
-                    formatSpeakerHeader = { it.name },
-                    kordSelfId = selfId,
+                val customFormatted =
+                    engine.formatDialogueMessages(
+                        messages = listOf(replyMsg),
+                        policy = DialogueContextPolicy.summary(maxReplyExcerptLength = 20),
+                        replyReferencesByMessage = refs,
+                        formatSpeakerHeader = { it.name },
+                        kordSelfId = selfId,
+                    )
+                val expectedCustomExcerpt = "A".repeat(17) + "..."
+                assertEquals("[Alice 回覆 Bob「$expectedCustomExcerpt」]: Look at this", customFormatted.transcript)
+                assertTrue(
+                    listAppender.list.any {
+                        it.level == Level.DEBUG && it.formattedMessage.contains("maxReplyExcerptLength=20")
+                    },
+                    "Expected DEBUG log when reply excerpt is truncated at custom 20 chars",
                 )
-            val expectedCustomExcerpt = "A".repeat(17) + "..."
-            assertEquals("[Alice 回覆 Bob「$expectedCustomExcerpt」]: Look at this", customFormatted.transcript)
-            assertTrue(
-                listAppender.list.any {
-                    it.level == Level.DEBUG && it.formattedMessage.contains("maxReplyExcerptLength=20")
-                },
-                "Expected DEBUG log when reply excerpt is truncated at custom 20 chars",
-            )
-        } finally {
-            logger.detachAppender(listAppender)
-            listAppender.stop()
-            logger.level = previousLevel
+            } finally {
+                logger.detachAppender(listAppender)
+                listAppender.stop()
+                logger.level = previousLevel
+            }
         }
-    }
 
     @Test
     fun `formatEmbedPreviews formats Tenor and Giphy embeds as GIF and other embeds as link previews`() {
@@ -278,57 +279,58 @@ class DialogueContextEngineTest {
     }
 
     @Test
-    fun `formatDialogueMessages gates sticker annotations and image extraction by policy`() {
-        val sticker = mockk<StickerItem>(relaxed = true)
-        every { sticker.name } returns "ThumbsUp"
-        every { sticker.id } returns Snowflake(500L)
-        every { sticker.formatType } returns MessageStickerType.PNG
+    fun `formatDialogueMessages gates sticker annotations and image extraction by policy`() =
+        runTest {
+            val sticker = mockk<StickerItem>(relaxed = true)
+            every { sticker.name } returns "ThumbsUp"
+            every { sticker.id } returns Snowflake(500L)
+            every { sticker.formatType } returns MessageStickerType.PNG
 
-        val attachment = mockk<Attachment>(relaxed = true)
-        every { attachment.url } returns "https://cdn.discordapp.com/attachments/1/2/photo.png"
-        every { attachment.contentType } returns "image/png"
-        every { attachment.filename } returns "photo.png"
-        every { attachment.size } returns 1024
+            val attachment = mockk<Attachment>(relaxed = true)
+            every { attachment.url } returns "https://cdn.discordapp.com/attachments/1/2/photo.png"
+            every { attachment.contentType } returns "image/png"
+            every { attachment.filename } returns "photo.png"
+            every { attachment.size } returns 1024
 
-        val msg1 = mockMessage(1L, content = "Nice!", authorName = "Alice", stickers = listOf(sticker))
-        val msg2 = mockMessage(2L, content = "", authorName = "Bob", attachments = setOf(attachment))
+            val msg1 = mockMessage(1L, content = "Nice!", authorName = "Alice", stickers = listOf(sticker))
+            val msg2 = mockMessage(2L, content = "", authorName = "Bob", attachments = setOf(attachment))
 
-        val chatterImages =
-            engine.selectImages(
-                messages = listOf(msg1, msg2),
-                policy = DialogueContextPolicy.chatter(),
-                maxImages = 10,
-            )
-        val chatterResult =
-            engine.formatDialogueMessages(
-                messages = listOf(msg1, msg2),
-                policy = DialogueContextPolicy.chatter(),
-                imagesByMessage = chatterImages,
-                formatSpeakerHeader = { it.name },
-                kordSelfId = selfId,
-            )
-        assertTrue(chatterResult.transcript.contains("[貼圖: ThumbsUp]"), "Chatter must include sticker annotation")
-        assertTrue(chatterResult.transcript.contains("[附帶圖片 1: ThumbsUp.png]"), "Chatter must include sticker image marker")
-        assertTrue(chatterResult.transcript.contains("[附帶圖片 2: photo.png]"), "Chatter must increment image index sequentially")
-        assertEquals(3, chatterResult.nextImageIndex)
+            val chatterImages =
+                engine.selectImages(
+                    messages = listOf(msg1, msg2),
+                    policy = DialogueContextPolicy.chatter(),
+                    maxImages = 10,
+                )
+            val chatterResult =
+                engine.formatDialogueMessages(
+                    messages = listOf(msg1, msg2),
+                    policy = DialogueContextPolicy.chatter(),
+                    imagesByMessage = chatterImages,
+                    formatSpeakerHeader = { it.name },
+                    kordSelfId = selfId,
+                )
+            assertTrue(chatterResult.transcript.contains("[貼圖: ThumbsUp]"), "Chatter must include sticker annotation")
+            assertTrue(chatterResult.transcript.contains("[附帶圖片 1: ThumbsUp.png]"), "Chatter must include sticker image marker")
+            assertTrue(chatterResult.transcript.contains("[附帶圖片 2: photo.png]"), "Chatter must increment image index sequentially")
+            assertEquals(3, chatterResult.nextImageIndex)
 
-        val summaryImages =
-            engine.selectImages(
-                messages = listOf(msg1, msg2),
-                policy = DialogueContextPolicy.summary(),
-                maxImages = 10,
-            )
-        val summaryResult =
-            engine.formatDialogueMessages(
-                messages = listOf(msg1, msg2),
-                policy = DialogueContextPolicy.summary(),
-                imagesByMessage = summaryImages,
-                formatSpeakerHeader = { it.name },
-                kordSelfId = selfId,
-            )
-        assertTrue(!summaryResult.transcript.contains("[貼圖:"), "Summary must omit sticker annotation")
-        assertTrue(!summaryResult.transcript.contains("ThumbsUp.png"), "Summary must omit sticker image")
-        assertTrue(summaryResult.transcript.contains("[Bob]: [附帶圖片 1: photo.png]"), "Summary must include photo attachment marker")
-        assertEquals(2, summaryResult.nextImageIndex)
-    }
+            val summaryImages =
+                engine.selectImages(
+                    messages = listOf(msg1, msg2),
+                    policy = DialogueContextPolicy.summary(),
+                    maxImages = 10,
+                )
+            val summaryResult =
+                engine.formatDialogueMessages(
+                    messages = listOf(msg1, msg2),
+                    policy = DialogueContextPolicy.summary(),
+                    imagesByMessage = summaryImages,
+                    formatSpeakerHeader = { it.name },
+                    kordSelfId = selfId,
+                )
+            assertTrue(!summaryResult.transcript.contains("[貼圖:"), "Summary must omit sticker annotation")
+            assertTrue(!summaryResult.transcript.contains("ThumbsUp.png"), "Summary must omit sticker image")
+            assertTrue(summaryResult.transcript.contains("[Bob]: [附帶圖片 1: photo.png]"), "Summary must include photo attachment marker")
+            assertEquals(2, summaryResult.nextImageIndex)
+        }
 }
