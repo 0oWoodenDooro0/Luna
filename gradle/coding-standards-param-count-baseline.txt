@@ -7,6 +7,6 @@ src/main/kotlin/luna/chatter/ChatterSilentReactionCoordinator.kt#handleSilentRea
 src/main/kotlin/luna/chatter/emoji/DefaultChatterEmojiService.kt#DefaultChatterEmojiService=18
 src/main/kotlin/luna/chatter/memory/MemoryDistiller.kt#MemoryDistiller=14
 src/main/kotlin/luna/chatter/schedule/DeferredCatchUpDeliveryExecutor.kt#DeferredCatchUpDeliveryExecutor=12
-src/main/kotlin/luna/chatter/schedule/DeferredCatchUpService.kt#DeferredCatchUpService=16
+src/main/kotlin/luna/chatter/schedule/DeferredCatchUpService.kt#DeferredCatchUpService=15
 src/main/kotlin/luna/core/ai/AiTraceSession.kt#recordAttempt=18
 src/main/kotlin/luna/summarizer/ConversationSliceCollector.kt#ConversationSliceCollector=13

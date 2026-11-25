@@ -151,9 +151,12 @@ class DeferredCatchUpScheduleEditTest {
                     scheduleProvider = scheduleProvider,
                 ),
             config = config,
-            clock = fixedClock,
-            randomProvider = { _, _ -> 0L },
-            staggerDelayFn = { },
+            timing =
+                CatchUpTimingPort(
+                    clock = fixedClock,
+                    randomProvider = { _, _ -> 0L },
+                    staggerDelayFn = { },
+                ),
         )
     }
 

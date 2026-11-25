@@ -155,9 +155,12 @@ class DeferredCatchUpMentionResolutionTest {
                     burstCoordinator = BoundedChannelBurstCoordinator(debounceMs = 1L, mentionDebounceMs = 1L, maxDebounceMs = 6_000L),
                     personaStateProvider = CircadianPersonaDrift(timezone = "Asia/Taipei", enabled = false, scheduleProvider = scheduleProvider),
                     config = config,
-                    clock = fixedClock,
-                    randomProvider = { _, _ -> 0L },
-                    staggerDelayFn = { },
+                    timing =
+                        CatchUpTimingPort(
+                            clock = fixedClock,
+                            randomProvider = { _, _ -> 0L },
+                            staggerDelayFn = { },
+                        ),
                 )
 
             service.onBecomeAvailable(AvailabilityState.BUSY, availableBlock)
