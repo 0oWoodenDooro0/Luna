@@ -206,14 +206,34 @@ internal object UnderstandingPatchPrompt {
                 }
             val mutations = envelope.understandingPatches.mapNotNull { dto -> toMutationOrNull(guildId, dto, aliasMap) }
             val relationshipUpdates =
-                envelope.relationshipUpdates.mapNotNull { dto ->
-                    toRelationshipUpdateOrNull(guildId, dto, validSpeakerIds)
-                }
+                aggregateRelationshipUpdates(
+                    envelope.relationshipUpdates.mapNotNull { dto ->
+                        toRelationshipUpdateOrNull(guildId, dto, validSpeakerIds)
+                    },
+                )
             Stage3PatchResult(
                 understandingMutations = mutations,
                 relationshipUpdates = relationshipUpdates,
             )
         }
+
+    private fun aggregateRelationshipUpdates(updates: List<ValidatedRelationshipUpdate>): List<ValidatedRelationshipUpdate> {
+        if (updates.size <= 1) return updates
+        val merged = linkedMapOf<String, Pair<Int, String?>>()
+        for (update in updates) {
+            val prev = merged[update.targetUserId]
+            val combinedDelta = (prev?.first ?: 0) + update.affinityDelta
+            val combinedTone = update.toneStyle ?: prev?.second
+            merged[update.targetUserId] = combinedDelta to combinedTone
+        }
+        return merged.map { (userId, pair) ->
+            ValidatedRelationshipUpdate(
+                targetUserId = userId,
+                affinityDelta = NegativeAffinityDecay.clampDelta(pair.first),
+                toneStyle = pair.second,
+            )
+        }
+    }
 
     private fun toRelationshipUpdateOrNull(
         guildId: String,

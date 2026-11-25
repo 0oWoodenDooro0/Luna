@@ -222,4 +222,33 @@ class UnderstandingPatchPromptTest {
         assertEquals(1, stage3.understandingMutations.size)
         assertTrue(stage3.relationshipUpdates.isEmpty(), "Expected empty relationshipUpdates for legacy array response")
     }
+
+    @Test
+    fun `parsePatchResponse aggregates duplicate targetUserId updates per batch before clamping delta`() {
+        val payload =
+            """
+            {
+              "understandingPatches": [],
+              "relationshipUpdates": [
+                {"target_user_id": "111", "affinity_delta": 10, "tone_style": "first style"},
+                {"target_user_id": "111", "affinity_delta": 12, "tone_style": "latest style"}
+              ]
+            }
+            """.trimIndent()
+        val result =
+            UnderstandingPatchPrompt.parsePatchResponse(
+                guildId = "890892967991189534",
+                responseText = payload,
+                aliasMap = emptyMap(),
+                validSpeakerIds = setOf("111"),
+            )
+
+        assertTrue(result.isSuccess, "Expected duplicate targetUserId updates to parse cleanly")
+        val updates = result.getOrThrow().relationshipUpdates
+        assertEquals(1, updates.size)
+        assertEquals(
+            ValidatedRelationshipUpdate(targetUserId = "111", affinityDelta = 15, toneStyle = "latest style"),
+            updates.single(),
+        )
+    }
 }
