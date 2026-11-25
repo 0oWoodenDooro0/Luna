@@ -38,6 +38,46 @@ class ChatterGeneratorTest {
             }
         }
 
+    @Test
+    fun `passes kordSelfId from provider into Interactions systemInstruction`() =
+        runTest {
+            var recordedBody: String? = null
+            val engine =
+                MockEngine { request ->
+                    recordedBody = request.body.toByteArray().decodeToString()
+                    respond(
+                        content =
+                            """
+                            {
+                              "id": "int-self-id-1",
+                              "status": "completed",
+                              "steps": [
+                                {
+                                  "type": "model_output",
+                                  "content": [{ "type": "text", "text": "早安呀" }]
+                                }
+                              ]
+                            }
+                            """.trimIndent(),
+                        status = HttpStatusCode.OK,
+                        headers = headersOf(HttpHeaders.ContentType, "application/json"),
+                    )
+                }
+
+            val generator =
+                ChatterGenerator(
+                    config = ChatterConfig(apiKey = "valid-api-key"),
+                    httpClient = createTestClient(engine),
+                    kordSelfIdProvider = { "777666555" },
+                )
+
+            val reply = generator.generateReply("Alice (uid:101): @Luna [YOU] (uid:777666555) 早安")
+            assertEquals("早安呀", reply)
+            val bodyJson = json.parseToJsonElement(assertNotNull(recordedBody)).jsonObject
+            val sysInst = bodyJson["system_instruction"]?.jsonPrimitive?.content
+            assertTrue(sysInst?.contains("777666555") == true, "Expected kordSelfId in system_instruction, got: $sysInst")
+        }
+
     // --- ChatterGenerator Integration & Error Handling Tests ---
 
     @Test

@@ -71,7 +71,7 @@ open class ConversationSliceCollector(
 
     internal suspend fun isBotSummaryMessage(message: Message): Boolean = noiseFilter.isBotSummaryMessage(message)
 
-    private fun formatTranscript(
+    private suspend fun formatTranscript(
         messages: List<Message>,
         imagesByMessage: Map<Snowflake, List<ChatImageAttachment>> = emptyMap(),
         replyReferencesByMessage: Map<Snowflake, Message> = emptyMap(),
@@ -144,7 +144,12 @@ open class ConversationSliceCollector(
                         replyReferencesByMessage = replyReferencesByMessage,
                     )
                 } else {
-                    message.content
+                    contextEngine.resolveTextMentions(
+                        text = message.content,
+                        contextMessages = listOf(message),
+                        policy = policy,
+                        kordSelfId = noiseFilter.selfId,
+                    )
                 }
             }
 
@@ -169,11 +174,22 @@ open class ConversationSliceCollector(
             val peekTargetUrl = enrichment.peekTargetUrl
             val combinedContent =
                 if (allMessages.size == 1 && sliceImageAttachments.isEmpty() && peekTargetUrl != null) {
-                    val commentary = message.content.replace(peekTargetUrl, "").trim()
+                    val rawCommentary = message.content.replace(peekTargetUrl, "").trim()
+                    val commentary =
+                        if (rawCommentary.isNotBlank()) {
+                            contextEngine.resolveTextMentions(
+                                text = rawCommentary,
+                                contextMessages = listOf(message),
+                                policy = policy,
+                                kordSelfId = noiseFilter.selfId,
+                            )
+                        } else {
+                            ""
+                        }
                     if (commentary.isNotBlank() && postContent.isNotBlank()) {
                         "使用者附註: $commentary\n\n內容:\n$postContent"
                     } else {
-                        postContent.ifBlank { message.content }
+                        postContent.ifBlank { formattedContent }
                     }
                 } else {
                     if (postContent.isNotBlank()) {

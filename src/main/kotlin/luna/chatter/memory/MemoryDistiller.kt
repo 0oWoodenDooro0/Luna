@@ -337,7 +337,7 @@ class MemoryDistiller(
 
         val newestMessageId = fetched.last().id.toString()
         val selfId = kordSelfIdProvider()
-        val chatMessages = fetched.mapNotNull { noiseFilter.toChatMessageOrNull(it, selfId) }
+        val chatMessages = noiseFilter.filterAndResolveHistory(fetched, selfId)
 
         if (chatMessages.isEmpty()) {
             memoryStore.upsertCursor(channelId = channelId, guildId = guildId, lastSummarizedMessageId = newestMessageId)

@@ -4,6 +4,7 @@ import org.gradle.api.tasks.testing.TestResult
 import org.gradle.api.tasks.testing.logging.TestExceptionFormat
 import org.gradle.api.tasks.testing.logging.TestLogEvent
 import java.time.Duration
+import java.util.concurrent.ConcurrentHashMap
 
 plugins {
     alias(libs.plugins.kotlin.jvm)
@@ -14,6 +15,7 @@ plugins {
 
 allprojects {
     tasks.withType<Test> {
+        maxHeapSize = "1g"
         timeout.set(Duration.ofSeconds(60))
         testLogging {
             events(TestLogEvent.FAILED)
@@ -22,6 +24,8 @@ allprojects {
             showCauses = true
             showStackTraces = false
         }
+        val testTask = this
+        val activeTests = ConcurrentHashMap<String, Long>()
         addTestListener(
             object : TestListener {
                 override fun beforeSuite(suite: TestDescriptor) {}
@@ -29,14 +33,32 @@ allprojects {
                 override fun afterSuite(
                     suite: TestDescriptor,
                     result: TestResult,
-                ) {}
+                ) {
+                    val className = suite.className ?: return
+                    val elapsedMs = result.endTime - result.startTime
+                    if (elapsedMs >= 5_000L) {
+                        logger.quiet("SLOW SUITE ({}ms): {}", elapsedMs, className)
+                    }
+                }
 
-                override fun beforeTest(testDescriptor: TestDescriptor) {}
+                override fun beforeTest(testDescriptor: TestDescriptor) {
+                    activeTests["${testDescriptor.className} > ${testDescriptor.displayName}"] = System.nanoTime()
+                }
 
                 override fun afterTest(
                     testDescriptor: TestDescriptor,
                     result: TestResult,
                 ) {
+                    activeTests.remove("${testDescriptor.className} > ${testDescriptor.displayName}")
+                    val elapsedMs = result.endTime - result.startTime
+                    if (elapsedMs >= 5_000L) {
+                        logger.quiet(
+                            "SLOW TEST ({}ms): {} > {}",
+                            elapsedMs,
+                            testDescriptor.className,
+                            testDescriptor.displayName,
+                        )
+                    }
                     if (result.resultType == TestResult.ResultType.FAILURE) {
                         val ex = result.exception
                         val detail = ex?.let { "${it::class.simpleName}: ${it.message}" }.orEmpty()
@@ -53,6 +75,19 @@ allprojects {
                 }
             },
         )
+        gradle.taskGraph.afterTask {
+            if (this == testTask && state.failure != null && activeTests.isNotEmpty()) {
+                val nowNs = System.nanoTime()
+                val snapshot =
+                    activeTests.entries
+                        .sortedBy { it.value }
+                        .joinToString("; ") { (name, startedNs) ->
+                            val runningMs = (nowNs - startedNs) / 1_000_000L
+                            "$name (${runningMs}ms)"
+                        }
+                logger.error("IN-FLIGHT TESTS ON FAILURE/TIMEOUT: {}", snapshot)
+            }
+        }
     }
 }
 

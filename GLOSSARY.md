@@ -201,7 +201,7 @@ A stable, non-decaying relational or behavioral impression distilled from recurr
 _Avoid_: Memory understanding, user persona, impression note, profile summary
 
 **Understanding Pre-Injection**:
-The zero-embedding reply-time inclusion of compact `Social Understanding` records for the triggering author, recent `Working Memory Window` speakers, and the active guild within a bounded character budget, providing immediate familiarity without invoking `Agentic Memory Retrieval`.
+The zero-embedding reply-time inclusion of compact `Social Understanding` records for the triggering author, human users mentioned in the latest message, recent `Working Memory Window` speakers, and the active guild within a bounded character budget, providing immediate familiarity without invoking `Agentic Memory Retrieval`.
 _Avoid_: Pre-prompt RAG, memory dump, profile injection
 
 **Fact Expiration**:
@@ -225,8 +225,12 @@ A bounded dual-signal damping factor applied during `Agentic Memory Retrieval` r
 _Avoid_: Time cutoff, hard age filter, linear score penalty
 
 **Dialogue Context Engine**:
-The policy-driven shared module in `luna.core.ai` that provides unified Discord noise evaluation, external `Reply Reference Chaining`, embed and Tenor/Giphy GIF preview formatting, primary social/YouTube link enrichment (with 2-hour duration cap and regex fallback), and image marker formatting for both `Chatter Pipeline` and `Summary Pipeline` without cross-plugin coupling.
+The policy-driven shared module in `luna.core.ai` that provides unified Discord noise evaluation, external `Reply Reference Chaining`, `Mention Resolution`, guild display-name resolution, embed and Tenor/Giphy GIF preview formatting, primary social/YouTube link enrichment (with 2-hour duration cap and regex fallback), and image marker formatting for both `Chatter Pipeline` and `Summary Pipeline` without cross-plugin coupling. All Discord-to-LLM message formatting entry points (`DiscordDialogueContextEngine`, `ChatterContextCollector`, `DeferredCatchUpService`) route through its formatting and resolution seams.
 _Avoid_: Context helper, shared collector, dialogue utils, enrichment service
+
+**Mention Resolution**:
+The inline expansion of raw Discord user, role, and channel mention tokens into human-readable display names within a formatted dialogue transcript—preserving stable user IDs in `Chatter Pipeline` while omitting IDs in `Summary Pipeline`—without altering the original Discord message content.
+_Avoid_: Mention stripping, tag replacement, ID scrubbing
 
 **Daily Schedule**:
 Luna's globally shared, day-scoped 24-hour sequence of contiguous `Schedule Block` entries generated from `Chatter Persona`, day-of-week, prior-day continuity, and any `Schedule Commitment` entries for that date, governing `Chatter Pipeline` availability and Discord presence and remaining mutable from the current time onward via `Agentic Schedule Adjustment`.

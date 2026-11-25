@@ -53,7 +53,9 @@ object ChatterPromptBuilder {
             "5. 一次講一句重點：通常一次只講一句重點，最多兩到三句極短句（每段想法各佔一行），嚴禁長篇大論、說教或分析條列。\n" +
             "6. 語言用語：以台灣繁體中文（zh-TW）為主要社群慣用語，或配合對話語言交流。\n" +
             "7. 嚴格禁用 AI 套話與開場白：輸出中絕對嚴禁使用任何制式、官方或機械化的 AI 助理開場白或套話（例如「身為一個 AI」、「很高興為您服務」、「有什麼我可以幫忙的嗎」等），請直接切入話題搭話。\n" +
-            "8. 對話脈絡理解：對話紀錄中標註了各發言者的名稱與識別碼（例如 使用者 (uid:123456): 內容 或 機器人 [BOT] (uid:789012): 內容）。請根據上下文脈絡隨性自然地搭話。\n" +
+            "8. 對話脈絡與提及（Mention）理解：對話紀錄中標註了各發言者的名稱與識別碼（例如 使用者 (uid:123456): 內容 或 機器人 [BOT] (uid:789012): 內容）。" +
+            "訊息內容中的提及標記會展開為 @Name (uid:<id>)、@Luna [YOU] (uid:<selfId>)、@Role (role) 與 #channel。" +
+            "請根據上下文脈絡隨性自然地搭話；平常聊天提到群友時直接稱呼純文字名稱即可，只有在真的需要點名通知特定對象時，才在回覆中輸出 <@uid> 格式。\n" +
             "9. 順應最新話鋒：發言時只順著聊天紀錄最新、當前正在進行的話題接話，切勿回頭去回覆或挖掘紀錄更早之前已經結束的舊句子。\n" +
             "10. 多模態與連結內容理解：若對話中附帶圖片（標記為 [附帶圖片 N]）、YouTube 影片、社群連結內容（[連結內容: ...]）或一般公開網頁連結" +
             "（可透過 url_context 工具讀取網頁內容），請自然融入視覺畫面、影片重點或網頁資訊來搭話或回應，但仍維持口語簡短的聊天節奏，不可變成制式摘要。\n" +
@@ -77,14 +79,25 @@ object ChatterPromptBuilder {
             "- manage_schedule_commitment 用於新增、更新（upsert）或取消（cancel）明天起算未來 7 天內的跨日約定。\n" +
             "- 若工具回傳 rejected（例如時段已過、超過時長上限或修改太頻繁），請自然用 Luna 的口吻回應或吐槽，切勿對群友提及內部系統限制或工具名稱。"
 
-    fun buildSystemInstruction(): String = buildSystemInstruction(personaState = null, memoryToolsEnabled = false, scheduleToolsEnabled = false)
+    fun buildSystemInstruction(): String =
+        buildSystemInstruction(
+            personaState = null,
+            memoryToolsEnabled = false,
+            scheduleToolsEnabled = false,
+            kordSelfId = null,
+        )
 
     fun buildSystemInstruction(
         personaState: PersonaState?,
         memoryToolsEnabled: Boolean = false,
         scheduleToolsEnabled: Boolean = false,
+        kordSelfId: String? = null,
     ): String {
         val sb = StringBuilder(SYSTEM_INSTRUCTION)
+        val cleanSelfId = kordSelfId?.trim()?.takeIf { it.isNotEmpty() }
+        if (cleanSelfId != null) {
+            sb.append("\n\n你的 Discord UID：$cleanSelfId（對話中顯示為 @Luna [YOU] (uid:$cleanSelfId)）")
+        }
         if (memoryToolsEnabled) {
             sb.append(MEMORY_TOOL_INSTRUCTION)
         }
@@ -274,6 +287,7 @@ object ChatterPromptBuilder {
         memoryToolsEnabled: Boolean = false,
         understandingContext: String? = null,
         scheduleToolsEnabled: Boolean = false,
+        kordSelfId: String? = null,
     ): GeminiInteractionRequest {
         val inputs =
             GeminiInteractionClient.buildMultimodalInputs(
@@ -291,6 +305,7 @@ object ChatterPromptBuilder {
                     personaState = input.personaState,
                     memoryToolsEnabled = memoryToolsEnabled,
                     scheduleToolsEnabled = scheduleToolsEnabled,
+                    kordSelfId = kordSelfId,
                 ),
             tools = tools.takeIf { it.isNotEmpty() },
             generationConfig = GeminiInteractionGenerationConfig(maxOutputTokens = MAX_OUTPUT_TOKENS),

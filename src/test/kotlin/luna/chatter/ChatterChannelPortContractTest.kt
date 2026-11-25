@@ -1,6 +1,8 @@
 package luna.chatter
 
+import dev.kord.common.entity.AllowedMentionType
 import dev.kord.common.entity.Snowflake
+import dev.kord.common.entity.optional.OptionalBoolean
 import dev.kord.core.behavior.channel.createMessage
 import dev.kord.core.entity.ApplicationEmoji
 import dev.kord.core.entity.Guild
@@ -338,30 +340,29 @@ class KordChatterChannelAdapterContractTest : ChatterChannelPortContractTest() {
         }
 
         val sentContents = mutableListOf<String>()
-        if (sendError != null) {
-            coEvery { channel.createMessage(any<String>()) } throws sendError
-        } else {
-            coEvery { channel.createMessage(any<String>()) } answers {
-                sentContents += firstArg<String>()
-                mockk(relaxed = true)
-            }
-        }
-
         val capturedReplies = mutableListOf<Pair<Snowflake?, String>>()
-        if (replyError != null) {
+        val restError = sendError ?: replyError
+        if (restError != null) {
             coEvery {
                 anchor.kord.rest.channel
                     .createMessage(channelId, any<MultipartMessageCreateRequest>())
-            } throws replyError
+            } throws restError
         } else {
             coEvery {
                 anchor.kord.rest.channel
                     .createMessage(channelId, any<MultipartMessageCreateRequest>())
             } answers {
                 val req = secondArg<MultipartMessageCreateRequest>().request
-                capturedReplies += req.messageReference.value
-                    ?.id
-                    ?.value to req.content.value.orEmpty()
+                val refId =
+                    req.messageReference.value
+                        ?.id
+                        ?.value
+                val text = req.content.value.orEmpty()
+                if (refId != null) {
+                    capturedReplies += refId to text
+                } else {
+                    sentContents += text
+                }
                 mockk(relaxed = true)
             }
         }
@@ -405,6 +406,42 @@ class KordChatterChannelAdapterContractTest : ChatterChannelPortContractTest() {
             },
         )
     }
+
+    @Test
+    fun `sendMessage and sendReply enforce allowedMentions for Users only and block everyone, here, and Roles`() =
+        runTest {
+            val channelId = Snowflake(100L)
+            val anchorId = Snowflake(10L)
+            val channel = mockk<MessageChannel>(relaxed = true)
+            val anchor = mockk<Message>(relaxed = true)
+            every { anchor.id } returns anchorId
+            every { anchor.channelId } returns channelId
+            every { anchor.channel } returns channel
+            every { channel.id } returns channelId
+            every { channel.kord } returns anchor.kord
+
+            val capturedRequests = mutableListOf<MultipartMessageCreateRequest>()
+            coEvery {
+                anchor.kord.rest.channel
+                    .createMessage(channelId, any<MultipartMessageCreateRequest>())
+            } answers {
+                capturedRequests += secondArg<MultipartMessageCreateRequest>()
+                mockk(relaxed = true)
+            }
+
+            KordChatterChannelAdapter.sendMessage(anchor, "@everyone @here <@&999> <@123>")
+            KordChatterChannelAdapter.sendReply(anchor, "@everyone @here <@&999> <@123>")
+
+            assertEquals(2, capturedRequests.size)
+
+            val plainAllowed = capturedRequests[0].request.allowedMentions.value
+            assertEquals(listOf(AllowedMentionType.UserMentions), plainAllowed?.parse)
+            assertEquals(OptionalBoolean.Missing, plainAllowed?.repliedUser)
+
+            val replyAllowed = capturedRequests[1].request.allowedMentions.value
+            assertEquals(listOf(AllowedMentionType.UserMentions), replyAllowed?.parse)
+            assertEquals(OptionalBoolean.Value(true), replyAllowed?.repliedUser)
+        }
 }
 
 class FakeChatterChannelPortContractTest : ChatterChannelPortContractTest() {

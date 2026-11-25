@@ -4,6 +4,9 @@ import ch.qos.logback.classic.Level
 import ch.qos.logback.classic.Logger
 import ch.qos.logback.classic.spi.ILoggingEvent
 import ch.qos.logback.core.read.ListAppender
+import dev.kord.common.entity.Snowflake
+import dev.kord.core.Kord
+import io.mockk.every
 import io.mockk.mockk
 import kotlinx.coroutines.test.runTest
 import luna.chatter.ChatterPlugin
@@ -154,5 +157,39 @@ class ChatterPluginScheduleTest {
 
             plugin.shutdown()
             assertNull(plugin.scheduleCommand)
+        }
+
+    @Test
+    fun `ChatterPlugin wires kordSelfIdProvider into ChatterGenerator`() =
+        runTest {
+            val dbPath = tempDir.resolve("plugin-self-id.db").toString()
+            val db = LunaHost.initDatabase(dbPath = dbPath, vecExtensionPath = tempDir.resolve("missing-vec0.so").toString())
+
+            val kord =
+                mockk<Kord>(relaxed = true).apply {
+                    every { selfId } returns Snowflake(999123456UL)
+                }
+            val plugin = ChatterPlugin()
+            val context =
+                DefaultPluginContext(
+                    kord = kord,
+                    routing = mockk(relaxed = true),
+                    database = db,
+                    env =
+                        EnvReader.of(
+                            mapOf(
+                                "GEMINI_API_KEY" to "test-key",
+                                "CHATTER_ENABLED" to "true",
+                                "CHATTER_SCHEDULE_ENABLED" to "false",
+                            ),
+                        ),
+                )
+
+            plugin.initialize(context)
+
+            val generator = assertNotNull(plugin.chatterGenerator, "Expected chatterGenerator to be initialized")
+            assertEquals("999123456", generator.kordSelfIdProvider())
+
+            plugin.shutdown()
         }
 }
