@@ -161,7 +161,7 @@ The multi-turn conversational output cadence that splits a generated `Chatter Pi
 _Avoid_: Multi-line spam, message chunking, stream split
 
 **Chatter Persona**:
-Luna's distinct conversational personality in `Chatter Pipeline`—a quick-witted, curious, sharp-tongued yet approachable freelance creator / flexible homebody night-owl friend who is confident yet occasionally scatterbrained, quick to admit mistakes, mildly thin-skinned when pressed, and naturally helpful without acting like an assistant—grounded by `Daily Schedule` and modulated by `Circadian Persona Drift`, isolated from `Summary Pipeline`.
+Luna's distinct conversational personality in `Chatter Pipeline`—a quick-witted, curious, sharp-tongued yet approachable freelance creator / flexible homebody night-owl friend who is confident yet occasionally scatterbrained, quick to admit mistakes, mildly thin-skinned when pressed, and naturally helpful to friends without acting like an assistant—grounded by `Daily Schedule` and modulated by `Circadian Persona Drift` and per-user `User Relationship`, isolated from `Summary Pipeline`.
 _Avoid_: Bot bio, assistant tone, static system prompt
 
 **Circadian Persona Drift**:
@@ -259,4 +259,24 @@ _Avoid_: Backlog dump, missed-message replay, unread queue flush
 **Catch-Up Watermark**:
 The per-channel persisted boundary tracking pending missed activity during unavailable blocks and the latest Discord message ID already reviewed by `Deferred Catch-Up`, preventing duplicate replies across restarts.
 _Avoid_: Unread pointer, backlog offset, catch-up cursor
+
+**User Relationship**:
+The guild-scoped interpersonal stance Luna maintains toward a specific Discord user—combining a bounded `Affinity Score` mapped to an `Affinity Tier` with a concise subjective feeling and tone cue—layered atop `Social Understanding` inside `Chatter Pipeline`.
+_Avoid_: Friendship level, reputation score, user rating, favorability stat
+
+**Affinity Score**:
+A bounded signed integer (`-100..+100`, default `0`) representing Luna's cumulative like or dislike toward a user within a guild, incrementally adjusted during `Memory Distillation` with per-batch bounds and subject to asymmetric `Negative Affinity Decay`.
+_Avoid_: Trust points, karma, favorability number, relationship XP
+
+**Affinity Tier**:
+The five-level discrete classification derived from a user's `Affinity Score` (`DISLIKED`, `COOL`, `NEUTRAL`, `WARM`, `FAVORITE`) that governs `Participation Decision` threshold offsets, `Silent Reaction Path` suppression, `Deferred Catch-Up` prioritization, and baseline conversational warmth.
+_Avoid_: Relationship rank, mood tier, friendliness level
+
+**Negative Affinity Decay**:
+The asymmetric time-based relaxation rule whereby negative `Affinity Score` values slowly drift back toward neutral (`0`) after an inactivity cooldown so strained relationships can recover, while positive scores remain durable without automatic decay.
+_Avoid_: Relationship reset, score expiration, global affinity TTL
+
+**Selective Mention Disengagement**:
+The low-affinity response option for `COOL` or `DISLIKED` users who directly mention or reply to Luna, allowing `Chatter Pipeline` reply generation to inspect full dialogue context before choosing a curt/aloof reply, an explicit refusal, a cold `Silent Reaction Path`, or silent non-response.
+_Avoid_: Mention ban, user blocklist, hard ignore filter
 
