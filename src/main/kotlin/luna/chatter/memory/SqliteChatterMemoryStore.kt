@@ -514,6 +514,31 @@ class SqliteChatterMemoryStore(
         }
     }
 
+    override fun getUserRelationship(
+        guildId: String,
+        userId: String,
+        now: Long?,
+    ): UserRelationship = SqliteUserRelationshipHelper.getFailOpen(database, guildId, userId, now ?: clock.millis(), logger)
+
+    override fun listUserRelationships(
+        guildId: String,
+        userIds: Collection<String>,
+        now: Long?,
+    ): Map<String, UserRelationship> = SqliteUserRelationshipHelper.listFailOpen(database, guildId, userIds, now ?: clock.millis(), logger)
+
+    override fun applyRelationshipUpdate(
+        guildId: String,
+        userId: String,
+        affinityDelta: Int,
+        toneStyle: String?,
+        now: Long?,
+    ): UserRelationship = SqliteUserRelationshipHelper.applyUpdateTx(database, guildId, userId, affinityDelta, toneStyle, now ?: clock.millis())
+
+    override fun deleteUserRelationship(
+        guildId: String,
+        userId: String,
+    ): Boolean = SqliteUserRelationshipHelper.deleteTx(database, guildId, userId)
+
     private fun currentJdbcConnection(): Connection = TransactionManager.current().connection.connection as Connection
 
     private fun evictAllGuildOverflowAfterMigration(
@@ -846,7 +871,6 @@ class SqliteChatterMemoryStore(
         const val DEFAULT_MAX_UNDERSTANDINGS_PER_USER = 15
         const val DEFAULT_MAX_UNDERSTANDINGS_PER_GUILD = 20
         private val WHITESPACE_REGEX = Regex("""\s+""")
-        private val VECTOR_DIMENSION_REGEX = Regex("""float\[(\d+)]""")
 
         internal fun sanitizeImportance(importance: Int): Int = importance.coerceIn(ChatterMemoryStore.MIN_IMPORTANCE, ChatterMemoryStore.MAX_IMPORTANCE)
 
@@ -860,19 +884,7 @@ class SqliteChatterMemoryStore(
             existingTableSql: String,
             expectedDimension: Int,
             logger: org.slf4j.Logger,
-        ): Boolean {
-            val match = VECTOR_DIMENSION_REGEX.find(existingTableSql) ?: return true
-            val existingDimension = match.groupValues[1].toIntOrNull() ?: return true
-            if (existingDimension != expectedDimension) {
-                logger.warn(
-                    "chatter_memories_vec embedding dimension mismatch (expected {}, found {}); degrading to lexical FTS5/LIKE fallback mode",
-                    expectedDimension,
-                    existingDimension,
-                )
-                return false
-            }
-            return true
-        }
+        ): Boolean = ChatterMemorySchemaMigrator.isVectorDimensionCompatible(existingTableSql, expectedDimension, logger)
 
         internal fun buildVectorSearchSql(
             scopeClause: String,

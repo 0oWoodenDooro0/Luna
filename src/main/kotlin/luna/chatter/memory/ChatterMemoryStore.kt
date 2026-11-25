@@ -130,6 +130,31 @@ interface ChatterMemoryStore {
 
     fun applyUnderstandingMutations(mutations: List<UnderstandingMutation>)
 
+    fun getUserRelationship(
+        guildId: String,
+        userId: String,
+        now: Long? = null,
+    ): UserRelationship = UserRelationship.neutral(guildId = guildId, userId = userId, now = now ?: 0L)
+
+    fun listUserRelationships(
+        guildId: String,
+        userIds: Collection<String>,
+        now: Long? = null,
+    ): Map<String, UserRelationship> = emptyMap()
+
+    fun applyRelationshipUpdate(
+        guildId: String,
+        userId: String,
+        affinityDelta: Int,
+        toneStyle: String? = null,
+        now: Long? = null,
+    ): UserRelationship = UserRelationship.neutral(guildId = guildId, userId = userId, now = now ?: 0L)
+
+    fun deleteUserRelationship(
+        guildId: String,
+        userId: String,
+    ): Boolean = false
+
     companion object {
         const val DEFAULT_IMPORTANCE = 3
         const val MIN_IMPORTANCE = 1
