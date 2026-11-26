@@ -244,7 +244,7 @@ class DeferredCatchUpServiceTest {
             coEvery { channelPort.fetchMessagesAfter(any(), any()) } returns emptyList()
 
             val deliveredOrder = mutableListOf<String>()
-            coEvery { channelPort.sendReply(mentionMsg, any()) } answers {
+            coEvery { channelPort.sendReply(mentionMsg, any(), any()) } answers {
                 deliveredOrder.add("REPLY:1002")
                 Unit
             }
@@ -266,9 +266,9 @@ class DeferredCatchUpServiceTest {
 
             service.onBecomeAvailable(AvailabilityState.BUSY, availableBlock)
 
-            // Direct mention delivered first via sendReply (message.reply), then ambient via Silent Reaction Path
+            // Direct mention delivered first via sendReply (message.reply) with pingRepliedUser = true, then ambient via Silent Reaction Path
             assertEquals(listOf("REPLY:1002", "REACT:1001"), deliveredOrder)
-            coVerify(exactly = 1) { channelPort.sendReply(mentionMsg, "好啊晚點上線！") }
+            coVerify(exactly = 1) { channelPort.sendReply(mentionMsg, "好啊晚點上線！", pingRepliedUser = true) }
             coVerify(exactly = 0) { channelPort.sendMessage(any(), any()) }
             coVerify(exactly = 1) { channelPort.addReaction(ambientMsg, ReactionEmoji.Unicode("😂")) }
             verify(exactly = 1) { store.clearCatchUpWatermark(channelId.toString()) }
@@ -393,9 +393,9 @@ class DeferredCatchUpServiceTest {
 
             service.onBecomeAvailable(AvailabilityState.BUSY, availableBlock)
 
-            coVerify(exactly = 1) { channelPort.sendReply(msg1, "收到！") }
-            coVerify(exactly = 0) { channelPort.sendReply(msg2, any()) }
-            coVerify(exactly = 0) { channelPort.sendReply(msg3, any()) }
+            coVerify(exactly = 1) { channelPort.sendReply(msg1, "收到！", pingRepliedUser = false) }
+            coVerify(exactly = 0) { channelPort.sendReply(msg2, any(), any()) }
+            coVerify(exactly = 0) { channelPort.sendReply(msg3, any(), any()) }
         }
 
     @Test
@@ -425,7 +425,7 @@ class DeferredCatchUpServiceTest {
 
             val channelPort = mockk<ChatterChannelPort>(relaxed = true)
             coEvery { channelPort.fetchMessagesBefore(any(), any()) } returns emptyList()
-            coEvery { channelPort.sendReply(msg1, any()) } answers {
+            coEvery { channelPort.sendReply(msg1, any(), any()) } answers {
                 // Transition back to BUSY immediately after first reply
                 currentBlock = busyBlock
                 Unit
@@ -443,8 +443,8 @@ class DeferredCatchUpServiceTest {
 
             service.onBecomeAvailable(AvailabilityState.SLEEPING, availableBlock)
 
-            coVerify(exactly = 1) { channelPort.sendReply(msg1, "先回你這則！") }
-            coVerify(exactly = 0) { channelPort.sendReply(msg2, any()) }
+            coVerify(exactly = 1) { channelPort.sendReply(msg1, "先回你這則！", pingRepliedUser = true) }
+            coVerify(exactly = 0) { channelPort.sendReply(msg2, any(), any()) }
             coVerify(exactly = 0) { catchUpPort.fetchMissedMessages(channelId2, any(), any()) }
             verify(exactly = 0) { store.clearCatchUpWatermark(channelId2.toString()) }
         }
@@ -472,7 +472,7 @@ class DeferredCatchUpServiceTest {
 
             val channelPort = mockk<ChatterChannelPort>(relaxed = true)
             coEvery { channelPort.fetchMessagesBefore(any(), any()) } returns emptyList()
-            coEvery { channelPort.sendReply(msg1, any()) } answers {
+            coEvery { channelPort.sendReply(msg1, any(), any()) } answers {
                 events.add("catchup_sent")
                 Unit
             }

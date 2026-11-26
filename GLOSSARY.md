@@ -153,7 +153,7 @@ The silent reading-delay phase executed concurrently with `Participation Decisio
 _Avoid_: Pre-typing sleep, fake read delay, AI wait
 
 **Asymmetric Reply Threading**:
-The delivery anchoring rule that posts unreferenced channel messages when the target message remains near the bottom of the channel and attaches a Discord reply reference to the opening segment once two or more non-Luna messages intervene.
+The delivery anchoring rule that posts unreferenced channel messages when the target message remains near the bottom of the channel and attaches a Discord reply reference to the opening segment once two or more non-Luna messages intervene, pinging the replied author only when responding to a direct mention or reply to Luna rather than ambient banter.
 _Avoid_: Quote fallback, reply ping, thread anchoring
 
 **Segmented Burst Delivery**:

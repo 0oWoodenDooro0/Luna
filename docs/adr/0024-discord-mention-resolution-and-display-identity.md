@@ -30,7 +30,7 @@ As a result, Luna cannot reliably tell who a user is mentioning—especially whe
 
 4. **Prompt Guidance and Outgoing `allowedMentions` Guardrail**:
    - Update `ChatterPromptBuilder` `SYSTEM_INSTRUCTION` to supply Luna's own Discord UID, explain the inline mention format, and instruct restrained ping etiquette (refer to people by plain name in normal conversation; emit `<@uid>` only when intentionally notifying a specific person).
-   - Enforce Kord `allowedMentions` on `ChatterChannelPort.sendMessage` and `ChatterChannelPort.sendReply` to allow `Users` (and `repliedUser` on replies) only, unconditionally blocking `@everyone`, `@here`, and `Roles` pings.
+   - Enforce Kord `allowedMentions` on `ChatterChannelPort.sendMessage` and `ChatterChannelPort.sendReply` to allow `Users` only and unconditionally block `@everyone`, `@here`, and `Roles` pings. On `sendReply`, control `repliedUser` via an explicit `pingRepliedUser: Boolean = false` flag—enabling `repliedUser = true` only when replying to a direct `@Luna` mention or direct reply to Luna (in both live `Asymmetric Reply Threading` and `Deferred Catch-Up`), and keeping `repliedUser = false` for ambient replies.
 
 ## Consequences
 

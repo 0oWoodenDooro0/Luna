@@ -176,6 +176,7 @@ class ChatterSegmentedDeliveryAndThreadingTest {
             assertTrue(run.await(), "Expected processMessage to succeed for segmented reply")
 
             assertEquals(listOf(Snowflake(300L)), channelPort.sentReplies.map { it.targetMessageId })
+            assertEquals(listOf(true), channelPort.sentReplies.map { it.pingRepliedUser })
             assertEquals(
                 listOf(
                     800L to 2_000L,
@@ -196,6 +197,47 @@ class ChatterSegmentedDeliveryAndThreadingTest {
                 timeline,
             )
             assertEquals(2, channelPort.sentMessages.size)
+        }
+
+    @Test
+    fun `ambient reply with 2 or more intervening non-Luna messages sends segment 1 via sendReply with pingRepliedUser false`() =
+        runTest {
+            val botSelfId = Snowflake(9999L)
+            val channelId = 7021L
+            val bobMsg = fixture.createMockMessage(id = 311L, channelId = channelId, authorId = 3001L, username = "Bob", content = "msg b")
+            val carolMsg = fixture.createMockMessage(id = 312L, channelId = channelId, authorId = 3002L, username = "Carol", content = "msg c")
+
+            val ambientTrigger =
+                fixture.createMockMessage(
+                    id = 310L,
+                    channelId = channelId,
+                    authorId = 1001L,
+                    content = "ambient message without mention",
+                    selfId = botSelfId,
+                )
+
+            coEvery { fixture.decisionClient.decide(any(), any(), any()) } returns
+                ParticipationDecision(shouldParticipate = true, noul = 0.95)
+            coEvery { fixture.chatterGenerator.generateReply(any<ChatterInput>()) } returns "ambient seg1\n\nambient seg2"
+
+            val channelPort =
+                FakeChatterChannelPort().apply {
+                    afterMessages = listOf(bobMsg, carolMsg)
+                }
+            val service =
+                ChatterService(
+                    filter = fixture.filter,
+                    decisionClient = fixture.decisionClient,
+                    chatterGenerator = fixture.chatterGenerator,
+                    contextCollector = fixture.contextCollector,
+                    channelPort = channelPort,
+                    randomProvider = { _, _ -> 800L },
+                )
+
+            assertTrue(service.processMessage(ambientTrigger), "Expected processMessage to succeed for ambient reply")
+            assertEquals(listOf(Snowflake(310L)), channelPort.sentReplies.map { it.targetMessageId })
+            assertEquals(listOf(false), channelPort.sentReplies.map { it.pingRepliedUser })
+            assertEquals(listOf("ambient seg2"), channelPort.sentMessages.map { it.content })
         }
 
     @Test

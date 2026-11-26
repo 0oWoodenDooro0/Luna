@@ -74,6 +74,7 @@ internal class ChatterDeliveryEngine(
         readingSimulation: ReadingSimulationScope,
         markDispatching: () -> Boolean,
         forceReplyThreading: Boolean = false,
+        pingRepliedUser: Boolean = false,
     ): DeliveryOutcome {
         val boundedSegments = segments.take(MAX_REPLY_SEGMENTS)
         if (boundedSegments.isEmpty()) return DeliveryOutcome.CancelledBeforeDispatch
@@ -101,7 +102,7 @@ internal class ChatterDeliveryEngine(
 
         val useReplyThreading = forceReplyThreading || shouldUseReplyThreading(anchor, selfId)
         if (useReplyThreading) {
-            channelPort.sendReply(anchor, boundedSegments.first())
+            channelPort.sendReply(anchor, boundedSegments.first(), pingRepliedUser = pingRepliedUser)
         } else {
             channelPort.sendMessage(anchor, boundedSegments.first())
         }

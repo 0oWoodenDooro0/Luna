@@ -431,16 +431,21 @@ class KordChatterChannelAdapterContractTest : ChatterChannelPortContractTest() {
 
             KordChatterChannelAdapter.sendMessage(anchor, "@everyone @here <@&999> <@123>")
             KordChatterChannelAdapter.sendReply(anchor, "@everyone @here <@&999> <@123>")
+            KordChatterChannelAdapter.sendReply(anchor, "@everyone @here <@&999> <@123>", pingRepliedUser = true)
 
-            assertEquals(2, capturedRequests.size)
+            assertEquals(3, capturedRequests.size)
 
             val plainAllowed = capturedRequests[0].request.allowedMentions.value
             assertEquals(listOf(AllowedMentionType.UserMentions), plainAllowed?.parse)
             assertEquals(OptionalBoolean.Missing, plainAllowed?.repliedUser)
 
-            val replyAllowed = capturedRequests[1].request.allowedMentions.value
-            assertEquals(listOf(AllowedMentionType.UserMentions), replyAllowed?.parse)
-            assertEquals(OptionalBoolean.Value(true), replyAllowed?.repliedUser)
+            val defaultReplyAllowed = capturedRequests[1].request.allowedMentions.value
+            assertEquals(listOf(AllowedMentionType.UserMentions), defaultReplyAllowed?.parse)
+            assertEquals(OptionalBoolean.Value(false), defaultReplyAllowed?.repliedUser)
+
+            val pingReplyAllowed = capturedRequests[2].request.allowedMentions.value
+            assertEquals(listOf(AllowedMentionType.UserMentions), pingReplyAllowed?.parse)
+            assertEquals(OptionalBoolean.Value(true), pingReplyAllowed?.repliedUser)
         }
 }
 
