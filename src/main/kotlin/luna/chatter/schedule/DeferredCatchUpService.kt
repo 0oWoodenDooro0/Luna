@@ -200,7 +200,7 @@ class DeferredCatchUpService(
                     content = resolvedContent,
                     timestampMillis = messageTimestampMillis(msg),
                     isDirectMention = filter.isDirectBotMention(msg, selfId),
-                    isReplyToLuna = isReplyToLuna(msg, selfId),
+                    isReplyToLuna = filter.isReplyToLuna(msg, selfId),
                     authorId = resolveAuthorId(msg)?.toString(),
                 )
             }
@@ -316,12 +316,18 @@ class DeferredCatchUpService(
             }
 
             val targetMessage = messagesById[selection.messageId] ?: continue
-            val isDirectTarget = candidatesById[selection.messageId]?.isDirectTarget == true
+            val candidate = candidatesById[selection.messageId]
+            val directInteraction =
+                when {
+                    candidate?.isDirectMention == true -> luna.chatter.DirectInteractionType.MENTION
+                    candidate?.isReplyToLuna == true -> luna.chatter.DirectInteractionType.DIRECT_REPLY
+                    else -> luna.chatter.DirectInteractionType.NONE
+                }
             val delivered =
                 deliveryExecutor.deliverSelection(
                     targetMessage = targetMessage,
                     selection = selection,
-                    isDirectTarget = isDirectTarget,
+                    directInteraction = directInteraction,
                     eligibleMessages = eligibleMessages,
                     selfId = selfId,
                     current = current,
@@ -388,15 +394,6 @@ class DeferredCatchUpService(
             return false
         }
         return true
-    }
-
-    private fun isReplyToLuna(
-        message: Message,
-        selfId: Snowflake?,
-    ): Boolean {
-        if (selfId == null) return false
-        val referencedAuthorId = runCatching { message.referencedMessage?.author?.id }.getOrNull()
-        return referencedAuthorId == selfId
     }
 
     private fun messageTimestampMillis(message: Message): Long = runCatching { message.timestamp.toEpochMilliseconds() }.getOrElse { timing.clock.millis() }

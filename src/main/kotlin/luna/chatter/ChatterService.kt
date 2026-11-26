@@ -136,7 +136,8 @@ class ChatterService(
      */
     suspend fun processMessage(message: Message): Boolean {
         val snapshot = extractTriggerSnapshot(message)
-        val isDirectMention = filter.isDirectBotMention(message, snapshot.selfId)
+        val directInteraction = filter.classifyDirectInteraction(message, snapshot.selfId)
+        val isDirectMention = directInteraction.isDirect
 
         if (!snapshot.isBotAuthor) {
             emojiService.recordMessageUsage(
@@ -160,20 +161,28 @@ class ChatterService(
                 isBotAuthor = snapshot.isBotAuthor,
                 isDirectMention = isDirectMention,
                 block = unavailableBlock,
+                trigger = directInteraction.toAiTraceTrigger(),
             )
             return false
         }
 
         val channelId = message.channelId
 
-        return burstCoordinator.executeWithDebounce(
+        return burstCoordinator.executeWithDirectInteraction(
             channelId = channelId,
             messageId = message.id,
             authorId = snapshot.authorId,
-            isDirectMention = isDirectMention,
+            directInteraction = directInteraction,
             canProceedAfterWait = { filter.shouldEvaluate(message, isDirectMention = isDirectMention, kordSelfId = snapshot.selfId) },
-        ) { effectiveIsDirectMention, markDispatching ->
-            runTracedSession(message, snapshot, channelId, effectiveIsDirectMention, markDispatching)
+        ) { effectiveDirectInteraction, markDispatching ->
+            runTracedSession(
+                message = message,
+                snapshot = snapshot,
+                channelId = channelId,
+                isDirectMention = effectiveDirectInteraction.isDirect,
+                trigger = effectiveDirectInteraction.toAiTraceTrigger(),
+                markDispatching = markDispatching,
+            )
         }
     }
 
@@ -182,12 +191,13 @@ class ChatterService(
         snapshot: TriggerSnapshot,
         channelId: Snowflake,
         isDirectMention: Boolean,
+        trigger: AiTraceTrigger,
         markDispatching: () -> Boolean,
     ): Boolean {
         val session =
             traceRecorder.startSession(
                 pipeline = AiTracePipeline.CHATTER,
-                trigger = if (isDirectMention) AiTraceTrigger.MENTION else AiTraceTrigger.AMBIENT,
+                trigger = trigger,
                 discord =
                     AiTraceDiscordContext(
                         guildId = snapshot.guildId?.toString(),

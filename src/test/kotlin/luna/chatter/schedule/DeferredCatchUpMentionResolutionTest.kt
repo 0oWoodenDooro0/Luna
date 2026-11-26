@@ -4,8 +4,10 @@ import dev.kord.common.entity.MessageType
 import dev.kord.common.entity.Snowflake
 import dev.kord.common.entity.optional.OptionalSnowflake
 import dev.kord.core.Kord
+import dev.kord.core.behavior.channel.MessageChannelBehavior
 import dev.kord.core.entity.Member
 import dev.kord.core.entity.Message
+import dev.kord.core.entity.MessageReference
 import dev.kord.core.entity.Role
 import dev.kord.core.entity.User
 import dev.kord.core.entity.channel.GuildChannel
@@ -16,16 +18,27 @@ import io.mockk.slot
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.runTest
 import luna.chatter.BoundedChannelBurstCoordinator
+import luna.chatter.ChatterChannelPort
 import luna.chatter.ChatterConfig
 import luna.chatter.ChatterContextCollector
 import luna.chatter.ChatterFilterConfig
+import luna.chatter.ChatterGenerator
+import luna.chatter.ChatterInput
 import luna.chatter.ChatterNoiseFilter
 import luna.chatter.CircadianPersonaDrift
+import luna.chatter.PreparedChatterContext
+import luna.core.ai.AiTraceDiscordContext
+import luna.core.ai.AiTracePipeline
+import luna.core.ai.AiTraceRecord
+import luna.core.ai.AiTraceRecorder
+import luna.core.ai.AiTraceSession
+import luna.core.ai.AiTraceTrigger
 import org.junit.jupiter.api.Test
 import java.time.Clock
 import java.time.Instant
 import java.time.ZoneOffset
 import kotlin.test.assertEquals
+import kotlin.test.assertTrue
 import kotlin.time.Instant as KotlinInstant
 
 class DeferredCatchUpMentionResolutionTest {
@@ -172,5 +185,308 @@ class DeferredCatchUpMentionResolutionTest {
                 "Hey @BobGlobal (uid:200002) and @Luna [YOU] (uid:999999), check @Moderators (role) in #general",
                 candidate.content,
             )
+        }
+
+    @Test
+    fun `triage excludes replies to Luna summary and resolves uncached same-channel reply to Luna chatter`() =
+        runTest {
+            val kord =
+                mockk<Kord>(relaxed = true).apply {
+                    every { selfId } returns this@DeferredCatchUpMentionResolutionTest.selfId
+                }
+            val aliceMember =
+                mockk<Member>(relaxed = true).apply {
+                    every { id } returns Snowflake(200001UL)
+                    every { username } returns "alice_raw"
+                    every { globalName } returns "AliceGlobal"
+                    every { effectiveName } returns "AliceNick"
+                    every { isBot } returns false
+                }
+            val lunaSummary =
+                mockk<Message>(relaxed = true).apply {
+                    every { id } returns Snowflake(9001UL)
+                    every { content } returns "TL;DR: Summary of earlier chat"
+                    every { author?.id } returns this@DeferredCatchUpMentionResolutionTest.selfId
+                    every { author?.isBot } returns true
+                    every { webhookId } returns null
+                    every { data.author.id } returns this@DeferredCatchUpMentionResolutionTest.selfId
+                }
+            val lunaChatter =
+                mockk<Message>(relaxed = true).apply {
+                    every { id } returns Snowflake(9002UL)
+                    every { content } returns "Haha that was funny"
+                    every { author?.id } returns this@DeferredCatchUpMentionResolutionTest.selfId
+                    every { author?.isBot } returns true
+                    every { webhookId } returns null
+                    every { data.author.id } returns this@DeferredCatchUpMentionResolutionTest.selfId
+                }
+
+            val replyToSummary =
+                mockk<Message>(relaxed = true).apply {
+                    every { id } returns Snowflake(1002UL)
+                    every { channelId } returns this@DeferredCatchUpMentionResolutionTest.channelId
+                    every { content } returns "thanks for the recap"
+                    every { author } returns aliceMember
+                    every { type } returns MessageType.Reply
+                    every { timestamp } returns KotlinInstant.fromEpochMilliseconds(nowInstant.toEpochMilli() - 60_000L)
+                    every { this@apply.kord } returns kord
+                    every { attachments } returns emptySet()
+                    every { mentionedUserIds } returns emptySet()
+                    every { referencedMessage } returns lunaSummary
+                    every { data.guildId } returns OptionalSnowflake.Value(guildId)
+                    every { data.author.id } returns Snowflake(200001UL)
+                    every { data.author.username } returns "alice_raw"
+                }
+
+            val sameChannelRef =
+                mockk<MessageReference> {
+                    every { data.id } returns OptionalSnowflake.Value(Snowflake(9002UL))
+                    every { data.channelId } returns OptionalSnowflake.Value(this@DeferredCatchUpMentionResolutionTest.channelId)
+                }
+            val channelBehavior =
+                mockk<MessageChannelBehavior> {
+                    coEvery { getMessageOrNull(Snowflake(9002UL)) } returns lunaChatter
+                }
+            val uncachedReplyToChatter =
+                mockk<Message>(relaxed = true).apply {
+                    every { id } returns Snowflake(1003UL)
+                    every { channelId } returns this@DeferredCatchUpMentionResolutionTest.channelId
+                    every { content } returns "right? I thought so too"
+                    every { author } returns aliceMember
+                    every { type } returns MessageType.Reply
+                    every { timestamp } returns KotlinInstant.fromEpochMilliseconds(nowInstant.toEpochMilli() - 30_000L)
+                    every { this@apply.kord } returns kord
+                    every { attachments } returns emptySet()
+                    every { mentionedUserIds } returns emptySet()
+                    every { referencedMessage } returns null
+                    every { messageReference } returns sameChannelRef
+                    every { channel } returns channelBehavior
+                    every { data.guildId } returns OptionalSnowflake.Value(guildId)
+                    every { data.author.id } returns Snowflake(200001UL)
+                    every { data.author.username } returns "alice_raw"
+                }
+
+            val store = mockk<DailyScheduleStore>(relaxed = true)
+            every { store.listPendingCatchUps() } returns
+                listOf(
+                    CatchUpWatermark(
+                        channelId = channelId.toString(),
+                        guildId = guildId.toString(),
+                        firstPendingMessageId = "1002",
+                        firstPendingAtMillis = nowInstant.toEpochMilli() - 600_000L,
+                        lastPendingMessageId = "1003",
+                        lastPendingAtMillis = nowInstant.toEpochMilli() - 30_000L,
+                        updatedAtMillis = nowInstant.toEpochMilli() - 30_000L,
+                    ),
+                )
+
+            val catchUpPort = mockk<CatchUpChannelPort>()
+            coEvery { catchUpPort.fetchMissedMessages(channelId, Snowflake(1002UL), 30) } returns listOf(replyToSummary, uncachedReplyToChatter)
+
+            val capturedCandidates = slot<List<CatchUpCandidateMessage>>()
+            val triageClient = mockk<DeferredCatchUpTriageClient>()
+            coEvery {
+                triageClient.triage(capture(capturedCandidates), AvailabilityState.BUSY, availableBlock, 2)
+            } returns Result.success(emptyList())
+
+            val config =
+                ChatterConfig(
+                    apiKey = "test-api-key",
+                    filter = ChatterFilterConfig(enabled = true),
+                    schedule = ChatterScheduleConfig(enabled = true),
+                )
+            val scheduleProvider =
+                object : DailyScheduleProvider {
+                    override fun isEnabled(): Boolean = true
+
+                    override fun currentSchedule(): DailySchedule? = null
+
+                    override fun currentBlock(): ScheduleBlock? = availableBlock
+                }
+
+            val service =
+                DeferredCatchUpService(
+                    scheduleStore = store,
+                    scheduleProvider = scheduleProvider,
+                    triageClient = triageClient,
+                    chatterGenerator = mockk(relaxed = true),
+                    filter = ChatterNoiseFilter(config = config.filter),
+                    contextCollector = mockk<ChatterContextCollector>(relaxed = true),
+                    channelPort = mockk(relaxed = true),
+                    catchUpChannelPort = catchUpPort,
+                    burstCoordinator = BoundedChannelBurstCoordinator(debounceMs = 1L, mentionDebounceMs = 1L, maxDebounceMs = 6_000L),
+                    personaStateProvider = CircadianPersonaDrift(timezone = "Asia/Taipei", enabled = false, scheduleProvider = scheduleProvider),
+                    config = config,
+                    timing = CatchUpTimingPort(clock = fixedClock, randomProvider = { _, _ -> 0L }, staggerDelayFn = { }),
+                )
+
+            service.onBecomeAvailable(AvailabilityState.BUSY, availableBlock)
+
+            assertEquals(2, capturedCandidates.captured.size)
+            val summaryReplyCandidate = capturedCandidates.captured.first { it.messageId == "1002" }
+            val chatterReplyCandidate = capturedCandidates.captured.first { it.messageId == "1003" }
+            kotlin.test.assertFalse(summaryReplyCandidate.isReplyToLuna, "Reply to Luna summary should not be marked isReplyToLuna")
+            kotlin.test.assertTrue(chatterReplyCandidate.isReplyToLuna, "Uncached reply to Luna chatter should be marked isReplyToLuna")
+        }
+
+    @Test
+    fun `deferred catch-up records DIRECT_REPLY trigger for ping-off reply and MENTION for explicit mention`() =
+        runTest {
+            val kord = mockk<Kord>(relaxed = true)
+            every { kord.selfId } returns selfId
+            val lunaUser =
+                mockk<User>(relaxed = true) {
+                    every { id } returns selfId
+                    every { username } returns "Luna"
+                    every { isBot } returns true
+                }
+            val aliceUser =
+                mockk<User>(relaxed = true) {
+                    every { id } returns Snowflake(200001UL)
+                    every { username } returns "Alice"
+                    every { isBot } returns false
+                }
+            val bobUser =
+                mockk<User>(relaxed = true) {
+                    every { id } returns Snowflake(200002UL)
+                    every { username } returns "Bob"
+                    every { isBot } returns false
+                }
+            val lunaChatter =
+                mockk<Message>(relaxed = true).apply {
+                    every { id } returns Snowflake(9000UL)
+                    every { channelId } returns this@DeferredCatchUpMentionResolutionTest.channelId
+                    every { content } returns "早安呀"
+                    every { author } returns lunaUser
+                    every { type } returns MessageType.Default
+                    every { timestamp } returns KotlinInstant.fromEpochMilliseconds(nowInstant.toEpochMilli() - 120_000L)
+                    every { this@apply.kord } returns kord
+                    every { data.guildId } returns OptionalSnowflake.Value(guildId)
+                    every { data.author.id } returns selfId
+                }
+            val pingOffReply =
+                mockk<Message>(relaxed = true).apply {
+                    every { id } returns Snowflake(1001UL)
+                    every { channelId } returns this@DeferredCatchUpMentionResolutionTest.channelId
+                    every { content } returns "早安！"
+                    every { author } returns aliceUser
+                    every { type } returns MessageType.Reply
+                    every { timestamp } returns KotlinInstant.fromEpochMilliseconds(nowInstant.toEpochMilli() - 60_000L)
+                    every { this@apply.kord } returns kord
+                    every { mentionedUserIds } returns emptySet()
+                    every { referencedMessage } returns lunaChatter
+                    every { data.guildId } returns OptionalSnowflake.Value(guildId)
+                    every { data.author.id } returns Snowflake(200001UL)
+                }
+            val explicitMention =
+                mockk<Message>(relaxed = true).apply {
+                    every { id } returns Snowflake(1002UL)
+                    every { channelId } returns this@DeferredCatchUpMentionResolutionTest.channelId
+                    every { content } returns "<@${selfId.value}> 午安"
+                    every { author } returns bobUser
+                    every { type } returns MessageType.Default
+                    every { timestamp } returns KotlinInstant.fromEpochMilliseconds(nowInstant.toEpochMilli() - 30_000L)
+                    every { this@apply.kord } returns kord
+                    every { mentionedUserIds } returns setOf(selfId)
+                    every { referencedMessage } returns null
+                    every { data.guildId } returns OptionalSnowflake.Value(guildId)
+                    every { data.author.id } returns Snowflake(200002UL)
+                }
+
+            val store = mockk<DailyScheduleStore>(relaxed = true)
+            every { store.listPendingCatchUps() } returns
+                listOf(
+                    CatchUpWatermark(
+                        channelId = channelId.toString(),
+                        guildId = guildId.toString(),
+                        firstPendingMessageId = "1001",
+                        firstPendingAtMillis = nowInstant.toEpochMilli() - 60_000L,
+                        lastPendingMessageId = "1002",
+                        lastPendingAtMillis = nowInstant.toEpochMilli() - 30_000L,
+                        updatedAtMillis = nowInstant.toEpochMilli() - 30_000L,
+                    ),
+                )
+
+            val catchUpPort = mockk<CatchUpChannelPort>()
+            coEvery { catchUpPort.fetchMissedMessages(channelId, Snowflake(1001UL), 30) } returns listOf(pingOffReply, explicitMention)
+
+            val triageClient = mockk<DeferredCatchUpTriageClient>()
+            coEvery { triageClient.triage(any(), any(), any(), any()) } returns
+                Result.success(
+                    listOf(
+                        CatchUpTriageSelection("1001", CatchUpAction.REPLY),
+                        CatchUpTriageSelection("1002", CatchUpAction.REPLY),
+                    ),
+                )
+
+            val generator = mockk<ChatterGenerator>(relaxed = true)
+            coEvery { generator.generateReply(any<ChatterInput>()) } returns "哈囉！"
+            val channelPort = mockk<ChatterChannelPort>(relaxed = true)
+            coEvery { channelPort.sendReply(any(), any(), any()) } returns Unit
+            val contextCollector =
+                mockk<ChatterContextCollector>(relaxed = true) {
+                    every { decisionMessageCount } returns 15
+                    every { historyMessageCount } returns 15
+                    coEvery { collectReplyContext(any(), any()) } returns PreparedChatterContext(transcript = "Alice: 早安！")
+                }
+            val recordedTraces = mutableListOf<AiTraceRecord>()
+            val traceRecorder =
+                object : AiTraceRecorder {
+                    override fun isEnabled(): Boolean = true
+
+                    override fun startSession(
+                        pipeline: AiTracePipeline,
+                        trigger: AiTraceTrigger,
+                        discord: AiTraceDiscordContext,
+                    ): AiTraceSession = AiTraceSession(recorder = this, pipeline = pipeline, trigger = trigger, discord = discord)
+
+                    override fun record(trace: AiTraceRecord) {
+                        recordedTraces.add(trace)
+                    }
+
+                    override suspend fun flushAndClose(timeoutMs: Long) = Unit
+                }
+            val config =
+                ChatterConfig(
+                    apiKey = "test-api-key",
+                    filter = ChatterFilterConfig(enabled = true),
+                    schedule = ChatterScheduleConfig(enabled = true),
+                )
+            val scheduleProvider =
+                object : DailyScheduleProvider {
+                    override fun isEnabled(): Boolean = true
+
+                    override fun currentSchedule(): DailySchedule? = null
+
+                    override fun currentBlock(): ScheduleBlock? = availableBlock
+                }
+
+            val service =
+                DeferredCatchUpService(
+                    scheduleStore = store,
+                    scheduleProvider = scheduleProvider,
+                    triageClient = triageClient,
+                    chatterGenerator = generator,
+                    filter = ChatterNoiseFilter(config = config.filter),
+                    contextCollector = contextCollector,
+                    channelPort = channelPort,
+                    catchUpChannelPort = catchUpPort,
+                    burstCoordinator = BoundedChannelBurstCoordinator(debounceMs = 1L, mentionDebounceMs = 1L, maxDebounceMs = 6_000L),
+                    personaStateProvider = CircadianPersonaDrift(timezone = "Asia/Taipei", enabled = false, scheduleProvider = scheduleProvider),
+                    traceRecorder = traceRecorder,
+                    config = config,
+                    timing = CatchUpTimingPort(clock = fixedClock, randomProvider = { _, _ -> 0L }, staggerDelayFn = { }),
+                )
+
+            service.onBecomeAvailable(AvailabilityState.BUSY, availableBlock)
+
+            val deliveryTraces = recordedTraces.filter { it.discord.authorId != null }
+            assertEquals(2, deliveryTraces.size)
+            val replyTrace = deliveryTraces.first { it.discord.messageId == "1001" }
+            val mentionTrace = deliveryTraces.first { it.discord.messageId == "1002" }
+            assertEquals(AiTraceTrigger.DIRECT_REPLY, replyTrace.trigger)
+            assertTrue(replyTrace.discord.isDirectMention, "Deferred DIRECT_REPLY should set discord.isDirectMention = true")
+            assertEquals(AiTraceTrigger.MENTION, mentionTrace.trigger)
+            assertTrue(mentionTrace.discord.isDirectMention, "Deferred MENTION should set discord.isDirectMention = true")
         }
 }

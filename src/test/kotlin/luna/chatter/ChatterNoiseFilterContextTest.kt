@@ -2,8 +2,12 @@ package luna.chatter
 
 import dev.kord.common.entity.MessageType
 import dev.kord.common.entity.Snowflake
+import dev.kord.common.entity.optional.OptionalSnowflake
+import dev.kord.core.behavior.channel.MessageChannelBehavior
 import dev.kord.core.entity.Message
+import dev.kord.core.entity.MessageReference
 import dev.kord.core.entity.User
+import io.mockk.coEvery
 import io.mockk.every
 import io.mockk.mockk
 import kotlinx.coroutines.test.runTest
@@ -332,5 +336,206 @@ class ChatterNoiseFilterContextTest {
 
         kotlin.test.assertNull(customFilter.toChatMessageOrNull(tldrMsg, botSelfId))
         kotlin.test.assertNull(customFilter.toChatMessageOrNull(keypointsMsg, botSelfId))
+    }
+
+    @Test
+    fun `classifyDirectInteraction distinguishes mention, ping-off reply to Luna, summary exclusion, and non-reply`() =
+        runTest {
+            val botSelfId = Snowflake(9999L)
+            val otherUserId = Snowflake(1234L)
+            val lunaChatter =
+                createMockMessage(
+                    id = 888L,
+                    username = "Luna",
+                    content = "That sounds fun!",
+                    isBot = true,
+                    authorId = botSelfId,
+                )
+            val lunaSummary =
+                createMockMessage(
+                    id = 889L,
+                    username = "Luna",
+                    content = "TL;DR: Everyone talked about dinner",
+                    isBot = true,
+                    authorId = botSelfId,
+                )
+            val otherUserMsg =
+                createMockMessage(
+                    id = 890L,
+                    username = "Bob",
+                    content = "Hey there",
+                    authorId = otherUserId,
+                )
+
+            val pingOnReply =
+                createMockMessage(
+                    id = 901L,
+                    type = MessageType.Reply,
+                    content = "yes totally",
+                    mentionedUserIds = setOf(botSelfId),
+                    referencedMessage = lunaChatter,
+                )
+            assertEquals(DirectInteractionType.MENTION, filter.classifyDirectInteraction(pingOnReply, botSelfId))
+
+            val pingOffReply =
+                createMockMessage(
+                    id = 902L,
+                    type = MessageType.Reply,
+                    content = "yes totally",
+                    referencedMessage = lunaChatter,
+                )
+            assertEquals(DirectInteractionType.DIRECT_REPLY, filter.classifyDirectInteraction(pingOffReply, botSelfId))
+
+            val pingOffReplyToSummary =
+                createMockMessage(
+                    id = 903L,
+                    type = MessageType.Reply,
+                    content = "thanks for the summary",
+                    referencedMessage = lunaSummary,
+                )
+            assertEquals(DirectInteractionType.NONE, filter.classifyDirectInteraction(pingOffReplyToSummary, botSelfId))
+
+            val nonReplyWithRef =
+                createMockMessage(
+                    id = 904L,
+                    type = MessageType.Default,
+                    content = "forwarded maybe",
+                    referencedMessage = lunaChatter,
+                )
+            assertEquals(DirectInteractionType.NONE, filter.classifyDirectInteraction(nonReplyWithRef, botSelfId))
+
+            val replyToOther =
+                createMockMessage(
+                    id = 905L,
+                    type = MessageType.Reply,
+                    content = "agreed Bob",
+                    referencedMessage = otherUserMsg,
+                )
+            assertEquals(DirectInteractionType.NONE, filter.classifyDirectInteraction(replyToOther, botSelfId))
+        }
+
+    @Test
+    fun `classifyDirectInteraction resolves uncached same-channel messageReference and fails safe on cross-channel or error`() =
+        runTest {
+            val botSelfId = Snowflake(9999L)
+            val refId = Snowflake(888L)
+            val lunaChatter =
+                createMockMessage(
+                    id = 888L,
+                    username = "Luna",
+                    content = "Older Luna message",
+                    isBot = true,
+                    authorId = botSelfId,
+                )
+
+            val sameChannelRef =
+                mockk<MessageReference> {
+                    every { data.id } returns OptionalSnowflake.Value(refId)
+                    every { data.channelId } returns OptionalSnowflake.Value(Snowflake(100L))
+                }
+            val sameChannel =
+                mockk<MessageChannelBehavior> {
+                    coEvery { getMessageOrNull(refId) } returns lunaChatter
+                }
+            val uncachedSameChannelReply =
+                createMockMessage(
+                    id = 910L,
+                    channelId = 100L,
+                    type = MessageType.Reply,
+                    content = "replying to older message",
+                    referencedMessage = null,
+                ).apply {
+                    every { messageReference } returns sameChannelRef
+                    every { channel } returns sameChannel
+                }
+            assertEquals(
+                DirectInteractionType.DIRECT_REPLY,
+                filter.classifyDirectInteraction(uncachedSameChannelReply, botSelfId),
+            )
+
+            val crossChannelRef =
+                mockk<MessageReference> {
+                    every { data.id } returns OptionalSnowflake.Value(refId)
+                    every { data.channelId } returns OptionalSnowflake.Value(Snowflake(200L))
+                }
+            val crossChannelReply =
+                createMockMessage(
+                    id = 911L,
+                    channelId = 100L,
+                    type = MessageType.Reply,
+                    content = "cross channel reply",
+                    referencedMessage = null,
+                ).apply {
+                    every { messageReference } returns crossChannelRef
+                }
+            assertEquals(
+                DirectInteractionType.NONE,
+                filter.classifyDirectInteraction(crossChannelReply, botSelfId),
+            )
+
+            val failingChannel =
+                mockk<MessageChannelBehavior> {
+                    coEvery { getMessageOrNull(refId) } throws RuntimeException("REST 500")
+                }
+            val failingLookupReply =
+                createMockMessage(
+                    id = 912L,
+                    channelId = 100L,
+                    type = MessageType.Reply,
+                    content = "lookup fails",
+                    referencedMessage = null,
+                ).apply {
+                    every { messageReference } returns sameChannelRef
+                    every { channel } returns failingChannel
+                }
+            assertEquals(
+                DirectInteractionType.NONE,
+                filter.classifyDirectInteraction(failingLookupReply, botSelfId),
+            )
+        }
+
+    @Test
+    fun `isContextMessage allows emoji-only ping-off reply to Luna chatter but excludes emoji-only reply to Luna summary`() {
+        val botSelfId = Snowflake(9999L)
+        val lunaChatter =
+            createMockMessage(
+                id = 888L,
+                username = "Luna",
+                content = "How was your day?",
+                isBot = true,
+                authorId = botSelfId,
+            )
+        val lunaSummary =
+            createMockMessage(
+                id = 889L,
+                username = "Luna",
+                content = "TL;DR: Daily summary",
+                isBot = true,
+                authorId = botSelfId,
+            )
+
+        val emojiReplyToChatter =
+            createMockMessage(
+                id = 920L,
+                type = MessageType.Reply,
+                content = "",
+                referencedMessage = lunaChatter,
+            )
+        assertTrue(
+            filter.isContextMessage(emojiReplyToChatter, botSelfId),
+            "Blank ping-off reply to Luna chatter should be eligible as context message",
+        )
+
+        val emojiReplyToSummary =
+            createMockMessage(
+                id = 921L,
+                type = MessageType.Reply,
+                content = "",
+                referencedMessage = lunaSummary,
+            )
+        assertFalse(
+            filter.isContextMessage(emojiReplyToSummary, botSelfId),
+            "Blank ping-off reply to Luna summary should remain excluded",
+        )
     }
 }

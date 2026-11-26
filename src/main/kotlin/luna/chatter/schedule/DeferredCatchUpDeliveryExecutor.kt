@@ -16,6 +16,7 @@ import luna.chatter.ChatterNoiseFilter
 import luna.chatter.ChatterPromptBuilder
 import luna.chatter.ChatterSilentReactionCoordinator
 import luna.chatter.DeliveryOutcome
+import luna.chatter.DirectInteractionType
 import luna.chatter.GuildCustomEmoji
 import luna.chatter.PersonaStateProvider
 import luna.chatter.emoji.ChatterEmojiService
@@ -70,7 +71,7 @@ internal class DeferredCatchUpDeliveryExecutor(
     suspend fun deliverSelection(
         targetMessage: Message,
         selection: CatchUpTriageSelection,
-        isDirectTarget: Boolean,
+        directInteraction: DirectInteractionType,
         eligibleMessages: List<Message>,
         selfId: Snowflake?,
         current: ScheduleBlock,
@@ -78,21 +79,22 @@ internal class DeferredCatchUpDeliveryExecutor(
         val authorId = resolveAuthorId(targetMessage)
         val guildId = runCatching { targetMessage.data.guildId.value }.getOrNull()
 
-        return burstCoordinator.executeWithDebounce(
+        return burstCoordinator.executeWithDirectInteraction(
             channelId = targetMessage.channelId,
             messageId = targetMessage.id,
             authorId = authorId,
-            isDirectMention = isDirectTarget,
+            directInteraction = directInteraction,
             canProceedAfterWait = { !isUnavailableNow() },
-        ) { _, markDispatching ->
+        ) { effectiveDirectInteraction, markDispatching ->
             if (isUnavailableNow()) {
-                return@executeWithDebounce false
+                return@executeWithDirectInteraction false
             }
+            val effectiveIsDirect = effectiveDirectInteraction.isDirect
 
             val session =
                 traceRecorder.startSession(
                     pipeline = AiTracePipeline.CHATTER,
-                    trigger = if (isDirectTarget) AiTraceTrigger.MENTION else AiTraceTrigger.AMBIENT,
+                    trigger = effectiveDirectInteraction.toAiTraceTrigger(),
                     discord =
                         AiTraceDiscordContext(
                             guildId = guildId?.toString(),
@@ -100,7 +102,7 @@ internal class DeferredCatchUpDeliveryExecutor(
                             messageId = targetMessage.id.toString(),
                             authorId = authorId?.toString(),
                             reactingUserId = null,
-                            isDirectMention = isDirectTarget,
+                            isDirectMention = effectiveIsDirect,
                         ),
                 )
             session.registerSecret(config.apiKey)
@@ -166,7 +168,7 @@ internal class DeferredCatchUpDeliveryExecutor(
                                 val preparedEmojis = emojiTurn.prepareReplyEmojis(replyContext.transcript)
                                 val chatterInput =
                                     replyContext
-                                        .toChatterInput(isDirectMention = isDirectTarget)
+                                        .toChatterInput(isDirectMention = effectiveIsDirect)
                                         .copy(
                                             transcript = preparedEmojis.transcript,
                                             personaState = personaState,
@@ -203,7 +205,7 @@ internal class DeferredCatchUpDeliveryExecutor(
                                         readingSimulation = readingScope,
                                         markDispatching = markDispatching,
                                         forceReplyThreading = true,
-                                        pingRepliedUser = isDirectTarget,
+                                        pingRepliedUser = effectiveIsDirect,
                                     )
                                 if (outcome == DeliveryOutcome.CancelledBeforeDispatch) {
                                     session.skip(reason = "Deferred catch-up reply cancelled before dispatch")

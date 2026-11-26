@@ -19,6 +19,7 @@ enum class AiTracePipeline {
 enum class AiTraceTrigger {
     REACTION,
     MENTION,
+    DIRECT_REPLY,
     AMBIENT,
 }
 
