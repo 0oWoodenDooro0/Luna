@@ -86,4 +86,5 @@ data class ChatterInput(
     val workingMemoryStartMs: Long? = null,
     val allowMentionDisengagement: Boolean = false,
     val coldReaction: Boolean = false,
+    val channelContext: String? = null,
 )

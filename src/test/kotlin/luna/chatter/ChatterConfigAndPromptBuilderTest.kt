@@ -561,4 +561,24 @@ class ChatterConfigAndPromptBuilderTest {
             )
         assertContains(assertNotNull(requestWithSelfId.systemInstruction), "999888777")
     }
+
+    @Test
+    fun `ChatterPromptBuilder and GeminiDecisionClient include channelContext block and untrusted-metadata isolation`() {
+        val channelBlock = "[頻道脈絡]\n位置：#general\n主題：日常閒聊"
+        val input =
+            ChatterInput(
+                transcript = "Alice: 早安",
+                channelContext = channelBlock,
+            )
+
+        val replyPrompt = ChatterPromptBuilder.buildUserPrompt(input)
+        val reactionPrompt = ChatterPromptBuilder.buildReactionUserPrompt(input)
+
+        assertTrue(replyPrompt.startsWith("$channelBlock\n\n以下為 Discord 頻道的近期對話紀錄："))
+        assertTrue(reactionPrompt.startsWith("$channelBlock\n\n以下為 Discord 頻道的近期對話紀錄："))
+
+        assertContains(ChatterPromptBuilder.buildSystemInstruction(), "[頻道脈絡]")
+        assertContains(ChatterPromptBuilder.buildReactionSystemInstruction(), "[頻道脈絡]")
+        assertContains(GeminiDecisionClient.DEFAULT_INSTRUCTIONS, "[頻道脈絡]")
+    }
 }
