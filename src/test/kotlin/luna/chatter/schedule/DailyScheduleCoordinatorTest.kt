@@ -10,7 +10,13 @@ import io.mockk.every
 import io.mockk.mockk
 import io.mockk.verify
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.runTest
 import org.junit.jupiter.api.Test
 import org.slf4j.LoggerFactory
@@ -20,6 +26,9 @@ import java.time.LocalDate
 import java.time.LocalTime
 import java.time.ZoneId
 import java.time.ZonedDateTime
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertNull
@@ -504,5 +513,56 @@ class DailyScheduleCoordinatorTest {
             }
 
             coordinator.shutdown()
+        }
+
+    @Test
+    fun `shutdown awaits in-flight blocking store load and skips subsequent store queries`() =
+        runBlocking {
+            val today = LocalDate.of(2026, 4, 21)
+            val clock = MutableClock(ZonedDateTime.of(today, LocalTime.of(10, 0), taipeiZone).toInstant(), taipeiZone)
+            val enteredStore = CountDownLatch(1)
+            val releaseStore = CountDownLatch(1)
+            val storeReturned = AtomicBoolean(false)
+
+            val store = mockk<DailyScheduleStore>(relaxed = true)
+            every { store.getSchedule(today) } answers {
+                enteredStore.countDown()
+                releaseStore.await(2, TimeUnit.SECONDS)
+                storeReturned.set(true)
+                null
+            }
+            val generator = mockk<DailyScheduleGenerator>(relaxed = true)
+            val coordinator =
+                DailyScheduleCoordinator(
+                    store = store,
+                    generator = generator,
+                    enabled = true,
+                    timezone = taipeiZone,
+                    clock = clock,
+                    delayFn = { awaitCancellation() },
+                )
+
+            val bgScope = CoroutineScope(Dispatchers.Default + SupervisorJob())
+            try {
+                val loopJob = checkNotNull(coordinator.start(bgScope))
+                assertTrue(enteredStore.await(2, TimeUnit.SECONDS), "Expected runLoop to enter store.getSchedule")
+
+                val releaser =
+                    launch(Dispatchers.IO) {
+                        Thread.sleep(50)
+                        releaseStore.countDown()
+                    }
+
+                coordinator.shutdown()
+                assertTrue(storeReturned.get(), "Expected shutdown() to wait until in-flight store call finishes")
+                assertTrue(loopJob.isCompleted, "Expected scheduler loopJob to be completed before shutdown() returns")
+                releaser.join()
+
+                verify(exactly = 0) { store.getPreviousDaySummary(any()) }
+                verify(exactly = 0) { store.listCommitmentsForDate(any()) }
+            } finally {
+                releaseStore.countDown()
+                bgScope.cancel()
+            }
         }
 }
