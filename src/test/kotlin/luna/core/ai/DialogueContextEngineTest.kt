@@ -333,4 +333,58 @@ class DialogueContextEngineTest {
             assertTrue(summaryResult.transcript.contains("[Bob]: [附帶圖片 1: photo.png]"), "Summary must include photo attachment marker")
             assertEquals(2, summaryResult.nextImageIndex)
         }
+
+    @Test
+    fun `formatDialogueMessages inserts relative time-gap markers according to policy threshold`() =
+        runTest {
+            assertEquals(
+                kotlin.time.Duration.parse("3m"),
+                DialogueContextPolicy.chatter().timeGapMarkerThreshold,
+            )
+            assertEquals(null, DialogueContextPolicy.summary().timeGapMarkerThreshold)
+
+            val base = kotlin.time.Instant.fromEpochMilliseconds(1_700_000_000_000L)
+            val m1 = mockMessage(1L, content = "First", authorName = "Alice")
+            val m2 = mockMessage(2L, content = "Within threshold", authorName = "Bob")
+            val m3 = mockMessage(3L, content = "Five mins later", authorName = "Alice")
+            val m4 = mockMessage(4L, content = "Two hours later", authorName = "Bob")
+            val m5 = mockMessage(5L, content = "One hour fifteen mins later", authorName = "Alice")
+            val m6 = mockMessage(6L, content = "Skewed earlier", authorName = "Bob")
+
+            every { m1.timestamp } returns base
+            every { m2.timestamp } returns base + kotlin.time.Duration.parse("2m59s")
+            every { m3.timestamp } returns base + kotlin.time.Duration.parse("7m59s") // +5m
+            every { m4.timestamp } returns base + kotlin.time.Duration.parse("127m59s") // +2h
+            every { m5.timestamp } returns base + kotlin.time.Duration.parse("202m59s") // +1h15m
+            every { m6.timestamp } returns base + kotlin.time.Duration.parse("190m59s") // negative delta
+
+            val chatterResult =
+                engine.formatDialogueMessages(
+                    messages = listOf(m1, m2, m3, m4, m5, m6),
+                    policy = DialogueContextPolicy.chatter(),
+                    kordSelfId = selfId,
+                )
+            assertEquals(
+                listOf(
+                    "Alice: First",
+                    "Bob: Within threshold",
+                    "--- 5 分鐘後 ---",
+                    "Alice: Five mins later",
+                    "--- 2 小時後 ---",
+                    "Bob: Two hours later",
+                    "--- 1 小時 15 分鐘後 ---",
+                    "Alice: One hour fifteen mins later",
+                    "Bob: Skewed earlier",
+                ).joinToString("\n"),
+                chatterResult.transcript,
+            )
+
+            val summaryResult =
+                engine.formatDialogueMessages(
+                    messages = listOf(m1, m2, m3),
+                    policy = DialogueContextPolicy.summary(),
+                    kordSelfId = selfId,
+                )
+            assertTrue(!summaryResult.transcript.contains("分鐘後"), "Summary policy must not emit time-gap markers")
+        }
 }

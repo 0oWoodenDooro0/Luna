@@ -36,6 +36,7 @@ data class PreparedChatterContext(
     val videoDurationSeconds: Long? = null,
     val webUrls: List<String> = emptyList(),
     val oldestWindowTimestampMs: Long? = null,
+    val channelContext: String? = null,
 ) {
     fun toChatterInput(isDirectMention: Boolean = false): ChatterInput =
         ChatterInput(
@@ -49,6 +50,7 @@ data class PreparedChatterContext(
             comments = comments,
             webUrls = webUrls,
             workingMemoryStartMs = oldestWindowTimestampMs,
+            channelContext = channelContext,
         )
 }
 
@@ -160,10 +162,12 @@ open class ChatterContextCollector(
                 maxWindowImages = maxDecisionImages,
                 kordSelfId = resolvedSelfId,
             )
+        val channelContext = ChatterChannelContextResolver.resolveBlock(window)
         val transcript =
             formatDecisionTranscript(
                 formattedTurns = windowContext.formatted.turns,
                 kordSelfId = resolvedSelfId,
+                channelContext = channelContext,
             )
 
         return ChatterDecisionContext(
@@ -226,6 +230,8 @@ open class ChatterContextCollector(
                 dialogueTranscript
             }
 
+        val channelContext = ChatterChannelContextResolver.resolveBlock(window)
+
         return PreparedChatterContext(
             transcript = transcript,
             imageAttachments = windowContext.images,
@@ -238,6 +244,7 @@ open class ChatterContextCollector(
             videoDurationSeconds = enrichment.videoDurationSeconds,
             webUrls = enrichment.classifiedUrls.webUrls,
             oldestWindowTimestampMs = oldestWindowTimestampMs,
+            channelContext = channelContext,
         )
     }
 
@@ -306,6 +313,7 @@ open class ChatterContextCollector(
     internal fun formatDecisionTranscript(
         formattedTurns: List<String>,
         kordSelfId: Snowflake?,
+        channelContext: String? = null,
     ): String {
         if (formattedTurns.isEmpty()) {
             return ""
@@ -320,6 +328,11 @@ open class ChatterContextCollector(
         val latestTurn = formattedTurns.last()
         return buildString {
             append(identityHeader)
+            val cleanChannelContext = channelContext?.trim()?.takeIf { it.isNotEmpty() }
+            if (cleanChannelContext != null) {
+                append("\n\n")
+                append(cleanChannelContext)
+            }
             if (recentTurns.isNotEmpty()) {
                 append("\n\n[Recent Context]\n")
                 append(recentTurns.joinToString("\n"))

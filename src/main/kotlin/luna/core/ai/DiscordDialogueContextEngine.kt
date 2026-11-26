@@ -281,64 +281,72 @@ open class DiscordDialogueContextEngine(
         }
 
         var imageIndex = startingImageIndex
+        var previousMessage: Message? = null
         val turns =
-            messages.map { msg ->
-                val speaker = resolveMessageSpeaker(msg)
-                val baseHeader = formatSpeakerHeader(speaker)
-                val refMsg = replyReferencesByMessage[msg.id]
-                val rawTurnHeader =
-                    if (refMsg != null) {
-                        val refSpeaker = resolveMessageSpeaker(refMsg)
-                        val refHeader = formatSpeakerHeader(refSpeaker)
-                        val resolvedRefContent = resolvedMentions.formatText(refMsg.content)
-                        val excerpt = truncateReplyExcerpt(resolvedRefContent, policy.maxReplyExcerptLength)
-                        "$baseHeader 回覆 $refHeader「$excerpt」"
-                    } else {
-                        baseHeader
-                    }
-                val turnHeader = if (policy.wrapTurnHeaderInBrackets) "[$rawTurnHeader]" else rawTurnHeader
+            buildList {
+                for (msg in messages) {
+                    DialogueTimeGapFormatter
+                        .formatMarkerIfNeeded(previousMessage, msg, policy.timeGapMarkerThreshold)
+                        ?.let(::add)
+                    previousMessage = msg
 
-                val stickerText =
-                    if (policy.includeStickerAnnotations) {
-                        DiscordMediaEmbedExtractor.formatStickerAnnotations(msg)
-                    } else {
-                        ""
-                    }
-                val embedText = formatEmbedPreviews(msg)
-                val images = imagesByMessage[msg.id].orEmpty()
-                val markersText =
-                    if (images.isNotEmpty()) {
-                        images.joinToString(" ") { img ->
-                            val idx = imageIndex++
-                            if (!img.filename.isNullOrBlank()) {
-                                "[附帶圖片 $idx: ${img.filename}]"
-                            } else {
-                                "[附帶圖片 $idx]"
-                            }
+                    val speaker = resolveMessageSpeaker(msg)
+                    val baseHeader = formatSpeakerHeader(speaker)
+                    val refMsg = replyReferencesByMessage[msg.id]
+                    val rawTurnHeader =
+                        if (refMsg != null) {
+                            val refSpeaker = resolveMessageSpeaker(refMsg)
+                            val refHeader = formatSpeakerHeader(refSpeaker)
+                            val resolvedRefContent = resolvedMentions.formatText(refMsg.content)
+                            val excerpt = truncateReplyExcerpt(resolvedRefContent, policy.maxReplyExcerptLength)
+                            "$baseHeader 回覆 $refHeader「$excerpt」"
+                        } else {
+                            baseHeader
                         }
-                    } else {
-                        ""
-                    }
+                    val turnHeader = if (policy.wrapTurnHeaderInBrackets) "[$rawTurnHeader]" else rawTurnHeader
 
-                val rawText = msg.content.takeIf { it.isNotBlank() }?.let { resolvedMentions.formatText(it) }
-                val parts =
-                    listOfNotNull(
-                        rawText,
-                        stickerText.takeIf { it.isNotEmpty() },
-                        embedText.takeIf { it.isNotEmpty() },
-                        markersText.takeIf { it.isNotEmpty() },
-                    )
+                    val stickerText =
+                        if (policy.includeStickerAnnotations) {
+                            DiscordMediaEmbedExtractor.formatStickerAnnotations(msg)
+                        } else {
+                            ""
+                        }
+                    val embedText = formatEmbedPreviews(msg)
+                    val images = imagesByMessage[msg.id].orEmpty()
+                    val markersText =
+                        if (images.isNotEmpty()) {
+                            images.joinToString(" ") { img ->
+                                val idx = imageIndex++
+                                if (!img.filename.isNullOrBlank()) {
+                                    "[附帶圖片 $idx: ${img.filename}]"
+                                } else {
+                                    "[附帶圖片 $idx]"
+                                }
+                            }
+                        } else {
+                            ""
+                        }
 
-                val body =
-                    if (parts.isNotEmpty()) {
-                        parts.joinToString(" ")
-                    } else if (policy.allowEmbedOnlyMessages || policy.allowStickerOnlyMessages) {
-                        resolveBlankMessagePlaceholder(msg).orEmpty()
-                    } else {
-                        ""
-                    }
+                    val rawText = msg.content.takeIf { it.isNotBlank() }?.let { resolvedMentions.formatText(it) }
+                    val parts =
+                        listOfNotNull(
+                            rawText,
+                            stickerText.takeIf { it.isNotEmpty() },
+                            embedText.takeIf { it.isNotEmpty() },
+                            markersText.takeIf { it.isNotEmpty() },
+                        )
 
-                if (body.isEmpty()) "$turnHeader:" else "$turnHeader: $body"
+                    val body =
+                        if (parts.isNotEmpty()) {
+                            parts.joinToString(" ")
+                        } else if (policy.allowEmbedOnlyMessages || policy.allowStickerOnlyMessages) {
+                            resolveBlankMessagePlaceholder(msg).orEmpty()
+                        } else {
+                            ""
+                        }
+
+                    add(if (body.isEmpty()) "$turnHeader:" else "$turnHeader: $body")
+                }
             }
 
         return FormattedDialogueResult(

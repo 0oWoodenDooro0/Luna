@@ -1,5 +1,8 @@
 package luna.core.ai
 
+import kotlin.time.Duration
+import kotlin.time.Duration.Companion.minutes
+
 /**
  * Policy rule governing how Discord text prefix and slash commands are detected during noise filtering.
  *
@@ -50,12 +53,14 @@ data class DialogueContextPolicy(
     val wrapTurnHeaderInBrackets: Boolean = false,
     val includeMentionUids: Boolean = false,
     val maxMentionRestFallbacks: Int = DEFAULT_MAX_MENTION_REST_FALLBACKS,
+    val timeGapMarkerThreshold: Duration? = null,
 ) {
     companion object {
         const val DEFAULT_MAX_EXTERNAL_REFERENCES = 3
         const val DEFAULT_MAX_REPLY_EXCERPT_LENGTH = 120
         const val DEFAULT_MAX_YOUTUBE_DURATION_SECONDS = 7200L
         const val DEFAULT_MAX_MENTION_REST_FALLBACKS = 10
+        val DEFAULT_TIME_GAP_MARKER_THRESHOLD: Duration = 3.minutes
 
         fun chatter(
             botPrefixes: Set<String> = CommandPrefixRule.DEFAULT_BOT_PREFIXES,
@@ -63,6 +68,7 @@ data class DialogueContextPolicy(
             maxReplyExcerptLength: Int = DEFAULT_MAX_REPLY_EXCERPT_LENGTH,
             maxYouTubeDurationSeconds: Long = DEFAULT_MAX_YOUTUBE_DURATION_SECONDS,
             maxMentionRestFallbacks: Int = DEFAULT_MAX_MENTION_REST_FALLBACKS,
+            timeGapMarkerThreshold: Duration? = DEFAULT_TIME_GAP_MARKER_THRESHOLD,
         ): DialogueContextPolicy =
             DialogueContextPolicy(
                 allowThirdPartyBots = true,
@@ -79,6 +85,7 @@ data class DialogueContextPolicy(
                 wrapTurnHeaderInBrackets = false,
                 includeMentionUids = true,
                 maxMentionRestFallbacks = maxMentionRestFallbacks,
+                timeGapMarkerThreshold = timeGapMarkerThreshold,
             )
 
         fun summary(
@@ -102,6 +109,7 @@ data class DialogueContextPolicy(
                 wrapTurnHeaderInBrackets = true,
                 includeMentionUids = false,
                 maxMentionRestFallbacks = maxMentionRestFallbacks,
+                timeGapMarkerThreshold = null,
             )
     }
 }
