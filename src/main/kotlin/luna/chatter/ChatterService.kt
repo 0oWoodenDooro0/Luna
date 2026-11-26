@@ -249,13 +249,15 @@ class ChatterService(
             val (relationship, effectiveThreshold) =
                 ChatterAffinityHelper.resolveThresholdAndRecordTrace(
                     memoryStore = chatterGenerator.memoryStore,
-                    guildId = snapshot.guildId,
-                    authorId = snapshot.authorId,
-                    channelId = message.channelId,
-                    personaState = personaState,
-                    reactionThreshold = reactionThreshold,
-                    configuredMomentumBoost = config.momentumThresholdBoost,
-                    filter = filter,
+                    context =
+                        ChatterAffinityHelper.ThresholdTraceContext(
+                            guildId = snapshot.guildId,
+                            authorId = snapshot.authorId,
+                            personaState = personaState,
+                            reactionThreshold = reactionThreshold,
+                            momentumState = filter.currentMomentumState(message.channelId),
+                            configuredMomentumBoost = config.momentumThresholdBoost,
+                        ),
                     session = session,
                     logger = logger,
                 )
@@ -544,12 +546,7 @@ class ChatterService(
 
             val deliveredOutput = segments.joinToString("\n")
             filter.cooldownCache.record(message.channelId)
-            filter.momentumCache.recordReply(
-                channelId = message.channelId,
-                isDirectMention = isDirectMention,
-                windowMs = filter.momentumWindowMs,
-                maxTurns = filter.momentumMaxTurns,
-            )
+            filter.recordMomentumReply(channelId = message.channelId, isDirectMention = isDirectMention)
             emojiTurn.recordDeliveredReply(segments)
             session.complete(finalOutput = deliveredOutput)
             logger.info("Chatter sent reply to channel {}: {}", message.channelId, deliveredOutput)

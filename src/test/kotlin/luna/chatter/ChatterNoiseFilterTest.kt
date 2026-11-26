@@ -422,7 +422,7 @@ class ChatterNoiseFilterTest {
                     cooldownCache = cooldownCache,
                     momentumCache = momentumCache,
                     cooldownDurationMs = 500L,
-                    momentumCooldownFloorMs = 1_500L,
+                    momentumSettings = MomentumFilterSettings(cooldownFloorMs = 1_500L),
                 )
             val channelId = Snowflake(100L)
             cooldownCache.record(channelId, simulatedTime)

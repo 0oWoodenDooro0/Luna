@@ -61,42 +61,39 @@ internal object ChatterAffinityHelper {
         (baseEffectiveThreshold + relationship.tier.ambientThresholdOffset + momentumThresholdOffset)
             .coerceIn(MIN_EFFECTIVE_THRESHOLD, MAX_EFFECTIVE_THRESHOLD)
 
+    data class ThresholdTraceContext(
+        val guildId: Snowflake?,
+        val authorId: Snowflake?,
+        val personaState: PersonaState,
+        val reactionThreshold: Double,
+        val momentumState: MomentumState,
+        val configuredMomentumBoost: Double,
+    )
+
     fun resolveThresholdAndRecordTrace(
         memoryStore: ChatterMemoryStore?,
-        guildId: Snowflake?,
-        authorId: Snowflake?,
-        channelId: Snowflake,
-        personaState: PersonaState,
-        reactionThreshold: Double,
-        configuredMomentumBoost: Double,
-        filter: ChatterNoiseFilter,
+        context: ThresholdTraceContext,
         session: luna.core.ai.AiTraceSession,
         logger: Logger,
     ): Pair<UserRelationship, Double> {
-        val relationship = resolveAuthorRelationship(memoryStore, guildId, authorId, logger)
-        val momentumState =
-            filter.momentumCache.stateFor(
-                channelId = channelId,
-                windowMs = filter.momentumWindowMs,
-                maxTurns = filter.momentumMaxTurns,
-            )
+        val relationship = resolveAuthorRelationship(memoryStore, context.guildId, context.authorId, logger)
         val momentumOffset =
             appliedMomentumThresholdOffset(
                 relationship = relationship,
-                momentumActive = momentumState.active,
-                configuredBoost = configuredMomentumBoost,
+                momentumActive = context.momentumState.active,
+                configuredBoost = context.configuredMomentumBoost,
             )
         val effectiveThreshold =
             computeEffectiveThreshold(
-                baseEffectiveThreshold = personaState.effectiveThreshold,
+                baseEffectiveThreshold = context.personaState.effectiveThreshold,
                 relationship = relationship,
                 momentumThresholdOffset = momentumOffset,
             )
         session.recordPersonaState(
-            circadianPeriod = personaState.circadianPeriod?.name,
-            personaMood = personaState.mood?.label,
+            circadianPeriod = context.personaState.circadianPeriod?.name,
+            personaMood = context.personaState.mood?.label,
             effectiveThreshold = effectiveThreshold,
-            reactionThreshold = reactionThreshold,
+            reactionThreshold = context.reactionThreshold,
         )
         session.recordRelationship(
             relationshipTier = relationship.tier.name,
@@ -104,8 +101,8 @@ internal object ChatterAffinityHelper {
             affinityThresholdOffset = relationship.tier.ambientThresholdOffset,
         )
         session.recordMomentumState(
-            active = momentumState.active,
-            ambientTurnCount = momentumState.ambientTurnCount,
+            active = context.momentumState.active,
+            ambientTurnCount = context.momentumState.ambientTurnCount,
             thresholdOffset = momentumOffset,
         )
         return relationship to effectiveThreshold

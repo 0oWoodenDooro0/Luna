@@ -41,6 +41,12 @@ sealed class ChatterFilterResult {
     ) : ChatterFilterResult()
 }
 
+data class MomentumFilterSettings(
+    val windowMs: Long = BoundedChannelMomentumCache.DEFAULT_WINDOW_MS,
+    val cooldownFloorMs: Long = ChatterFilterConfig.DEFAULT_MOMENTUM_COOLDOWN_FLOOR_MS,
+    val maxTurns: Int = BoundedChannelMomentumCache.DEFAULT_MAX_TURNS,
+)
+
 data class ChatterFilterConfig(
     val enabled: Boolean = DEFAULT_ENABLED,
     val allowedChannels: Set<Snowflake> = emptySet(),
@@ -51,30 +57,22 @@ data class ChatterFilterConfig(
     val momentumMaxTurns: Int = BoundedChannelMomentumCache.DEFAULT_MAX_TURNS,
 ) {
     init {
-        if (cooldownDurationMs < 0L) {
-            val safeValue = SecretMasker.maskValue("CHATTER_COOLDOWN_SECONDS", cooldownDurationMs)
+        requireNonNegative("CHATTER_COOLDOWN_SECONDS", cooldownDurationMs, "duration", "ms")
+        requireNonNegative("CHATTER_MOMENTUM_WINDOW_SECONDS", momentumWindowMs, "duration", "ms")
+        requireNonNegative("CHATTER_MOMENTUM_COOLDOWN_FLOOR_MS", momentumCooldownFloorMs, "duration", "ms")
+        requireNonNegative("CHATTER_MOMENTUM_MAX_TURNS", momentumMaxTurns.toLong(), "integer", "")
+    }
+
+    private fun requireNonNegative(
+        key: String,
+        value: Long,
+        expectedKind: String,
+        unitSuffix: String,
+    ) {
+        if (value < 0L) {
+            val safeValue = SecretMasker.maskValue(key, value)
             throw ConfigValidationException(
-                "Invalid configuration for CHATTER_COOLDOWN_SECONDS: expected a non-negative duration, but got '${safeValue}ms'",
-            )
-        }
-        if (momentumWindowMs < 0L) {
-            val safeValue = SecretMasker.maskValue("CHATTER_MOMENTUM_WINDOW_SECONDS", momentumWindowMs)
-            throw ConfigValidationException(
-                "Invalid configuration for CHATTER_MOMENTUM_WINDOW_SECONDS: " +
-                    "expected a non-negative duration, but got '${safeValue}ms'",
-            )
-        }
-        if (momentumCooldownFloorMs < 0L) {
-            val safeValue = SecretMasker.maskValue("CHATTER_MOMENTUM_COOLDOWN_FLOOR_MS", momentumCooldownFloorMs)
-            throw ConfigValidationException(
-                "Invalid configuration for CHATTER_MOMENTUM_COOLDOWN_FLOOR_MS: " +
-                    "expected a non-negative duration, but got '${safeValue}ms'",
-            )
-        }
-        if (momentumMaxTurns < 0) {
-            val safeValue = SecretMasker.maskValue("CHATTER_MOMENTUM_MAX_TURNS", momentumMaxTurns)
-            throw ConfigValidationException(
-                "Invalid configuration for CHATTER_MOMENTUM_MAX_TURNS: expected a non-negative integer, but got '$safeValue'",
+                "Invalid configuration for $key: expected a non-negative $expectedKind, but got '$safeValue$unitSuffix'",
             )
         }
     }
@@ -141,11 +139,12 @@ open class ChatterNoiseFilter(
     var botPrefixes: Set<String> = DEFAULT_BOT_PREFIXES,
     val contextEngine: DiscordDialogueContextEngine = DiscordDialogueContextEngine(webhookRegistry, summaryRegistry),
     val momentumCache: BoundedChannelMomentumCache = BoundedChannelMomentumCache(),
-    var momentumCooldownFloorMs: Long = ChatterFilterConfig.DEFAULT_MOMENTUM_COOLDOWN_FLOOR_MS,
+    var momentumSettings: MomentumFilterSettings =
+        MomentumFilterSettings(
+            windowMs = momentumCache.defaultWindowMs,
+            maxTurns = momentumCache.defaultMaxTurns,
+        ),
 ) {
-    var momentumWindowMs: Long = momentumCache.defaultWindowMs
-    var momentumMaxTurns: Int = momentumCache.defaultMaxTurns
-
     constructor(
         config: ChatterFilterConfig,
         cooldownCache: BoundedChannelCooldownCache =
@@ -168,10 +167,31 @@ open class ChatterNoiseFilter(
         botPrefixes = config.botPrefixes,
         contextEngine = contextEngine,
         momentumCache = momentumCache,
-        momentumCooldownFloorMs = config.momentumCooldownFloorMs,
+        momentumSettings =
+            MomentumFilterSettings(
+                windowMs = config.momentumWindowMs,
+                cooldownFloorMs = config.momentumCooldownFloorMs,
+                maxTurns = config.momentumMaxTurns,
+            ),
+    )
+
+    fun currentMomentumState(channelId: Snowflake): MomentumState =
+        momentumCache.stateFor(
+            channelId = channelId,
+            windowMs = momentumSettings.windowMs,
+            maxTurns = momentumSettings.maxTurns,
+        )
+
+    fun recordMomentumReply(
+        channelId: Snowflake,
+        isDirectMention: Boolean,
     ) {
-        this.momentumWindowMs = config.momentumWindowMs
-        this.momentumMaxTurns = config.momentumMaxTurns
+        momentumCache.recordReply(
+            channelId = channelId,
+            isDirectMention = isDirectMention,
+            windowMs = momentumSettings.windowMs,
+            maxTurns = momentumSettings.maxTurns,
+        )
     }
 
     internal fun contextPolicy(): DialogueContextPolicy = DialogueContextPolicy.chatter(botPrefixes = botPrefixes)
@@ -204,15 +224,10 @@ open class ChatterNoiseFilter(
 
         // 3. Check if channel is on cooldown (bypassed for direct bot mentions; softened during active momentum)
         if (!directMention) {
-            val momentumActive =
-                momentumCache.isActive(
-                    channelId = channelId,
-                    windowMs = momentumWindowMs,
-                    maxTurns = momentumMaxTurns,
-                )
+            val momentumActive = currentMomentumState(channelId).active
             val effectiveCooldownMs =
                 if (momentumActive) {
-                    minOf(momentumCooldownFloorMs, cooldownDurationMs)
+                    minOf(momentumSettings.cooldownFloorMs, cooldownDurationMs)
                 } else {
                     cooldownDurationMs
                 }

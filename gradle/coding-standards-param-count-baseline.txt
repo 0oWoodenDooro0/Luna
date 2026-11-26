@@ -1,12 +1,23 @@
 # Per-declaration ratchet baseline for production parameter count limits (Rule 12).
-# Non-data-class constructors and functions not listed here have max allowed = 10 parameters.
+# Non-data-class constructors not listed here have max allowed = 10 parameters;
+# non-constructor functions not listed here have max allowed = 8 parameters.
 # Reduce counts over time; never increase.
 src/main/kotlin/luna/chatter/ChatterContextCollector.kt#ChatterContextCollector=11
+src/main/kotlin/luna/chatter/ChatterPromptBuilder.kt#buildInteractionRequest=9
 src/main/kotlin/luna/chatter/ChatterService.kt#ChatterService=13
 src/main/kotlin/luna/chatter/ChatterSilentReactionCoordinator.kt#handleSilentReactionPath=11
 src/main/kotlin/luna/chatter/emoji/DefaultChatterEmojiService.kt#DefaultChatterEmojiService=18
+src/main/kotlin/luna/chatter/memory/ChatterMemoryService.kt#create=9
+src/main/kotlin/luna/chatter/memory/ChatterMemoryStore.kt#search=10
 src/main/kotlin/luna/chatter/memory/MemoryDistiller.kt#MemoryDistiller=14
+src/main/kotlin/luna/chatter/memory/SqliteChatterMemoryStore.kt#insertMemoryInternal=10
+src/main/kotlin/luna/chatter/memory/SqliteChatterMemoryStore.kt#search=10
+src/main/kotlin/luna/chatter/memory/SqliteChatterMemoryStore.kt#updateMemoryInternal=9
+src/main/kotlin/luna/chatter/memory/SqliteSocialUnderstandingHelper.kt#insert=9
+src/main/kotlin/luna/chatter/schedule/DailyScheduleCoordinator.kt#upsertCommitment=9
 src/main/kotlin/luna/chatter/schedule/DeferredCatchUpDeliveryExecutor.kt#DeferredCatchUpDeliveryExecutor=12
 src/main/kotlin/luna/chatter/schedule/DeferredCatchUpService.kt#DeferredCatchUpService=15
 src/main/kotlin/luna/core/ai/AiTraceSession.kt#recordAttempt=18
+src/main/kotlin/luna/core/ai/GeminiInteractionClient.kt#continueInteraction=10
+src/main/kotlin/luna/core/ai/GeminiInteractionClient.kt#handleSubmissionResponse=9
 src/main/kotlin/luna/summarizer/ConversationSliceCollector.kt#ConversationSliceCollector=13
