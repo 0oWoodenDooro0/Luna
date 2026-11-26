@@ -156,6 +156,35 @@ val cachedUser = kord.getUser(userId, strategy = EntitySupplyStrategy.cache)
 val cachedChannel = kord.getChannel(channelId, strategy = EntitySupplyStrategy.cache)
 ```
 
+### Channel & Thread Metadata (`TopGuildMessageChannel`, `ForumChannel`, `ThreadChannel`)
+```kotlin
+import dev.kord.core.entity.channel.ForumChannel
+import dev.kord.core.entity.channel.TopGuildChannel
+import dev.kord.core.entity.channel.TopGuildMessageChannel
+import dev.kord.core.entity.channel.thread.ThreadChannel
+
+// Resolve channel entity from a message (uses cacheWithRestFallback; wrap in runCatching for fail-open paths)
+val channel = runCatching { message.channel.asChannelOrNull() }.getOrNull()
+
+// Regular guild channels: TopGuildChannel exposes `name`; `topic` lives on TopGuildMessageChannel and ForumChannel
+val topic: String? = when (channel) {
+    is TopGuildMessageChannel -> channel.topic
+    is ForumChannel -> channel.topic
+    else -> null
+}
+
+// Threads (including Forum posts): ThreadChannel exposes `name` (thread title) and `parent` (TopGuildChannelBehavior)
+if (channel is ThreadChannel) {
+    val parent = runCatching { channel.parent.asChannelOrNull() }.getOrNull()
+    val parentName = (parent as? TopGuildChannel)?.name
+    val parentTopic = when (parent) {
+        is TopGuildMessageChannel -> parent.topic
+        is ForumChannel -> parent.topic
+        else -> null
+    }
+}
+```
+
 ### Reactions (`ReactionEmoji`, `Message.addReaction`)
 ```kotlin
 import dev.kord.common.entity.Snowflake
