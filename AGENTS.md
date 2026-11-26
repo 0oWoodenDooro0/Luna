@@ -2,7 +2,7 @@
 
 ## Reference Pointers
 
-- **Coding standards**: Read [`CODING_STANDARDS.md`](CODING_STANDARDS.md) when modifying or reviewing services, shared libraries, or tests. Mechanical rules in [`gradle/coding-standards.gradle.kts`](gradle/coding-standards.gradle.kts) run via `.githooks/pre-commit` and `lintCodingStandards` (`./gradlew tightenCodingStandardsBaselines --console=plain -q` auto-tightens Rule 10 & Rule 12 ratchet baselines).
+- **Coding standards**: Read [`CODING_STANDARDS.md`](CODING_STANDARDS.md) during code review. Mechanical rules in [`gradle/coding-standards.gradle.kts`](gradle/coding-standards.gradle.kts) run via `.githooks/pre-commit` and `lintCodingStandards` (`./gradlew tightenCodingStandardsBaselines --console=plain -q` auto-tightens Rule 10 & Rule 12 ratchet baselines).
 - **Domain & ADRs**: Read [`GLOSSARY.md`](GLOSSARY.md) and relevant [`docs/adr/`](docs/adr/) before naming or designing domain changes ([`docs/agents/domain.md`](docs/agents/domain.md)).
 - **Issues & triage**: GitHub Issues workflow -> [`docs/agents/issue-tracker.md`](docs/agents/issue-tracker.md); triage labels -> [`docs/agents/triage-labels.md`](docs/agents/triage-labels.md).
 - **Configuration**: Unified env architecture -> [`docs/architecture/configuration.md`](docs/architecture/configuration.md).
