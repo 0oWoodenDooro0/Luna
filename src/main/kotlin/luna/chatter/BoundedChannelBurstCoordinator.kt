@@ -52,17 +52,19 @@ class BoundedChannelBurstCoordinator(
 
     private data class HandoffOutcome(
         val shouldExecute: Boolean,
-        val effectiveIsDirectMention: Boolean,
+        val effectiveDirectInteraction: DirectInteractionType,
     )
 
     private class ChannelRound(
         val channelId: Snowflake,
-        var isMentionBurst: Boolean,
+        var directInteraction: DirectInteractionType,
         var mentionAuthorId: Snowflake?,
         var nextDebounceMs: Long,
         var ownerToken: Long,
         var interruptCount: Int = 0,
     ) {
+        val isMentionBurst: Boolean
+            get() = directInteraction.isDirect
         var phase: Phase = Phase.DEBOUNCING
         var coalesceSeq: Long = 0L
         var debounceWakeup: CompletableDeferred<Unit> = CompletableDeferred()
@@ -123,6 +125,24 @@ class BoundedChannelBurstCoordinator(
         isDirectMention: Boolean,
         canProceedAfterWait: () -> Boolean = { true },
         block: suspend (effectiveIsDirectMention: Boolean, markDispatching: () -> Boolean) -> Boolean,
+    ): Boolean =
+        executeWithDirectInteraction(
+            channelId = channelId,
+            messageId = messageId,
+            authorId = authorId,
+            directInteraction = if (isDirectMention) DirectInteractionType.MENTION else DirectInteractionType.NONE,
+            canProceedAfterWait = canProceedAfterWait,
+        ) { effectiveInteraction, markDispatching ->
+            block(effectiveInteraction.isDirect, markDispatching)
+        }
+
+    suspend fun executeWithDirectInteraction(
+        channelId: Snowflake,
+        messageId: Snowflake,
+        authorId: Snowflake?,
+        directInteraction: DirectInteractionType,
+        canProceedAfterWait: () -> Boolean = { true },
+        block: suspend (effectiveDirectInteraction: DirectInteractionType, markDispatching: () -> Boolean) -> Boolean,
     ): Boolean {
         var isFirstAttempt = true
         while (true) {
@@ -132,7 +152,7 @@ class BoundedChannelBurstCoordinator(
             }
             isFirstAttempt = false
 
-            when (val action = joinOrReplaceRound(channelId, authorId, isDirectMention)) {
+            when (val action = joinOrReplaceRound(channelId, authorId, directInteraction)) {
                 is JoinAction.Ignore -> {
                     logger.debug(
                         "Ignoring bystander ambient message {} in channel {} during active direct-mention burst",
@@ -169,7 +189,7 @@ class BoundedChannelBurstCoordinator(
                         logger.debug("Coalesced message {} in channel {} yielded to newer burst message", messageId, channelId)
                         return false
                     }
-                    return runPhase2(channelId, messageId, action.round, outcome.effectiveIsDirectMention, block)
+                    return runPhase2(channelId, messageId, action.round, outcome.effectiveDirectInteraction, block)
                 }
 
                 is JoinAction.RunDebounce -> {
@@ -178,16 +198,35 @@ class BoundedChannelBurstCoordinator(
                     if (!outcome.shouldExecute) {
                         return false
                     }
-                    return runPhase2(channelId, messageId, action.round, outcome.effectiveIsDirectMention, block)
+                    return runPhase2(channelId, messageId, action.round, outcome.effectiveDirectInteraction, block)
                 }
             }
         }
     }
 
+    private fun openRound(
+        channelId: Snowflake,
+        authorId: Snowflake?,
+        directInteraction: DirectInteractionType,
+        interruptCount: Int = 0,
+    ): ChannelRound {
+        val round =
+            ChannelRound(
+                channelId = channelId,
+                directInteraction = directInteraction,
+                mentionAuthorId = if (directInteraction.isDirect) authorId else null,
+                nextDebounceMs = if (directInteraction.isDirect) mentionDebounceMs else debounceMs,
+                ownerToken = ++nextToken,
+                interruptCount = interruptCount,
+            )
+        rounds[channelId] = round
+        return round
+    }
+
     private fun joinOrReplaceRound(
         channelId: Snowflake,
         authorId: Snowflake?,
-        isDirectMention: Boolean,
+        directInteraction: DirectInteractionType,
     ): JoinAction {
         var toCancelJob: Job? = null
         var action: JoinAction? = null
@@ -195,34 +234,20 @@ class BoundedChannelBurstCoordinator(
         synchronized(lock) {
             val current = rounds[channelId]
             if (current == null || current.phase == Phase.DONE || current.evicted) {
-                val round =
-                    ChannelRound(
-                        channelId = channelId,
-                        isMentionBurst = isDirectMention,
-                        mentionAuthorId = if (isDirectMention) authorId else null,
-                        nextDebounceMs = if (isDirectMention) mentionDebounceMs else debounceMs,
-                        ownerToken = ++nextToken,
-                    )
-                rounds[channelId] = round
+                val round = openRound(channelId, authorId, directInteraction)
                 action = JoinAction.RunDebounce(round = round, myToken = round.ownerToken, evictedRound = null)
                 return@synchronized
             }
 
             if (current.isMentionBurst) {
-                if (!isDirectMention) {
-                    val isSameAuthor = authorId != null && current.mentionAuthorId != null && authorId == current.mentionAuthorId
-                    if (!isSameAuthor) {
-                        action = JoinAction.Ignore
-                        return@synchronized
-                    }
-                    // Same-author follow-up to an active direct mention: coalesce or wait/interrupt while preserving mention mode
-                } else {
-                    val isSameAuthor = authorId != null && current.mentionAuthorId != null && authorId == current.mentionAuthorId
-                    if (!isSameAuthor) {
-                        // Different author's direct mention waits for the active direct mention instead of cancelling it
-                        action = JoinAction.WaitForCompletion(current.completion)
-                        return@synchronized
-                    }
+                val isSameAuthor = authorId != null && current.mentionAuthorId != null && authorId == current.mentionAuthorId
+                if (!directInteraction.isDirect && !isSameAuthor) {
+                    action = JoinAction.Ignore
+                    return@synchronized
+                }
+                if (directInteraction.isDirect && !isSameAuthor) {
+                    action = JoinAction.WaitForCompletion(current.completion)
+                    return@synchronized
                 }
             }
 
@@ -232,11 +257,12 @@ class BoundedChannelBurstCoordinator(
                     val waiter = CompletableDeferred<HandoffOutcome>()
                     current.waiters[token] = waiter
                     current.ownerToken = token
-                    if (isDirectMention && !current.isMentionBurst) {
-                        current.isMentionBurst = true
+                    if (directInteraction.isDirect && !current.isMentionBurst) {
+                        current.directInteraction = directInteraction
                         current.mentionAuthorId = authorId
                         current.nextDebounceMs = mentionDebounceMs
                     } else if (current.isMentionBurst) {
+                        current.directInteraction = current.directInteraction.mergeWith(directInteraction)
                         current.nextDebounceMs = mentionDebounceMs
                     } else {
                         current.nextDebounceMs = debounceMs
@@ -253,27 +279,25 @@ class BoundedChannelBurstCoordinator(
                     if (isLockedByCap) {
                         action = JoinAction.WaitForCompletion(current.completion)
                     } else {
-                        // Pre-send cancellation: interrupt active run and open a new debounce round carrying interruptCount + 1
                         current.interrupted = true
                         current.phase = Phase.DONE
                         toCancelJob = current.executionJob
 
-                        val inheritMention = isDirectMention || (current.isMentionBurst && authorId != null && authorId == current.mentionAuthorId)
+                        val isSameMentionAuthor = current.isMentionBurst && authorId != null && authorId == current.mentionAuthorId
+                        val inheritedInteraction =
+                            if (isSameMentionAuthor) current.directInteraction.mergeWith(directInteraction) else directInteraction
                         val mentionAuthor =
-                            if (isDirectMention) {
-                                authorId
-                            } else if (current.isMentionBurst && authorId != null && authorId == current.mentionAuthorId) {
-                                current.mentionAuthorId
-                            } else {
-                                null
+                            when {
+                                directInteraction.isDirect -> authorId
+                                isSameMentionAuthor -> current.mentionAuthorId
+                                else -> null
                             }
-                        val nextDebounce = if (inheritMention) mentionDebounceMs else debounceMs
                         val replacement =
                             ChannelRound(
                                 channelId = channelId,
-                                isMentionBurst = inheritMention,
+                                directInteraction = inheritedInteraction,
                                 mentionAuthorId = mentionAuthor,
-                                nextDebounceMs = nextDebounce,
+                                nextDebounceMs = if (inheritedInteraction.isDirect) mentionDebounceMs else debounceMs,
                                 ownerToken = ++nextToken,
                                 interruptCount = current.interruptCount + 1,
                             )
@@ -287,16 +311,7 @@ class BoundedChannelBurstCoordinator(
                 }
 
                 Phase.DONE -> {
-                    // Already unreachable above, fallback cleanly
-                    val round =
-                        ChannelRound(
-                            channelId = channelId,
-                            isMentionBurst = isDirectMention,
-                            mentionAuthorId = if (isDirectMention) authorId else null,
-                            nextDebounceMs = if (isDirectMention) mentionDebounceMs else debounceMs,
-                            ownerToken = ++nextToken,
-                        )
-                    rounds[channelId] = round
+                    val round = openRound(channelId, authorId, directInteraction)
                     action = JoinAction.RunDebounce(round = round, myToken = round.ownerToken, evictedRound = null)
                 }
             }
@@ -312,7 +327,7 @@ class BoundedChannelBurstCoordinator(
         round: ChannelRound,
         runnerToken: Long,
     ): HandoffOutcome {
-        var outcomeForRunner = HandoffOutcome(shouldExecute = false, effectiveIsDirectMention = round.isMentionBurst)
+        var outcomeForRunner = HandoffOutcome(shouldExecute = false, effectiveDirectInteraction = round.directInteraction)
         try {
             withTimeoutOrNull(maxDebounceMs) {
                 while (true) {
@@ -346,19 +361,19 @@ class BoundedChannelBurstCoordinator(
             val waitersToNotify = mutableListOf<Pair<CompletableDeferred<HandoffOutcome>, HandoffOutcome>>()
             synchronized(lock) {
                 if (round.evicted || round.phase != Phase.DEBOUNCING) {
-                    val cancelOutcome = HandoffOutcome(shouldExecute = false, effectiveIsDirectMention = round.isMentionBurst)
+                    val cancelOutcome = HandoffOutcome(shouldExecute = false, effectiveDirectInteraction = round.directInteraction)
                     round.waiters.values.forEach { waitersToNotify.add(it to cancelOutcome) }
                     round.waiters.clear()
                     outcomeForRunner = cancelOutcome
                 } else {
                     val winnerToken = round.ownerToken
-                    val effectiveMention = round.isMentionBurst
+                    val effectiveInteraction = round.directInteraction
                     round.phase = Phase.EXECUTING
                     round.waiters.forEach { (tok, deferred) ->
                         val outcome =
                             HandoffOutcome(
                                 shouldExecute = (tok == winnerToken),
-                                effectiveIsDirectMention = effectiveMention,
+                                effectiveDirectInteraction = effectiveInteraction,
                             )
                         waitersToNotify.add(deferred to outcome)
                     }
@@ -366,7 +381,7 @@ class BoundedChannelBurstCoordinator(
                     outcomeForRunner =
                         HandoffOutcome(
                             shouldExecute = (winnerToken == runnerToken),
-                            effectiveIsDirectMention = effectiveMention,
+                            effectiveDirectInteraction = effectiveInteraction,
                         )
                 }
             }
@@ -374,7 +389,7 @@ class BoundedChannelBurstCoordinator(
             return outcomeForRunner
         } catch (t: Throwable) {
             val waitersToNotify = mutableListOf<Pair<CompletableDeferred<HandoffOutcome>, HandoffOutcome>>()
-            val cancelOutcome = HandoffOutcome(shouldExecute = false, effectiveIsDirectMention = round.isMentionBurst)
+            val cancelOutcome = HandoffOutcome(shouldExecute = false, effectiveDirectInteraction = round.directInteraction)
             synchronized(lock) {
                 round.phase = Phase.DONE
                 if (rounds[channelId] === round) {
@@ -412,8 +427,8 @@ class BoundedChannelBurstCoordinator(
         channelId: Snowflake,
         messageId: Snowflake,
         round: ChannelRound,
-        effectiveIsDirectMention: Boolean,
-        block: suspend (effectiveIsDirectMention: Boolean, markDispatching: () -> Boolean) -> Boolean,
+        effectiveDirectInteraction: DirectInteractionType,
+        block: suspend (effectiveDirectInteraction: DirectInteractionType, markDispatching: () -> Boolean) -> Boolean,
     ): Boolean =
         coroutineScope {
             var blockResult = false
@@ -432,7 +447,7 @@ class BoundedChannelBurstCoordinator(
             val job =
                 launch(start = CoroutineStart.LAZY) {
                     try {
-                        blockResult = block(effectiveIsDirectMention, markDispatching)
+                        blockResult = block(effectiveDirectInteraction, markDispatching)
                     } catch (e: CancellationException) {
                         throw e
                     } catch (t: Throwable) {
@@ -485,6 +500,28 @@ class BoundedChannelBurstCoordinator(
             }
         }
 
+    private fun abortRound(
+        round: ChannelRound,
+        reason: String,
+    ) {
+        val cancelWaiters = mutableListOf<CompletableDeferred<HandoffOutcome>>()
+        val jobToCancel: Job?
+        val wakeupToComplete: CompletableDeferred<Unit>
+        synchronized(lock) {
+            round.evicted = true
+            round.phase = Phase.DONE
+            cancelWaiters.addAll(round.waiters.values)
+            round.waiters.clear()
+            jobToCancel = round.executionJob
+            wakeupToComplete = round.debounceWakeup
+        }
+        wakeupToComplete.complete(Unit)
+        val outcome = HandoffOutcome(shouldExecute = false, effectiveDirectInteraction = round.directInteraction)
+        cancelWaiters.forEach { it.complete(outcome) }
+        jobToCancel?.cancel(BurstInterruptedCancellationException(reason))
+        round.completion.complete(Unit)
+    }
+
     private fun abortEvictedRound() {
         val evicted =
             synchronized(lock) {
@@ -492,22 +529,7 @@ class BoundedChannelBurstCoordinator(
                 pendingEviction = null
                 r
             } ?: return
-
-        val cancelWaiters = mutableListOf<CompletableDeferred<HandoffOutcome>>()
-        val jobToCancel: Job?
-        val wakeupToComplete: CompletableDeferred<Unit>
-        synchronized(lock) {
-            evicted.phase = Phase.DONE
-            cancelWaiters.addAll(evicted.waiters.values)
-            evicted.waiters.clear()
-            jobToCancel = evicted.executionJob
-            wakeupToComplete = evicted.debounceWakeup
-        }
-        wakeupToComplete.complete(Unit)
-        val outcome = HandoffOutcome(shouldExecute = false, effectiveIsDirectMention = evicted.isMentionBurst)
-        cancelWaiters.forEach { it.complete(outcome) }
-        jobToCancel?.cancel(BurstInterruptedCancellationException("Evicted due to maxEntries capacity ($maxEntries)"))
-        evicted.completion.complete(Unit)
+        abortRound(evicted, "Evicted due to maxEntries capacity ($maxEntries)")
     }
 
     fun isActive(channelId: Snowflake): Boolean = synchronized(lock) { channelId in rounds }
@@ -524,24 +546,7 @@ class BoundedChannelBurstCoordinator(
             rounds.clear()
             pendingEviction = null
         }
-        toAbort.forEach { round ->
-            val cancelWaiters = mutableListOf<CompletableDeferred<HandoffOutcome>>()
-            val job: Job?
-            val wakeup: CompletableDeferred<Unit>
-            synchronized(lock) {
-                round.evicted = true
-                round.phase = Phase.DONE
-                cancelWaiters.addAll(round.waiters.values)
-                round.waiters.clear()
-                job = round.executionJob
-                wakeup = round.debounceWakeup
-            }
-            wakeup.complete(Unit)
-            val outcome = HandoffOutcome(shouldExecute = false, effectiveIsDirectMention = round.isMentionBurst)
-            cancelWaiters.forEach { it.complete(outcome) }
-            job?.cancel(BurstInterruptedCancellationException("Coordinator cleared"))
-            round.completion.complete(Unit)
-        }
+        toAbort.forEach { abortRound(it, "Coordinator cleared") }
     }
 
     private data class DebounceSnapshot(
@@ -568,19 +573,12 @@ class BoundedChannelBurstCoordinator(
         }
 
         private fun normalizeMaxDebounceMs(raw: Long): Long {
-            if (raw <= 0L) {
-                logger.warn(
-                    "Invalid maxDebounceMs '{}ms'; falling back to default {}ms",
-                    raw,
-                    ChatterConfig.DEFAULT_DEBOUNCE_MAX_MILLIS,
-                )
-                return ChatterConfig.DEFAULT_DEBOUNCE_MAX_MILLIS
-            }
-            val clamped = raw.coerceIn(ChatterConfig.MIN_DEBOUNCE_MAX_MILLIS, ChatterConfig.MAX_DEBOUNCE_MAX_MILLIS)
-            if (clamped != raw) {
+            val positive = normalizePositiveMs(raw, ChatterConfig.DEFAULT_DEBOUNCE_MAX_MILLIS, "maxDebounceMs")
+            val clamped = positive.coerceIn(ChatterConfig.MIN_DEBOUNCE_MAX_MILLIS, ChatterConfig.MAX_DEBOUNCE_MAX_MILLIS)
+            if (clamped != positive) {
                 logger.warn(
                     "Out-of-range maxDebounceMs '{}ms'; clamped to {}ms (allowed [{}, {}])",
-                    raw,
+                    positive,
                     clamped,
                     ChatterConfig.MIN_DEBOUNCE_MAX_MILLIS,
                     ChatterConfig.MAX_DEBOUNCE_MAX_MILLIS,

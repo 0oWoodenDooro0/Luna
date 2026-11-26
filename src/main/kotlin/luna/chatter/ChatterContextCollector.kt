@@ -147,7 +147,7 @@ open class ChatterContextCollector(
         val resolvedSelfId = kordSelfId ?: messages.firstNotNullOfOrNull { runCatching { it.kord.selfId }.getOrNull() }
         val filtered =
             noiseFilter
-                .filterContextMessages(messages, resolvedSelfId)
+                .filterContextMessagesResolvingReplies(messages, resolvedSelfId)
                 .distinctBy { it.id }
 
         if (filtered.isEmpty()) {
@@ -188,7 +188,7 @@ open class ChatterContextCollector(
         val resolvedSelfId = kordSelfId ?: messages.firstNotNullOfOrNull { runCatching { it.kord.selfId }.getOrNull() }
         val filtered =
             noiseFilter
-                .filterContextMessages(messages, resolvedSelfId)
+                .filterContextMessagesResolvingReplies(messages, resolvedSelfId)
                 .distinctBy { it.id }
 
         if (filtered.isEmpty()) {

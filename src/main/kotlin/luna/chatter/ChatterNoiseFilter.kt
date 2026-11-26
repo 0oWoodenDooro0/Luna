@@ -29,6 +29,13 @@ enum class DirectInteractionType {
     val isDirect: Boolean
         get() = this != NONE
 
+    fun mergeWith(other: DirectInteractionType): DirectInteractionType =
+        when {
+            this == MENTION || other == MENTION -> MENTION
+            this == DIRECT_REPLY || other == DIRECT_REPLY -> DIRECT_REPLY
+            else -> NONE
+        }
+
     fun toAiTraceTrigger(effectiveIsDirect: Boolean = isDirect): AiTraceTrigger =
         when {
             !effectiveIsDirect -> AiTraceTrigger.AMBIENT
@@ -427,9 +434,20 @@ open class ChatterNoiseFilter(
         }
         val refId = runCatching { ref.data.id.value }.getOrNull() ?: return null
         return try {
-            withTimeoutOrNull(REFERENCE_LOOKUP_TIMEOUT_MS) {
-                message.channel.getMessageOrNull(refId)
+            var completed = false
+            val resolved =
+                withTimeoutOrNull(REFERENCE_LOOKUP_TIMEOUT_MS) {
+                    message.channel.getMessageOrNull(refId).also { completed = true }
+                }
+            if (!completed) {
+                logger.debug(
+                    "Timed out resolving referenced message {} for {} after {}ms",
+                    refId,
+                    message.id,
+                    REFERENCE_LOOKUP_TIMEOUT_MS,
+                )
             }
+            resolved
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
@@ -438,23 +456,48 @@ open class ChatterNoiseFilter(
         }
     }
 
+    private fun evaluateCachedContextEligibility(
+        message: Message,
+        resolvedSelfId: Snowflake?,
+    ): Boolean? {
+        val noiseEval = contextEngine.evaluateNoise(message, contextPolicy(), kordSelfId = resolvedSelfId)
+        if (!noiseEval.isNoise) {
+            return true
+        }
+        if (noiseEval.reason != DialogueNoiseReason.EMPTY_OR_EMOJI_ONLY) {
+            return false
+        }
+        if (isDirectBotMention(message, resolvedSelfId) || isCachedReplyToLuna(message, resolvedSelfId)) {
+            return true
+        }
+        return null
+    }
+
     fun isContextMessage(
         message: Message,
         kordSelfId: Snowflake? = null,
     ): Boolean {
         val resolvedSelfId = kordSelfId ?: runCatching { message.kord.selfId }.getOrNull()
-        val noiseEval = contextEngine.evaluateNoise(message, contextPolicy(), kordSelfId = resolvedSelfId)
-        if (!noiseEval.isNoise) {
-            return true
-        }
-        return noiseEval.reason == DialogueNoiseReason.EMPTY_OR_EMOJI_ONLY &&
-            (isDirectBotMention(message, resolvedSelfId) || isCachedReplyToLuna(message, resolvedSelfId))
+        return evaluateCachedContextEligibility(message, resolvedSelfId) == true
+    }
+
+    suspend fun isContextMessageResolvingReply(
+        message: Message,
+        kordSelfId: Snowflake? = null,
+    ): Boolean {
+        val resolvedSelfId = kordSelfId ?: runCatching { message.kord.selfId }.getOrNull()
+        return evaluateCachedContextEligibility(message, resolvedSelfId) ?: isReplyToLuna(message, resolvedSelfId)
     }
 
     fun filterContextMessages(
         messages: List<Message>,
         kordSelfId: Snowflake? = null,
     ): List<Message> = messages.filter { isContextMessage(it, kordSelfId) }
+
+    suspend fun filterContextMessagesResolvingReplies(
+        messages: List<Message>,
+        kordSelfId: Snowflake? = null,
+    ): List<Message> = messages.filter { isContextMessageResolvingReply(it, kordSelfId) }
 
     fun toChatMessageOrNull(
         message: Message,

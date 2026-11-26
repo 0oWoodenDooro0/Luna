@@ -168,19 +168,19 @@ class ChatterService(
 
         val channelId = message.channelId
 
-        return burstCoordinator.executeWithDebounce(
+        return burstCoordinator.executeWithDirectInteraction(
             channelId = channelId,
             messageId = message.id,
             authorId = snapshot.authorId,
-            isDirectMention = isDirectMention,
+            directInteraction = directInteraction,
             canProceedAfterWait = { filter.shouldEvaluate(message, isDirectMention = isDirectMention, kordSelfId = snapshot.selfId) },
-        ) { effectiveIsDirectMention, markDispatching ->
+        ) { effectiveDirectInteraction, markDispatching ->
             runTracedSession(
                 message = message,
                 snapshot = snapshot,
                 channelId = channelId,
-                isDirectMention = effectiveIsDirectMention,
-                trigger = directInteraction.toAiTraceTrigger(effectiveIsDirectMention),
+                isDirectMention = effectiveDirectInteraction.isDirect,
+                trigger = effectiveDirectInteraction.toAiTraceTrigger(),
                 markDispatching = markDispatching,
             )
         }
