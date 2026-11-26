@@ -3,20 +3,25 @@ package luna.chatter.schedule
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.selects.select
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
 import luna.chatter.ChatterConfig
 import org.slf4j.LoggerFactory
 import java.time.Clock
 import java.time.LocalDate
 import java.time.ZoneId
 import java.util.UUID
+import kotlin.coroutines.coroutineContext
 
 /**
  * Coordinates Luna's daily 24-hour [DailySchedule] lifecycle:
@@ -127,12 +132,17 @@ open class DailyScheduleCoordinator(
         return job
     }
 
-    fun shutdown() {
-        schedulerJob?.cancel()
+    suspend fun shutdown() {
+        val job = schedulerJob
         schedulerJob = null
         activeSchedule = null
         lastSyncedBlockKey = null
         previousAvailability = null
+        if (job != null) {
+            withContext(NonCancellable) {
+                job.cancelAndJoin()
+            }
+        }
     }
 
     /**
@@ -412,6 +422,7 @@ open class DailyScheduleCoordinator(
     }
 
     private suspend fun loadOrGenerateSchedule(today: LocalDate): DailySchedule? {
+        coroutineContext.ensureActive()
         val existing =
             activeSchedule?.takeIf { it.date == today }
                 ?: runCatching { store.getSchedule(today) }
@@ -422,18 +433,21 @@ open class DailyScheduleCoordinator(
             return existing
         }
 
+        coroutineContext.ensureActive()
         val previousSummary =
             runCatching { store.getPreviousDaySummary(today) }
                 .onFailure { ex ->
                     logger.warn("Failed to read previous day summary before {}: {}", today, ex.message)
                 }.getOrNull()
 
+        coroutineContext.ensureActive()
         val todayCommitments =
             runCatching { store.listCommitmentsForDate(today) }
                 .onFailure { ex ->
                     logger.warn("Failed to load ScheduleCommitments for {}: {}", today, ex.message)
                 }.getOrDefault(emptyList())
 
+        coroutineContext.ensureActive()
         val generated =
             generator.generate(
                 date = today,
@@ -449,6 +463,7 @@ open class DailyScheduleCoordinator(
                     schedule.copy(blocks = DailyScheduleSplicer.spliceBlocks(schedule.blocks, commitmentBlocks))
                 }
             }.onSuccess { schedule ->
+                coroutineContext.ensureActive()
                 runCatching { store.saveSchedule(schedule) }
                     .onFailure { ex ->
                         logger.warn("Failed to persist generated DailySchedule for {}: {}", today, ex.message)
