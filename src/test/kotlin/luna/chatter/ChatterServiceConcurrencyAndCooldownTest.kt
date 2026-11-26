@@ -291,6 +291,8 @@ class ChatterServiceConcurrencyAndCooldownTest {
         runTest {
             val botSelfId = Snowflake(9999L)
             val channelId = 704L
+            // Isolate base 5s cooldown behavior without Conversation Momentum softening
+            fixture.filter.momentumWindowMs = 0L
 
             coEvery { fixture.decisionClient.decide(any(), any(), any()) } returns ParticipationDecision(shouldParticipate = true, noul = 0.9)
             coEvery { fixture.chatterGenerator.generateReply(any<ChatterInput>()) } returns "Hello!"

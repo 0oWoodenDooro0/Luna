@@ -246,29 +246,19 @@ class ChatterService(
             val baseThreshold = config.decision.threshold
             val reactionThreshold = config.reactionThreshold
             val personaState = personaStateProvider.currentState(baseThreshold)
-            val relationship =
-                ChatterAffinityHelper.resolveAuthorRelationship(
+            val (relationship, effectiveThreshold) =
+                ChatterAffinityHelper.resolveThresholdAndRecordTrace(
                     memoryStore = chatterGenerator.memoryStore,
                     guildId = snapshot.guildId,
                     authorId = snapshot.authorId,
+                    channelId = message.channelId,
+                    personaState = personaState,
+                    reactionThreshold = reactionThreshold,
+                    configuredMomentumBoost = config.momentumThresholdBoost,
+                    filter = filter,
+                    session = session,
                     logger = logger,
                 )
-            val effectiveThreshold =
-                ChatterAffinityHelper.computeEffectiveThreshold(
-                    baseEffectiveThreshold = personaState.effectiveThreshold,
-                    relationship = relationship,
-                )
-            session.recordPersonaState(
-                circadianPeriod = personaState.circadianPeriod?.name,
-                personaMood = personaState.mood?.label,
-                effectiveThreshold = effectiveThreshold,
-                reactionThreshold = reactionThreshold,
-            )
-            session.recordRelationship(
-                relationshipTier = relationship.tier.name,
-                affinityScore = relationship.affinityScore,
-                affinityThresholdOffset = relationship.tier.ambientThresholdOffset,
-            )
             scheduleGate.recordActiveScheduleInSession(session, personaState.scheduleBlock)
 
             // 2. Gathers recent messages from channel slice to construct state / history
@@ -554,6 +544,12 @@ class ChatterService(
 
             val deliveredOutput = segments.joinToString("\n")
             filter.cooldownCache.record(message.channelId)
+            filter.momentumCache.recordReply(
+                channelId = message.channelId,
+                isDirectMention = isDirectMention,
+                windowMs = filter.momentumWindowMs,
+                maxTurns = filter.momentumMaxTurns,
+            )
             emojiTurn.recordDeliveredReply(segments)
             session.complete(finalOutput = deliveredOutput)
             logger.info("Chatter sent reply to channel {}: {}", message.channelId, deliveredOutput)

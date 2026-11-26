@@ -46,6 +46,9 @@ data class ChatterFilterConfig(
     val allowedChannels: Set<Snowflake> = emptySet(),
     val cooldownDurationMs: Long = BoundedChannelCooldownCache.DEFAULT_COOLDOWN_MS,
     val botPrefixes: Set<String> = ChatterNoiseFilter.DEFAULT_BOT_PREFIXES,
+    val momentumWindowMs: Long = BoundedChannelMomentumCache.DEFAULT_WINDOW_MS,
+    val momentumCooldownFloorMs: Long = DEFAULT_MOMENTUM_COOLDOWN_FLOOR_MS,
+    val momentumMaxTurns: Int = BoundedChannelMomentumCache.DEFAULT_MAX_TURNS,
 ) {
     init {
         if (cooldownDurationMs < 0L) {
@@ -54,11 +57,32 @@ data class ChatterFilterConfig(
                 "Invalid configuration for CHATTER_COOLDOWN_SECONDS: expected a non-negative duration, but got '${safeValue}ms'",
             )
         }
+        if (momentumWindowMs < 0L) {
+            val safeValue = SecretMasker.maskValue("CHATTER_MOMENTUM_WINDOW_SECONDS", momentumWindowMs)
+            throw ConfigValidationException(
+                "Invalid configuration for CHATTER_MOMENTUM_WINDOW_SECONDS: " +
+                    "expected a non-negative duration, but got '${safeValue}ms'",
+            )
+        }
+        if (momentumCooldownFloorMs < 0L) {
+            val safeValue = SecretMasker.maskValue("CHATTER_MOMENTUM_COOLDOWN_FLOOR_MS", momentumCooldownFloorMs)
+            throw ConfigValidationException(
+                "Invalid configuration for CHATTER_MOMENTUM_COOLDOWN_FLOOR_MS: " +
+                    "expected a non-negative duration, but got '${safeValue}ms'",
+            )
+        }
+        if (momentumMaxTurns < 0) {
+            val safeValue = SecretMasker.maskValue("CHATTER_MOMENTUM_MAX_TURNS", momentumMaxTurns)
+            throw ConfigValidationException(
+                "Invalid configuration for CHATTER_MOMENTUM_MAX_TURNS: expected a non-negative integer, but got '$safeValue'",
+            )
+        }
     }
 
     companion object {
         const val DEFAULT_ENABLED = true
         const val DEFAULT_COOLDOWN_SECONDS = 5L
+        const val DEFAULT_MOMENTUM_COOLDOWN_FLOOR_MS = 1_500L
         private const val MAX_COOLDOWN_SECONDS = Long.MAX_VALUE / 1000L
 
         /** Parses [ChatterFilterConfig] from [env] with strict fail-fast validation. */
@@ -77,10 +101,31 @@ data class ChatterFilterConfig(
                         Snowflake(idValue)
                     }.toSet()
             val cooldownSeconds = env.long("CHATTER_COOLDOWN_SECONDS", DEFAULT_COOLDOWN_SECONDS, 0L..MAX_COOLDOWN_SECONDS)
+            val momentumWindowSeconds =
+                env.long(
+                    "CHATTER_MOMENTUM_WINDOW_SECONDS",
+                    BoundedChannelMomentumCache.DEFAULT_WINDOW_SECONDS,
+                    0L..MAX_COOLDOWN_SECONDS,
+                )
+            val momentumCooldownFloorMs =
+                env.long(
+                    "CHATTER_MOMENTUM_COOLDOWN_FLOOR_MS",
+                    DEFAULT_MOMENTUM_COOLDOWN_FLOOR_MS,
+                    0L..Long.MAX_VALUE,
+                )
+            val momentumMaxTurns =
+                env.int(
+                    "CHATTER_MOMENTUM_MAX_TURNS",
+                    BoundedChannelMomentumCache.DEFAULT_MAX_TURNS,
+                    0..Int.MAX_VALUE,
+                )
             return ChatterFilterConfig(
                 enabled = enabled,
                 allowedChannels = allowedChannels,
                 cooldownDurationMs = cooldownSeconds * 1000L,
+                momentumWindowMs = momentumWindowSeconds * 1000L,
+                momentumCooldownFloorMs = momentumCooldownFloorMs,
+                momentumMaxTurns = momentumMaxTurns,
             )
         }
     }
@@ -95,7 +140,12 @@ open class ChatterNoiseFilter(
     var cooldownDurationMs: Long = BoundedChannelCooldownCache.DEFAULT_COOLDOWN_MS,
     var botPrefixes: Set<String> = DEFAULT_BOT_PREFIXES,
     val contextEngine: DiscordDialogueContextEngine = DiscordDialogueContextEngine(webhookRegistry, summaryRegistry),
+    val momentumCache: BoundedChannelMomentumCache = BoundedChannelMomentumCache(),
+    var momentumCooldownFloorMs: Long = ChatterFilterConfig.DEFAULT_MOMENTUM_COOLDOWN_FLOOR_MS,
 ) {
+    var momentumWindowMs: Long = momentumCache.defaultWindowMs
+    var momentumMaxTurns: Int = momentumCache.defaultMaxTurns
+
     constructor(
         config: ChatterFilterConfig,
         cooldownCache: BoundedChannelCooldownCache =
@@ -103,6 +153,11 @@ open class ChatterNoiseFilter(
         webhookRegistry: WebhookRegistry = LunaWebhookRegistry,
         summaryRegistry: SummaryRegistry = SummaryMessageRegistry,
         contextEngine: DiscordDialogueContextEngine = DiscordDialogueContextEngine(webhookRegistry, summaryRegistry),
+        momentumCache: BoundedChannelMomentumCache =
+            BoundedChannelMomentumCache(
+                defaultWindowMs = config.momentumWindowMs,
+                defaultMaxTurns = config.momentumMaxTurns,
+            ),
     ) : this(
         cooldownCache = cooldownCache,
         webhookRegistry = webhookRegistry,
@@ -112,7 +167,12 @@ open class ChatterNoiseFilter(
         cooldownDurationMs = config.cooldownDurationMs,
         botPrefixes = config.botPrefixes,
         contextEngine = contextEngine,
-    )
+        momentumCache = momentumCache,
+        momentumCooldownFloorMs = config.momentumCooldownFloorMs,
+    ) {
+        this.momentumWindowMs = config.momentumWindowMs
+        this.momentumMaxTurns = config.momentumMaxTurns
+    }
 
     internal fun contextPolicy(): DialogueContextPolicy = DialogueContextPolicy.chatter(botPrefixes = botPrefixes)
 
@@ -142,12 +202,26 @@ open class ChatterNoiseFilter(
         val resolvedSelfId = kordSelfId ?: runCatching { message.kord.selfId }.getOrNull()
         val directMention = isDirectMention || isDirectBotMention(message, resolvedSelfId)
 
-        // 3. Check if channel is on cooldown (bypassed for direct bot mentions)
-        if (!directMention && cooldownCache.isOnCooldown(channelId, cooldownDurationMs)) {
-            return ChatterFilterResult.Rejected(
-                RejectionReason.CHANNEL_ON_COOLDOWN,
-                "Channel $channelId is currently on cooldown",
-            )
+        // 3. Check if channel is on cooldown (bypassed for direct bot mentions; softened during active momentum)
+        if (!directMention) {
+            val momentumActive =
+                momentumCache.isActive(
+                    channelId = channelId,
+                    windowMs = momentumWindowMs,
+                    maxTurns = momentumMaxTurns,
+                )
+            val effectiveCooldownMs =
+                if (momentumActive) {
+                    minOf(momentumCooldownFloorMs, cooldownDurationMs)
+                } else {
+                    cooldownDurationMs
+                }
+            if (cooldownCache.isOnCooldown(channelId, effectiveCooldownMs)) {
+                return ChatterFilterResult.Rejected(
+                    RejectionReason.CHANNEL_ON_COOLDOWN,
+                    "Channel $channelId is currently on cooldown",
+                )
+            }
         }
 
         // 4. Delegate shared noise evaluation (commands, system notices, webhooks/bots, blank/media checks)

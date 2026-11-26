@@ -45,6 +45,9 @@ class AiTraceSession internal constructor(
     private var relationshipTier: String? = null
     private var affinityScore: Int? = null
     private var affinityThresholdOffset: Double? = null
+    private var momentumActive: Boolean? = null
+    private var momentumTurnCount: Int? = null
+    private var momentumThresholdOffset: Double? = null
 
     fun registerSecret(secret: String?) {
         if (!isEnabled || secret.isNullOrBlank()) return
@@ -91,6 +94,19 @@ class AiTraceSession internal constructor(
             this.relationshipTier = relationshipTier
             this.affinityScore = affinityScore
             this.affinityThresholdOffset = affinityThresholdOffset
+        }
+    }
+
+    fun recordMomentumState(
+        active: Boolean,
+        ambientTurnCount: Int,
+        thresholdOffset: Double,
+    ) {
+        if (!isEnabled) return
+        synchronized(lock) {
+            this.momentumActive = active
+            this.momentumTurnCount = ambientTurnCount
+            this.momentumThresholdOffset = thresholdOffset
         }
     }
 
@@ -278,6 +294,9 @@ class AiTraceSession internal constructor(
                     relationshipTier = relationshipTier,
                     affinityScore = affinityScore,
                     affinityThresholdOffset = affinityThresholdOffset,
+                    momentumActive = momentumActive,
+                    momentumTurnCount = momentumTurnCount,
+                    momentumThresholdOffset = momentumThresholdOffset,
                 )
             secretsSnapshot = extraSecrets.toSet()
         }

@@ -19,6 +19,7 @@ import kotlin.test.assertTrue
 class ChatterNoiseFilterTest {
     private var simulatedTime: Long = 1_000_000L
     private lateinit var cooldownCache: BoundedChannelCooldownCache
+    private lateinit var momentumCache: BoundedChannelMomentumCache
     private lateinit var filter: ChatterNoiseFilter
 
     @BeforeEach
@@ -27,7 +28,8 @@ class ChatterNoiseFilterTest {
         luna.core.SummaryMessageRegistry.clear()
         simulatedTime = 1_000_000L
         cooldownCache = BoundedChannelCooldownCache(timeSource = { simulatedTime })
-        filter = ChatterNoiseFilter(cooldownCache = cooldownCache)
+        momentumCache = BoundedChannelMomentumCache(timeSource = { simulatedTime })
+        filter = ChatterNoiseFilter(cooldownCache = cooldownCache, momentumCache = momentumCache)
     }
 
     private fun createMockMessage(
@@ -369,5 +371,66 @@ class ChatterNoiseFilterTest {
             val res4 = filter.evaluate(emptyDirectMentionMsg, isDirectMention = false, kordSelfId = botSelfId)
             assertIs<ChatterFilterResult.Rejected>(res4)
             assertEquals(RejectionReason.EMPTY_MESSAGE, res4.reason)
+        }
+
+    @Test
+    fun `evaluate softens cooldown to momentum floor while momentum is active and non-exhausted`() =
+        runTest {
+            val channelId = Snowflake(100L)
+            cooldownCache.record(channelId, simulatedTime)
+            momentumCache.recordReply(channelId, isDirectMention = true, timestamp = simulatedTime)
+
+            // 1000ms < 1500ms floor -> still rejected
+            simulatedTime += 1_000L
+            val tooSoon = filter.evaluate(createMockMessage(id = 801L, channelId = 100L, content = "really?"))
+            assertIs<ChatterFilterResult.Rejected>(tooSoon)
+            assertEquals(RejectionReason.CHANNEL_ON_COOLDOWN, tooSoon.reason)
+
+            // 1600ms >= 1500ms floor (and < 5000ms full cooldown) -> allowed
+            simulatedTime += 600L
+            val allowed = filter.evaluate(createMockMessage(id = 802L, channelId = 100L, content = "then what?"))
+            assertIs<ChatterFilterResult.Allowed>(allowed)
+        }
+
+    @Test
+    fun `evaluate restores full cooldown when momentum is exhausted`() =
+        runTest {
+            val channelId = Snowflake(100L)
+            // 3 ambient turns exhaust default maxTurns=3
+            repeat(3) {
+                momentumCache.recordReply(channelId, isDirectMention = false, timestamp = simulatedTime)
+            }
+            cooldownCache.record(channelId, simulatedTime)
+
+            // 2500ms > 1500ms floor, but < 5000ms full cooldown -> rejected because momentum exhausted
+            simulatedTime += 2_500L
+            val rejected = filter.evaluate(createMockMessage(id = 803L, channelId = 100L, content = "more"))
+            assertIs<ChatterFilterResult.Rejected>(rejected)
+            assertEquals(RejectionReason.CHANNEL_ON_COOLDOWN, rejected.reason)
+
+            // 5000ms -> full cooldown elapsed -> allowed
+            simulatedTime += 2_500L
+            val allowed = filter.evaluate(createMockMessage(id = 804L, channelId = 100L, content = "after pause"))
+            assertIs<ChatterFilterResult.Allowed>(allowed)
+        }
+
+    @Test
+    fun `evaluate clamps momentum cooldown floor to configured cooldownDurationMs`() =
+        runTest {
+            val shortCooldownFilter =
+                ChatterNoiseFilter(
+                    cooldownCache = cooldownCache,
+                    momentumCache = momentumCache,
+                    cooldownDurationMs = 500L,
+                    momentumCooldownFloorMs = 1_500L,
+                )
+            val channelId = Snowflake(100L)
+            cooldownCache.record(channelId, simulatedTime)
+            momentumCache.recordReply(channelId, isDirectMention = true, timestamp = simulatedTime)
+
+            // 600ms > 500ms cooldownDurationMs (even though < 1500ms floor) -> allowed
+            simulatedTime += 600L
+            val allowed = shortCooldownFilter.evaluate(createMockMessage(id = 805L, channelId = 100L, content = "fast"))
+            assertIs<ChatterFilterResult.Allowed>(allowed)
         }
 }

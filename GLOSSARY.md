@@ -284,3 +284,7 @@ _Avoid_: Relationship reset, score expiration, global affinity TTL
 The low-affinity response option for `COOL` or `DISLIKED` users who directly mention or reply to Luna, allowing `Chatter Pipeline` reply generation to inspect full dialogue context before choosing a curt/aloof reply, an explicit refusal, a cold `Silent Reaction Path`, or silent non-response.
 _Avoid_: Mention ban, user blocklist, hard ignore filter
 
+**Conversation Momentum**:
+The transient per-channel conversational state following a live `Chatter Pipeline` reply that softens the flat post-reply cooldown to a minimal anti-spam floor and lowers the `Participation Decision` threshold for a bounded window and consecutive ambient turn cap so Luna can sustain natural back-and-forth exchanges without dominating the channel.
+_Avoid_: Chat streak, rapid-fire mode, cooldown bypass, sticky reply mode
+

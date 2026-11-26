@@ -15,6 +15,7 @@ import luna.core.LunaWebhookRegistry
 internal class ChatterServiceTestSupport {
     var simulatedTime: Long = 100_000L
     lateinit var cooldownCache: BoundedChannelCooldownCache
+    lateinit var momentumCache: BoundedChannelMomentumCache
     lateinit var filter: ChatterNoiseFilter
     lateinit var decisionClient: GeminiDecisionClient
     lateinit var chatterGenerator: ChatterGenerator
@@ -26,7 +27,8 @@ internal class ChatterServiceTestSupport {
         LunaWebhookRegistry.clear()
         simulatedTime = 100_000L
         cooldownCache = BoundedChannelCooldownCache(timeSource = { simulatedTime })
-        filter = ChatterNoiseFilter(cooldownCache = cooldownCache)
+        momentumCache = BoundedChannelMomentumCache(timeSource = { simulatedTime })
+        filter = ChatterNoiseFilter(cooldownCache = cooldownCache, momentumCache = momentumCache)
         decisionClient = mockk(relaxed = true)
         every { decisionClient.config } returns ChatterConfig()
         chatterGenerator = mockk(relaxed = true)

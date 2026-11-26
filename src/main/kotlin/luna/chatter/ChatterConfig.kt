@@ -46,6 +46,7 @@ data class ChatterConfig(
     val timezone: String = DEFAULT_TIMEZONE,
     val driftEnabled: Boolean = DEFAULT_DRIFT_ENABLED,
     val reactionThreshold: Double = DEFAULT_REACTION_THRESHOLD,
+    val momentumThresholdBoost: Double = DEFAULT_MOMENTUM_THRESHOLD_BOOST,
     val emojiVisionModel: String? = null,
     val maxImages: Int = ChatterContextCollector.DEFAULT_MAX_IMAGES,
     val youtubeApiKey: String? = null,
@@ -103,6 +104,11 @@ data class ChatterConfig(
             reactionThreshold,
             MIN_REACTION_THRESHOLD..MAX_REACTION_THRESHOLD,
         )
+        requireDoubleRange(
+            "CHATTER_MOMENTUM_THRESHOLD_BOOST",
+            momentumThresholdBoost,
+            MIN_MOMENTUM_THRESHOLD_BOOST..MAX_MOMENTUM_THRESHOLD_BOOST,
+        )
         requireIntRange("SUMMARY_MAX_IMAGES", maxImages, 1..Int.MAX_VALUE)
     }
 
@@ -150,6 +156,9 @@ data class ChatterConfig(
         const val DEFAULT_REACTION_THRESHOLD = 0.45
         const val MIN_REACTION_THRESHOLD = 0.0
         const val MAX_REACTION_THRESHOLD = 1.0
+        const val DEFAULT_MOMENTUM_THRESHOLD_BOOST = 0.10
+        const val MIN_MOMENTUM_THRESHOLD_BOOST = 0.0
+        const val MAX_MOMENTUM_THRESHOLD_BOOST = 1.0
 
         const val DEFAULT_DEBOUNCE_MILLIS = 2_500L
         const val DEFAULT_MENTION_DEBOUNCE_MILLIS = 1_200L
@@ -268,6 +277,12 @@ data class ChatterConfig(
                     DEFAULT_REACTION_THRESHOLD,
                     MIN_REACTION_THRESHOLD..MAX_REACTION_THRESHOLD,
                 )
+            val momentumThresholdBoost =
+                env.double(
+                    "CHATTER_MOMENTUM_THRESHOLD_BOOST",
+                    DEFAULT_MOMENTUM_THRESHOLD_BOOST,
+                    MIN_MOMENTUM_THRESHOLD_BOOST..MAX_MOMENTUM_THRESHOLD_BOOST,
+                )
             val emojiVisionModel =
                 env
                     .string("CHATTER_EMOJI_VISION_MODEL")
@@ -325,6 +340,7 @@ data class ChatterConfig(
                 timezone = timezone,
                 driftEnabled = driftEnabled,
                 reactionThreshold = reactionThreshold,
+                momentumThresholdBoost = momentumThresholdBoost,
                 emojiVisionModel = emojiVisionModel,
                 maxImages = maxImages,
                 youtubeApiKey = youtubeApiKey,
