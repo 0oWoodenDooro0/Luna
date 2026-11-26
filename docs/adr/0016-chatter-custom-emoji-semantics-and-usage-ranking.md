@@ -1,6 +1,6 @@
 # Chatter Custom Emoji Semantics and Rolling Usage Ranking
 
-Status: accepted
+Status: accepted (amended by [ADR 0019](0019-chatter-application-emojis-and-persona.md))
 
 ## Context
 

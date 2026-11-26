@@ -308,3 +308,17 @@ Inspect enabled tools, search queries, and `rawCitations` vs. `filteredCitations
 ```bash
 jq -c 'select(any(.attempts[]?; (.request.enabledTools | length) > 0)) | {traceId, pipeline, outcome, citations, attempts: [.attempts[] | {attemptIndex, stage, webUrlCount: .request.webUrlCount, enabledTools: .request.enabledTools, urlContextResults, googleSearchQueries, rawCitations, filteredCitations}]}' data/logs/ai/ai-*.jsonl
 ```
+
+### 8. Inspect `Chatter Pipeline` Participation Rate, Thresholds, and `Ambient Fatigue`
+
+Summarize `Chatter Pipeline` counts by `trigger` and `outcome` across one or more daily trace files:
+
+```bash
+jq -s '[.[] | select(.pipeline == "CHATTER")] | group_by([.trigger, .outcome]) | map({trigger: .[0].trigger, outcome: .[0].outcome, count: length}) | sort_by(.trigger, .outcome)' data/logs/ai/ai-*.jsonl
+```
+
+Inspect per-trace `AMBIENT` `noul` scores alongside `effectiveThreshold`, `reactionThreshold`, `ambientFatigueCount`, and `ambientFatigueOffset`:
+
+```bash
+jq -c 'select(.pipeline == "CHATTER" and .trigger == "AMBIENT") | {timestamp, channelId: .discord.channelId, outcome, noul: ((.attempts[] | select(.stage == "DECISION") | (.responseRaw // "{}" | try fromjson catch null) | .answers.should_participate.noul) // null), effectiveThreshold, reactionThreshold, ambientFatigueCount, ambientFatigueOffset, circadianPeriod, personaMood}' data/logs/ai/ai-*.jsonl
+```

@@ -1,6 +1,6 @@
 # Agentic Schedule Adjustment and Cross-Day Schedule Commitments
 
-Status: accepted
+Status: accepted (amended by [ADR 0026](0026-chatter-presence-invisible-sleep-and-native-activities.md))
 
 ## Context
 

@@ -1,6 +1,6 @@
 # Chatter Layered Memory and Agentic Retrieval
 
-Status: accepted
+Status: accepted (amended by [ADR 0020](0020-chatter-guild-scoped-memory-and-temporal-lifecycle.md), [ADR 0022](0022-chatter-memory-ranking-and-social-understanding.md))
 
 ## Context
 

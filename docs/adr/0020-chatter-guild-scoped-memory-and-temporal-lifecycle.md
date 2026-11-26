@@ -1,6 +1,6 @@
 # Chatter Guild-Scoped Memory, Fact Expiration, and Retrieval Temporal Awareness
 
-Status: accepted
+Status: accepted (amended by [ADR 0022](0022-chatter-memory-ranking-and-social-understanding.md))
 
 ## Context
 
