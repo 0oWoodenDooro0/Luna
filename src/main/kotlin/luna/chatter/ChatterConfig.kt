@@ -24,7 +24,7 @@ import kotlin.math.roundToLong
  * @property maxInterrupts Maximum number of pre-send cancellations/restarts allowed per round before locking in delivery (defaults to 2).
  * @property timezone IANA timezone ID for `Circadian Persona Drift` (defaults to `Asia/Taipei`).
  * @property driftEnabled Whether `Circadian Persona Drift` tone cues and threshold offsets are enabled (defaults to `true`).
- * @property reactionThreshold Minimum `noul` probability required for `Silent Reaction Path` (in `[0.0, 1.0]`, defaults to `0.45`).
+ * @property reactionThreshold Minimum `noul` probability required for `Silent Reaction Path` (in `[0.0, 1.0]`, defaults to `0.55`).
  * @property emojiVisionModel Optional Gemini Vision model for `Custom Emoji Meaning` resolution (strictly opt-in, no fallback).
  * @property maxImages Maximum number of image attachments processed per chatter context (defaults to `10`).
  * @property youtubeApiKey Optional YouTube Data API key for rich video context enrichment.

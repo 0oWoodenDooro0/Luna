@@ -175,72 +175,72 @@ data class ChatterFilterConfig(
 }
 
 open class ChatterNoiseFilter(
-    val cooldownCache: BoundedChannelCooldownCache = BoundedChannelCooldownCache(),
+    config: ChatterFilterConfig,
+    val cooldownCache: BoundedChannelCooldownCache =
+        BoundedChannelCooldownCache(defaultCooldownDurationMs = config.cooldownDurationMs),
     val webhookRegistry: WebhookRegistry = LunaWebhookRegistry,
     val summaryRegistry: SummaryRegistry = SummaryMessageRegistry,
-    var enabled: Boolean = true,
-    var allowedChannels: Set<Snowflake> = emptySet(),
-    var cooldownDurationMs: Long = BoundedChannelCooldownCache.DEFAULT_COOLDOWN_MS,
-    var botPrefixes: Set<String> = DEFAULT_BOT_PREFIXES,
     val contextEngine: DiscordDialogueContextEngine = DiscordDialogueContextEngine(webhookRegistry, summaryRegistry),
-    val momentumCache: BoundedChannelMomentumCache = BoundedChannelMomentumCache(),
-    var momentumSettings: MomentumFilterSettings =
-        MomentumFilterSettings(
-            windowMs = momentumCache.defaultWindowMs,
-            maxTurns = momentumCache.defaultMaxTurns,
+    val momentumCache: BoundedChannelMomentumCache =
+        BoundedChannelMomentumCache(
+            defaultWindowMs = config.momentumWindowMs,
+            defaultMaxTurns = config.momentumMaxTurns,
+        ),
+    val fatigueCache: BoundedChannelFatigueCache =
+        BoundedChannelFatigueCache(
+            defaultWindowMs = config.fatigueWindowMs,
+            defaultStep = config.fatigueStep,
+            defaultMaxOffset = config.fatigueMaxOffset,
         ),
 ) {
-    var fatigueCache: BoundedChannelFatigueCache = BoundedChannelFatigueCache()
-    var fatigueSettings: FatigueFilterSettings =
+    var enabled: Boolean = config.enabled
+    var allowedChannels: Set<Snowflake> = config.allowedChannels
+    var cooldownDurationMs: Long = config.cooldownDurationMs
+    var botPrefixes: Set<String> = config.botPrefixes
+    var momentumSettings: MomentumFilterSettings =
+        MomentumFilterSettings(
+            windowMs = config.momentumWindowMs,
+            cooldownFloorMs = config.momentumCooldownFloorMs,
+            maxTurns = config.momentumMaxTurns,
+        )
+    val fatigueSettings: FatigueFilterSettings =
         FatigueFilterSettings(
-            windowMs = fatigueCache.defaultWindowMs,
-            step = fatigueCache.defaultStep,
-            maxOffset = fatigueCache.defaultMaxOffset,
+            windowMs = config.fatigueWindowMs,
+            step = config.fatigueStep,
+            maxOffset = config.fatigueMaxOffset,
         )
 
     constructor(
-        config: ChatterFilterConfig,
-        cooldownCache: BoundedChannelCooldownCache =
-            BoundedChannelCooldownCache(defaultCooldownDurationMs = config.cooldownDurationMs),
+        cooldownCache: BoundedChannelCooldownCache = BoundedChannelCooldownCache(),
         webhookRegistry: WebhookRegistry = LunaWebhookRegistry,
         summaryRegistry: SummaryRegistry = SummaryMessageRegistry,
+        enabled: Boolean = true,
+        allowedChannels: Set<Snowflake> = emptySet(),
+        cooldownDurationMs: Long = BoundedChannelCooldownCache.DEFAULT_COOLDOWN_MS,
+        botPrefixes: Set<String> = DEFAULT_BOT_PREFIXES,
         contextEngine: DiscordDialogueContextEngine = DiscordDialogueContextEngine(webhookRegistry, summaryRegistry),
-        momentumCache: BoundedChannelMomentumCache =
-            BoundedChannelMomentumCache(
-                defaultWindowMs = config.momentumWindowMs,
-                defaultMaxTurns = config.momentumMaxTurns,
-            ),
-        fatigueCache: BoundedChannelFatigueCache =
-            BoundedChannelFatigueCache(
-                defaultWindowMs = config.fatigueWindowMs,
-                defaultStep = config.fatigueStep,
-                defaultMaxOffset = config.fatigueMaxOffset,
-            ),
+        momentumCache: BoundedChannelMomentumCache = BoundedChannelMomentumCache(),
+        fatigueCache: BoundedChannelFatigueCache = BoundedChannelFatigueCache(),
     ) : this(
+        config =
+            ChatterFilterConfig(
+                enabled = enabled,
+                allowedChannels = allowedChannels,
+                cooldownDurationMs = cooldownDurationMs,
+                botPrefixes = botPrefixes,
+                momentumWindowMs = momentumCache.defaultWindowMs,
+                momentumMaxTurns = momentumCache.defaultMaxTurns,
+                fatigueWindowMs = fatigueCache.defaultWindowMs,
+                fatigueStep = fatigueCache.defaultStep,
+                fatigueMaxOffset = fatigueCache.defaultMaxOffset,
+            ),
         cooldownCache = cooldownCache,
         webhookRegistry = webhookRegistry,
         summaryRegistry = summaryRegistry,
-        enabled = config.enabled,
-        allowedChannels = config.allowedChannels,
-        cooldownDurationMs = config.cooldownDurationMs,
-        botPrefixes = config.botPrefixes,
         contextEngine = contextEngine,
         momentumCache = momentumCache,
-        momentumSettings =
-            MomentumFilterSettings(
-                windowMs = config.momentumWindowMs,
-                cooldownFloorMs = config.momentumCooldownFloorMs,
-                maxTurns = config.momentumMaxTurns,
-            ),
-    ) {
-        this.fatigueCache = fatigueCache
-        this.fatigueSettings =
-            FatigueFilterSettings(
-                windowMs = config.fatigueWindowMs,
-                step = config.fatigueStep,
-                maxOffset = config.fatigueMaxOffset,
-            )
-    }
+        fatigueCache = fatigueCache,
+    )
 
     internal val directInteractionResolver = ChatterDirectInteractionResolver(contextEngine = contextEngine)
 

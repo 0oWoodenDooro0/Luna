@@ -1,6 +1,6 @@
 # Humanized Chatter Pipeline: Burst Debounce, Overlapping Reading, Persona Drift, and Silent Reactions
 
-Status: accepted
+Status: accepted (amended by [ADR 0027](0027-chatter-conversation-momentum.md), [ADR 0029](0029-chatter-ambient-fatigue-and-anti-hijack-gating.md))
 
 ## Context
 
