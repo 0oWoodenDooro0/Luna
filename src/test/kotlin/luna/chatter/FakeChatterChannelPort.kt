@@ -51,6 +51,7 @@ internal class FakeChatterChannelPort : ChatterChannelPort {
             override val anchorMessageId: Snowflake,
             val content: String,
             override val virtualTimeMs: Long,
+            val pingRepliedUser: Boolean = false,
         ) : ChannelEvent
 
         data class ReactionAdded(
@@ -85,6 +86,7 @@ internal class FakeChatterChannelPort : ChatterChannelPort {
         val targetMessageId: Snowflake,
         val content: String,
         val virtualTimeMs: Long,
+        val pingRepliedUser: Boolean = false,
     )
 
     data class AddedReaction(
@@ -219,14 +221,15 @@ internal class FakeChatterChannelPort : ChatterChannelPort {
     override suspend fun sendReply(
         target: Message,
         content: String,
+        pingRepliedUser: Boolean,
     ) {
         val timeMs = currentVirtualTimeMs()
         replyError?.let { throw it }
         onReplyTo?.invoke(target, content)
         synchronized(lock) {
-            _sentReplies += SentReply(target.channelId, target.id, content, timeMs)
+            _sentReplies += SentReply(target.channelId, target.id, content, timeMs, pingRepliedUser)
             _allDeliveredTexts += content
-            _events += ChannelEvent.ReplySent(target.channelId, target.id, content, timeMs)
+            _events += ChannelEvent.ReplySent(target.channelId, target.id, content, timeMs, pingRepliedUser)
         }
     }
 

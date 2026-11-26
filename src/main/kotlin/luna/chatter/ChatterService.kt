@@ -531,6 +531,7 @@ class ChatterService(
                         selfId = snapshot.selfId,
                         readingSimulation = readingScope,
                         markDispatching = markDispatching,
+                        pingRepliedUser = isDirectMention,
                     )
                 } catch (e: CancellationException) {
                     throw e

@@ -203,8 +203,8 @@ class DeferredCatchUpScheduleEditTest {
 
             service.onBecomeAvailable(AvailabilityState.SLEEPING, availableBlock)
 
-            coVerify(exactly = 1) { channelPort.sendReply(msg1, "好那我先去忙報告，晚點再聊！") }
-            coVerify(exactly = 0) { channelPort.sendReply(msg2, any()) }
+            coVerify(exactly = 1) { channelPort.sendReply(msg1, "好那我先去忙報告，晚點再聊！", pingRepliedUser = true) }
+            coVerify(exactly = 0) { channelPort.sendReply(msg2, any(), any()) }
             coVerify(exactly = 0) { catchUpPort.fetchMissedMessages(channelId2, any(), any()) }
             verify(exactly = 0) { store.clearCatchUpWatermark(channelId2.toString()) }
         }
@@ -246,6 +246,6 @@ class DeferredCatchUpScheduleEditTest {
 
             service.onBecomeAvailable(AvailabilityState.SLEEPING, availableBlock)
 
-            coVerify(exactly = 0) { channelPort.sendReply(any(), any()) }
+            coVerify(exactly = 0) { channelPort.sendReply(any(), any(), any()) }
         }
 }

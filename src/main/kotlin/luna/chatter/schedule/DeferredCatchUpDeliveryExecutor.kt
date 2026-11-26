@@ -203,6 +203,7 @@ internal class DeferredCatchUpDeliveryExecutor(
                                         readingSimulation = readingScope,
                                         markDispatching = markDispatching,
                                         forceReplyThreading = true,
+                                        pingRepliedUser = isDirectTarget,
                                     )
                                 if (outcome == DeliveryOutcome.CancelledBeforeDispatch) {
                                     session.skip(reason = "Deferred catch-up reply cancelled before dispatch")

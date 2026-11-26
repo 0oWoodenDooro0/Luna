@@ -48,10 +48,12 @@ interface ChatterChannelPort {
 
     /**
      * Sends a Discord reply to [target] with `messageReference` anchored to [target]'s ID.
+     * When [pingRepliedUser] is `true`, Discord notifies the author of [target].
      */
     suspend fun sendReply(
         target: Message,
         content: String,
+        pingRepliedUser: Boolean = false,
     )
 
     /**
@@ -121,13 +123,14 @@ object KordChatterChannelAdapter : ChatterChannelPort {
     override suspend fun sendReply(
         target: Message,
         content: String,
+        pingRepliedUser: Boolean,
     ) {
         target.reply {
             this.messageReference = target.id
             this.content = content
             allowedMentions {
                 add(AllowedMentionType.UserMentions)
-                repliedUser = true
+                repliedUser = pingRepliedUser
             }
         }
     }
