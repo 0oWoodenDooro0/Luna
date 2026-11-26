@@ -910,8 +910,9 @@ fun scanProductionParameterCounts(projectRoot: File): List<ParamCountDeclaration
     return results
 }
 
+fun defaultMaxParamsForKind(kind: String): Int = if (kind == "fun") 8 else 10
+
 fun checkParameterCountLimit(projectRoot: File): List<String> {
-    val defaultMaxParams = 10
     val baselineFile = File(projectRoot, "gradle/coding-standards-param-count-baseline.txt")
     if (!baselineFile.exists()) {
         return listOf(
@@ -941,11 +942,12 @@ fun checkParameterCountLimit(projectRoot: File): List<String> {
     }
 
     val declarations = scanProductionParameterCounts(projectRoot)
-    val maxCountByKey =
-        declarations.groupBy { it.key }.mapValues { (_, list) -> list.maxOf { it.paramCount } }
+    val maxDeclByKey =
+        declarations.groupBy { it.key }.mapValues { (_, list) -> list.maxBy { it.paramCount } }
     val violations = mutableListOf<String>()
 
     declarations.forEach { decl ->
+        val defaultMaxParams = defaultMaxParamsForKind(decl.kind)
         val baselinedMax = baseline[decl.key]
         val maxAllowed = baselinedMax ?: defaultMaxParams
         if (decl.paramCount > maxAllowed) {
@@ -958,7 +960,9 @@ fun checkParameterCountLimit(projectRoot: File): List<String> {
     }
 
     baseline.forEach { (key, baselinedMax) ->
-        val currentMax = maxCountByKey[key]
+        val currentDecl = maxDeclByKey[key]
+        val currentMax = currentDecl?.paramCount
+        val defaultMaxParams = currentDecl?.let { defaultMaxParamsForKind(it.kind) } ?: 10
         when {
             currentMax == null -> {
                 violations.add(
@@ -1122,15 +1126,14 @@ tasks.register("tightenCodingStandardsBaselines") {
         }
 
         // Tighten Rule 12 parameter count baseline
-        val defaultMaxParams = 10
         val paramBaselineFile = File(codingStandardsRoot, "gradle/coding-standards-param-count-baseline.txt")
         if (!paramBaselineFile.exists()) {
             throw GradleException("Baseline file missing: gradle/coding-standards-param-count-baseline.txt")
         }
-        val maxCountByKey =
+        val maxDeclByKey =
             scanProductionParameterCounts(codingStandardsRoot)
                 .groupBy { it.key }
-                .mapValues { (_, list) -> list.maxOf { it.paramCount } }
+                .mapValues { (_, list) -> list.maxBy { it.paramCount } }
         val paramHeaderLines = mutableListOf<String>()
         val paramUpdatedEntries = linkedMapOf<String, Int>()
         val paramChanges = mutableListOf<String>()
@@ -1152,7 +1155,9 @@ tasks.register("tightenCodingStandardsBaselines") {
                     ?: throw GradleException(
                         "Invalid parameter count at gradle/coding-standards-param-count-baseline.txt:${idx + 1}: '$trimmed'",
                     )
-            val currentMax = maxCountByKey[key]
+            val currentDecl = maxDeclByKey[key]
+            val currentMax = currentDecl?.paramCount
+            val defaultMaxParams = currentDecl?.let { defaultMaxParamsForKind(it.kind) } ?: 10
             when {
                 currentMax == null -> {
                     paramChanges.add("removed missing $key (was $baselinedMax)")

@@ -136,6 +136,9 @@ data class AiTraceRecord(
     val relationshipTier: String? = null,
     val affinityScore: Int? = null,
     val affinityThresholdOffset: Double? = null,
+    val momentumActive: Boolean? = null,
+    val momentumTurnCount: Int? = null,
+    val momentumThresholdOffset: Double? = null,
 )
 
 /**
