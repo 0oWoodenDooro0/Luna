@@ -47,6 +47,7 @@ open class DailyScheduleCoordinator(
         val activityTitle: String,
         val statusText: String,
         val availability: AvailabilityState,
+        val activityType: PresenceActivityType,
     )
 
     private val logger = LoggerFactory.getLogger(DailyScheduleCoordinator::class.java)
@@ -385,6 +386,7 @@ open class DailyScheduleCoordinator(
                 activityTitle = block.activityTitle,
                 statusText = block.statusText,
                 availability = block.availability,
+                activityType = block.activityType,
             )
         if (blockKey != lastSyncedBlockKey) {
             presencePort?.updatePresence(block)

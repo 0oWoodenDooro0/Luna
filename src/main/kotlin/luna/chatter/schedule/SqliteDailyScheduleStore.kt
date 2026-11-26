@@ -25,6 +25,7 @@ class SqliteDailyScheduleStore(
         Json {
             ignoreUnknownKeys = true
             encodeDefaults = true
+            coerceInputValues = true
         }
 
     init {

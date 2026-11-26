@@ -1,11 +1,15 @@
 package luna.chatter.schedule
 
 import luna.core.LunaHost
+import org.jetbrains.exposed.v1.jdbc.transactions.TransactionManager
+import org.jetbrains.exposed.v1.jdbc.transactions.transaction
 import org.junit.jupiter.api.io.TempDir
 import java.nio.file.Path
+import java.sql.Connection
 import java.time.Clock
 import java.time.Instant
 import java.time.LocalDate
+import java.time.ZoneId
 import java.time.ZoneOffset
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -354,5 +358,63 @@ class SqliteDailyScheduleStoreTest {
         assertEquals(2, reloaded.size)
         assertEquals(PresenceActivityType.CUSTOM, reloaded[0].activityType)
         assertEquals(PresenceActivityType.PLAYING, reloaded[1].activityType)
+    }
+
+    @Test
+    fun `getSchedule gracefully coerces legacy omitted and unknown activityType in blocks_json to CUSTOM`() {
+        val dbPath = tempDir.resolve("legacy-blocks.db").toString()
+        val vecPath = tempDir.resolve("missing-vec.so").toString()
+        val db = LunaHost.initDatabase(dbPath = dbPath, vecExtensionPath = vecPath)
+        val clock = MutableClock(Instant.parse("2026-11-26T00:00:00Z"))
+        val taipei = ZoneId.of("Asia/Taipei")
+        val store = SqliteDailyScheduleStore(database = db, clock = clock, timezone = taipei)
+        val day = LocalDate.of(2026, 11, 26)
+        val legacyBlocksJson =
+            """
+            [
+              {
+                "startMinute": 0,
+                "endMinute": 720,
+                "activityTitle": "舊資料區塊",
+                "activityDetail": "省略 activityType 欄位",
+                "statusText": "☕ 泡咖啡",
+                "availability": "AVAILABLE"
+              },
+              {
+                "startMinute": 720,
+                "endMinute": 1440,
+                "activityTitle": "未知類型區塊",
+                "activityDetail": "未知 activityType 字串",
+                "statusText": "參加比賽",
+                "availability": "AVAILABLE",
+                "activityType": "COMPETING"
+              }
+            ]
+            """.trimIndent()
+
+        transaction(db) {
+            val conn = TransactionManager.current().connection.connection as Connection
+            conn
+                .prepareStatement(
+                    """
+                    INSERT INTO chatter_daily_schedules(
+                        schedule_date, timezone, summary, blocks_json, created_at
+                    ) VALUES (?, ?, ?, ?, ?)
+                    """.trimIndent(),
+                ).use { ps ->
+                    ps.setString(1, day.toString())
+                    ps.setString(2, taipei.id)
+                    ps.setString(3, "測試舊版與未知 activityType")
+                    ps.setString(4, legacyBlocksJson)
+                    ps.setLong(5, clock.millis())
+                    ps.executeUpdate()
+                }
+        }
+
+        val loaded = store.getSchedule(day)
+        assertNotNull(loaded)
+        assertEquals(2, loaded.blocks.size)
+        assertEquals(PresenceActivityType.CUSTOM, loaded.blocks[0].activityType)
+        assertEquals(PresenceActivityType.CUSTOM, loaded.blocks[1].activityType)
     }
 }
