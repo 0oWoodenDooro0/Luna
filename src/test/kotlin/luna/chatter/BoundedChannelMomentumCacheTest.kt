@@ -37,67 +37,78 @@ class BoundedChannelMomentumCacheTest {
     }
 
     @Test
-    fun `ambient replies increment turn count until max turns exhausted`() {
-        var now = 1_000_000L
-        val cache = BoundedChannelMomentumCache(defaultWindowMs = 30_000L, defaultMaxTurns = 3, timeSource = { now })
+    fun `uninvited ambient reply on cold channel does not start momentum`() {
+        val now = 1_000_000L
+        val cache = BoundedChannelMomentumCache(defaultWindowMs = 30_000L, defaultMaxTurns = 2, timeSource = { now })
         val channelId = Snowflake(100L)
 
-        // Cold start ambient reply -> turn 1 (active)
+        cache.recordReply(channelId, isDirectMention = false)
+
+        val state = cache.stateFor(channelId)
+        assertFalse(state.active, "Cold-start ambient reply should not activate momentum")
+        assertFalse(state.withinWindow, "Cold-start ambient reply should not open momentum window")
+        assertEquals(0, state.ambientTurnCount)
+        assertEquals(0, cache.size)
+    }
+
+    @Test
+    fun `ambient replies after direct mention increment turn count until max turns exhausted`() {
+        var now = 1_000_000L
+        val cache = BoundedChannelMomentumCache(defaultWindowMs = 30_000L, defaultMaxTurns = 2, timeSource = { now })
+        val channelId = Snowflake(100L)
+
+        // Direct mention starts active momentum at turn 0
+        cache.recordReply(channelId, isDirectMention = true)
+        assertEquals(MomentumState(active = true, withinWindow = true, ambientTurnCount = 0), cache.stateFor(channelId))
+
+        // Ambient turn 1 (still active: 1 < 2)
+        now += 2_000L
         cache.recordReply(channelId, isDirectMention = false)
         assertEquals(MomentumState(active = true, withinWindow = true, ambientTurnCount = 1), cache.stateFor(channelId))
 
-        // Turn 2 (active)
-        now += 2_000L
-        cache.recordReply(channelId, isDirectMention = false)
-        assertEquals(MomentumState(active = true, withinWindow = true, ambientTurnCount = 2), cache.stateFor(channelId))
-
-        // Turn 3 -> reaches maxTurns=3, now exhausted (active = false)
+        // Ambient turn 2 -> reaches maxTurns=2, now exhausted (active = false)
         now += 2_000L
         cache.recordReply(channelId, isDirectMention = false)
         val exhausted = cache.stateFor(channelId)
         assertFalse(exhausted.active, "Momentum should pause once ambientTurnCount reaches maxTurns")
         assertTrue(exhausted.withinWindow, "Exhausted channel should still be inside momentum window")
-        assertEquals(3, exhausted.ambientTurnCount)
+        assertEquals(2, exhausted.ambientTurnCount)
     }
 
     @Test
-    fun `ambient reply while exhausted inside window refreshes timestamp without resetting turn count`() {
+    fun `ambient reply while exhausted inside window does not refresh timestamp or increment count`() {
         var now = 1_000_000L
-        val cache = BoundedChannelMomentumCache(defaultWindowMs = 30_000L, defaultMaxTurns = 3, timeSource = { now })
+        val cache = BoundedChannelMomentumCache(defaultWindowMs = 30_000L, defaultMaxTurns = 2, timeSource = { now })
         val channelId = Snowflake(100L)
 
-        repeat(3) {
+        cache.recordReply(channelId, isDirectMention = true)
+        repeat(2) {
             now += 2_000L
             cache.recordReply(channelId, isDirectMention = false)
         }
-        assertFalse(cache.stateFor(channelId).active, "Momentum should be exhausted after 3 ambient turns")
+        assertFalse(cache.stateFor(channelId).active, "Momentum should be exhausted after 2 ambient turns")
 
-        // Wait 6s (past normal 5s cooldown, still inside 30s window) and deliver another ambient reply
+        // Wait 6s and deliver another ambient reply while exhausted
         now += 6_000L
         cache.recordReply(channelId, isDirectMention = false)
+        assertEquals(2, cache.stateFor(channelId).ambientTurnCount)
 
-        // 25s after that reply (past original window, still inside refreshed 30s window): still exhausted
-        now += 25_000L
-        val state = cache.stateFor(channelId)
-        assertFalse(state.active, "Momentum should remain exhausted within refreshed window")
-        assertTrue(state.withinWindow, "Refreshed window should still be open")
-        assertEquals(4, state.ambientTurnCount)
-
-        // Full 30s silence from last reply -> window expires and resets
-        now += 5_000L
+        // 24s later (30s since the 2nd ambient turn, only 24s since the exhausted ambient reply): window expires
+        now += 24_000L
         val expired = cache.stateFor(channelId)
         assertFalse(expired.active, "Expired momentum should be inactive")
-        assertFalse(expired.withinWindow, "Expired momentum should be outside window")
+        assertFalse(expired.withinWindow, "Exhausted ambient reply should not have refreshed window")
         assertEquals(0, expired.ambientTurnCount)
     }
 
     @Test
     fun `direct mention resets exhausted momentum back to zero ambient turns`() {
         var now = 1_000_000L
-        val cache = BoundedChannelMomentumCache(defaultWindowMs = 30_000L, defaultMaxTurns = 3, timeSource = { now })
+        val cache = BoundedChannelMomentumCache(defaultWindowMs = 30_000L, defaultMaxTurns = 2, timeSource = { now })
         val channelId = Snowflake(100L)
 
-        repeat(3) {
+        cache.recordReply(channelId, isDirectMention = true)
+        repeat(2) {
             now += 2_000L
             cache.recordReply(channelId, isDirectMention = false)
         }
@@ -113,22 +124,22 @@ class BoundedChannelMomentumCacheTest {
     }
 
     @Test
-    fun `window expiration resets cold start ambient turn count to one on next ambient reply`() {
+    fun `window expiration prevents subsequent ambient reply from restarting momentum`() {
         var now = 1_000_000L
-        val cache = BoundedChannelMomentumCache(defaultWindowMs = 30_000L, defaultMaxTurns = 3, timeSource = { now })
+        val cache = BoundedChannelMomentumCache(defaultWindowMs = 30_000L, defaultMaxTurns = 2, timeSource = { now })
         val channelId = Snowflake(100L)
 
-        cache.recordReply(channelId, isDirectMention = false)
+        cache.recordReply(channelId, isDirectMention = true)
         now += 2_000L
         cache.recordReply(channelId, isDirectMention = false)
-        assertEquals(2, cache.stateFor(channelId).ambientTurnCount)
+        assertEquals(1, cache.stateFor(channelId).ambientTurnCount)
 
         // Advance past full 30s window
         now += 30_000L
         assertFalse(cache.stateFor(channelId).withinWindow, "Momentum window should have expired")
 
         cache.recordReply(channelId, isDirectMention = false)
-        assertEquals(MomentumState(active = true, withinWindow = true, ambientTurnCount = 1), cache.stateFor(channelId))
+        assertEquals(MomentumState.INACTIVE, cache.stateFor(channelId))
     }
 
     @Test
@@ -171,7 +182,7 @@ class BoundedChannelMomentumCacheTest {
         val defaults = ChatterConfig.from(EnvReader.of())
         assertEquals(30_000L, defaults.filter.momentumWindowMs)
         assertEquals(1_500L, defaults.filter.momentumCooldownFloorMs)
-        assertEquals(3, defaults.filter.momentumMaxTurns)
+        assertEquals(2, defaults.filter.momentumMaxTurns)
         assertEquals(0.10, defaults.momentumThresholdBoost)
 
         val custom =

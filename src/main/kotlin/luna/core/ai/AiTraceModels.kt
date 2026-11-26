@@ -140,6 +140,8 @@ data class AiTraceRecord(
     val momentumActive: Boolean? = null,
     val momentumTurnCount: Int? = null,
     val momentumThresholdOffset: Double? = null,
+    val ambientFatigueCount: Int? = null,
+    val ambientFatigueOffset: Double? = null,
 )
 
 /**

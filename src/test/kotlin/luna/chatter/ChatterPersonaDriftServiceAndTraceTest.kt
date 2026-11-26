@@ -109,6 +109,7 @@ class ChatterPersonaDriftServiceAndTraceTest {
                 channelPort = channelPort,
                 traceRecorder = recorder,
                 personaStateProvider = drift,
+                config = ChatterConfig(apiKey = "secret-key", decision = ChatterConfig.Decision(threshold = 0.7)),
             )
 
         val message =
@@ -284,7 +285,7 @@ class ChatterPersonaDriftServiceAndTraceTest {
         assertEquals(AiTraceOutcome.SUCCESS, trace.outcome)
         assertEquals("MORNING", trace.circadianPeriod)
         assertEquals("STEADY", trace.personaMood)
-        assertEquals(0.72, trace.effectiveThreshold)
+        assertEquals(0.82, trace.effectiveThreshold)
     }
 
     @Test

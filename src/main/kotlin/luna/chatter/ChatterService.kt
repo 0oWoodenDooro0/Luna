@@ -270,9 +270,8 @@ class ChatterService(
         return deliveryEngine.withReadingSimulation {
             val readingScope = this
             val baseThreshold = config.decision.threshold
-            val reactionThreshold = config.reactionThreshold
             val personaState = personaStateProvider.currentState(baseThreshold)
-            val (relationship, effectiveThreshold) =
+            val resolved =
                 ChatterAffinityHelper.resolveThresholdAndRecordTrace(
                     memoryStore = chatterGenerator.memoryStore,
                     context =
@@ -280,13 +279,17 @@ class ChatterService(
                             guildId = snapshot.guildId,
                             authorId = snapshot.authorId,
                             personaState = personaState,
-                            reactionThreshold = reactionThreshold,
+                            reactionThreshold = config.reactionThreshold,
                             momentumState = filter.currentMomentumState(message.channelId),
                             configuredMomentumBoost = config.momentumThresholdBoost,
+                            fatigueState = filter.currentFatigueState(message.channelId),
                         ),
                     session = session,
                     logger = logger,
                 )
+            val relationship = resolved.relationship
+            val effectiveThreshold = resolved.effectiveThreshold
+            val reactionThreshold = resolved.effectiveReactionThreshold
             scheduleGate.recordActiveScheduleInSession(session, personaState.scheduleBlock)
 
             // 2. Gathers recent messages from channel slice to construct state / history

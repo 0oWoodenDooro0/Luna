@@ -153,7 +153,7 @@ data class ChatterConfig(
         const val DEFAULT_MAX_INTERRUPTS = 2
         const val DEFAULT_TIMEZONE = "Asia/Taipei"
         const val DEFAULT_DRIFT_ENABLED = true
-        const val DEFAULT_REACTION_THRESHOLD = 0.45
+        const val DEFAULT_REACTION_THRESHOLD = 0.55
         const val MIN_REACTION_THRESHOLD = 0.0
         const val MAX_REACTION_THRESHOLD = 1.0
         const val DEFAULT_MOMENTUM_THRESHOLD_BOOST = 0.10
@@ -167,7 +167,7 @@ data class ChatterConfig(
         const val MAX_DEBOUNCE_MAX_MILLIS = 8_000L
 
         const val DEFAULT_DECISION_MODEL = "gemini-decision-1"
-        const val DEFAULT_DECISION_THRESHOLD = 0.7
+        const val DEFAULT_DECISION_THRESHOLD = 0.80
         const val MIN_DECISION_THRESHOLD = 0.0
         const val MAX_DECISION_THRESHOLD = 1.0
         const val DEFAULT_DECISION_TIMEOUT_SECONDS = 15L

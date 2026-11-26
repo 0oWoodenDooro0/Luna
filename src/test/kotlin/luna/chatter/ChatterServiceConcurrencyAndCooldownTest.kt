@@ -302,13 +302,13 @@ class ChatterServiceConcurrencyAndCooldownTest {
             assertTrue(fixture.service.processMessage(firstAmbient))
             coVerify(exactly = 1) { fixture.decisionClient.decide(any(), any(), any()) }
 
-            // 4.999s later: ambient message is blocked by default 5s cooldown
-            fixture.simulatedTime += 4_999L
+            // 29.999s later: ambient message is blocked by default 30s cooldown
+            fixture.simulatedTime += 29_999L
             val blockedAmbient = fixture.createMockMessage(id = 7202L, channelId = channelId, username = "Bob", content = "still blocked")
             assertFalse(fixture.service.processMessage(blockedAmbient))
             coVerify(exactly = 1) { fixture.decisionClient.decide(any(), any(), any()) }
 
-            // Direct @bot mention during the 5s cooldown still bypasses cooldown and replies
+            // Direct @bot mention during the 30s cooldown still bypasses cooldown and replies
             val mentionDuringCooldown =
                 fixture.createMockMessage(
                     id = 7203L,
@@ -321,8 +321,8 @@ class ChatterServiceConcurrencyAndCooldownTest {
             assertTrue(fixture.service.processMessage(mentionDuringCooldown))
             coVerify(exactly = 2) { fixture.chatterGenerator.generateReply(any<ChatterInput>()) }
 
-            // Advance 5.000s after the mention reply: ambient message is allowed again
-            fixture.simulatedTime += 5_000L
+            // Advance 30.000s after the mention reply: ambient message is allowed again
+            fixture.simulatedTime += 30_000L
             val allowedAmbient = fixture.createMockMessage(id = 7204L, channelId = channelId, username = "Dave", content = "cooldown expired")
             assertTrue(fixture.service.processMessage(allowedAmbient))
             coVerify(exactly = 2) { fixture.decisionClient.decide(any(), any(), any()) }

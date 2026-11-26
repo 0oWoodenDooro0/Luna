@@ -47,6 +47,12 @@ data class MomentumFilterSettings(
     val maxTurns: Int = BoundedChannelMomentumCache.DEFAULT_MAX_TURNS,
 )
 
+data class FatigueFilterSettings(
+    val windowMs: Long = BoundedChannelFatigueCache.DEFAULT_WINDOW_MS,
+    val step: Double = BoundedChannelFatigueCache.DEFAULT_STEP,
+    val maxOffset: Double = BoundedChannelFatigueCache.DEFAULT_MAX_OFFSET,
+)
+
 data class ChatterFilterConfig(
     val enabled: Boolean = DEFAULT_ENABLED,
     val allowedChannels: Set<Snowflake> = emptySet(),
@@ -55,12 +61,30 @@ data class ChatterFilterConfig(
     val momentumWindowMs: Long = BoundedChannelMomentumCache.DEFAULT_WINDOW_MS,
     val momentumCooldownFloorMs: Long = DEFAULT_MOMENTUM_COOLDOWN_FLOOR_MS,
     val momentumMaxTurns: Int = BoundedChannelMomentumCache.DEFAULT_MAX_TURNS,
+    val fatigueWindowMs: Long = BoundedChannelFatigueCache.DEFAULT_WINDOW_MS,
+    val fatigueStep: Double = BoundedChannelFatigueCache.DEFAULT_STEP,
+    val fatigueMaxOffset: Double = BoundedChannelFatigueCache.DEFAULT_MAX_OFFSET,
 ) {
     init {
         requireNonNegative("CHATTER_COOLDOWN_SECONDS", cooldownDurationMs, "duration", "ms")
         requireNonNegative("CHATTER_MOMENTUM_WINDOW_SECONDS", momentumWindowMs, "duration", "ms")
         requireNonNegative("CHATTER_MOMENTUM_COOLDOWN_FLOOR_MS", momentumCooldownFloorMs, "duration", "ms")
         requireNonNegative("CHATTER_MOMENTUM_MAX_TURNS", momentumMaxTurns.toLong(), "integer", "")
+        requireNonNegative("CHATTER_FATIGUE_WINDOW_SECONDS", fatigueWindowMs, "duration", "ms")
+        requireUnitDouble("CHATTER_FATIGUE_STEP", fatigueStep)
+        requireUnitDouble("CHATTER_FATIGUE_MAX_OFFSET", fatigueMaxOffset)
+    }
+
+    private fun requireUnitDouble(
+        key: String,
+        value: Double,
+    ) {
+        if (!value.isFinite() || value !in 0.0..1.0) {
+            val safeValue = SecretMasker.maskValue(key, value)
+            throw ConfigValidationException(
+                "Invalid configuration for $key: expected a number in 0.0..1.0, but got '$safeValue'",
+            )
+        }
     }
 
     private fun requireNonNegative(
@@ -79,7 +103,7 @@ data class ChatterFilterConfig(
 
     companion object {
         const val DEFAULT_ENABLED = true
-        const val DEFAULT_COOLDOWN_SECONDS = 5L
+        const val DEFAULT_COOLDOWN_SECONDS = 30L
         const val DEFAULT_MOMENTUM_COOLDOWN_FLOOR_MS = 1_500L
         private const val MAX_COOLDOWN_SECONDS = Long.MAX_VALUE / 1000L
 
@@ -117,6 +141,24 @@ data class ChatterFilterConfig(
                     BoundedChannelMomentumCache.DEFAULT_MAX_TURNS,
                     0..Int.MAX_VALUE,
                 )
+            val fatigueWindowSeconds =
+                env.long(
+                    "CHATTER_FATIGUE_WINDOW_SECONDS",
+                    BoundedChannelFatigueCache.DEFAULT_WINDOW_SECONDS,
+                    0L..MAX_COOLDOWN_SECONDS,
+                )
+            val fatigueStep =
+                env.double(
+                    "CHATTER_FATIGUE_STEP",
+                    BoundedChannelFatigueCache.DEFAULT_STEP,
+                    0.0..1.0,
+                )
+            val fatigueMaxOffset =
+                env.double(
+                    "CHATTER_FATIGUE_MAX_OFFSET",
+                    BoundedChannelFatigueCache.DEFAULT_MAX_OFFSET,
+                    0.0..1.0,
+                )
             return ChatterFilterConfig(
                 enabled = enabled,
                 allowedChannels = allowedChannels,
@@ -124,6 +166,9 @@ data class ChatterFilterConfig(
                 momentumWindowMs = momentumWindowSeconds * 1000L,
                 momentumCooldownFloorMs = momentumCooldownFloorMs,
                 momentumMaxTurns = momentumMaxTurns,
+                fatigueWindowMs = fatigueWindowSeconds * 1000L,
+                fatigueStep = fatigueStep,
+                fatigueMaxOffset = fatigueMaxOffset,
             )
         }
     }
@@ -145,6 +190,14 @@ open class ChatterNoiseFilter(
             maxTurns = momentumCache.defaultMaxTurns,
         ),
 ) {
+    var fatigueCache: BoundedChannelFatigueCache = BoundedChannelFatigueCache()
+    var fatigueSettings: FatigueFilterSettings =
+        FatigueFilterSettings(
+            windowMs = fatigueCache.defaultWindowMs,
+            step = fatigueCache.defaultStep,
+            maxOffset = fatigueCache.defaultMaxOffset,
+        )
+
     constructor(
         config: ChatterFilterConfig,
         cooldownCache: BoundedChannelCooldownCache =
@@ -156,6 +209,12 @@ open class ChatterNoiseFilter(
             BoundedChannelMomentumCache(
                 defaultWindowMs = config.momentumWindowMs,
                 defaultMaxTurns = config.momentumMaxTurns,
+            ),
+        fatigueCache: BoundedChannelFatigueCache =
+            BoundedChannelFatigueCache(
+                defaultWindowMs = config.fatigueWindowMs,
+                defaultStep = config.fatigueStep,
+                defaultMaxOffset = config.fatigueMaxOffset,
             ),
     ) : this(
         cooldownCache = cooldownCache,
@@ -173,7 +232,15 @@ open class ChatterNoiseFilter(
                 cooldownFloorMs = config.momentumCooldownFloorMs,
                 maxTurns = config.momentumMaxTurns,
             ),
-    )
+    ) {
+        this.fatigueCache = fatigueCache
+        this.fatigueSettings =
+            FatigueFilterSettings(
+                windowMs = config.fatigueWindowMs,
+                step = config.fatigueStep,
+                maxOffset = config.fatigueMaxOffset,
+            )
+    }
 
     internal val directInteractionResolver = ChatterDirectInteractionResolver(contextEngine = contextEngine)
 
@@ -194,6 +261,27 @@ open class ChatterNoiseFilter(
             windowMs = momentumSettings.windowMs,
             maxTurns = momentumSettings.maxTurns,
         )
+    }
+
+    fun currentFatigueState(channelId: Snowflake): FatigueState =
+        fatigueCache.stateFor(
+            channelId = channelId,
+            windowMs = fatigueSettings.windowMs,
+            step = fatigueSettings.step,
+            maxOffset = fatigueSettings.maxOffset,
+        )
+
+    fun recordAmbientFatigue(channelId: Snowflake) {
+        fatigueCache.recordAmbientReply(
+            channelId = channelId,
+            windowMs = fatigueSettings.windowMs,
+            step = fatigueSettings.step,
+            maxOffset = fatigueSettings.maxOffset,
+        )
+    }
+
+    fun resetFatigue(channelId: Snowflake) {
+        fatigueCache.reset(channelId)
     }
 
     internal fun contextPolicy(): DialogueContextPolicy = DialogueContextPolicy.chatter(botPrefixes = botPrefixes)

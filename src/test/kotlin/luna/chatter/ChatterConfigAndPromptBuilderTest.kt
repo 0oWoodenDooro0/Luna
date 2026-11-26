@@ -191,7 +191,8 @@ class ChatterConfigAndPromptBuilderTest {
     fun `ChatterConfig Decision loads from EnvReader, validates init invariants, and allows reactionThreshold at or above decision threshold`() {
         val defaults = ChatterConfig()
         assertEquals("gemini-decision-1", defaults.decision.model)
-        assertEquals(0.7, defaults.decision.threshold)
+        assertEquals(0.80, defaults.decision.threshold)
+        assertEquals(0.55, defaults.reactionThreshold)
         assertEquals(15_000L, defaults.decision.timeoutMillis)
         assertEquals(GeminiDecisionClient.DEFAULT_INSTRUCTIONS, defaults.decision.instructions)
         assertEquals(15, defaults.decision.decisionMessageCount)
@@ -249,7 +250,7 @@ class ChatterConfigAndPromptBuilderTest {
         assertTrue(defaults.filter.enabled)
         assertFalse(defaults.effectiveEnabled)
         assertTrue(defaults.filter.allowedChannels.isEmpty())
-        assertEquals(5_000L, defaults.filter.cooldownDurationMs)
+        assertEquals(30_000L, defaults.filter.cooldownDurationMs)
         assertEquals(10L, defaults.memory.historyWindowMinutes)
 
         val configured =

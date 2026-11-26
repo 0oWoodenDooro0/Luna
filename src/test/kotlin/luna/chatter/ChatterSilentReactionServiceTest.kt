@@ -198,7 +198,7 @@ class ChatterSilentReactionServiceTest {
         val trace = ChatterAiTraceTestSupport.readTraceLines(tempDir).single()
         assertEquals(AiTraceOutcome.SUCCESS, trace.outcome)
         assertEquals("<a:party:555666777888>", trace.finalOutput)
-        assertEquals(0.45, trace.reactionThreshold)
+        assertEquals(0.55, trace.reactionThreshold)
         assertEquals(0.82, trace.effectiveThreshold)
         assertNull(trace.errorSummary)
         assertNull(trace.failureCategory)
@@ -269,6 +269,7 @@ class ChatterSilentReactionServiceTest {
                     burstCoordinator = BoundedChannelBurstCoordinator(debounceMs = 1L),
                     randomProvider = { _, _ -> 0L },
                     personaStateProvider = fixedPersonaProvider(effectiveThreshold = 0.70),
+                    config = ChatterConfig(apiKey = "secret-key", reactionThreshold = 0.45),
                 )
 
             val handled = service.processMessage(message)
@@ -366,8 +367,8 @@ class ChatterSilentReactionServiceTest {
         val traces = ChatterAiTraceTestSupport.readTraceLines(tempDir)
         assertEquals(2, traces.size)
         assertTrue(traces.all { it.outcome == AiTraceOutcome.SKIPPED })
-        assertEquals(0.45, traces[0].reactionThreshold)
-        assertEquals(0.80, traces[1].reactionThreshold)
+        assertEquals(0.55, traces[0].reactionThreshold)
+        assertEquals(0.70, traces[1].reactionThreshold)
     }
 
     @Test
@@ -434,6 +435,7 @@ class ChatterSilentReactionServiceTest {
                     burstCoordinator = BoundedChannelBurstCoordinator(debounceMs = 1L),
                     randomProvider = { _, _ -> 0L },
                     personaStateProvider = fixedPersonaProvider(effectiveThreshold = 0.70),
+                    config = ChatterConfig(apiKey = "secret-key", reactionThreshold = 0.45),
                 )
             assertFalse(
                 serviceApiFail.processMessage(ChatterAiTraceTestSupport.createMockMessage(id = 105L, channelId = 205L)),
@@ -458,6 +460,7 @@ class ChatterSilentReactionServiceTest {
                     burstCoordinator = BoundedChannelBurstCoordinator(debounceMs = 1L),
                     randomProvider = { _, _ -> 0L },
                     personaStateProvider = fixedPersonaProvider(effectiveThreshold = 0.70),
+                    config = ChatterConfig(apiKey = "secret-key", reactionThreshold = 0.45),
                 )
             assertFalse(
                 serviceSenderFail.processMessage(ChatterAiTraceTestSupport.createMockMessage(id = 106L, channelId = 206L)),

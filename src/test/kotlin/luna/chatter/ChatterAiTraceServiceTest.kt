@@ -365,7 +365,7 @@ class ChatterAiTraceServiceTest {
             assertEquals(1, trace.attemptCount)
             assertEquals(listOf("DECISION"), trace.fallbackPath)
             assertTrue(trace.errorSummary?.contains("0.31") == true)
-            assertTrue(trace.errorSummary?.contains("0.7") == true)
+            assertTrue(trace.errorSummary?.contains("0.8") == true)
 
             val attempt = trace.attempts.single()
             assertEquals(AiAttemptStage.DECISION, attempt.stage)

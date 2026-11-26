@@ -82,8 +82,10 @@ All schema models are defined in [`AiTraceModels.kt`](../../src/main/kotlin/luna
 | `attempts` | `List<AiAttemptRecord>` | Chronologically ordered `AI Attempt` records executed during this trace. |
 | `circadianPeriod` | `String?` | Active circadian period (`LATE_NIGHT`, `MORNING`, `DAYTIME`, `EVENING`) recorded by `Chatter Pipeline` when drift is enabled; `null` for `SUMMARY` or when drift is disabled. |
 | `personaMood` | `String?` | Active transient in-memory mood/energy label (`ENERGETIC`, `CHATTY`, `STEADY`, `MELLOW`, `TIRED`, `LOW_BATTERY`) recorded by `Chatter Pipeline`; `null` for `SUMMARY` or when drift is disabled. |
-| `effectiveThreshold` | `Double?` | Effective `noul` participation threshold (`baseThreshold + circadianOffset + moodOffset` clamped to `[0.05, 0.98]`, or `baseThreshold` when drift is disabled) evaluated by `Chatter Pipeline`; `null` for `SUMMARY`. |
-| `reactionThreshold` | `Double?` | Configured `Silent Reaction Path` `noul` lower threshold (`CHATTER_REACTION_THRESHOLD`, clamped `[0.0, 1.0]`, default `0.45`) evaluated by `Chatter Pipeline`; `null` for `SUMMARY`. |
+| `effectiveThreshold` | `Double?` | Effective `noul` participation threshold (`baseThreshold + circadianOffset + moodOffset + affinityOffset + momentumOffset + fatigueOffset`, clamped to `[0.15, 0.95]`) evaluated by `Chatter Pipeline`; `null` for `SUMMARY`. |
+| `reactionThreshold` | `Double?` | Effective `Silent Reaction Path` `noul` lower threshold (`CHATTER_REACTION_THRESHOLD + ambientFatigueOffset`, clamped to `[0.0, effectiveThreshold]`, default `0.55`) evaluated by `Chatter Pipeline`; `null` for `SUMMARY`. |
+| `ambientFatigueCount` | `Int?` | Number of uninvited `AMBIENT` text replies recorded in the channel's active `Ambient Fatigue` window (`0` when cold or reset); `null` for `SUMMARY`. |
+| `ambientFatigueOffset` | `Double?` | Active `Ambient Fatigue` threshold penalty (`min(CHATTER_FATIGUE_MAX_OFFSET, count * CHATTER_FATIGUE_STEP)`, default step `0.08`, cap `0.24`) applied to both `effectiveThreshold` and `reactionThreshold`; `null` for `SUMMARY`. |
 
 #### `discord` Subfields (`AiTraceDiscordContext`)
 
