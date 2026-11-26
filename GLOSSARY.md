@@ -237,8 +237,12 @@ Luna's globally shared, day-scoped 24-hour sequence of contiguous `Schedule Bloc
 _Avoid_: Bot calendar, cron timetable, sleep mode, static routine
 
 **Schedule Block**:
-A single non-overlapping time interval within a `Daily Schedule` carrying an activity title, contextual detail, Discord status text, an `Availability State`, and whether it was conversationally adjusted.
+A single non-overlapping time interval within a `Daily Schedule` carrying an activity title, contextual detail, Discord status text, a `Presence Activity Type`, an `Availability State`, and whether it was conversationally adjusted.
 _Avoid_: Time slot, event item, activity chunk
+
+**Presence Activity Type**:
+The Discord activity presentation category assigned to a `Schedule Block` (`CUSTOM`, `PLAYING`, `LISTENING`, `WATCHING`), determining whether Luna's status renders as a free-form custom status or a native Discord activity.
+_Avoid_: Status kind, rich presence mode, game tag
 
 **Availability State**:
 The four-tier responsiveness classification of a `Schedule Block` (`AVAILABLE`, `BREAK`, `BUSY`, `SLEEPING`) that determines whether `Chatter Pipeline` replies in real time, defers incoming messages, triggers `Deferred Catch-Up`, and sets Luna's Discord presence indicator.

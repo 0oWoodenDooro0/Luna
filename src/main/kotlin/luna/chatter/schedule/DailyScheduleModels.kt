@@ -30,6 +30,25 @@ enum class AvailabilityState {
 }
 
 /**
+ * Discord presence rendering mode for a [ScheduleBlock] or [ScheduleCommitment].
+ */
+@Serializable
+enum class PresenceActivityType {
+    CUSTOM,
+    PLAYING,
+    LISTENING,
+    WATCHING,
+    ;
+
+    companion object {
+        fun fromOrDefault(raw: String?): PresenceActivityType {
+            val normalized = raw?.trim()?.uppercase().orEmpty()
+            return entries.firstOrNull { it.name == normalized } ?: CUSTOM
+        }
+    }
+}
+
+/**
  * A single contiguous time block within a 24-hour [DailySchedule] (`[startMinute, endMinute)`).
  */
 @Serializable
@@ -41,6 +60,7 @@ data class ScheduleBlock(
     val statusText: String,
     val availability: AvailabilityState,
     val adjustedByConversation: Boolean = false,
+    val activityType: PresenceActivityType = PresenceActivityType.CUSTOM,
 ) {
     init {
         require(startMinute in 0 until MINUTES_PER_DAY) {
@@ -133,6 +153,7 @@ data class ScheduleCommitment(
     val statusText: String,
     val availability: AvailabilityState,
     val createdAtMillis: Long,
+    val activityType: PresenceActivityType = PresenceActivityType.CUSTOM,
 ) {
     init {
         require(id.isNotBlank()) { "id must not be blank" }
@@ -161,6 +182,7 @@ data class ScheduleCommitment(
             statusText = statusText,
             availability = availability,
             adjustedByConversation = adjustedByConversation,
+            activityType = activityType,
         )
 }
 

@@ -31,7 +31,7 @@ This ADR amends ADR-0015 (`Circadian Persona Drift` and `Chatter Pipeline` gatin
    - When a `Daily Schedule` is active, it replaces the four fixed `CircadianPeriod` windows while keeping the transient 2–4 hour in-memory `PersonaMood` fluctuation layered on top during `AVAILABLE` and `BREAK` blocks.
    - Inject the active `Schedule Block` (plus a compact outline of today's schedule) into `ChatterPromptBuilder` so Luna's dialogue naturally reflects what she is doing or just finished, and record schedule state in `AI Trace`.
 
-5. **Discord Presence Mapping and Public `/schedule` Command**:
+5. **Discord Presence Mapping and Public `/schedule` Command** *(Presence mapping amended by ADR-0026)*:
    - Synchronize Luna's global Discord presence on startup and at each `Schedule Block` boundary:
      - `AVAILABLE` / `BREAK` → `Online` + block custom status text.
      - `BUSY` → `DoNotDisturb` + block custom status text.
