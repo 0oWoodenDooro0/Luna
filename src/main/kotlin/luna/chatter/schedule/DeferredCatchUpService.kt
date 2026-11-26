@@ -199,8 +199,8 @@ class DeferredCatchUpService(
                     authorName = resolveAuthorName(msg, mentionContext),
                     content = resolvedContent,
                     timestampMillis = messageTimestampMillis(msg),
-                    isDirectMention = filter.isDirectBotMention(msg, selfId),
-                    isReplyToLuna = filter.isReplyToLuna(msg, selfId),
+                    isDirectMention = filter.directInteractionResolver.isDirectBotMention(msg, selfId),
+                    isReplyToLuna = filter.directInteractionResolver.isReplyToLuna(msg, selfId),
                     authorId = resolveAuthorId(msg)?.toString(),
                 )
             }

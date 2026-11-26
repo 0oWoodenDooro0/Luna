@@ -79,6 +79,22 @@ class ChatterService(
             traceRecorder = traceRecorder,
             apiKey = config.apiKey,
         )
+    private val participationEvaluator =
+        ChatterParticipationEvaluator(
+            contextCollector = contextCollector,
+            decisionClient = decisionClient,
+            silentReactionCoordinator = silentReactionCoordinator,
+            logger = logger,
+        )
+    private val replyPipeline =
+        ChatterReplyPipeline(
+            contextCollector = contextCollector,
+            chatterGenerator = chatterGenerator,
+            silentReactionCoordinator = silentReactionCoordinator,
+            deliveryEngine = deliveryEngine,
+            filter = filter,
+            logger = logger,
+        )
 
     private data class TriggerSnapshot(
         val selfId: Snowflake?,
@@ -136,7 +152,7 @@ class ChatterService(
      */
     suspend fun processMessage(message: Message): Boolean {
         val snapshot = extractTriggerSnapshot(message)
-        val directInteraction = filter.classifyDirectInteraction(message, snapshot.selfId)
+        val directInteraction = filter.directInteractionResolver.classifyDirectInteraction(message, snapshot.selfId)
         val isDirectMention = directInteraction.isDirect
 
         if (!snapshot.isBotAuthor) {
@@ -298,270 +314,49 @@ class ChatterService(
 
             // 3. Participation evaluation: bypass for direct bot mentions
             if (!isDirectMention) {
-                val decisionContext =
-                    try {
-                        contextCollector.collectDecisionContext(allRaw, kordSelfId = snapshot.selfId)
-                    } catch (e: CancellationException) {
-                        throw e
-                    } catch (e: Exception) {
-                        logger.warn("Error collecting decision context for message {}: {}", message.id, e.message)
-                        session.fail(
-                            AiTraceFailureCategory.CONTEXT_ERROR,
-                            "Error collecting decision context for message ${message.id}: ${e.message}",
-                        )
-                        return@withReadingSimulation false
-                    }
-                currentCoroutineContext().ensureActive()
-                if (decisionContext.transcript.isBlank() && decisionContext.images.isEmpty()) {
-                    logger.debug("Assembled decision dialogue state is blank; skipping evaluation")
-                    session.fail(
-                        AiTraceFailureCategory.CONTEXT_ERROR,
-                        "Assembled decision dialogue state is blank",
-                    )
-                    return@withReadingSimulation false
-                }
-
-                val annotatedDecisionTranscript = emojiTurn.annotateTranscript(decisionContext.transcript)
-                currentCoroutineContext().ensureActive()
-                val annotatedDecisionContext = decisionContext.copy(transcript = annotatedDecisionTranscript)
-
-                val decision =
-                    try {
-                        decisionClient.decide(
-                            annotatedDecisionContext.transcript,
-                            annotatedDecisionContext.images,
-                            effectiveThreshold = effectiveThreshold,
-                        )
-                    } catch (e: CancellationException) {
-                        throw e
-                    } catch (e: Exception) {
-                        logger.warn("Gemini decision evaluation threw error for state: {}", e.message)
-                        session.fail(
-                            AiTraceFailureCategory.UNEXPECTED_ERROR,
-                            "Gemini decision evaluation threw error: ${e.message}",
-                        )
-                        return@withReadingSimulation false
-                    }
-                currentCoroutineContext().ensureActive()
-
-                if (!decision.shouldParticipate) {
-                    val noul = decision.noul
-                    if (noul != null && reactionThreshold < effectiveThreshold && noul >= reactionThreshold) {
-                        if (relationship.tier.suppressFriendlySilentReaction) {
-                            logger.debug(
-                                "Silent reaction suppressed for {} user {} on message {} (noul={}, effectiveThreshold={}, reactionThreshold={})",
-                                relationship.tier,
-                                snapshot.authorId,
-                                message.id,
-                                noul,
-                                effectiveThreshold,
-                                reactionThreshold,
-                            )
-                            session.skip(
-                                reason =
-                                    "Silent reaction suppressed for ${relationship.tier.name} user " +
-                                        "(noul=$noul, confidence=${decision.confidence}, " +
-                                        "threshold=$effectiveThreshold, reactionThreshold=$reactionThreshold)",
-                            )
-                            return@withReadingSimulation false
-                        }
-                        return@withReadingSimulation silentReactionCoordinator.handleSilentReactionPath(
+                val evaluation =
+                    participationEvaluator.evaluate(
+                        ParticipationEvaluationContext(
                             message = message,
-                            decisionContext = annotatedDecisionContext,
+                            allRaw = allRaw,
+                            selfId = snapshot.selfId,
+                            authorId = snapshot.authorId,
                             personaState = personaState,
-                            noul = noul,
-                            confidence = decision.confidence,
+                            relationship = relationship,
+                            baseThreshold = baseThreshold,
                             effectiveThreshold = effectiveThreshold,
                             reactionThreshold = reactionThreshold,
+                            emojiTurn = emojiTurn,
                             readingScope = readingScope,
                             session = session,
                             markDispatching = markDispatching,
-                            emojiTurn = emojiTurn,
-                        )
-                    }
-
-                    logger.debug(
-                        "Decision client evaluated shouldParticipate=false for message {} (noul={}, effectiveThreshold={}, reactionThreshold={})",
-                        message.id,
-                        decision.noul,
-                        effectiveThreshold,
-                        reactionThreshold,
+                        ),
                     )
-                    if (decision.noul != null) {
-                        session.skip(
-                            reason =
-                                "Participation decision skipped (noul=${decision.noul}, " +
-                                    "confidence=${decision.confidence}, threshold=$effectiveThreshold, " +
-                                    "reactionThreshold=$reactionThreshold, baseThreshold=$baseThreshold)",
-                        )
-                    }
-                    return@withReadingSimulation false
+                if (evaluation is ParticipationEvaluationResult.Completed) {
+                    return@withReadingSimulation evaluation.outcome
                 }
             } else {
                 logger.info("Direct bot mention detected on message {}; bypassing decision evaluation", message.id)
             }
 
-            // Assemble heavy reply context (15 messages, reply chains, images, SocialPeek)
-            val replyContext =
-                try {
-                    contextCollector.collectReplyContext(allRaw, kordSelfId = snapshot.selfId)
-                } catch (e: CancellationException) {
-                    throw e
-                } catch (e: Exception) {
-                    logger.warn("Error collecting reply context for message {}: {}", message.id, e.message)
-                    session.fail(
-                        AiTraceFailureCategory.CONTEXT_ERROR,
-                        "Error collecting reply context for message ${message.id}: ${e.message}",
-                    )
-                    return@withReadingSimulation false
-                }
-            currentCoroutineContext().ensureActive()
-            if (replyContext.transcript.isBlank() &&
-                replyContext.imageAttachments.isEmpty() &&
-                replyContext.videoUri.isNullOrBlank()
-            ) {
-                logger.debug("No valid chat messages or media found in reply context for message {}", message.id)
-                session.fail(
-                    AiTraceFailureCategory.CONTEXT_ERROR,
-                    "Reply context is blank and contains no media",
-                )
-                return@withReadingSimulation false
-            }
-
-            val preparedEmojis = emojiTurn.prepareReplyEmojis(replyContext.transcript)
-            val allowMentionDisengagement =
-                ChatterAffinityHelper.allowsMentionDisengagement(isDirectMention = isDirectMention, relationship = relationship)
-
-            val chatterInput =
-                replyContext
-                    .toChatterInput(isDirectMention = isDirectMention)
-                    .copy(
-                        transcript = preparedEmojis.transcript,
-                        personaState = personaState,
-                        guildEmojis = preparedEmojis.guildEmojis,
-                        applicationEmojis = preparedEmojis.applicationEmojis,
-                        guildId = snapshot.guildId?.toString(),
-                        channelId = message.channelId.toString(),
-                        authorId = snapshot.authorId?.toString(),
-                        allowMentionDisengagement = allowMentionDisengagement,
-                    )
-
-            // Calls chatterGenerator.generateReply(chatterInput) while reading simulation runs concurrently
-            val replyText =
-                try {
-                    chatterGenerator.generateReply(chatterInput)
-                } catch (e: CancellationException) {
-                    throw e
-                } catch (e: Exception) {
-                    logger.error("ChatterGenerator failed to generate reply: {}", e.message, e)
-                    session.fail(
-                        AiTraceFailureCategory.UNEXPECTED_ERROR,
-                        "ChatterGenerator failed to generate reply: ${e.message}",
-                    )
-                    return@withReadingSimulation false
-                }
-            currentCoroutineContext().ensureActive()
-
-            if (replyText == null) {
-                logger.debug("ChatterGenerator returned null reply for message {}", message.id)
-                return@withReadingSimulation false
-            }
-
-            val cleanedReplyText =
-                when (
-                    val outcome =
-                        ChatterPromptBuilder.parseDisengagementOutcome(
-                            replyText,
-                            allowDisengagement = allowMentionDisengagement,
-                        )
-                ) {
-                    is ChatterPromptBuilder.DisengagementOutcome.NoReply -> {
-                        logger.info(
-                            "Direct mention disengaged with [NO_REPLY] for {} user {} in channel {}",
-                            relationship.tier,
-                            snapshot.authorId,
-                            message.channelId,
-                        )
-                        session.skip(
-                            reason = "Direct mention disengaged with [NO_REPLY] for ${relationship.tier.name} user",
-                        )
-                        return@withReadingSimulation false
-                    }
-
-                    is ChatterPromptBuilder.DisengagementOutcome.ColdReact -> {
-                        return@withReadingSimulation silentReactionCoordinator.handleSilentReactionPath(
-                            message = message,
-                            decisionContext =
-                                ChatterDecisionContext(
-                                    transcript = preparedEmojis.transcript,
-                                    images = replyContext.imageAttachments,
-                                    coldReaction = true,
-                                ),
-                            personaState = personaState,
-                            noul = 0.0,
-                            confidence = null,
-                            effectiveThreshold = effectiveThreshold,
-                            reactionThreshold = reactionThreshold,
-                            readingScope = readingScope,
-                            session = session,
-                            markDispatching = markDispatching,
-                            emojiTurn = emojiTurn,
-                        )
-                    }
-
-                    is ChatterPromptBuilder.DisengagementOutcome.Text -> {
-                        outcome.text
-                    }
-                }
-
-            if (cleanedReplyText.isBlank()) {
-                logger.debug("ChatterGenerator returned blank reply for message {}", message.id)
-                session.fail(
-                    AiTraceFailureCategory.EMPTY_OUTPUT,
-                    "ChatterGenerator returned blank reply",
-                )
-                return@withReadingSimulation false
-            }
-
-            val segments = ChatterPromptBuilder.splitReplySegments(cleanedReplyText)
-            if (segments.isEmpty()) {
-                logger.debug("ChatterPromptBuilder.splitReplySegments returned no segments for message {}", message.id)
-                session.fail(
-                    AiTraceFailureCategory.EMPTY_OUTPUT,
-                    "ChatterGenerator returned blank segments",
-                )
-                return@withReadingSimulation false
-            }
-
-            val delivered =
-                try {
-                    deliveryEngine.deliverSegmentedReply(
-                        anchor = message,
-                        segments = segments,
-                        selfId = snapshot.selfId,
-                        readingSimulation = readingScope,
-                        markDispatching = markDispatching,
-                        pingRepliedUser = isDirectMention,
-                    )
-                } catch (e: CancellationException) {
-                    throw e
-                } catch (e: Exception) {
-                    logger.error("Failed to send reply to channel {}: {}", message.channelId, e.message, e)
-                    session.fail(AiTraceFailureCategory.UNEXPECTED_ERROR, "Failed to deliver Discord reply: ${e.message}")
-                    return@withReadingSimulation false
-                }
-            if (delivered == DeliveryOutcome.CancelledBeforeDispatch) {
-                session.skip(reason = "Cancelled right before dispatch lock in channel ${message.channelId}")
-                return@withReadingSimulation false
-            }
-
-            val deliveredOutput = segments.joinToString("\n")
-            filter.cooldownCache.record(message.channelId)
-            filter.recordMomentumReply(channelId = message.channelId, isDirectMention = isDirectMention)
-            emojiTurn.recordDeliveredReply(segments)
-            session.complete(finalOutput = deliveredOutput)
-            logger.info("Chatter sent reply to channel {}: {}", message.channelId, deliveredOutput)
-            true
+            replyPipeline.execute(
+                ReplyPipelineContext(
+                    message = message,
+                    allRaw = allRaw,
+                    selfId = snapshot.selfId,
+                    guildId = snapshot.guildId,
+                    authorId = snapshot.authorId,
+                    isDirectMention = isDirectMention,
+                    personaState = personaState,
+                    relationship = relationship,
+                    effectiveThreshold = effectiveThreshold,
+                    reactionThreshold = reactionThreshold,
+                    emojiTurn = emojiTurn,
+                    readingScope = readingScope,
+                    session = session,
+                    markDispatching = markDispatching,
+                ),
+            )
         }
     }
 
