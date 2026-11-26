@@ -24,7 +24,7 @@ import kotlin.math.roundToLong
  * @property maxInterrupts Maximum number of pre-send cancellations/restarts allowed per round before locking in delivery (defaults to 2).
  * @property timezone IANA timezone ID for `Circadian Persona Drift` (defaults to `Asia/Taipei`).
  * @property driftEnabled Whether `Circadian Persona Drift` tone cues and threshold offsets are enabled (defaults to `true`).
- * @property reactionThreshold Minimum `noul` probability required for `Silent Reaction Path` (in `[0.0, 1.0]`, defaults to `0.45`).
+ * @property reactionThreshold Minimum `noul` probability required for `Silent Reaction Path` (in `[0.0, 1.0]`, defaults to `0.55`).
  * @property emojiVisionModel Optional Gemini Vision model for `Custom Emoji Meaning` resolution (strictly opt-in, no fallback).
  * @property maxImages Maximum number of image attachments processed per chatter context (defaults to `10`).
  * @property youtubeApiKey Optional YouTube Data API key for rich video context enrichment.
@@ -153,7 +153,7 @@ data class ChatterConfig(
         const val DEFAULT_MAX_INTERRUPTS = 2
         const val DEFAULT_TIMEZONE = "Asia/Taipei"
         const val DEFAULT_DRIFT_ENABLED = true
-        const val DEFAULT_REACTION_THRESHOLD = 0.45
+        const val DEFAULT_REACTION_THRESHOLD = 0.55
         const val MIN_REACTION_THRESHOLD = 0.0
         const val MAX_REACTION_THRESHOLD = 1.0
         const val DEFAULT_MOMENTUM_THRESHOLD_BOOST = 0.10
@@ -167,7 +167,7 @@ data class ChatterConfig(
         const val MAX_DEBOUNCE_MAX_MILLIS = 8_000L
 
         const val DEFAULT_DECISION_MODEL = "gemini-decision-1"
-        const val DEFAULT_DECISION_THRESHOLD = 0.7
+        const val DEFAULT_DECISION_THRESHOLD = 0.80
         const val MIN_DECISION_THRESHOLD = 0.0
         const val MAX_DECISION_THRESHOLD = 1.0
         const val DEFAULT_DECISION_TIMEOUT_SECONDS = 15L

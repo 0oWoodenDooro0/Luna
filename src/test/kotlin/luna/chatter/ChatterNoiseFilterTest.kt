@@ -396,20 +396,21 @@ class ChatterNoiseFilterTest {
     fun `evaluate restores full cooldown when momentum is exhausted`() =
         runTest {
             val channelId = Snowflake(100L)
-            // 3 ambient turns exhaust default maxTurns=3
-            repeat(3) {
+            // Direct mention activates momentum, then 2 ambient turns exhaust default maxTurns=2
+            momentumCache.recordReply(channelId, isDirectMention = true, timestamp = simulatedTime)
+            repeat(2) {
                 momentumCache.recordReply(channelId, isDirectMention = false, timestamp = simulatedTime)
             }
             cooldownCache.record(channelId, simulatedTime)
 
-            // 2500ms > 1500ms floor, but < 5000ms full cooldown -> rejected because momentum exhausted
+            // 2500ms > 1500ms floor, but < 30000ms full cooldown -> rejected because momentum exhausted
             simulatedTime += 2_500L
             val rejected = filter.evaluate(createMockMessage(id = 803L, channelId = 100L, content = "more"))
             assertIs<ChatterFilterResult.Rejected>(rejected)
             assertEquals(RejectionReason.CHANNEL_ON_COOLDOWN, rejected.reason)
 
-            // 5000ms -> full cooldown elapsed -> allowed
-            simulatedTime += 2_500L
+            // 30000ms -> full cooldown elapsed -> allowed
+            simulatedTime += 27_500L
             val allowed = filter.evaluate(createMockMessage(id = 804L, channelId = 100L, content = "after pause"))
             assertIs<ChatterFilterResult.Allowed>(allowed)
         }
@@ -419,10 +420,13 @@ class ChatterNoiseFilterTest {
         runTest {
             val shortCooldownFilter =
                 ChatterNoiseFilter(
+                    config =
+                        ChatterFilterConfig(
+                            cooldownDurationMs = 500L,
+                            momentumCooldownFloorMs = 1_500L,
+                        ),
                     cooldownCache = cooldownCache,
                     momentumCache = momentumCache,
-                    cooldownDurationMs = 500L,
-                    momentumSettings = MomentumFilterSettings(cooldownFloorMs = 1_500L),
                 )
             val channelId = Snowflake(100L)
             cooldownCache.record(channelId, simulatedTime)

@@ -168,6 +168,7 @@ class ChatterPersonaAndPunctuationTest {
         assertTrue(instructions.contains("1-on-1 exchange"), "Expected 1-on-1 exclusion intact")
         assertTrue(instructions.contains("standalone emoji"), "Expected standalone emoji exclusion intact")
         assertTrue(instructions.contains("bot command or system notice"), "Expected bot command exclusion intact")
-        assertTrue(instructions.contains("naturally references Luna"), "Expected Luna reference inclusion intact")
+        assertTrue(instructions.contains("naturally references her"), "Expected Luna reference inclusion intact")
+        assertTrue(instructions.contains("Luna recently spoke in [Recent Context]"), "Expected anti-hijack clause intact")
     }
 }

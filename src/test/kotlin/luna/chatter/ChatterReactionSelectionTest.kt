@@ -63,9 +63,9 @@ class ChatterReactionSelectionTest {
     @Test
     fun `ChatterConfig resolves CHATTER_REACTION_THRESHOLD defaults and fails fast on out-of-range or invalid values`() {
         val defaults = ChatterConfig()
-        assertEquals(0.45, defaults.reactionThreshold)
+        assertEquals(0.55, defaults.reactionThreshold)
 
-        assertEquals(0.45, ChatterConfig.from(luna.config.EnvReader.of()).reactionThreshold)
+        assertEquals(0.55, ChatterConfig.from(luna.config.EnvReader.of()).reactionThreshold)
         assertEquals(0.55, ChatterConfig.from(luna.config.EnvReader.of("CHATTER_REACTION_THRESHOLD" to "0.55")).reactionThreshold)
         assertEquals(0.0, ChatterConfig.from(luna.config.EnvReader.of("CHATTER_REACTION_THRESHOLD" to "0.0")).reactionThreshold)
         assertEquals(1.0, ChatterConfig.from(luna.config.EnvReader.of("CHATTER_REACTION_THRESHOLD" to "1.0")).reactionThreshold)

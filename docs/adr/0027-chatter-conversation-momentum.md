@@ -1,6 +1,6 @@
 # Chatter Conversation Momentum for Natural Back-and-Forth Exchanges
 
-Status: accepted
+Status: accepted (amended by [ADR 0029](0029-chatter-ambient-fatigue-and-anti-hijack-gating.md))
 
 ## Context
 

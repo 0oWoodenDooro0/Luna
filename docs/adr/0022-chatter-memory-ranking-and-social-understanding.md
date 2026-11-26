@@ -1,6 +1,6 @@
 # Chatter Memory Ranking Enhancements and Social Understanding Layer
 
-Status: accepted
+Status: accepted (amended by [ADR 0025](0025-chatter-user-affinity-and-selective-response.md))
 
 ## Context
 

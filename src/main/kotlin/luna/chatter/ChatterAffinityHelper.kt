@@ -57,9 +57,20 @@ internal object ChatterAffinityHelper {
         baseEffectiveThreshold: Double,
         relationship: UserRelationship,
         momentumThresholdOffset: Double = 0.0,
+        fatigueThresholdOffset: Double = 0.0,
     ): Double =
-        (baseEffectiveThreshold + relationship.tier.ambientThresholdOffset + momentumThresholdOffset)
-            .coerceIn(MIN_EFFECTIVE_THRESHOLD, MAX_EFFECTIVE_THRESHOLD)
+        (
+            baseEffectiveThreshold +
+                relationship.tier.ambientThresholdOffset +
+                momentumThresholdOffset +
+                fatigueThresholdOffset
+        ).coerceIn(MIN_EFFECTIVE_THRESHOLD, MAX_EFFECTIVE_THRESHOLD)
+
+    fun computeEffectiveReactionThreshold(
+        baseReactionThreshold: Double,
+        fatigueThresholdOffset: Double,
+        effectiveThreshold: Double,
+    ): Double = (baseReactionThreshold + fatigueThresholdOffset).coerceIn(0.0, effectiveThreshold)
 
     data class ThresholdTraceContext(
         val guildId: Snowflake?,
@@ -68,6 +79,13 @@ internal object ChatterAffinityHelper {
         val reactionThreshold: Double,
         val momentumState: MomentumState,
         val configuredMomentumBoost: Double,
+        val fatigueState: FatigueState = FatigueState.ZERO,
+    )
+
+    data class ResolvedThresholdState(
+        val relationship: UserRelationship,
+        val effectiveThreshold: Double,
+        val effectiveReactionThreshold: Double,
     )
 
     fun resolveThresholdAndRecordTrace(
@@ -75,7 +93,7 @@ internal object ChatterAffinityHelper {
         context: ThresholdTraceContext,
         session: luna.core.ai.AiTraceSession,
         logger: Logger,
-    ): Pair<UserRelationship, Double> {
+    ): ResolvedThresholdState {
         val relationship = resolveAuthorRelationship(memoryStore, context.guildId, context.authorId, logger)
         val momentumOffset =
             appliedMomentumThresholdOffset(
@@ -88,12 +106,19 @@ internal object ChatterAffinityHelper {
                 baseEffectiveThreshold = context.personaState.effectiveThreshold,
                 relationship = relationship,
                 momentumThresholdOffset = momentumOffset,
+                fatigueThresholdOffset = context.fatigueState.offset,
+            )
+        val effectiveReactionThreshold =
+            computeEffectiveReactionThreshold(
+                baseReactionThreshold = context.reactionThreshold,
+                fatigueThresholdOffset = context.fatigueState.offset,
+                effectiveThreshold = effectiveThreshold,
             )
         session.recordPersonaState(
             circadianPeriod = context.personaState.circadianPeriod?.name,
             personaMood = context.personaState.mood?.label,
             effectiveThreshold = effectiveThreshold,
-            reactionThreshold = context.reactionThreshold,
+            reactionThreshold = effectiveReactionThreshold,
         )
         session.recordRelationship(
             relationshipTier = relationship.tier.name,
@@ -105,7 +130,15 @@ internal object ChatterAffinityHelper {
             ambientTurnCount = context.momentumState.ambientTurnCount,
             thresholdOffset = momentumOffset,
         )
-        return relationship to effectiveThreshold
+        session.recordAmbientFatigue(
+            count = context.fatigueState.count,
+            offset = context.fatigueState.offset,
+        )
+        return ResolvedThresholdState(
+            relationship = relationship,
+            effectiveThreshold = effectiveThreshold,
+            effectiveReactionThreshold = effectiveReactionThreshold,
+        )
     }
 
     fun allowsMentionDisengagement(

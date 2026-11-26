@@ -324,7 +324,7 @@ open class ChatterContextCollector(
             } else {
                 "[Bot Identity: Luna]"
             }
-        val recentTurns = formattedTurns.dropLast(1)
+        val recentTurns = coalesceConsecutiveAuthorTurns(formattedTurns.dropLast(1))
         val latestTurn = formattedTurns.last()
         return buildString {
             append(identityHeader)
@@ -340,6 +340,51 @@ open class ChatterContextCollector(
             append("\n\n[Latest Message]\n")
             append(latestTurn)
         }
+    }
+
+    private fun coalesceConsecutiveAuthorTurns(turns: List<String>): List<String> {
+        if (turns.size <= 1) return turns
+        val coalesced = mutableListOf<String>()
+        var currentHeader: String? = null
+        val currentBlock = StringBuilder()
+
+        fun flushCurrent() {
+            if (currentBlock.isNotEmpty()) {
+                coalesced.add(currentBlock.toString())
+                currentBlock.clear()
+            }
+            currentHeader = null
+        }
+
+        for (turn in turns) {
+            if (turn.startsWith("---")) {
+                flushCurrent()
+                coalesced.add(turn)
+                continue
+            }
+            val sepIdx = turn.indexOf(": ")
+            if (sepIdx <= 0) {
+                flushCurrent()
+                coalesced.add(turn)
+                continue
+            }
+            val header = turn.substring(0, sepIdx)
+            val body = turn.substring(sepIdx + 2)
+            if (header.contains(" 回覆 ")) {
+                flushCurrent()
+                coalesced.add(turn)
+                continue
+            }
+            if (header == currentHeader) {
+                currentBlock.append('\n').append(body)
+            } else {
+                flushCurrent()
+                currentHeader = header
+                currentBlock.append(turn)
+            }
+        }
+        flushCurrent()
+        return coalesced
     }
 
     companion object {

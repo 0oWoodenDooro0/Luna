@@ -866,6 +866,10 @@ fun scanProductionParameterCounts(projectRoot: File): List<ParamCountDeclaration
         Regex(
             """(?m)^[ \t]*(?:(?:public|internal|private|protected|open|abstract|sealed|final|override|suspend|inline|tailrec|operator|infix|external|actual|expect|inner|value|enum|annotation|data)\s+)*(class|fun)\s+(?:<[^>]+>\s*)?([A-Za-z_][A-Za-z0-9_.]*)\s*(?:<[^>]+>\s*)?(?:(?:private|internal|protected|public)\s+constructor\s*)?\(""",
         )
+    val secondaryCtorRegex =
+        Regex(
+            """(?m)^[ \t]*(?:(?:public|internal|private|protected)\s+)?constructor\s*\(""",
+        )
     val dataClassRegex = Regex("""\bdata\s+class\b""")
     val results = mutableListOf<ParamCountDeclaration>()
 
@@ -901,6 +905,31 @@ fun scanProductionParameterCounts(projectRoot: File): List<ParamCountDeclaration
                             line = line,
                             kind = kind,
                             name = name,
+                            paramCount = paramCount,
+                        ),
+                    )
+                }
+                for (match in secondaryCtorRegex.findAll(clean)) {
+                    var j = match.range.last + 1
+                    var depth = 1
+                    while (j < clean.length && depth > 0) {
+                        when (clean[j]) {
+                            '(' -> depth++
+                            ')' -> depth--
+                        }
+                        j++
+                    }
+                    if (depth != 0) continue
+                    val paramBlock = clean.substring(match.range.last + 1, j - 1)
+                    val paramCount = countTopLevelParameters(paramBlock)
+                    val line = clean.substring(0, match.range.first).count { it == '\n' } + 1
+                    results.add(
+                        ParamCountDeclaration(
+                            key = "$relPath#constructor",
+                            relPath = relPath,
+                            line = line,
+                            kind = "constructor",
+                            name = "constructor",
                             paramCount = paramCount,
                         ),
                     )
@@ -1026,6 +1055,125 @@ fun checkSqliteJsonCoerceInputValues(projectRoot: File): List<String> {
     return violations
 }
 
+fun checkNoSecondaryConstructorBodies(projectRoot: File): List<String> {
+    val mainRoots = findKotlinSourceRoots(projectRoot, "main")
+    val violations = mutableListOf<String>()
+    val secondaryCtorRegex =
+        Regex(
+            """(?m)^[ \t]*(?:(?:public|internal|private|protected)\s+)?constructor\s*\(""",
+        )
+
+    mainRoots.forEach { root ->
+        root
+            .walkTopDown()
+            .filter { it.isFile && it.extension == "kt" }
+            .forEach { file ->
+                val relPath = file.relativeTo(projectRoot).path.replace('\\', '/')
+                val clean = stripCommentsAndStringsForParamScan(file.readText())
+                val n = clean.length
+                for (match in secondaryCtorRegex.findAll(clean)) {
+                    var j = match.range.last + 1
+                    var depth = 1
+                    while (j < n && depth > 0) {
+                        when (clean[j]) {
+                            '(' -> depth++
+                            ')' -> depth--
+                        }
+                        j++
+                    }
+                    if (depth != 0) continue
+                    while (j < n && clean[j].isWhitespace()) j++
+                    if (j < n && clean[j] == ':') {
+                        j++
+                        while (j < n && clean[j] != '(' && clean[j] != '{') j++
+                        if (j < n && clean[j] == '(') {
+                            j++
+                            var delDepth = 1
+                            while (j < n && delDepth > 0) {
+                                when (clean[j]) {
+                                    '(' -> delDepth++
+                                    ')' -> delDepth--
+                                }
+                                j++
+                            }
+                            if (delDepth != 0) continue
+                            while (j < n && clean[j].isWhitespace()) j++
+                        }
+                    }
+                    if (j < n && clean[j] == '{') {
+                        val line = clean.substring(0, match.range.first).count { it == '\n' } + 1
+                        violations.add(
+                            "[Rule 14: no-secondary-ctor-body] $relPath:$line: " +
+                                "Secondary constructor must purely delegate via ': this(...)' without a body block. " +
+                                "Move configuration into the primary constructor or a config data class per CODING_STANDARDS.md §4.",
+                        )
+                    }
+                }
+            }
+    }
+    return violations
+}
+
+fun checkAdrAmendmentParity(projectRoot: File): List<String> {
+    val adrDir = File(projectRoot, "docs/adr")
+    if (!adrDir.exists() || !adrDir.isDirectory) return emptyList()
+
+    val adrFileRegex = Regex("""^(\d{4})-.*\.md$""")
+    val statusRegex = Regex("""(?m)^Status:\s*(.+)$""")
+    val amendmentLineRegex =
+        Regex(
+            """(?im)^(?:>\s*_?(?:Amends|Supersedes)\b.*|This\s+(?:ADR|decision)\s+(?:amends|supersedes)\b.*|-\s*\*\*ADR\s+\d{4}\b[^*]*\*\*:\s*(?:Amends|Supersedes)\b.*)$""",
+        )
+    val adrRefRegex = Regex("""\bADR[\s-]+(\d{4})\b""")
+
+    val adrFiles =
+        adrDir
+            .listFiles { file -> file.isFile && adrFileRegex.matches(file.name) }
+            ?.sortedBy { it.name }
+            ?: return emptyList()
+
+    val statusByNum = mutableMapOf<String, String>()
+    val fileByNum = mutableMapOf<String, File>()
+    adrFiles.forEach { file ->
+        val num = adrFileRegex.matchEntire(file.name)!!.groupValues[1]
+        fileByNum[num] = file
+        statusByNum[num] = statusRegex.find(file.readText())?.groupValues?.get(1).orEmpty()
+    }
+
+    val violations = mutableListOf<String>()
+    adrFiles.forEach { file ->
+        val srcNum = adrFileRegex.matchEntire(file.name)!!.groupValues[1]
+        val text = file.readText()
+        val referencedTargets = linkedSetOf<String>()
+        amendmentLineRegex.findAll(text).forEach { lineMatch ->
+            adrRefRegex.findAll(lineMatch.value).forEach { refMatch ->
+                val targetNum = refMatch.groupValues[1]
+                if (targetNum != srcNum) {
+                    referencedTargets.add(targetNum)
+                }
+            }
+        }
+        referencedTargets.forEach { targetNum ->
+            val targetFile = fileByNum[targetNum]
+            if (targetFile == null) {
+                violations.add(
+                    "[Rule 15: adr-amendment-parity] docs/adr/${file.name}: " +
+                        "References ADR $targetNum in an Amends/Supersedes declaration, but no matching docs/adr/$targetNum-*.md exists.",
+                )
+            } else {
+                val targetStatus = statusByNum[targetNum].orEmpty()
+                if (!Regex("""\bADR[\s-]+$srcNum\b""").containsMatchIn(targetStatus)) {
+                    violations.add(
+                        "[Rule 15: adr-amendment-parity] docs/adr/${targetFile.name}: " +
+                            "Status line must reference ADR $srcNum (declared in docs/adr/${file.name}).",
+                    )
+                }
+            }
+        }
+    }
+    return violations
+}
+
 tasks.register("lintCodingStandards") {
     group = "verification"
     description = "Enforces mechanical CODING_STANDARDS.md rules without compiling Kotlin sources."
@@ -1046,6 +1194,8 @@ tasks.register("lintCodingStandards") {
                 addAll(checkLoggerClassMatch(codingStandardsRoot))
                 addAll(checkParameterCountLimit(codingStandardsRoot))
                 addAll(checkSqliteJsonCoerceInputValues(codingStandardsRoot))
+                addAll(checkNoSecondaryConstructorBodies(codingStandardsRoot))
+                addAll(checkAdrAmendmentParity(codingStandardsRoot))
             }
 
         if (violations.isNotEmpty()) {
@@ -1054,7 +1204,7 @@ tasks.register("lintCodingStandards") {
                     violations.joinToString("\n\n"),
             )
         }
-        logger.lifecycle("lintCodingStandards: all 13 rules passed.")
+        logger.lifecycle("lintCodingStandards: all 15 rules passed.")
     }
 }
 

@@ -48,6 +48,8 @@ class AiTraceSession internal constructor(
     private var momentumActive: Boolean? = null
     private var momentumTurnCount: Int? = null
     private var momentumThresholdOffset: Double? = null
+    private var ambientFatigueCount: Int? = null
+    private var ambientFatigueOffset: Double? = null
 
     fun registerSecret(secret: String?) {
         if (!isEnabled || secret.isNullOrBlank()) return
@@ -107,6 +109,17 @@ class AiTraceSession internal constructor(
             this.momentumActive = active
             this.momentumTurnCount = ambientTurnCount
             this.momentumThresholdOffset = thresholdOffset
+        }
+    }
+
+    fun recordAmbientFatigue(
+        count: Int,
+        offset: Double,
+    ) {
+        if (!isEnabled) return
+        synchronized(lock) {
+            this.ambientFatigueCount = count
+            this.ambientFatigueOffset = offset
         }
     }
 
@@ -297,6 +310,8 @@ class AiTraceSession internal constructor(
                     momentumActive = momentumActive,
                     momentumTurnCount = momentumTurnCount,
                     momentumThresholdOffset = momentumThresholdOffset,
+                    ambientFatigueCount = ambientFatigueCount,
+                    ambientFatigueOffset = ambientFatigueOffset,
                 )
             secretsSnapshot = extraSecrets.toSet()
         }

@@ -143,13 +143,13 @@ class ChatterServiceMomentumTest {
 
             assertTrue(fixture.service.processMessage(followUpMsg), "Follow-up at 2s should pass softened cooldown and reply")
 
-            // Threshold reduced by 0.10 (0.70 -> 0.60), reactionThreshold stays 0.45
-            coVerify { fixture.decisionClient.decide(any(), any(), effectiveThreshold = 0.60) }
+            // Threshold reduced by 0.10 (0.80 -> 0.70), reactionThreshold stays 0.55
+            coVerify { fixture.decisionClient.decide(any(), any(), effectiveThreshold = match { kotlin.math.abs(it - 0.70) < 1e-9 }) }
             val followUpTrace = traceRecorder.records.last()
             assertEquals(true, followUpTrace.momentumActive)
             assertEquals(0, followUpTrace.momentumTurnCount)
             assertEquals(-0.10, followUpTrace.momentumThresholdOffset)
-            assertEquals(0.45, followUpTrace.reactionThreshold)
+            assertEquals(0.55, followUpTrace.reactionThreshold)
 
             // Ambient reply incremented turn count to 1
             val afterAmbient = momentumCache.stateFor(Snowflake(channelId))
@@ -201,8 +201,8 @@ class ChatterServiceMomentumTest {
                 ParticipationDecision(shouldParticipate = false, confidence = 0.2, noul = 0.2)
 
             assertFalse(fixture.service.processMessage(coolMsg), "Low-score COOL message should not participate")
-            // 0.70 + 0.10 (COOL) + 0.0 (momentum suppressed) = 0.80
-            coVerify { fixture.decisionClient.decide(any(), any(), effectiveThreshold = match { kotlin.math.abs(it - 0.80) < 1e-9 }) }
+            // 0.80 + 0.10 (COOL) + 0.0 (momentum suppressed) = 0.90
+            coVerify { fixture.decisionClient.decide(any(), any(), effectiveThreshold = match { kotlin.math.abs(it - 0.90) < 1e-9 }) }
             val coolTrace = traceRecorder.records.last()
             assertEquals(true, coolTrace.momentumActive)
             assertEquals(0.0, coolTrace.momentumThresholdOffset)
@@ -218,8 +218,8 @@ class ChatterServiceMomentumTest {
                 )
             stubGuild(dislikedMsg, guildId)
             assertFalse(fixture.service.processMessage(dislikedMsg), "Low-score DISLIKED message should not participate")
-            // 0.70 + 0.22 (DISLIKED) + 0.0 (momentum suppressed) = 0.92
-            coVerify { fixture.decisionClient.decide(any(), any(), effectiveThreshold = match { kotlin.math.abs(it - 0.92) < 1e-9 }) }
+            // 0.80 + 0.22 (DISLIKED) + 0.0 (momentum suppressed) = 1.02 -> clamped to 0.95
+            coVerify { fixture.decisionClient.decide(any(), any(), effectiveThreshold = match { kotlin.math.abs(it - 0.95) < 1e-9 }) }
             val dislikedTrace = traceRecorder.records.last()
             assertEquals(true, dislikedTrace.momentumActive)
             assertEquals(0.0, dislikedTrace.momentumThresholdOffset)
@@ -230,11 +230,15 @@ class ChatterServiceMomentumTest {
         runTest {
             val channelId = 100L
             coEvery { fixture.decisionClient.decide(any(), any(), any()) } returns
-                ParticipationDecision(shouldParticipate = true, confidence = 0.9, noul = 0.9)
+                ParticipationDecision(shouldParticipate = true, confidence = 0.95, noul = 0.95)
             coEvery { fixture.chatterGenerator.generateReply(any<ChatterInput>()) } returns "ok"
 
-            // 3 consecutive ambient deliveries exhaust maxTurns=3
-            repeat(3) { idx ->
+            // Direct mention activates momentum
+            momentumCache.recordReply(Snowflake(channelId), isDirectMention = true, timestamp = fixture.simulatedTime)
+            fixture.cooldownCache.record(Snowflake(channelId), fixture.simulatedTime)
+
+            // 2 consecutive ambient deliveries exhaust maxTurns=2
+            repeat(2) { idx ->
                 fixture.simulatedTime += 2_000L
                 val msg =
                     fixture.createMockMessage(
@@ -248,26 +252,26 @@ class ChatterServiceMomentumTest {
             }
 
             val exhausted = momentumCache.stateFor(Snowflake(channelId))
-            assertFalse(exhausted.active, "Momentum should be exhausted after 3 ambient turns")
-            assertEquals(3, exhausted.ambientTurnCount)
+            assertFalse(exhausted.active, "Momentum should be exhausted after 2 ambient turns")
+            assertEquals(2, exhausted.ambientTurnCount)
 
-            // 4th ambient message at +2s (< 5s full cooldown) is rejected by cooldown
+            // 3rd ambient message at +2s (< 30s full cooldown) is rejected by cooldown
             fixture.simulatedTime += 2_000L
             val blockedMsg = fixture.createMockMessage(id = 4L, channelId = channelId, authorId = 20L, content = "too fast")
             stubGuild(blockedMsg)
-            assertFalse(fixture.service.processMessage(blockedMsg), "Exhausted momentum should re-engage full 5s cooldown")
+            assertFalse(fixture.service.processMessage(blockedMsg), "Exhausted momentum should re-engage full 30s cooldown")
 
-            // After full 5s cooldown, 4th ambient message runs WITHOUT threshold boost (0.70)
-            fixture.simulatedTime += 3_000L
-            val afterCooldownMsg = fixture.createMockMessage(id = 5L, channelId = channelId, authorId = 20L, content = "after 5s")
+            // After full 30s cooldown, 3rd ambient message runs WITHOUT threshold boost (0.80); momentum window also expired at 30s
+            fixture.simulatedTime += 28_000L
+            val afterCooldownMsg = fixture.createMockMessage(id = 5L, channelId = channelId, authorId = 20L, content = "after 30s")
             stubGuild(afterCooldownMsg)
-            assertTrue(fixture.service.processMessage(afterCooldownMsg), "Message after full 5s cooldown should deliver")
-            coVerify { fixture.decisionClient.decide(any(), any(), effectiveThreshold = 0.70) }
+            assertTrue(fixture.service.processMessage(afterCooldownMsg), "Message after full 30s cooldown should deliver")
+            coVerify { fixture.decisionClient.decide(any(), any(), effectiveThreshold = 0.80) }
             val trace = traceRecorder.records.last()
             assertEquals(false, trace.momentumActive)
-            assertEquals(3, trace.momentumTurnCount)
+            assertEquals(0, trace.momentumTurnCount)
             assertEquals(0.0, trace.momentumThresholdOffset)
-            assertEquals(4, momentumCache.stateFor(Snowflake(channelId)).ambientTurnCount)
+            assertEquals(0, momentumCache.stateFor(Snowflake(channelId)).ambientTurnCount)
         }
 
     @Test

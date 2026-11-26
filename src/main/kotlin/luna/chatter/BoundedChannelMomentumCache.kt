@@ -37,7 +37,7 @@ class BoundedChannelMomentumCache(
         const val DEFAULT_MAX_CAPACITY = 500
         const val DEFAULT_WINDOW_SECONDS = 30L
         const val DEFAULT_WINDOW_MS = DEFAULT_WINDOW_SECONDS * 1_000L
-        const val DEFAULT_MAX_TURNS = 3
+        const val DEFAULT_MAX_TURNS = 2
     }
 
     private data class MomentumEntry(
@@ -90,7 +90,8 @@ class BoundedChannelMomentumCache(
      * Records a delivered reply for [channelId].
      *
      * Direct `@mention` / reply-to-Luna deliveries start or refresh the window with `ambientTurnCount = 0`.
-     * Ambient replies start at `1` on cold start or expired window, and increment while within [windowMs].
+     * Ambient replies never start or refresh momentum on cold start or expired/exhausted windows;
+     * they only increment `ambientTurnCount` while `Direct Interaction`-initiated momentum is active.
      */
     fun recordReply(
         channelId: Snowflake,
@@ -107,13 +108,16 @@ class BoundedChannelMomentumCache(
                 cache[channelId] = MomentumEntry(lastReplyAtMs = timestamp, ambientTurnCount = 0)
             } else {
                 val existing = cache[channelId]
-                val nextCount =
-                    if (existing == null || timestamp - existing.lastReplyAtMs >= windowMs) {
-                        1
-                    } else {
-                        existing.ambientTurnCount + 1
-                    }
-                cache[channelId] = MomentumEntry(lastReplyAtMs = timestamp, ambientTurnCount = nextCount)
+                if (existing != null &&
+                    timestamp - existing.lastReplyAtMs < windowMs &&
+                    existing.ambientTurnCount < maxTurns
+                ) {
+                    cache[channelId] =
+                        MomentumEntry(
+                            lastReplyAtMs = timestamp,
+                            ambientTurnCount = existing.ambientTurnCount + 1,
+                        )
+                }
             }
         }
     }

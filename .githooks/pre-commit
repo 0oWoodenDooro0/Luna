@@ -2,7 +2,7 @@
 set -eo pipefail
 
 staged=$(git diff --cached --name-only)
-if ! printf '%s\n' "$staged" | grep -qE '(\.kts?$|^Dockerfile$|^\.env\.example$|^src/main/resources/META-INF/services/|^gradle/coding-standards-.*-baseline\.txt$)'; then
+if ! printf '%s\n' "$staged" | grep -qE '(\.kts?$|^Dockerfile$|^\.env\.example$|^docs/adr/|^src/main/resources/META-INF/services/|^gradle/coding-standards-.*-baseline\.txt$)'; then
   echo "==> Skipping pre-commit Gradle checks (no Kotlin, build, or guardrail-tracked files staged)."
   exit 0
 fi

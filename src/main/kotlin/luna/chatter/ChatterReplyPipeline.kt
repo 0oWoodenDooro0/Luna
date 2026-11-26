@@ -105,7 +105,14 @@ internal class ChatterReplyPipeline(
 
         val deliveredOutput = segments.joinToString("\n")
         filter.cooldownCache.record(message.channelId)
-        filter.recordMomentumReply(channelId = message.channelId, isDirectMention = context.isDirectMention)
+        if (context.isDirectMention) {
+            filter.resetFatigue(message.channelId)
+            filter.recordMomentumReply(channelId = message.channelId, isDirectMention = true)
+        } else if (filter.currentMomentumState(message.channelId).active) {
+            filter.recordMomentumReply(channelId = message.channelId, isDirectMention = false)
+        } else {
+            filter.recordAmbientFatigue(message.channelId)
+        }
         context.emojiTurn.recordDeliveredReply(segments)
         context.session.complete(finalOutput = deliveredOutput)
         logger.info("Chatter sent reply to channel {}: {}", message.channelId, deliveredOutput)

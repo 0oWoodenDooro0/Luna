@@ -1,6 +1,6 @@
 # Chatter Application Emoji Priority and Persona Identity
 
-Status: accepted
+Status: accepted (amended by [ADR 0021](0021-chatter-daily-schedule-and-deferred-catch-up.md), [ADR 0025](0025-chatter-user-affinity-and-selective-response.md))
 
 ## Context
 

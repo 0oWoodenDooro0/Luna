@@ -410,4 +410,46 @@ class ChatterContextCollectorTest {
                 "Thread decision transcript should degrade gracefully when parent lookup fails",
             )
         }
+
+    @Test
+    fun `formatDecisionTranscript coalesces consecutive same-author turns without crossing gaps or reply annotations`() {
+        val collector =
+            ChatterContextCollector(
+                noiseFilter = filter,
+                peekResolver = { null },
+            )
+        val turns =
+            listOf(
+                "Luna (uid:9999): 第一段回覆",
+                "Luna (uid:9999): 第二段回覆",
+                "Luna (uid:9999): 第三段回覆",
+                "--- 距離上一則訊息已過 15 分鐘 ---",
+                "Luna (uid:9999): 間隔後的訊息",
+                "Alice (uid:101): 早安",
+                "Alice (uid:101) 回覆 Luna (uid:9999)「間隔後的訊息」: 哈哈對啊",
+                "Alice (uid:101): 話說今天好冷",
+                "Alice (uid:101): 出門記得穿外套",
+                "Alice (uid:101): 最新這句要隔離",
+            )
+
+        val transcript = collector.formatDecisionTranscript(turns, kordSelfId = Snowflake(9999L))
+        val expectedRecent =
+            """
+            [Recent Context]
+            Luna (uid:9999): 第一段回覆
+            第二段回覆
+            第三段回覆
+            --- 距離上一則訊息已過 15 分鐘 ---
+            Luna (uid:9999): 間隔後的訊息
+            Alice (uid:101): 早安
+            Alice (uid:101) 回覆 Luna (uid:9999)「間隔後的訊息」: 哈哈對啊
+            Alice (uid:101): 話說今天好冷
+            出門記得穿外套
+            """.trimIndent()
+        assertTrue(transcript.contains(expectedRecent), "Expected coalesced [Recent Context] block, got:\n$transcript")
+        assertTrue(
+            transcript.endsWith("\n\n[Latest Message]\nAlice (uid:101): 最新這句要隔離"),
+            "Expected [Latest Message] to remain isolated, got:\n$transcript",
+        )
+    }
 }

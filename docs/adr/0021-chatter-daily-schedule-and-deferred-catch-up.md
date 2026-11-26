@@ -1,6 +1,6 @@
 # Persona-Driven Daily Schedule, Presence Sync, and Deferred Catch-Up
 
-Status: accepted
+Status: accepted (amended by [ADR 0023](0023-chatter-agentic-schedule-adjustment-and-commitments.md), [ADR 0026](0026-chatter-presence-invisible-sleep-and-native-activities.md))
 
 ## Context
 
