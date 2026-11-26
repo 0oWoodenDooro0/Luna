@@ -68,7 +68,7 @@ All schema models are defined in [`AiTraceModels.kt`](../../src/main/kotlin/luna
 | `traceId` | `String` | UUID uniquely identifying this `AI Trace` session. |
 | `timestamp` | `String` | UTC ISO-8601 instant when the session started (e.g. `2026-11-14T08:12:34.567Z`). |
 | `pipeline` | `AiTracePipeline` | Pipeline that handled the trigger: `SUMMARY` or `CHATTER`. |
-| `trigger` | `AiTraceTrigger` | Discord trigger source: `REACTION`, `MENTION`, or `AMBIENT`. |
+| `trigger` | `AiTraceTrigger` | Discord trigger source: `REACTION`, `MENTION`, `DIRECT_REPLY`, or `AMBIENT`. |
 | `discord` | `AiTraceDiscordContext` | Discord origin metadata (`guildId`, `channelId`, `messageId`, `authorId`, `reactingUserId`, `isDirectMention`). |
 | `outcome` | `AiTraceOutcome` | Terminal workflow status: `SUCCESS`, `DEGRADED_SUCCESS`, `SKIPPED`, or `FAILED`. |
 | `degraded` | `Boolean` | `true` when a fallback retry ran—currently `GeminiDecisionClient` retrying text-only input (`DECISION:text-only`) after a `DECISION:multimodal` failure. `Summary Pipeline` and `ChatterGenerator` enforce single-attempt no-fallback execution (`degraded: false`, failing directly to `FAILED` on upstream/tool/media errors). |
@@ -94,12 +94,12 @@ All schema models are defined in [`AiTraceModels.kt`](../../src/main/kotlin/luna
 | `messageId` | `String` | Discord target message snowflake ID (or `"direct"` / `"standalone"`). |
 | `authorId` | `String?` | Target message author snowflake ID, if available. |
 | `reactingUserId` | `String?` | User snowflake ID that added the `Summary Reaction` (`null` for `CHATTER`). |
-| `isDirectMention` | `Boolean` | `true` when Luna was directly `@`-mentioned (`MENTION` trigger); `false` otherwise. |
+| `isDirectMention` | `Boolean` | `true` when Luna was directly `@`-mentioned (`MENTION`) or directly replied to with ping off (`DIRECT_REPLY`); `false` otherwise. |
 
 #### Top-Level Enum Values
 
 - **`AiTracePipeline`**: `SUMMARY`, `CHATTER`
-- **`AiTraceTrigger`**: `REACTION`, `MENTION`, `AMBIENT`
+- **`AiTraceTrigger`**: `REACTION`, `MENTION`, `DIRECT_REPLY`, `AMBIENT`
 - **`AiTraceOutcome`**:
   - `SUCCESS`: Completed on the primary path without degradation (including runs where an individual `url_context_result` entry returned non-success/`unsafe` while the model still produced valid `model_output`, in which case errors are logged via `logger.error` and preserved in `attempts[].urlContextResults`).
   - `DEGRADED_SUCCESS`: Produced output after a fallback retry (`degraded: true`), currently triggered only when `GeminiDecisionClient` succeeds on a `DECISION:text-only` retry after `DECISION:multimodal` fails. `Summary Pipeline` and `ChatterGenerator` no longer perform tool/media degraded fallback retries (`no-search`, `no-images`, `no-media`, or `baseline` retries were removed).

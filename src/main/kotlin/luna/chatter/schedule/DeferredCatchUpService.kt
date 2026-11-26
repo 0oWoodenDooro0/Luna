@@ -200,7 +200,7 @@ class DeferredCatchUpService(
                     content = resolvedContent,
                     timestampMillis = messageTimestampMillis(msg),
                     isDirectMention = filter.isDirectBotMention(msg, selfId),
-                    isReplyToLuna = isReplyToLuna(msg, selfId),
+                    isReplyToLuna = filter.isReplyToLuna(msg, selfId),
                     authorId = resolveAuthorId(msg)?.toString(),
                 )
             }
@@ -388,15 +388,6 @@ class DeferredCatchUpService(
             return false
         }
         return true
-    }
-
-    private fun isReplyToLuna(
-        message: Message,
-        selfId: Snowflake?,
-    ): Boolean {
-        if (selfId == null) return false
-        val referencedAuthorId = runCatching { message.referencedMessage?.author?.id }.getOrNull()
-        return referencedAuthorId == selfId
     }
 
     private fun messageTimestampMillis(message: Message): Long = runCatching { message.timestamp.toEpochMilliseconds() }.getOrElse { timing.clock.millis() }

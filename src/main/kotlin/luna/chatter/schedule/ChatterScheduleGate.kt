@@ -34,12 +34,13 @@ internal class ChatterScheduleGate(
         isBotAuthor: Boolean,
         isDirectMention: Boolean,
         block: ScheduleBlock,
+        trigger: AiTraceTrigger = if (isDirectMention) AiTraceTrigger.MENTION else AiTraceTrigger.AMBIENT,
     ) {
         recordPendingCatchUpIfNonBot(message, guildId, isBotAuthor)
         val session =
             traceRecorder.startSession(
                 pipeline = AiTracePipeline.CHATTER,
-                trigger = if (isDirectMention) AiTraceTrigger.MENTION else AiTraceTrigger.AMBIENT,
+                trigger = trigger,
                 discord =
                     AiTraceDiscordContext(
                         guildId = guildId?.toString(),

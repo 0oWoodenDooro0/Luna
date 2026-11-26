@@ -4,8 +4,10 @@ import dev.kord.common.entity.MessageType
 import dev.kord.common.entity.Snowflake
 import dev.kord.common.entity.optional.OptionalSnowflake
 import dev.kord.core.Kord
+import dev.kord.core.behavior.channel.MessageChannelBehavior
 import dev.kord.core.entity.Member
 import dev.kord.core.entity.Message
+import dev.kord.core.entity.MessageReference
 import dev.kord.core.entity.Role
 import dev.kord.core.entity.User
 import dev.kord.core.entity.channel.GuildChannel
@@ -172,5 +174,147 @@ class DeferredCatchUpMentionResolutionTest {
                 "Hey @BobGlobal (uid:200002) and @Luna [YOU] (uid:999999), check @Moderators (role) in #general",
                 candidate.content,
             )
+        }
+
+    @Test
+    fun `triage excludes replies to Luna summary and resolves uncached same-channel reply to Luna chatter`() =
+        runTest {
+            val kord =
+                mockk<Kord>(relaxed = true).apply {
+                    every { selfId } returns this@DeferredCatchUpMentionResolutionTest.selfId
+                }
+            val aliceMember =
+                mockk<Member>(relaxed = true).apply {
+                    every { id } returns Snowflake(200001UL)
+                    every { username } returns "alice_raw"
+                    every { globalName } returns "AliceGlobal"
+                    every { effectiveName } returns "AliceNick"
+                    every { isBot } returns false
+                }
+            val lunaSummary =
+                mockk<Message>(relaxed = true).apply {
+                    every { id } returns Snowflake(9001UL)
+                    every { content } returns "TL;DR: Summary of earlier chat"
+                    every { author?.id } returns this@DeferredCatchUpMentionResolutionTest.selfId
+                    every { author?.isBot } returns true
+                    every { webhookId } returns null
+                    every { data.author.id } returns this@DeferredCatchUpMentionResolutionTest.selfId
+                }
+            val lunaChatter =
+                mockk<Message>(relaxed = true).apply {
+                    every { id } returns Snowflake(9002UL)
+                    every { content } returns "Haha that was funny"
+                    every { author?.id } returns this@DeferredCatchUpMentionResolutionTest.selfId
+                    every { author?.isBot } returns true
+                    every { webhookId } returns null
+                    every { data.author.id } returns this@DeferredCatchUpMentionResolutionTest.selfId
+                }
+
+            val replyToSummary =
+                mockk<Message>(relaxed = true).apply {
+                    every { id } returns Snowflake(1002UL)
+                    every { channelId } returns this@DeferredCatchUpMentionResolutionTest.channelId
+                    every { content } returns "thanks for the recap"
+                    every { author } returns aliceMember
+                    every { type } returns MessageType.Reply
+                    every { timestamp } returns KotlinInstant.fromEpochMilliseconds(nowInstant.toEpochMilli() - 60_000L)
+                    every { this@apply.kord } returns kord
+                    every { attachments } returns emptySet()
+                    every { mentionedUserIds } returns emptySet()
+                    every { referencedMessage } returns lunaSummary
+                    every { data.guildId } returns OptionalSnowflake.Value(guildId)
+                    every { data.author.id } returns Snowflake(200001UL)
+                    every { data.author.username } returns "alice_raw"
+                }
+
+            val sameChannelRef =
+                mockk<MessageReference> {
+                    every { data.id } returns OptionalSnowflake.Value(Snowflake(9002UL))
+                    every { data.channelId } returns OptionalSnowflake.Value(this@DeferredCatchUpMentionResolutionTest.channelId)
+                }
+            val channelBehavior =
+                mockk<MessageChannelBehavior> {
+                    coEvery { getMessageOrNull(Snowflake(9002UL)) } returns lunaChatter
+                }
+            val uncachedReplyToChatter =
+                mockk<Message>(relaxed = true).apply {
+                    every { id } returns Snowflake(1003UL)
+                    every { channelId } returns this@DeferredCatchUpMentionResolutionTest.channelId
+                    every { content } returns "right? I thought so too"
+                    every { author } returns aliceMember
+                    every { type } returns MessageType.Reply
+                    every { timestamp } returns KotlinInstant.fromEpochMilliseconds(nowInstant.toEpochMilli() - 30_000L)
+                    every { this@apply.kord } returns kord
+                    every { attachments } returns emptySet()
+                    every { mentionedUserIds } returns emptySet()
+                    every { referencedMessage } returns null
+                    every { messageReference } returns sameChannelRef
+                    every { channel } returns channelBehavior
+                    every { data.guildId } returns OptionalSnowflake.Value(guildId)
+                    every { data.author.id } returns Snowflake(200001UL)
+                    every { data.author.username } returns "alice_raw"
+                }
+
+            val store = mockk<DailyScheduleStore>(relaxed = true)
+            every { store.listPendingCatchUps() } returns
+                listOf(
+                    CatchUpWatermark(
+                        channelId = channelId.toString(),
+                        guildId = guildId.toString(),
+                        firstPendingMessageId = "1002",
+                        firstPendingAtMillis = nowInstant.toEpochMilli() - 600_000L,
+                        lastPendingMessageId = "1003",
+                        lastPendingAtMillis = nowInstant.toEpochMilli() - 30_000L,
+                        updatedAtMillis = nowInstant.toEpochMilli() - 30_000L,
+                    ),
+                )
+
+            val catchUpPort = mockk<CatchUpChannelPort>()
+            coEvery { catchUpPort.fetchMissedMessages(channelId, Snowflake(1002UL), 30) } returns listOf(replyToSummary, uncachedReplyToChatter)
+
+            val capturedCandidates = slot<List<CatchUpCandidateMessage>>()
+            val triageClient = mockk<DeferredCatchUpTriageClient>()
+            coEvery {
+                triageClient.triage(capture(capturedCandidates), AvailabilityState.BUSY, availableBlock, 2)
+            } returns Result.success(emptyList())
+
+            val config =
+                ChatterConfig(
+                    apiKey = "test-api-key",
+                    filter = ChatterFilterConfig(enabled = true),
+                    schedule = ChatterScheduleConfig(enabled = true),
+                )
+            val scheduleProvider =
+                object : DailyScheduleProvider {
+                    override fun isEnabled(): Boolean = true
+
+                    override fun currentSchedule(): DailySchedule? = null
+
+                    override fun currentBlock(): ScheduleBlock? = availableBlock
+                }
+
+            val service =
+                DeferredCatchUpService(
+                    scheduleStore = store,
+                    scheduleProvider = scheduleProvider,
+                    triageClient = triageClient,
+                    chatterGenerator = mockk(relaxed = true),
+                    filter = ChatterNoiseFilter(config = config.filter),
+                    contextCollector = mockk<ChatterContextCollector>(relaxed = true),
+                    channelPort = mockk(relaxed = true),
+                    catchUpChannelPort = catchUpPort,
+                    burstCoordinator = BoundedChannelBurstCoordinator(debounceMs = 1L, mentionDebounceMs = 1L, maxDebounceMs = 6_000L),
+                    personaStateProvider = CircadianPersonaDrift(timezone = "Asia/Taipei", enabled = false, scheduleProvider = scheduleProvider),
+                    config = config,
+                    timing = CatchUpTimingPort(clock = fixedClock, randomProvider = { _, _ -> 0L }, staggerDelayFn = { }),
+                )
+
+            service.onBecomeAvailable(AvailabilityState.BUSY, availableBlock)
+
+            assertEquals(2, capturedCandidates.captured.size)
+            val summaryReplyCandidate = capturedCandidates.captured.first { it.messageId == "1002" }
+            val chatterReplyCandidate = capturedCandidates.captured.first { it.messageId == "1003" }
+            kotlin.test.assertFalse(summaryReplyCandidate.isReplyToLuna, "Reply to Luna summary should not be marked isReplyToLuna")
+            kotlin.test.assertTrue(chatterReplyCandidate.isReplyToLuna, "Uncached reply to Luna chatter should be marked isReplyToLuna")
         }
 }
