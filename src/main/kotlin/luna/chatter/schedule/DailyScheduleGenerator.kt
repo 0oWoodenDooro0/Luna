@@ -49,6 +49,7 @@ open class DailyScheduleGenerator(
         val activityDetail: String,
         val statusText: String,
         val availability: AvailabilityState,
+        val activityType: String? = null,
     )
 
     @Serializable
@@ -142,6 +143,7 @@ open class DailyScheduleGenerator(
                         activityDetail = block.activityDetail.trim(),
                         statusText = block.statusText.trim(),
                         availability = block.availability,
+                        activityType = PresenceActivityType.fromOrDefault(block.activityType),
                     )
                 }
             DailySchedule(
@@ -197,8 +199,13 @@ open class DailyScheduleGenerator(
                - BUSY：專心接案趕稿、外出辦事、洗澡或專注做某件事（不回訊息）
                - BREAK：吃飯、泡咖啡、伸懶腰滑手機的短暫休息（會看一眼群組並簡短回幾句）
                - AVAILABLE：自由耍廢、追番、打遊戲或窩在電腦前（正常跟群友聊天）
-            3. activityTitle、activityDetail、statusText、summary 請使用自然口語的繁體中文；statusText 請簡短適合當作 Discord 自訂狀態（可帶 1 個 emoji）。
-            4. 作息節奏建議（彈性原則）：單段連續 BUSY 建議控制在約 1–2 小時左右，避免連續排好幾個小時不休息的 BUSY；若趕稿或辦事需要較長時間，請在中間自然穿插 15–45 分鐘的 BREAK（例如喝水、吃點心、伸懶腰、滑群組）或 AVAILABLE 來分段。整天請避免排滿 BUSY，留出足夠的 AVAILABLE 與 BREAK 時段讓 Luna 可以跟群友聊天（此為彈性節奏建議，不需硬性限制每日總時數）。
+            3. activityTitle、activityDetail、statusText、summary 請使用自然口語的繁體中文。
+            4. activityType 用於決定 Discord 個人狀態的呈現方式，只能是以下四種之一（省略時預設 CUSTOM）：
+               - PLAYING：打遊戲時使用；statusText 只寫精簡的遊戲／活動名詞（不可包含「玩」「打」「中」或 emoji，例如「薩爾達傳說」）。
+               - LISTENING：聽音樂、Podcast、ASMR 時使用；statusText 只寫精簡的聆聽對象名詞（不可包含「聽」「中」或 emoji，例如「Lo-Fi 歌單」）。
+               - WATCHING：追番、看影片、看實況時使用；statusText 只寫精簡的觀看對象名詞（不可包含「看」「追」「中」或 emoji，例如「深夜新番」）。
+               - CUSTOM：其他日常活動（畫圖、聊天、泡咖啡、睡覺等）使用；statusText 請簡短自然並可帶 1 個 emoji（例如「☕ 泡咖啡醒腦中」）。
+            5. 作息節奏建議（彈性原則）：單段連續 BUSY 建議控制在約 1–2 小時左右，避免連續排好幾個小時不休息的 BUSY；若趕稿或辦事需要較長時間，請在中間自然穿插 15–45 分鐘的 BREAK（例如喝水、吃點心、伸懶腰、滑群組）或 AVAILABLE 來分段。整天請避免排滿 BUSY，留出足夠的 AVAILABLE 與 BREAK 時段讓 Luna 可以跟群友聊天（此為彈性節奏建議，不需硬性限制每日總時數）。
 
             請嚴格輸出以下 JSON 結構：
             {
@@ -209,8 +216,9 @@ open class DailyScheduleGenerator(
                   "endMinute": 120,
                   "activityTitle": "深夜追番",
                   "activityDetail": "窩在電腦前看新番順便滑群組",
-                  "statusText": "📺 深夜追番中",
-                  "availability": "AVAILABLE"
+                  "statusText": "深夜新番",
+                  "availability": "AVAILABLE",
+                  "activityType": "WATCHING"
                 }
               ]
             }

@@ -14,6 +14,7 @@ data class SchedulePatch(
     val activityDetail: String,
     val statusText: String,
     val availability: AvailabilityState,
+    val activityType: PresenceActivityType = PresenceActivityType.CUSTOM,
 )
 
 /**
@@ -139,6 +140,7 @@ object DailyScheduleSplicer {
                     statusText = patch.statusText.trim(),
                     availability = patch.availability,
                     adjustedByConversation = true,
+                    activityType = patch.activityType,
                 ),
             )
         }

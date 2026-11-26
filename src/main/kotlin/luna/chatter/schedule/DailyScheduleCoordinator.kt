@@ -47,6 +47,7 @@ open class DailyScheduleCoordinator(
         val activityTitle: String,
         val statusText: String,
         val availability: AvailabilityState,
+        val activityType: PresenceActivityType,
     )
 
     private val logger = LoggerFactory.getLogger(DailyScheduleCoordinator::class.java)
@@ -206,6 +207,7 @@ open class DailyScheduleCoordinator(
         activityDetail: String,
         statusText: String,
         availability: AvailabilityState,
+        activityType: PresenceActivityType = PresenceActivityType.CUSTOM,
     ): CommitmentResult {
         if (!enabled) {
             return CommitmentResult.Rejected("DailyScheduleCoordinator is disabled.")
@@ -241,6 +243,7 @@ open class DailyScheduleCoordinator(
                     activityDetail = activityDetail,
                     statusText = statusText,
                     availability = availability,
+                    activityType = activityType,
                 )
             val fieldError = ScheduleGuardrails.validatePatchFields(patch)
             if (fieldError != null) {
@@ -280,6 +283,7 @@ open class DailyScheduleCoordinator(
                     statusText = statusText.trim(),
                     availability = availability,
                     createdAtMillis = existing?.createdAtMillis ?: nowMillis,
+                    activityType = activityType,
                 )
 
             try {
@@ -382,6 +386,7 @@ open class DailyScheduleCoordinator(
                 activityTitle = block.activityTitle,
                 statusText = block.statusText,
                 availability = block.availability,
+                activityType = block.activityType,
             )
         if (blockKey != lastSyncedBlockKey) {
             presencePort?.updatePresence(block)

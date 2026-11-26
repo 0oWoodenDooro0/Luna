@@ -107,6 +107,7 @@ open class ChatterScheduleToolHandler(
                         activityDetail = patch.activityDetail,
                         statusText = patch.statusText,
                         availability = patch.availability,
+                        activityType = patch.activityType,
                     )
             ) {
                 is DailyScheduleCoordinator.CommitmentResult.Upserted -> formatUpsertedResponse(result.commitment)
@@ -243,6 +244,8 @@ open class ChatterScheduleToolHandler(
                     "Invalid ${prefix}availability '$rawAvailability'; must be AVAILABLE, BREAK, BUSY, or SLEEPING.",
                 )
 
+        val activityType = PresenceActivityType.fromOrDefault(extractString(obj, "activity_type"))
+
         return ParseResult.Value(
             SchedulePatch(
                 startMinute = startMinute,
@@ -251,6 +254,7 @@ open class ChatterScheduleToolHandler(
                 activityDetail = detail,
                 statusText = statusText,
                 availability = availability,
+                activityType = activityType,
             ),
         )
     }
@@ -375,6 +379,20 @@ open class ChatterScheduleToolHandler(
                     add(JsonPrimitive("SLEEPING"))
                 }
                 put("description", availabilityDescription)
+            }
+            putJsonObject("activity_type") {
+                put("type", "string")
+                putJsonArray("enum") {
+                    add(JsonPrimitive("CUSTOM"))
+                    add(JsonPrimitive("PLAYING"))
+                    add(JsonPrimitive("LISTENING"))
+                    add(JsonPrimitive("WATCHING"))
+                }
+                put(
+                    "description",
+                    "Optional Discord presence activity type (defaults to CUSTOM). For PLAYING/LISTENING/WATCHING, " +
+                        "keep status_text as a concise object/noun phrase without redundant verbs or emojis.",
+                )
             }
         }
 

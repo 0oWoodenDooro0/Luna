@@ -1,11 +1,15 @@
 package luna.chatter.schedule
 
 import luna.core.LunaHost
+import org.jetbrains.exposed.v1.jdbc.transactions.TransactionManager
+import org.jetbrains.exposed.v1.jdbc.transactions.transaction
 import org.junit.jupiter.api.io.TempDir
 import java.nio.file.Path
+import java.sql.Connection
 import java.time.Clock
 import java.time.Instant
 import java.time.LocalDate
+import java.time.ZoneId
 import java.time.ZoneOffset
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -276,5 +280,141 @@ class SqliteDailyScheduleStoreTest {
         clock.advanceMinutes(24 * 60)
         assertTrue(store2.listCommitmentsForDate(day25).isEmpty(), "Expired commitment for day25 must be auto-pruned")
         assertTrue(store2.listUpcomingCommitments(day26, day30).isEmpty(), "Upcoming list must be empty after day25 expires")
+    }
+
+    @Test
+    fun `persists activityType and migrates legacy chatter_schedule_commitments table without activity_type column`() {
+        val dbPath = tempDir.resolve("activity-migration-${System.nanoTime()}.db").toString()
+        val vecPath = tempDir.resolve("missing-vec0.so").toString()
+        val taipei = java.time.ZoneId.of("Asia/Taipei")
+        val clock =
+            MutableClock(
+                java.time.ZonedDateTime
+                    .of(2026, 11, 24, 10, 0, 0, 0, taipei)
+                    .toInstant(),
+            )
+
+        // Pre-create legacy table without activity_type column and insert a legacy row
+        val db1 = LunaHost.initDatabase(dbPath = dbPath, vecExtensionPath = vecPath)
+        org.jetbrains.exposed.v1.jdbc.transactions.transaction(db1) {
+            val conn =
+                (
+                    org.jetbrains.exposed.v1.jdbc.transactions.TransactionManager
+                        .current()
+                        .connection.connection as java.sql.Connection
+                )
+            conn.createStatement().use { stmt ->
+                stmt.execute(
+                    """
+                    CREATE TABLE chatter_schedule_commitments (
+                        id TEXT PRIMARY KEY,
+                        target_date TEXT NOT NULL,
+                        start_minute INTEGER NOT NULL,
+                        end_minute INTEGER NOT NULL,
+                        activity_title TEXT NOT NULL,
+                        activity_detail TEXT NOT NULL,
+                        status_text TEXT NOT NULL,
+                        availability TEXT NOT NULL,
+                        created_at INTEGER NOT NULL
+                    );
+                    """.trimIndent(),
+                )
+                stmt.execute(
+                    """
+                    INSERT INTO chatter_schedule_commitments(
+                        id, target_date, start_minute, end_minute,
+                        activity_title, activity_detail, status_text, availability, created_at
+                    ) VALUES ('legacy-c1', '2026-11-25', 600, 720, '舊約定', '沒有 activity_type 欄位', '🎨 趕稿中', 'BUSY', 1700000000000);
+                    """.trimIndent(),
+                )
+            }
+        }
+
+        // Opening SqliteDailyScheduleStore must migrate idempotently and preserve legacy row as CUSTOM
+        val store = SqliteDailyScheduleStore(database = db1, clock = clock, timezone = taipei)
+        val day25 = LocalDate.of(2026, 11, 25)
+        val legacyRow = store.listCommitmentsForDate(day25).single()
+        assertEquals(PresenceActivityType.CUSTOM, legacyRow.activityType)
+
+        // Upsert new commitment with PLAYING and reload after reopen
+        store.upsertCommitment(
+            ScheduleCommitment(
+                id = "new-c2",
+                targetDate = day25,
+                startMinute = 1140,
+                endMinute = 1260,
+                activityTitle = "打薩爾達",
+                activityDetail = "探索海拉魯",
+                statusText = "薩爾達傳說",
+                availability = AvailabilityState.AVAILABLE,
+                createdAtMillis = clock.millis(),
+                activityType = PresenceActivityType.PLAYING,
+            ),
+        )
+
+        val db2 = LunaHost.initDatabase(dbPath = dbPath, vecExtensionPath = vecPath)
+        val store2 = SqliteDailyScheduleStore(database = db2, clock = clock, timezone = taipei)
+        val reloaded = store2.listCommitmentsForDate(day25)
+        assertEquals(2, reloaded.size)
+        assertEquals(PresenceActivityType.CUSTOM, reloaded[0].activityType)
+        assertEquals(PresenceActivityType.PLAYING, reloaded[1].activityType)
+    }
+
+    @Test
+    fun `getSchedule gracefully coerces legacy omitted and unknown activityType in blocks_json to CUSTOM`() {
+        val dbPath = tempDir.resolve("legacy-blocks.db").toString()
+        val vecPath = tempDir.resolve("missing-vec.so").toString()
+        val db = LunaHost.initDatabase(dbPath = dbPath, vecExtensionPath = vecPath)
+        val clock = MutableClock(Instant.parse("2026-11-26T00:00:00Z"))
+        val taipei = ZoneId.of("Asia/Taipei")
+        val store = SqliteDailyScheduleStore(database = db, clock = clock, timezone = taipei)
+        val day = LocalDate.of(2026, 11, 26)
+        val legacyBlocksJson =
+            """
+            [
+              {
+                "startMinute": 0,
+                "endMinute": 720,
+                "activityTitle": "舊資料區塊",
+                "activityDetail": "省略 activityType 欄位",
+                "statusText": "☕ 泡咖啡",
+                "availability": "AVAILABLE"
+              },
+              {
+                "startMinute": 720,
+                "endMinute": 1440,
+                "activityTitle": "未知類型區塊",
+                "activityDetail": "未知 activityType 字串",
+                "statusText": "參加比賽",
+                "availability": "AVAILABLE",
+                "activityType": "COMPETING"
+              }
+            ]
+            """.trimIndent()
+
+        transaction(db) {
+            val conn = TransactionManager.current().connection.connection as Connection
+            conn
+                .prepareStatement(
+                    """
+                    INSERT INTO chatter_daily_schedules(
+                        schedule_date, timezone, summary, blocks_json, created_at
+                    ) VALUES (?, ?, ?, ?, ?)
+                    """.trimIndent(),
+                ).use { ps ->
+                    ps.setString(1, day.toString())
+                    ps.setString(2, taipei.id)
+                    ps.setString(3, "測試舊版與未知 activityType")
+                    ps.setString(4, legacyBlocksJson)
+                    ps.setLong(5, clock.millis())
+                    ps.executeUpdate()
+                }
+        }
+
+        val loaded = store.getSchedule(day)
+        assertNotNull(loaded)
+        assertEquals(2, loaded.blocks.size)
+        assertEquals(PresenceActivityType.CUSTOM, loaded.blocks[0].activityType)
+        assertEquals(PresenceActivityType.CUSTOM, loaded.blocks[1].activityType)
     }
 }

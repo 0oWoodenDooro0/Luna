@@ -10,12 +10,14 @@ import io.mockk.every
 import io.mockk.mockk
 import io.mockk.verify
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.test.runTest
 import org.junit.jupiter.api.Test
 import org.slf4j.LoggerFactory
 import java.time.Clock
 import java.time.Instant
 import java.time.LocalDate
+import java.time.LocalTime
 import java.time.ZoneId
 import java.time.ZonedDateTime
 import kotlin.test.assertEquals
@@ -419,5 +421,88 @@ class DailyScheduleCoordinatorTest {
             verify(exactly = 0) { store.getSchedule(any()) }
             coVerify(exactly = 0) { generator.generate(any(), any()) }
             coVerify(exactly = 0) { presencePort.updatePresence(any()) }
+        }
+
+    @Test
+    fun `applyTodayPatches re-syncs presence when only activityType changes on active block`() =
+        runTest {
+            val today = LocalDate.of(2026, 11, 26)
+            val clock = Clock.fixed(ZonedDateTime.of(today, LocalTime.of(14, 0), taipeiZone).toInstant(), taipeiZone)
+            val morningBlock =
+                ScheduleBlock(
+                    startMinute = 0,
+                    endMinute = 840,
+                    activityTitle = "上午補眠",
+                    activityDetail = "睡覺",
+                    statusText = "💤 補眠中",
+                    availability = AvailabilityState.SLEEPING,
+                )
+            val initialBlock =
+                ScheduleBlock(
+                    startMinute = 840,
+                    endMinute = 1440,
+                    activityTitle = "打遊戲",
+                    activityDetail = "探索海拉魯",
+                    statusText = "薩爾達傳說",
+                    availability = AvailabilityState.AVAILABLE,
+                    activityType = PresenceActivityType.CUSTOM,
+                )
+            val schedule =
+                DailySchedule(
+                    date = today,
+                    timezone = taipeiZone.id,
+                    blocks = listOf(morningBlock, initialBlock),
+                    summary = "遊戲日",
+                    createdAtMillis = clock.millis(),
+                )
+            val store = mockk<DailyScheduleStore>(relaxed = true)
+            val generator = mockk<DailyScheduleGenerator>(relaxed = true)
+            val presencePort = mockk<SchedulePresencePort>(relaxed = true)
+            val syncedInitial = CompletableDeferred<Unit>()
+            every { store.getSchedule(today) } returns schedule
+            coEvery { presencePort.updatePresence(any()) } answers {
+                if (!syncedInitial.isCompleted) syncedInitial.complete(Unit)
+            }
+
+            val coordinator =
+                DailyScheduleCoordinator(
+                    store = store,
+                    generator = generator,
+                    presencePort = presencePort,
+                    enabled = true,
+                    timezone = taipeiZone,
+                    clock = clock,
+                    delayFn = { awaitCancellation() },
+                )
+
+            coordinator.start(this)
+            syncedInitial.await()
+
+            val result =
+                coordinator.applyTodayPatches(
+                    listOf(
+                        SchedulePatch(
+                            startMinute = 840,
+                            endMinute = 1440,
+                            activityTitle = "打遊戲",
+                            activityDetail = "探索海拉魯",
+                            statusText = "薩爾達傳說",
+                            availability = AvailabilityState.AVAILABLE,
+                            activityType = PresenceActivityType.PLAYING,
+                        ),
+                    ),
+                )
+            assertTrue(
+                result is DailyScheduleSplicer.SpliceResult.Success,
+                "Expected activityType-only patch on active block to succeed",
+            )
+            coVerify(exactly = 1) {
+                presencePort.updatePresence(match { it.activityType == PresenceActivityType.CUSTOM })
+            }
+            coVerify(exactly = 1) {
+                presencePort.updatePresence(match { it.activityType == PresenceActivityType.PLAYING })
+            }
+
+            coordinator.shutdown()
         }
 }

@@ -987,6 +987,41 @@ fun checkParameterCountLimit(projectRoot: File): List<String> {
     return violations
 }
 
+fun checkSqliteJsonCoerceInputValues(projectRoot: File): List<String> {
+    val mainRoots = findKotlinSourceRoots(projectRoot, "main")
+    val violations = mutableListOf<String>()
+    val jsonBuilderRegex = Regex("""\bJson\s*\{""")
+    val coerceInputValuesRegex = Regex("""\bcoerceInputValues\s*=\s*true\b""")
+
+    mainRoots.forEach { mainRoot ->
+        mainRoot
+            .walkTopDown()
+            .filter { it.isFile && it.name.startsWith("Sqlite") && it.name.endsWith("Store.kt") }
+            .forEach { file ->
+                val relPath = file.relativeTo(projectRoot).path.replace('\\', '/')
+                val text = file.readText()
+                jsonBuilderRegex.findAll(text).forEach { match ->
+                    val openBraceIdx = match.range.last
+                    val remaining = text.substring(openBraceIdx)
+                    val closingOffset = findClosingBraceIndex(remaining)
+                    if (closingOffset >= 0) {
+                        val blockBody = remaining.substring(0, closingOffset + 1)
+                        if (!coerceInputValuesRegex.containsMatchIn(blockBody)) {
+                            val lineNumber = text.substring(0, match.range.first).count { it == '\n' } + 1
+                            violations.add(
+                                "[Rule 13: sqlite-json-coerce-input-values] $relPath:$lineNumber: " +
+                                    "Persisted SQLite Json configuration must set 'coerceInputValues = true' so unknown " +
+                                    "enum values in legacy rows gracefully fall back to defaults instead of throwing SerializationException.",
+                            )
+                        }
+                    }
+                }
+            }
+    }
+
+    return violations
+}
+
 tasks.register("lintCodingStandards") {
     group = "verification"
     description = "Enforces mechanical CODING_STANDARDS.md rules without compiling Kotlin sources."
@@ -1006,6 +1041,7 @@ tasks.register("lintCodingStandards") {
                 addAll(checkMainSourceLineLimit(codingStandardsRoot))
                 addAll(checkLoggerClassMatch(codingStandardsRoot))
                 addAll(checkParameterCountLimit(codingStandardsRoot))
+                addAll(checkSqliteJsonCoerceInputValues(codingStandardsRoot))
             }
 
         if (violations.isNotEmpty()) {
@@ -1014,7 +1050,7 @@ tasks.register("lintCodingStandards") {
                     violations.joinToString("\n\n"),
             )
         }
-        logger.lifecycle("lintCodingStandards: all 12 rules passed.")
+        logger.lifecycle("lintCodingStandards: all 13 rules passed.")
     }
 }
 

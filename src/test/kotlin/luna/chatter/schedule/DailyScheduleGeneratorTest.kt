@@ -293,4 +293,100 @@ class DailyScheduleGeneratorTest {
             assertTrue(capturedBody.contains("跟群友打瓦"), "Prompt must include commitment title")
             assertTrue(capturedBody.contains("約好晚上七點五排"), "Prompt must include commitment detail")
         }
+
+    @Test
+    fun `parses activityType values and falls back to CUSTOM when omitted or unknown`() =
+        runTest {
+            var capturedBody = ""
+            val payloadJson =
+                """
+                {
+                  "summary": "多樣化狀態測試",
+                  "blocks": [
+                    {
+                      "startMinute": 0,
+                      "endMinute": 360,
+                      "activityTitle": "打薩爾達",
+                      "activityDetail": "探索神廟",
+                      "statusText": "薩爾達傳說",
+                      "availability": "AVAILABLE",
+                      "activityType": "PLAYING"
+                    },
+                    {
+                      "startMinute": 360,
+                      "endMinute": 720,
+                      "activityTitle": "聽歌趕稿",
+                      "activityDetail": "聽 Lo-Fi 畫圖",
+                      "statusText": "Lo-Fi 歌單",
+                      "availability": "BUSY",
+                      "activityType": "LISTENING"
+                    },
+                    {
+                      "startMinute": 720,
+                      "endMinute": 1080,
+                      "activityTitle": "追新番",
+                      "activityDetail": "看動畫",
+                      "statusText": "深夜新番",
+                      "availability": "BREAK",
+                      "activityType": "WATCHING"
+                    },
+                    {
+                      "startMinute": 1080,
+                      "endMinute": 1260,
+                      "activityTitle": "泡咖啡",
+                      "activityDetail": "休息一下",
+                      "statusText": "☕ 泡咖啡醒腦中",
+                      "availability": "BREAK",
+                      "activityType": "CUSTOM"
+                    },
+                    {
+                      "startMinute": 1260,
+                      "endMinute": 1350,
+                      "activityTitle": "競技模式",
+                      "activityDetail": "未知類型應退回 CUSTOM",
+                      "statusText": "✨ 未知類型",
+                      "availability": "AVAILABLE",
+                      "activityType": "COMPETING"
+                    },
+                    {
+                      "startMinute": 1350,
+                      "endMinute": 1440,
+                      "activityTitle": "睡覺",
+                      "activityDetail": "省略 activityType 應退回 CUSTOM",
+                      "statusText": "💤 補眠中",
+                      "availability": "SLEEPING"
+                    }
+                  ]
+                }
+                """.trimIndent()
+
+            val engine =
+                MockEngine { request ->
+                    capturedBody = request.body.toByteArray().decodeToString()
+                    respond(
+                        content = interactionSuccessResponse(payloadJson),
+                        status = HttpStatusCode.OK,
+                        headers = headersOf(HttpHeaders.ContentType, "application/json"),
+                    )
+                }
+
+            val result = createGenerator(engine).generate(LocalDate.of(2026, 11, 24))
+            assertTrue(result.isSuccess, "Expected payload with known/unknown/omitted activityType to succeed")
+            val blocks = result.getOrThrow().blocks
+            assertEquals(PresenceActivityType.PLAYING, blocks[0].activityType)
+            assertEquals(PresenceActivityType.LISTENING, blocks[1].activityType)
+            assertEquals(PresenceActivityType.WATCHING, blocks[2].activityType)
+            assertEquals(PresenceActivityType.CUSTOM, blocks[3].activityType)
+            assertEquals(PresenceActivityType.CUSTOM, blocks[4].activityType)
+            assertEquals(PresenceActivityType.CUSTOM, blocks[5].activityType)
+
+            assertTrue(capturedBody.contains("activityType"), "Expected system instruction to document activityType")
+            assertTrue(
+                capturedBody.contains("PLAYING") &&
+                    capturedBody.contains("LISTENING") &&
+                    capturedBody.contains("WATCHING") &&
+                    capturedBody.contains("CUSTOM"),
+                "Expected system instruction to list all four activityType values",
+            )
+        }
 }

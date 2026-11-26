@@ -36,21 +36,61 @@ class SchedulePresencePortTest {
             port.updatePresence(sampleBlock(AvailabilityState.AVAILABLE, "📺 追番中"))
             port.updatePresence(sampleBlock(AvailabilityState.BREAK, "☕ 泡咖啡"))
             port.updatePresence(sampleBlock(AvailabilityState.BUSY, "🎨 趕稿中"))
-            port.updatePresence(sampleBlock(AvailabilityState.SLEEPING, "💤 睡覺中"))
+            port.updatePresence(sampleBlock(AvailabilityState.SLEEPING, "💤 睡覺中", PresenceActivityType.PLAYING))
 
             assertEquals(
-                listOf<Pair<PresenceStatus, String?>>(
-                    PresenceStatus.Online to "📺 追番中",
-                    PresenceStatus.Online to "☕ 泡咖啡",
-                    PresenceStatus.DoNotDisturb to "🎨 趕稿中",
-                    PresenceStatus.Idle to "💤 睡覺中",
+                listOf<Triple<PresenceStatus, String?, Int>>(
+                    Triple(PresenceStatus.Online, "📺 追番中", 1),
+                    Triple(PresenceStatus.Online, "☕ 泡咖啡", 1),
+                    Triple(PresenceStatus.DoNotDisturb, "🎨 趕稿中", 1),
+                    Triple(PresenceStatus.Invisible, null, 0),
                 ),
                 captured.map { update ->
                     val customActivity = update.activities.firstOrNull { it.type == ActivityType.Custom }
-                    update.status to customActivity?.state?.value
+                    Triple(update.status, customActivity?.state?.value, update.activities.size)
                 },
             )
             coVerify(exactly = 4) { gateway.sendAll(any()) }
+        }
+
+    @Test
+    fun `KordSchedulePresencePort maps native PresenceActivityType without setting state`() =
+        runTest {
+            val captured = mutableListOf<UpdateStatus>()
+            val gateway = mockk<MasterGateway>(relaxed = true)
+            coEvery { gateway.sendAll(any()) } coAnswers {
+                captured += firstArg<UpdateStatus>()
+            }
+            val kord = mockk<Kord>(relaxed = true)
+            every { kord.gateway } returns gateway
+
+            val port = KordSchedulePresencePort(kord, initiallyReady = true)
+
+            port.updatePresence(sampleBlock(AvailabilityState.AVAILABLE, "☕ 泡咖啡", PresenceActivityType.CUSTOM))
+            port.updatePresence(sampleBlock(AvailabilityState.AVAILABLE, "薩爾達傳說", PresenceActivityType.PLAYING))
+            port.updatePresence(sampleBlock(AvailabilityState.BREAK, "Lo-Fi 歌單", PresenceActivityType.LISTENING))
+            port.updatePresence(sampleBlock(AvailabilityState.BUSY, "深夜新番", PresenceActivityType.WATCHING))
+
+            assertEquals(4, captured.size)
+
+            val custom = captured[0].activities.single()
+            assertEquals(ActivityType.Custom, custom.type)
+            assertEquals("☕ 泡咖啡", custom.state.value)
+
+            val playing = captured[1].activities.single()
+            assertEquals(ActivityType.Game, playing.type)
+            assertEquals("薩爾達傳說", playing.name)
+            assertEquals(null, playing.state.value)
+
+            val listening = captured[2].activities.single()
+            assertEquals(ActivityType.Listening, listening.type)
+            assertEquals("Lo-Fi 歌單", listening.name)
+            assertEquals(null, listening.state.value)
+
+            val watching = captured[3].activities.single()
+            assertEquals(ActivityType.Watching, watching.type)
+            assertEquals("深夜新番", watching.name)
+            assertEquals(null, watching.state.value)
         }
 
     @Test
@@ -130,6 +170,7 @@ class SchedulePresencePortTest {
     private fun sampleBlock(
         availability: AvailabilityState,
         statusText: String,
+        activityType: PresenceActivityType = PresenceActivityType.CUSTOM,
     ): ScheduleBlock =
         ScheduleBlock(
             startMinute = 0,
@@ -138,5 +179,6 @@ class SchedulePresencePortTest {
             activityDetail = "測試細節",
             statusText = statusText,
             availability = availability,
+            activityType = activityType,
         )
 }

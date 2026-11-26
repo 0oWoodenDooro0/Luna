@@ -147,4 +147,37 @@ class DailyScheduleModelsTest {
             ScheduleBlock(0, 60, "title", "detail", " ", AvailabilityState.AVAILABLE)
         }
     }
+
+    @Test
+    fun `PresenceActivityType defaults to CUSTOM and parses known or unknown values leniently`() {
+        val block = ScheduleBlock(0, 60, "title", "detail", "status", AvailabilityState.AVAILABLE)
+        assertEquals(PresenceActivityType.CUSTOM, block.activityType)
+
+        assertEquals(PresenceActivityType.PLAYING, PresenceActivityType.fromOrDefault("playing"))
+        assertEquals(PresenceActivityType.LISTENING, PresenceActivityType.fromOrDefault(" LISTENING "))
+        assertEquals(PresenceActivityType.WATCHING, PresenceActivityType.fromOrDefault("Watching"))
+        assertEquals(PresenceActivityType.CUSTOM, PresenceActivityType.fromOrDefault("COMPETING"))
+        assertEquals(PresenceActivityType.CUSTOM, PresenceActivityType.fromOrDefault(null))
+        assertEquals(PresenceActivityType.CUSTOM, PresenceActivityType.fromOrDefault(""))
+    }
+
+    @Test
+    fun `ScheduleCommitment propagates activityType to ScheduleBlock`() {
+        val commitment =
+            ScheduleCommitment(
+                id = "c1",
+                targetDate = sampleDate,
+                startMinute = 1200,
+                endMinute = 1320,
+                activityTitle = "打薩爾達",
+                activityDetail = "探索海拉魯",
+                statusText = "薩爾達傳說 王國之淚",
+                availability = AvailabilityState.AVAILABLE,
+                createdAtMillis = 1L,
+                activityType = PresenceActivityType.PLAYING,
+            )
+
+        val block = commitment.toScheduleBlock()
+        assertEquals(PresenceActivityType.PLAYING, block.activityType)
+    }
 }

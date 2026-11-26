@@ -235,4 +235,35 @@ suspend fun update(state: State) {
 ```
 Cancel the `ReadyEvent` listener `Job` in `shutdown()`.
 
+---
+
+## 8. Presence & Native Activities (`kord.editPresence`, `PresenceBuilder`)
+
+`dev.kord.gateway.builder.PresenceBuilder` constructs a single `DiscordBotActivity?` via `buildGame()` and sends `UpdateStatus(since, listOfNotNull(buildGame()), status, afk)`:
+- **Native activity (`playing`, `listening`, `watching`, `competing`, `streaming`)**: sets `game`; if `state` is **also** set, `buildGame()` attaches `state` onto that native activity (`game.copy(state = _state)`) rather than creating a Custom Status. Leave `state` unset when you only want `Playing <text>` / `Listening to <text>` / `Watching <text>`.
+- **Custom Status (`state = text`)**: when no native activity method is called, `buildGame()` emits `DiscordBotActivity("Custom Status", ActivityType.Custom, state = _state)`.
+- **`PresenceStatus.Invisible`**: omit both native activity methods and `state` so `activities = emptyList()`. Gateway events and slash commands continue operating normally while the bot appears offline.
+
+```kotlin
+import dev.kord.common.entity.PresenceStatus
+
+// Offline / sleeping appearance (no activity or custom status attached)
+kord.editPresence {
+    status = PresenceStatus.Invisible
+}
+
+// Native activity (do NOT also set `state` unless attaching sub-state text to the activity)
+kord.editPresence {
+    status = PresenceStatus.Online
+    playing("Monster Hunter Wilds") // or listening("Lo-Fi Beats"), watching("新番")
+}
+
+// Plain Custom Status
+kord.editPresence {
+    status = PresenceStatus.DoNotDisturb
+    state = "趕稿中"
+}
+```
+
+
 

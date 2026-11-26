@@ -25,6 +25,7 @@ class SqliteDailyScheduleStore(
         Json {
             ignoreUnknownKeys = true
             encodeDefaults = true
+            coerceInputValues = true
         }
 
     init {
@@ -66,9 +67,16 @@ class SqliteDailyScheduleStore(
                         activity_detail TEXT NOT NULL,
                         status_text TEXT NOT NULL,
                         availability TEXT NOT NULL,
+                        activity_type TEXT NOT NULL DEFAULT 'CUSTOM',
                         created_at INTEGER NOT NULL
                     );
                     """.trimIndent(),
+                )
+                ensureColumnExists(
+                    conn = conn,
+                    table = "chatter_schedule_commitments",
+                    column = "activity_type",
+                    definition = "TEXT NOT NULL DEFAULT 'CUSTOM'",
                 )
                 stmt.execute(
                     """
@@ -245,8 +253,8 @@ class SqliteDailyScheduleStore(
                     """
                     INSERT INTO chatter_schedule_commitments(
                         id, target_date, start_minute, end_minute,
-                        activity_title, activity_detail, status_text, availability, created_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        activity_title, activity_detail, status_text, availability, activity_type, created_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(id) DO UPDATE SET
                         target_date = excluded.target_date,
                         start_minute = excluded.start_minute,
@@ -254,7 +262,8 @@ class SqliteDailyScheduleStore(
                         activity_title = excluded.activity_title,
                         activity_detail = excluded.activity_detail,
                         status_text = excluded.status_text,
-                        availability = excluded.availability
+                        availability = excluded.availability,
+                        activity_type = excluded.activity_type
                     """.trimIndent(),
                 ).use { ps ->
                     ps.setString(1, commitment.id)
@@ -265,7 +274,8 @@ class SqliteDailyScheduleStore(
                     ps.setString(6, commitment.activityDetail)
                     ps.setString(7, commitment.statusText)
                     ps.setString(8, commitment.availability.name)
-                    ps.setLong(9, commitment.createdAtMillis)
+                    ps.setString(9, commitment.activityType.name)
+                    ps.setLong(10, commitment.createdAtMillis)
                     ps.executeUpdate()
                 }
         }
@@ -290,7 +300,7 @@ class SqliteDailyScheduleStore(
                 .prepareStatement(
                     """
                     SELECT id, target_date, start_minute, end_minute,
-                           activity_title, activity_detail, status_text, availability, created_at
+                           activity_title, activity_detail, status_text, availability, activity_type, created_at
                     FROM chatter_schedule_commitments
                     WHERE target_date = ?
                     ORDER BY start_minute ASC, created_at ASC
@@ -318,7 +328,7 @@ class SqliteDailyScheduleStore(
                 .prepareStatement(
                     """
                     SELECT id, target_date, start_minute, end_minute,
-                           activity_title, activity_detail, status_text, availability, created_at
+                           activity_title, activity_detail, status_text, availability, activity_type, created_at
                     FROM chatter_schedule_commitments
                     WHERE target_date >= ? AND target_date <= ?
                     ORDER BY target_date ASC, start_minute ASC, created_at ASC
@@ -359,7 +369,34 @@ class SqliteDailyScheduleStore(
             statusText = rs.getString("status_text"),
             availability = AvailabilityState.valueOf(rs.getString("availability")),
             createdAtMillis = rs.getLong("created_at"),
+            activityType = PresenceActivityType.fromOrDefault(rs.getString("activity_type")),
         )
+
+    private fun ensureColumnExists(
+        conn: Connection,
+        table: String,
+        column: String,
+        definition: String,
+    ) {
+        val exists =
+            conn.createStatement().use { stmt ->
+                stmt.executeQuery("PRAGMA table_info($table)").use { rs ->
+                    var found = false
+                    while (rs.next()) {
+                        if (rs.getString("name").equals(column, ignoreCase = true)) {
+                            found = true
+                            break
+                        }
+                    }
+                    found
+                }
+            }
+        if (!exists) {
+            conn.createStatement().use { stmt ->
+                stmt.execute("ALTER TABLE $table ADD COLUMN $column $definition")
+            }
+        }
+    }
 
     private fun currentLocalDate(): LocalDate = clock.instant().atZone(timezone).toLocalDate()
 

@@ -388,4 +388,71 @@ class ChatterScheduleToolHandlerTest {
                     ).jsonObject
             assertEquals("rejected", todayRejected["status"]?.jsonPrimitive?.content)
         }
+
+    @Test
+    fun `propagates activity_type in update_today_schedule and manage_schedule_commitment with CUSTOM fallback`() =
+        runBlocking {
+            val store = FakeScheduleStore(baseSchedule())
+            val coordinator = createCoordinator(store)
+            val handler = ChatterScheduleToolHandler(coordinator)
+
+            val todayArgs =
+                buildJsonObject {
+                    put(
+                        "patches",
+                        buildJsonArray {
+                            add(
+                                buildJsonObject {
+                                    put("start_time", "15:00")
+                                    put("end_time", "17:00")
+                                    put("title", "打薩爾達")
+                                    put("detail", "探索神廟")
+                                    put("status_text", "薩爾達傳說")
+                                    put("availability", "AVAILABLE")
+                                    put("activity_type", "PLAYING")
+                                },
+                            )
+                            add(
+                                buildJsonObject {
+                                    put("start_time", "17:00")
+                                    put("end_time", "18:00")
+                                    put("title", "未知類型測試")
+                                    put("detail", "應該退回 CUSTOM")
+                                    put("status_text", "✨ 閒晃中")
+                                    put("availability", "AVAILABLE")
+                                    put("activity_type", "COMPETING")
+                                },
+                            )
+                        },
+                    )
+                }
+
+            val todayResp = json.parseToJsonElement(handler.handleTodayScheduleCall(todayArgs)).jsonObject
+            assertEquals("ok", todayResp["status"]?.jsonPrimitive?.content)
+            val updatedSchedule = store.schedule!!
+            assertEquals(PresenceActivityType.PLAYING, updatedSchedule.blockAt(15 * 60)?.activityType)
+            assertEquals(PresenceActivityType.CUSTOM, updatedSchedule.blockAt(17 * 60)?.activityType)
+
+            val commitmentArgs =
+                buildJsonObject {
+                    put("action", "upsert")
+                    put("date", "2026-11-26")
+                    put("start_time", "20:00")
+                    put("end_time", "22:00")
+                    put("title", "一起追番")
+                    put("detail", "語音房看新番")
+                    put("status_text", "深夜新番")
+                    put("availability", "AVAILABLE")
+                    put("activity_type", "WATCHING")
+                }
+
+            val commitResp = json.parseToJsonElement(handler.handleCommitmentCall(commitmentArgs)).jsonObject
+            assertEquals("ok", commitResp["status"]?.jsonPrimitive?.content)
+            assertEquals(
+                PresenceActivityType.WATCHING,
+                store.commitments.values
+                    .single()
+                    .activityType,
+            )
+        }
 }

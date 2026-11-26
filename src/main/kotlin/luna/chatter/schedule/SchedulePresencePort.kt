@@ -74,7 +74,14 @@ class KordSchedulePresencePort(
         try {
             kord.editPresence {
                 status = targetStatus
-                state = block.statusText
+                if (targetStatus != PresenceStatus.Invisible) {
+                    when (block.activityType) {
+                        PresenceActivityType.CUSTOM -> state = block.statusText
+                        PresenceActivityType.PLAYING -> playing(block.statusText)
+                        PresenceActivityType.LISTENING -> listening(block.statusText)
+                        PresenceActivityType.WATCHING -> watching(block.statusText)
+                    }
+                }
             }
         } catch (ex: CancellationException) {
             throw ex
@@ -97,5 +104,5 @@ private fun AvailabilityState.toPresenceStatus(): PresenceStatus =
 
         AvailabilityState.BUSY -> PresenceStatus.DoNotDisturb
 
-        AvailabilityState.SLEEPING -> PresenceStatus.Idle
+        AvailabilityState.SLEEPING -> PresenceStatus.Invisible
     }
