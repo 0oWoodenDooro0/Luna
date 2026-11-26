@@ -4,8 +4,6 @@ import dev.kord.common.entity.MessageType
 import dev.kord.common.entity.Snowflake
 import dev.kord.core.entity.Message
 import dev.kord.core.entity.channel.Channel
-import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.withTimeoutOrNull
 import luna.config.ConfigValidationException
 import luna.config.EnvReader
 import luna.config.SecretMasker
@@ -13,36 +11,10 @@ import luna.core.LunaWebhookRegistry
 import luna.core.SummaryMessageRegistry
 import luna.core.SummaryRegistry
 import luna.core.WebhookRegistry
-import luna.core.ai.AiTraceTrigger
 import luna.core.ai.CommandPrefixRule
 import luna.core.ai.DialogueContextPolicy
 import luna.core.ai.DialogueNoiseReason
 import luna.core.ai.DiscordDialogueContextEngine
-import org.slf4j.LoggerFactory
-
-enum class DirectInteractionType {
-    MENTION,
-    DIRECT_REPLY,
-    NONE,
-    ;
-
-    val isDirect: Boolean
-        get() = this != NONE
-
-    fun mergeWith(other: DirectInteractionType): DirectInteractionType =
-        when {
-            this == MENTION || other == MENTION -> MENTION
-            this == DIRECT_REPLY || other == DIRECT_REPLY -> DIRECT_REPLY
-            else -> NONE
-        }
-
-    fun toAiTraceTrigger(effectiveIsDirect: Boolean = isDirect): AiTraceTrigger =
-        when {
-            !effectiveIsDirect -> AiTraceTrigger.AMBIENT
-            this == DIRECT_REPLY -> AiTraceTrigger.DIRECT_REPLY
-            else -> AiTraceTrigger.MENTION
-        }
-}
 
 enum class RejectionReason {
     CHATTER_DISABLED,
@@ -203,6 +175,8 @@ open class ChatterNoiseFilter(
             ),
     )
 
+    internal val directInteractionResolver = ChatterDirectInteractionResolver(contextEngine = contextEngine)
+
     fun currentMomentumState(channelId: Snowflake): MomentumState =
         momentumCache.stateFor(
             channelId = channelId,
@@ -248,7 +222,7 @@ open class ChatterNoiseFilter(
         }
 
         val resolvedSelfId = kordSelfId ?: runCatching { message.kord.selfId }.getOrNull()
-        val directMention = isDirectMention || isDirectBotMention(message, resolvedSelfId)
+        val directMention = isDirectMention || directInteractionResolver.isDirectBotMention(message, resolvedSelfId)
 
         // 3. Check if channel is on cooldown (bypassed for direct bot mentions; softened during active momentum)
         if (!directMention) {
@@ -359,103 +333,6 @@ open class ChatterNoiseFilter(
         kordSelfId: Snowflake? = null,
     ): Boolean = shouldProcess(message, channel, isDirectMention, kordSelfId)
 
-    fun isDirectBotMention(
-        message: Message,
-        kordSelfId: Snowflake? = null,
-    ): Boolean {
-        val resolvedSelfId = kordSelfId ?: runCatching { message.kord.selfId }.getOrNull() ?: return false
-        if (runCatching { message.mentionedUserIds.contains(resolvedSelfId) }.getOrDefault(false)) {
-            return true
-        }
-        val content = message.content
-        return content.contains("<@$resolvedSelfId>") || content.contains("<@!$resolvedSelfId>")
-    }
-
-    suspend fun classifyDirectInteraction(
-        message: Message,
-        kordSelfId: Snowflake? = null,
-    ): DirectInteractionType {
-        val resolvedSelfId = kordSelfId ?: runCatching { message.kord.selfId }.getOrNull() ?: return DirectInteractionType.NONE
-        if (isDirectBotMention(message, resolvedSelfId)) {
-            return DirectInteractionType.MENTION
-        }
-        if (isReplyToLuna(message, resolvedSelfId)) {
-            return DirectInteractionType.DIRECT_REPLY
-        }
-        return DirectInteractionType.NONE
-    }
-
-    suspend fun isReplyToLuna(
-        message: Message,
-        kordSelfId: Snowflake? = null,
-    ): Boolean {
-        val resolvedSelfId = kordSelfId ?: runCatching { message.kord.selfId }.getOrNull() ?: return false
-        val messageType = runCatching { message.type }.getOrNull()
-        if (messageType != MessageType.Reply) {
-            return false
-        }
-        val referenced = resolveReferencedMessage(message) ?: return false
-        return isNonSummaryReplyTarget(referenced, resolvedSelfId)
-    }
-
-    private fun isCachedReplyToLuna(
-        message: Message,
-        kordSelfId: Snowflake?,
-    ): Boolean {
-        val resolvedSelfId = kordSelfId ?: return false
-        val messageType = runCatching { message.type }.getOrNull()
-        if (messageType != MessageType.Reply) {
-            return false
-        }
-        val referenced = runCatching { message.referencedMessage }.getOrNull() ?: return false
-        return isNonSummaryReplyTarget(referenced, resolvedSelfId)
-    }
-
-    private fun isNonSummaryReplyTarget(
-        referenced: Message,
-        selfId: Snowflake,
-    ): Boolean {
-        val referencedAuthorId =
-            runCatching { referenced.author?.id }.getOrNull()
-                ?: runCatching { referenced.data.author.id }.getOrNull()
-                ?: return false
-        if (referencedAuthorId != selfId) {
-            return false
-        }
-        return !contextEngine.isBotSummaryMessage(referenced)
-    }
-
-    private suspend fun resolveReferencedMessage(message: Message): Message? {
-        runCatching { message.referencedMessage }.getOrNull()?.let { return it }
-        val ref = runCatching { message.messageReference }.getOrNull() ?: return null
-        val refChannelId = runCatching { ref.data.channelId.value }.getOrNull()
-        if (refChannelId != null && refChannelId != message.channelId) {
-            return null
-        }
-        val refId = runCatching { ref.data.id.value }.getOrNull() ?: return null
-        return try {
-            var completed = false
-            val resolved =
-                withTimeoutOrNull(REFERENCE_LOOKUP_TIMEOUT_MS) {
-                    message.channel.getMessageOrNull(refId).also { completed = true }
-                }
-            if (!completed) {
-                logger.debug(
-                    "Timed out resolving referenced message {} for {} after {}ms",
-                    refId,
-                    message.id,
-                    REFERENCE_LOOKUP_TIMEOUT_MS,
-                )
-            }
-            resolved
-        } catch (e: CancellationException) {
-            throw e
-        } catch (e: Exception) {
-            logger.debug("Failed to resolve referenced message {} for {}: {}", refId, message.id, e.message)
-            null
-        }
-    }
-
     private fun evaluateCachedContextEligibility(
         message: Message,
         resolvedSelfId: Snowflake?,
@@ -467,7 +344,10 @@ open class ChatterNoiseFilter(
         if (noiseEval.reason != DialogueNoiseReason.EMPTY_OR_EMOJI_ONLY) {
             return false
         }
-        if (isDirectBotMention(message, resolvedSelfId) || isCachedReplyToLuna(message, resolvedSelfId)) {
+        if (
+            directInteractionResolver.isDirectBotMention(message, resolvedSelfId) ||
+            directInteractionResolver.isCachedReplyToLuna(message, resolvedSelfId)
+        ) {
             return true
         }
         return null
@@ -486,7 +366,8 @@ open class ChatterNoiseFilter(
         kordSelfId: Snowflake? = null,
     ): Boolean {
         val resolvedSelfId = kordSelfId ?: runCatching { message.kord.selfId }.getOrNull()
-        return evaluateCachedContextEligibility(message, resolvedSelfId) ?: isReplyToLuna(message, resolvedSelfId)
+        return evaluateCachedContextEligibility(message, resolvedSelfId)
+            ?: directInteractionResolver.isReplyToLuna(message, resolvedSelfId)
     }
 
     fun filterContextMessages(
@@ -571,8 +452,6 @@ open class ChatterNoiseFilter(
     fun extractSpeakerName(message: Message): String = contextEngine.extractSpeakerName(message)
 
     companion object {
-        private val logger = LoggerFactory.getLogger(ChatterNoiseFilter::class.java)
-        private const val REFERENCE_LOOKUP_TIMEOUT_MS = 2_000L
         val DEFAULT_BOT_PREFIXES = CommandPrefixRule.DEFAULT_BOT_PREFIXES
         val URL_REGEX = Regex("""https?://[^\s<>"']+""")
         const val ATTACHMENT_PLACEHOLDER = DiscordDialogueContextEngine.ATTACHMENT_PLACEHOLDER

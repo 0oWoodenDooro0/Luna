@@ -136,7 +136,7 @@ class ChatterService(
      */
     suspend fun processMessage(message: Message): Boolean {
         val snapshot = extractTriggerSnapshot(message)
-        val directInteraction = filter.classifyDirectInteraction(message, snapshot.selfId)
+        val directInteraction = filter.directInteractionResolver.classifyDirectInteraction(message, snapshot.selfId)
         val isDirectMention = directInteraction.isDirect
 
         if (!snapshot.isBotAuthor) {

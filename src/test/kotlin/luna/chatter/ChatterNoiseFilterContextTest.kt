@@ -182,25 +182,25 @@ class ChatterNoiseFilterContextTest {
 
         // 1. MentionedUserIds contains bot self ID
         val msg1 = createMockMessage(content = "hey bot", mentionedUserIds = setOf(botSelfId))
-        assertTrue(filter.isDirectBotMention(msg1, botSelfId))
+        assertTrue(filter.directInteractionResolver.isDirectBotMention(msg1, botSelfId))
 
         // 2. Content contains <@9999> or <@!9999>
         val msg2 = createMockMessage(content = "hello <@9999> how are you")
-        assertTrue(filter.isDirectBotMention(msg2, botSelfId))
+        assertTrue(filter.directInteractionResolver.isDirectBotMention(msg2, botSelfId))
         val msg3 = createMockMessage(content = "hello <@!9999> how are you")
-        assertTrue(filter.isDirectBotMention(msg3, botSelfId))
+        assertTrue(filter.directInteractionResolver.isDirectBotMention(msg3, botSelfId))
 
         // 3. Returns false when kordSelfId is null (and message.kord is unavailable), even with @Luna or <@9999>
         val msgWithRawTag = createMockMessage(content = "<@9999> hello", mentionedUserIds = setOf(botSelfId))
-        assertFalse(filter.isDirectBotMention(msgWithRawTag, null))
+        assertFalse(filter.directInteractionResolver.isDirectBotMention(msgWithRawTag, null))
         val msgWithTextLuna = createMockMessage(content = "@Luna what is the weather today?")
-        assertFalse(filter.isDirectBotMention(msgWithTextLuna, null))
+        assertFalse(filter.directInteractionResolver.isDirectBotMention(msgWithTextLuna, null))
 
         // 4. Plain-text @luna / @Luna does not bypass Participation Decision even when selfId is resolved
         val msgPlainLuna = createMockMessage(content = "Hey @luna, tell me a joke")
-        assertFalse(filter.isDirectBotMention(msgPlainLuna, botSelfId))
+        assertFalse(filter.directInteractionResolver.isDirectBotMention(msgPlainLuna, botSelfId))
         val msgUpperLuna = createMockMessage(content = "@Luna what do you think?")
-        assertFalse(filter.isDirectBotMention(msgUpperLuna, botSelfId))
+        assertFalse(filter.directInteractionResolver.isDirectBotMention(msgUpperLuna, botSelfId))
 
         // 5. Discord reply to Luna does not bypass Participation Decision
         val lunaMsg = createMockMessage(id = 888L, isBot = true)
@@ -208,13 +208,13 @@ class ChatterNoiseFilterContextTest {
         every { userAuthor.id } returns botSelfId
         every { lunaMsg.author } returns userAuthor
         val msgReplyToLuna = createMockMessage(content = "I agree with your point", referencedMessage = lunaMsg)
-        assertFalse(filter.isDirectBotMention(msgReplyToLuna, botSelfId))
+        assertFalse(filter.directInteractionResolver.isDirectBotMention(msgReplyToLuna, botSelfId))
 
         // 6. Mentioning another user or unrelated text returns false
         val msgOtherMention = createMockMessage(content = "<@1234> hello", mentionedUserIds = setOf(otherUserId))
-        assertFalse(filter.isDirectBotMention(msgOtherMention, botSelfId))
+        assertFalse(filter.directInteractionResolver.isDirectBotMention(msgOtherMention, botSelfId))
         val msgUnrelated = createMockMessage(content = "What is everyone doing tonight?")
-        assertFalse(filter.isDirectBotMention(msgUnrelated, botSelfId))
+        assertFalse(filter.directInteractionResolver.isDirectBotMention(msgUnrelated, botSelfId))
     }
 
     @Test
@@ -375,7 +375,7 @@ class ChatterNoiseFilterContextTest {
                     mentionedUserIds = setOf(botSelfId),
                     referencedMessage = lunaChatter,
                 )
-            assertEquals(DirectInteractionType.MENTION, filter.classifyDirectInteraction(pingOnReply, botSelfId))
+            assertEquals(DirectInteractionType.MENTION, filter.directInteractionResolver.classifyDirectInteraction(pingOnReply, botSelfId))
 
             val pingOffReply =
                 createMockMessage(
@@ -384,7 +384,7 @@ class ChatterNoiseFilterContextTest {
                     content = "yes totally",
                     referencedMessage = lunaChatter,
                 )
-            assertEquals(DirectInteractionType.DIRECT_REPLY, filter.classifyDirectInteraction(pingOffReply, botSelfId))
+            assertEquals(DirectInteractionType.DIRECT_REPLY, filter.directInteractionResolver.classifyDirectInteraction(pingOffReply, botSelfId))
 
             val pingOffReplyToSummary =
                 createMockMessage(
@@ -393,7 +393,7 @@ class ChatterNoiseFilterContextTest {
                     content = "thanks for the summary",
                     referencedMessage = lunaSummary,
                 )
-            assertEquals(DirectInteractionType.NONE, filter.classifyDirectInteraction(pingOffReplyToSummary, botSelfId))
+            assertEquals(DirectInteractionType.NONE, filter.directInteractionResolver.classifyDirectInteraction(pingOffReplyToSummary, botSelfId))
 
             val nonReplyWithRef =
                 createMockMessage(
@@ -402,7 +402,7 @@ class ChatterNoiseFilterContextTest {
                     content = "forwarded maybe",
                     referencedMessage = lunaChatter,
                 )
-            assertEquals(DirectInteractionType.NONE, filter.classifyDirectInteraction(nonReplyWithRef, botSelfId))
+            assertEquals(DirectInteractionType.NONE, filter.directInteractionResolver.classifyDirectInteraction(nonReplyWithRef, botSelfId))
 
             val replyToOther =
                 createMockMessage(
@@ -411,7 +411,7 @@ class ChatterNoiseFilterContextTest {
                     content = "agreed Bob",
                     referencedMessage = otherUserMsg,
                 )
-            assertEquals(DirectInteractionType.NONE, filter.classifyDirectInteraction(replyToOther, botSelfId))
+            assertEquals(DirectInteractionType.NONE, filter.directInteractionResolver.classifyDirectInteraction(replyToOther, botSelfId))
         }
 
     @Test
@@ -450,7 +450,7 @@ class ChatterNoiseFilterContextTest {
                 }
             assertEquals(
                 DirectInteractionType.DIRECT_REPLY,
-                filter.classifyDirectInteraction(uncachedSameChannelReply, botSelfId),
+                filter.directInteractionResolver.classifyDirectInteraction(uncachedSameChannelReply, botSelfId),
             )
 
             val crossChannelRef =
@@ -470,7 +470,7 @@ class ChatterNoiseFilterContextTest {
                 }
             assertEquals(
                 DirectInteractionType.NONE,
-                filter.classifyDirectInteraction(crossChannelReply, botSelfId),
+                filter.directInteractionResolver.classifyDirectInteraction(crossChannelReply, botSelfId),
             )
 
             val failingChannel =
@@ -490,7 +490,7 @@ class ChatterNoiseFilterContextTest {
                 }
             assertEquals(
                 DirectInteractionType.NONE,
-                filter.classifyDirectInteraction(failingLookupReply, botSelfId),
+                filter.directInteractionResolver.classifyDirectInteraction(failingLookupReply, botSelfId),
             )
         }
 
