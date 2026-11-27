@@ -104,6 +104,18 @@ _Avoid_: External auth server, Auth0 integration
 The cross-process SQLite storage library residing in `libs/mcp-data` shared between Luna Host and Decoupled MCP Server, managing client credentials, tagged webhooks, and WAL concurrency without exposing database tables across the interface seam.
 _Avoid_: SQLite helper, MCP database layer, shared DB scripts
 
+**MCP Server Plugin**:
+A self-contained capability module hosted by `Decoupled MCP Server` that registers MCP tools and optional HTTP routes without depending on Discord Gateway or Kord.
+_Avoid_: MCP addon, tool handler, bot plugin
+
+**Ledger Entry**:
+A single-entry personal income or expense record owned by a user—carrying an integer minor-unit amount, ISO-4217 currency code, normalized category, optional note and payment method tag, and occurrence timestamp—with a soft-delete lifecycle.
+_Avoid_: Transaction, accounting line, journal entry, expense row
+
+**Ledger Store**:
+The isolated SQLite database dedicated to persisting `Ledger Entry` records independently of `Shared MCP Data Store`, keyed by durable user identity rather than ephemeral MCP client credentials.
+_Avoid_: Ledger table in luna.db, finance cache, bookkeeping DB
+
 **Bidirectional Dialogue Slicing**:
 The conversation history traversal strategy that walks both backward and forward from the target message, prioritizing backward context to establish discussion origin and extending forward until an inactivity gap, a bot summary, or the message capacity budget is encountered.
 _Avoid_: Forward-backward scraper, chat window expansion
