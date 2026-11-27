@@ -41,6 +41,7 @@ object McpServerMain {
                     broadcaster = broadcaster,
                     authConfig = authConfig,
                     clientRepository = clientRepository,
+                    plugins = listOf(DiscordWebhookPlugin(broadcaster, repository)),
                 )
             }
 
