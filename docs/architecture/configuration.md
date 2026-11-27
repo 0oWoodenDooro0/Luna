@@ -48,7 +48,7 @@ In unit tests, `EnvReader.of(mapOf(...))` provides an isolated in-memory reader 
 - **Config Definition**: [`McpServerConfig`](../../mcp-server/src/main/kotlin/luna/mcp/server/McpServerConfig.kt)
 - **Responsibilities**:
   - Operates as an independent microservice decoupled from Discord Gateway/tokens per [ADR 0007](../adr/0007-gemini-mcp-webhook-server.md).
-  - Loads via `EnvReader.load(...)` and reads `MCP_PORT` (`1..65535`, default `8081`, never falling back to `PORT`), `MCP_DB_PATH`, and `MCP_PUBLIC_BASE_URL`.
+  - Loads via `EnvReader.load(...)` and reads `MCP_PORT` (`1..65535`, default `8081`, never falling back to `PORT`), `MCP_DB_PATH`, `MCP_PUBLIC_BASE_URL`, `MCP_LEDGER_ENABLED` (default `false`), `MCP_LEDGER_DB_PATH` (default `./.data/ledger.db`), `MCP_LEDGER_DEFAULT_CURRENCY` (default `TWD`), `MCP_LEDGER_TIMEZONE` (default `Asia/Taipei`), and `MCP_LEDGER_ALLOWED_USER_IDS` (optional comma-separated user ID allowlist).
 
 ### 4. Plugin Context Access (`PluginContext`)
 - **Interface**: [`PluginContext`](../../src/main/kotlin/luna/plugin/PluginContext.kt)

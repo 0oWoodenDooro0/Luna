@@ -9,6 +9,8 @@ include(":libs:config")
 project(":libs:config").projectDir = file("libs/config")
 include(":libs:mcp-data")
 project(":libs:mcp-data").projectDir = file("libs/mcp-data")
+include(":libs:ledger")
+project(":libs:ledger").projectDir = file("libs/ledger")
 include("mcp-server")
 
 dependencyResolutionManagement {

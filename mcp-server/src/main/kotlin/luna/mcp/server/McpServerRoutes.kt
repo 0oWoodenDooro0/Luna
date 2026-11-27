@@ -37,10 +37,13 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.put
 import luna.mcp.data.McpClientRepository
 import luna.mcp.data.McpWebhookRepository
+import org.slf4j.LoggerFactory
 import java.net.URLEncoder
 import java.nio.charset.StandardCharsets
 import java.util.Base64
 import java.util.UUID
+
+private val mcpRoutesLogger = LoggerFactory.getLogger("luna.mcp.server.McpServerRoutes")
 
 fun Application.mcpServerModule(
     broadcaster: DiscordWebhookBroadcaster,
@@ -49,6 +52,7 @@ fun Application.mcpServerModule(
     clientRepository: McpClientRepository? = null,
     oAuthProvider: McpOAuthProvider = McpOAuthProvider(authConfig, clientRepository),
     webhookRepository: McpWebhookRepository = broadcaster.repository,
+    plugins: List<McpServerPlugin> = listOf(DiscordWebhookPlugin(broadcaster, webhookRepository)),
 ) {
     if (clientRepository != null && oAuthProvider.clientRepository == null) {
         oAuthProvider.clientRepository = clientRepository
@@ -59,7 +63,7 @@ fun Application.mcpServerModule(
         json()
     }
 
-    val handler = McpProtocolHandler(broadcaster, webhookRepository)
+    val handler = McpProtocolHandler(broadcaster, webhookRepository, plugins)
     val baseUrl = authConfig.normalizedBaseUrl
 
     fun isValidClient(clientId: String?): Boolean = oAuthProvider.isValidClientId(clientId)
@@ -74,6 +78,8 @@ fun Application.mcpServerModule(
     }
 
     routing {
+        plugins.forEach { it.registerRoutes(this) }
+
         get("/oauth/authorize") {
             val responseType = call.request.queryParameters["response_type"]?.trim()
             val clientId = call.request.queryParameters["client_id"]?.trim()
@@ -526,7 +532,13 @@ fun Application.mcpServerModule(
                     call.respondText(errorJson, ContentType.Application.Json, HttpStatusCode.Unauthorized)
                     return
                 }
-                val responseString = handler.handle(requestBody, clientId)
+                val authContext =
+                    resolveMcpAuthContext(
+                        clientId = clientId,
+                        clientRepository = clientRepository ?: oAuthProvider.clientRepository,
+                        logger = mcpRoutesLogger,
+                    )
+                val responseString = handler.handle(requestBody, authContext)
 
                 if (responseString == null) {
                     call.respond(HttpStatusCode.Accepted)

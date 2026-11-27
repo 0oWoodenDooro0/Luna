@@ -2,10 +2,20 @@
 set -eo pipefail
 
 staged=$(git diff --cached --name-only)
-if ! printf '%s\n' "$staged" | grep -qE '(\.kts?$|^Dockerfile$|^\.env\.example$|^docs/adr/|^src/main/resources/META-INF/services/|^gradle/coding-standards-.*-baseline\.txt$)'; then
+tasks=()
+
+if printf '%s\n' "$staged" | grep -qE '\.kts?$'; then
+  tasks+=(lintKotlin)
+fi
+
+if printf '%s\n' "$staged" | grep -qE '(\.kts?$|^Dockerfile$|^\.env\.example$|^docs/adr/|^src/main/resources/META-INF/services/|^gradle/coding-standards-.*-baseline\.txt$)'; then
+  tasks+=(lintCodingStandards)
+fi
+
+if [ "${#tasks[@]}" -eq 0 ]; then
   echo "==> Skipping pre-commit Gradle checks (no Kotlin, build, or guardrail-tracked files staged)."
   exit 0
 fi
 
-echo "==> Running pre-commit guardrail: lintKotlin and lintCodingStandards..."
-./gradlew lintKotlin lintCodingStandards --daemon --console=plain -q
+echo "==> Running pre-commit guardrail: ${tasks[*]}..."
+./gradlew "${tasks[@]}" --daemon --console=plain -q

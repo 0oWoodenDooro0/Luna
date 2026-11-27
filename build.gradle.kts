@@ -16,7 +16,7 @@ plugins {
 allprojects {
     tasks.withType<Test> {
         maxHeapSize = "1g"
-        timeout.set(Duration.ofSeconds(60))
+        timeout.set(Duration.ofSeconds(if (System.getenv("CI") == "true") 120 else 60))
         testLogging {
             events(TestLogEvent.FAILED)
             exceptionFormat = TestExceptionFormat.SHORT

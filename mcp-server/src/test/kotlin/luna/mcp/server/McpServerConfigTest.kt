@@ -393,4 +393,40 @@ class McpServerConfigTest {
         assertEquals("******", result.activeConfig["API_KEY"], "API_KEY must be masked")
         assertEquals("******", result.activeConfig["MY_SECRET"], "MY_SECRET must be masked")
     }
+
+    @Test
+    fun `ledger settings default and parse from EnvReader with fail-fast validation`() {
+        val defaults = McpServerConfig.from(EnvReader.of())
+        assertFalse(defaults.ledgerEnabled, "MCP_LEDGER_ENABLED must default to false")
+        assertEquals("./.data/ledger.db", defaults.ledgerDbPath)
+        assertEquals("TWD", defaults.ledgerDefaultCurrency)
+        assertEquals("Asia/Taipei", defaults.ledgerTimezone)
+        assertTrue(defaults.ledgerAllowedUserIds.isEmpty(), "MCP_LEDGER_ALLOWED_USER_IDS must default to empty")
+
+        val custom =
+            McpServerConfig.from(
+                EnvReader.of(
+                    "MCP_LEDGER_ENABLED" to "true",
+                    "MCP_LEDGER_DB_PATH" to "/tmp/custom-ledger.db",
+                    "MCP_LEDGER_DEFAULT_CURRENCY" to "usd",
+                    "MCP_LEDGER_TIMEZONE" to "America/New_York",
+                    "MCP_LEDGER_ALLOWED_USER_IDS" to "user-1, user-2 , ,user-3",
+                ),
+            )
+        assertTrue(custom.ledgerEnabled, "MCP_LEDGER_ENABLED should parse true")
+        assertEquals("/tmp/custom-ledger.db", custom.ledgerDbPath)
+        assertEquals("USD", custom.ledgerDefaultCurrency)
+        assertEquals("America/New_York", custom.ledgerTimezone)
+        assertEquals(setOf("user-1", "user-2", "user-3"), custom.ledgerAllowedUserIds)
+
+        assertThrows<ConfigValidationException> {
+            McpServerConfig.from(EnvReader.of("MCP_LEDGER_ENABLED" to "yes"))
+        }
+        assertThrows<ConfigValidationException> {
+            McpServerConfig.from(EnvReader.of("MCP_LEDGER_DEFAULT_CURRENCY" to "XYZ"))
+        }
+        assertThrows<ConfigValidationException> {
+            McpServerConfig.from(EnvReader.of("MCP_LEDGER_TIMEZONE" to "Invalid/Timezone"))
+        }
+    }
 }

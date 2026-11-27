@@ -36,17 +36,24 @@ data class JsonRpcError(
 )
 
 class McpProtocolHandler(
-    val broadcaster: DiscordWebhookBroadcaster,
-    val repository: McpWebhookRepository = broadcaster.repository,
-    private val json: Json =
-        Json {
-            ignoreUnknownKeys = true
-            encodeDefaults = true
-        },
+    val plugins: List<McpServerPlugin>,
+    private val json: Json = DEFAULT_JSON,
 ) {
+    constructor(
+        broadcaster: DiscordWebhookBroadcaster,
+        repository: McpWebhookRepository = broadcaster.repository,
+        plugins: List<McpServerPlugin> = listOf(DiscordWebhookPlugin(broadcaster, repository)),
+        json: Json = DEFAULT_JSON,
+    ) : this(plugins = plugins, json = json)
+
     suspend fun handle(
         requestBody: String,
         clientId: String,
+    ): String? = handle(requestBody, McpAuthContext(clientId = clientId))
+
+    suspend fun handle(
+        requestBody: String,
+        auth: McpAuthContext,
     ): String? {
         val request =
             runCatching {
@@ -60,13 +67,18 @@ class McpProtocolHandler(
                 return json.encodeToString(JsonRpcResponse.serializer(), errorResponse)
             }
 
-        val response = handleRequest(request, clientId) ?: return null
+        val response = handleRequest(request, auth) ?: return null
         return json.encodeToString(JsonRpcResponse.serializer(), response)
     }
 
     suspend fun handleRequest(
         request: JsonRpcRequest,
         clientId: String,
+    ): JsonRpcResponse? = handleRequest(request, McpAuthContext(clientId = clientId))
+
+    suspend fun handleRequest(
+        request: JsonRpcRequest,
+        auth: McpAuthContext,
     ): JsonRpcResponse? =
         when (request.method) {
             "initialize" -> {
@@ -82,11 +94,11 @@ class McpProtocolHandler(
             }
 
             "tools/list" -> {
-                handleToolsList(request)
+                handleToolsList(request, auth)
             }
 
             "tools/call" -> {
-                handleToolsCall(request, clientId)
+                handleToolsCall(request, auth)
             }
 
             else -> {
@@ -116,52 +128,28 @@ class McpProtocolHandler(
         return JsonRpcResponse(id = request.id, result = result)
     }
 
-    private fun handleToolsList(request: JsonRpcRequest): JsonRpcResponse {
+    private fun visibleTools(auth: McpAuthContext): List<McpTool> =
+        plugins
+            .filter { it.isEnabledFor(auth) }
+            .flatMap { it.tools() }
+            .filter { it.isVisibleTo(auth) }
+
+    private fun handleToolsList(
+        request: JsonRpcRequest,
+        auth: McpAuthContext,
+    ): JsonRpcResponse {
         val result =
             buildJsonObject {
                 putJsonArray("tools") {
-                    add(
-                        buildJsonObject {
-                            put("name", TOOL_SEND_MESSAGE)
-                            put(
-                                "description",
-                                "Send a message to registered Discord channels via webhooks. Specify 'target' with a specific tag name or 'all' to broadcast to all channels.",
-                            )
-                            putJsonObject("inputSchema") {
-                                put("type", "object")
-                                putJsonObject("properties") {
-                                    putJsonObject("content") {
-                                        put("type", "string")
-                                        put("description", "The message text to send to Discord")
-                                    }
-                                    putJsonObject("target") {
-                                        put("type", "string")
-                                        put(
-                                            "description",
-                                            "The target Discord channel tag name, or 'all' to send to all registered channels",
-                                        )
-                                    }
-                                }
-                                putJsonArray("required") {
-                                    add(kotlinx.serialization.json.JsonPrimitive("content"))
-                                    add(kotlinx.serialization.json.JsonPrimitive("target"))
-                                }
-                            }
-                        },
-                    )
-                    add(
-                        buildJsonObject {
-                            put("name", TOOL_LIST_TARGETS)
-                            put(
-                                "description",
-                                "List all registered Discord channel tags and quota status for the authenticated client",
-                            )
-                            putJsonObject("inputSchema") {
-                                put("type", "object")
-                                putJsonObject("properties") {}
-                            }
-                        },
-                    )
+                    for (tool in visibleTools(auth)) {
+                        add(
+                            buildJsonObject {
+                                put("name", tool.name)
+                                put("description", tool.description)
+                                put("inputSchema", tool.inputSchema)
+                            },
+                        )
+                    }
                 }
             }
         return JsonRpcResponse(id = request.id, result = result)
@@ -169,7 +157,7 @@ class McpProtocolHandler(
 
     private suspend fun handleToolsCall(
         request: JsonRpcRequest,
-        clientId: String,
+        auth: McpAuthContext,
     ): JsonRpcResponse {
         val toolName =
             request.params
@@ -177,92 +165,27 @@ class McpProtocolHandler(
                 ?.jsonPrimitive
                 ?.content
 
-        return when (toolName) {
-            TOOL_LIST_TARGETS -> {
-                handleListTargets(request, clientId)
+        val tool = visibleTools(auth).firstOrNull { it.name == toolName }
+        if (tool == null) {
+            return JsonRpcResponse(
+                id = request.id,
+                error = JsonRpcError(code = -32601, message = "Unknown tool: $toolName"),
+            )
+        }
+
+        val arguments = request.params?.get("arguments")?.jsonObject
+        return when (val outcome = tool.execute(arguments, auth)) {
+            is McpToolResult.Text -> {
+                toolResult(request.id, outcome.text, outcome.isError)
             }
 
-            TOOL_SEND_MESSAGE -> {
-                handleSendDiscordMessage(request, clientId)
-            }
-
-            else -> {
+            is McpToolResult.RpcError -> {
                 JsonRpcResponse(
                     id = request.id,
-                    error = JsonRpcError(code = -32601, message = "Unknown tool: $toolName"),
+                    error = JsonRpcError(code = outcome.code, message = outcome.message),
                 )
             }
         }
-    }
-
-    private fun handleListTargets(
-        request: JsonRpcRequest,
-        clientId: String,
-    ): JsonRpcResponse {
-        val webhooks = repository.listByClientId(clientId)
-        val tags = webhooks.map { it.tag }
-        val payload =
-            buildJsonObject {
-                putJsonArray("tags") {
-                    for (tag in tags) {
-                        add(kotlinx.serialization.json.JsonPrimitive(tag))
-                    }
-                }
-                put("quota", "${tags.size}/$MAX_WEBHOOK_QUOTA")
-                put("count", tags.size)
-                put("maxQuota", MAX_WEBHOOK_QUOTA)
-            }
-
-        return toolResult(request.id, payload.toString(), isError = false)
-    }
-
-    private suspend fun handleSendDiscordMessage(
-        request: JsonRpcRequest,
-        clientId: String,
-    ): JsonRpcResponse {
-        val arguments = request.params?.get("arguments")?.jsonObject
-        val content = arguments?.get("content")?.jsonPrimitive?.content
-        val target = arguments?.get("target")?.jsonPrimitive?.content
-
-        if (content.isNullOrBlank() || target.isNullOrBlank()) {
-            return JsonRpcResponse(
-                id = request.id,
-                error = JsonRpcError(code = -32602, message = "Missing or blank required argument 'content' or 'target'"),
-            )
-        }
-
-        val webhooks = repository.listByClientId(clientId)
-        if (webhooks.isEmpty()) {
-            return toolResult(
-                id = request.id,
-                text = "❌ 發送失敗：尚未綁定任何 Discord 頻道 Webhook。請在 Discord 中執行 /mcp webhook add tag:<標籤> 進行綁定。",
-                isError = true,
-            )
-        }
-
-        val matchedWebhooks =
-            if (target == "all") {
-                webhooks
-            } else {
-                webhooks.filter { it.tag == target }
-            }
-
-        if (matchedWebhooks.isEmpty()) {
-            return toolResult(
-                id = request.id,
-                text = "❌ 發送失敗：找不到標籤為 '$target' 的 Webhook。請先在 Discord 使用 /mcp webhook add tag:$target 綁定頻道，或調用 list_targets 查看現有可用標籤。",
-                isError = true,
-            )
-        }
-
-        broadcaster.broadcastToWebhooks(matchedWebhooks, content)
-
-        val successText = "✅ 已成功將訊息發送至 ${matchedWebhooks.size} 個頻道 [${matchedWebhooks.joinToString { it.tag }}]"
-        return toolResult(
-            id = request.id,
-            text = successText,
-            isError = false,
-        )
     }
 
     private fun toolResult(
@@ -293,5 +216,11 @@ class McpProtocolHandler(
         const val TOOL_SEND_MESSAGE = "send_discord_message"
         const val TOOL_LIST_TARGETS = "list_targets"
         const val MAX_WEBHOOK_QUOTA = 10
+
+        val DEFAULT_JSON =
+            Json {
+                ignoreUnknownKeys = true
+                encodeDefaults = true
+            }
     }
 }
