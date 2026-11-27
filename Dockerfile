@@ -10,6 +10,7 @@ COPY gradle ./gradle
 COPY libs/socialpeek/build.gradle.kts ./libs/socialpeek/
 COPY libs/config/build.gradle.kts ./libs/config/
 COPY libs/mcp-data/build.gradle.kts ./libs/mcp-data/
+COPY libs/ledger/build.gradle.kts ./libs/ledger/
 COPY mcp-server/build.gradle.kts ./mcp-server/
 
 # Make gradlew executable and download the Gradle distribution, retrying transient
