@@ -6,11 +6,15 @@ import luna.config.DotenvParser
 import luna.config.EnvReader
 import luna.config.EnvSchemaAuditor
 import luna.config.SecretMasker
+import luna.ledger.LedgerMoney
+import luna.ledger.LedgerValidationException
 import net.logstash.logback.argument.StructuredArguments.kv
 import org.slf4j.Logger
 import org.slf4j.LoggerFactory
 import java.io.File
 import java.io.InputStream
+import java.time.DateTimeException
+import java.time.ZoneId
 
 typealias EnvVarSchema = luna.config.EnvVarSchema
 typealias DriftAuditResult = luna.config.DriftAuditResult
@@ -25,12 +29,29 @@ data class McpServerConfig(
     val port: Int = DEFAULT_PORT,
     val dbPath: String = DEFAULT_DB_PATH,
     val publicBaseUrl: String = DEFAULT_PUBLIC_BASE_URL,
+    val ledgerEnabled: Boolean = DEFAULT_LEDGER_ENABLED,
+    val ledgerDbPath: String = DEFAULT_LEDGER_DB_PATH,
+    val ledgerDefaultCurrency: String = DEFAULT_LEDGER_DEFAULT_CURRENCY,
+    val ledgerTimezone: String = DEFAULT_LEDGER_TIMEZONE,
+    val ledgerAllowedUserIds: Set<String> = emptySet(),
 ) {
     val normalizedBaseUrl: String = publicBaseUrl.trimEnd('/')
 
     init {
         if (port !in 1..65535) {
             throw ConfigValidationException("Invalid configuration: MCP_PORT must be between 1 and 65535, but got: $port")
+        }
+        try {
+            LedgerMoney.normalizeCurrency(ledgerDefaultCurrency)
+        } catch (e: LedgerValidationException) {
+            throw ConfigValidationException("Invalid configuration for MCP_LEDGER_DEFAULT_CURRENCY: ${e.message}")
+        }
+        try {
+            ZoneId.of(ledgerTimezone)
+        } catch (e: DateTimeException) {
+            throw ConfigValidationException(
+                "Invalid configuration for MCP_LEDGER_TIMEZONE: '$ledgerTimezone' is not a valid IANA time zone",
+            )
         }
     }
 
@@ -50,6 +71,11 @@ data class McpServerConfig(
             "MCP_PORT" to port,
             "MCP_DB_PATH" to dbPath,
             "MCP_PUBLIC_BASE_URL" to publicBaseUrl,
+            "MCP_LEDGER_ENABLED" to ledgerEnabled,
+            "MCP_LEDGER_DB_PATH" to ledgerDbPath,
+            "MCP_LEDGER_DEFAULT_CURRENCY" to ledgerDefaultCurrency,
+            "MCP_LEDGER_TIMEZONE" to ledgerTimezone,
+            "MCP_LEDGER_ALLOWED_USER_IDS" to ledgerAllowedUserIds.joinToString(","),
         )
 
     /**
@@ -65,6 +91,10 @@ data class McpServerConfig(
         const val DEFAULT_PORT = 8081
         const val DEFAULT_DB_PATH = "./.data/luna.db"
         const val DEFAULT_PUBLIC_BASE_URL = "https://woodendoor.website"
+        const val DEFAULT_LEDGER_ENABLED = false
+        const val DEFAULT_LEDGER_DB_PATH = "./.data/ledger.db"
+        const val DEFAULT_LEDGER_DEFAULT_CURRENCY = "TWD"
+        const val DEFAULT_LEDGER_TIMEZONE = "Asia/Taipei"
 
         val SENSITIVE_EXPLICIT_KEYS: Set<String> get() = SecretMasker.SENSITIVE_EXPLICIT_KEYS
 
@@ -122,12 +152,25 @@ data class McpServerConfig(
         /**
          * Builds [McpServerConfig] from a strict [EnvReader] with canonical keys and fail-fast validation.
          */
-        fun from(env: EnvReader): McpServerConfig =
-            McpServerConfig(
+        fun from(env: EnvReader): McpServerConfig {
+            val rawCurrency = env.string("MCP_LEDGER_DEFAULT_CURRENCY", DEFAULT_LEDGER_DEFAULT_CURRENCY)
+            val normalizedCurrency =
+                try {
+                    LedgerMoney.normalizeCurrency(rawCurrency)
+                } catch (e: LedgerValidationException) {
+                    throw ConfigValidationException("Invalid configuration for MCP_LEDGER_DEFAULT_CURRENCY: ${e.message}")
+                }
+            return McpServerConfig(
                 port = env.port("MCP_PORT", DEFAULT_PORT),
                 dbPath = env.string("MCP_DB_PATH", DEFAULT_DB_PATH),
                 publicBaseUrl = env.string("MCP_PUBLIC_BASE_URL", DEFAULT_PUBLIC_BASE_URL),
+                ledgerEnabled = env.boolean("MCP_LEDGER_ENABLED", DEFAULT_LEDGER_ENABLED),
+                ledgerDbPath = env.string("MCP_LEDGER_DB_PATH", DEFAULT_LEDGER_DB_PATH),
+                ledgerDefaultCurrency = normalizedCurrency,
+                ledgerTimezone = env.string("MCP_LEDGER_TIMEZONE", DEFAULT_LEDGER_TIMEZONE),
+                ledgerAllowedUserIds = env.csv("MCP_LEDGER_ALLOWED_USER_IDS").toSet(),
             )
+        }
 
         /**
          * Builds [McpServerConfig] from a key-value map with canonical defaults and fail-fast validation.
@@ -240,6 +283,11 @@ data class McpServerConfig(
                     "MCP_PORT" to DEFAULT_PORT,
                     "MCP_DB_PATH" to DEFAULT_DB_PATH,
                     "MCP_PUBLIC_BASE_URL" to DEFAULT_PUBLIC_BASE_URL,
+                    "MCP_LEDGER_ENABLED" to DEFAULT_LEDGER_ENABLED,
+                    "MCP_LEDGER_DB_PATH" to DEFAULT_LEDGER_DB_PATH,
+                    "MCP_LEDGER_DEFAULT_CURRENCY" to DEFAULT_LEDGER_DEFAULT_CURRENCY,
+                    "MCP_LEDGER_TIMEZONE" to DEFAULT_LEDGER_TIMEZONE,
+                    "MCP_LEDGER_ALLOWED_USER_IDS" to "",
                 )
 
             val auditResult =
