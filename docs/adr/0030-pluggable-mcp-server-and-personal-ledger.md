@@ -23,7 +23,7 @@ ADR 0007 and ADR 0008 established `:mcp-server` as a decoupled, multi-tenant OAu
 
 4. **Single-Entry Domain Model, Monetary Precision, and Timezone**:
    - Model each `Ledger Entry` as a single-entry `INCOME` or `EXPENSE` record with `amount_minor: Long`, ISO-4217 `currency` (default `MCP_LEDGER_DEFAULT_CURRENCY=TWD`), free-form normalized `category` (trimmed/lowercase, guided by suggested defaults in tool descriptions rather than a rigid managed table), optional `note` and `payment_method` tag, and UTC epoch-millisecond timestamps (`occurred_at`, `created_at`, `updated_at`, `deleted_at`).
-   - Accept **major units** at the MCP tool boundary (e.g., `150` or `"12.50"`) and convert to integer minor units via the currency's ISO-4217 decimal exponent to prevent LLM 100x scaling errors. Summaries group totals by currency without exchange-rate conversion.
+   - Accept **major units** at the MCP tool boundary (e.g., `150` or `"12.50"`) and convert to integer minor units via the currency's ISO-4217 decimal exponent (with `TWD` explicitly overridden to `0` decimal places to match everyday whole-dollar bookkeeping) to prevent LLM 100x scaling errors. Summaries group totals by currency without exchange-rate conversion.
    - Interpret calendar date boundaries (e.g., `2026-11-01`..`2026-11-30`) and format human-readable timestamps in `MCP_LEDGER_TIMEZONE` (default `Asia/Taipei`).
 
 5. **MCP Tool Surface & Soft-Delete Safety**:

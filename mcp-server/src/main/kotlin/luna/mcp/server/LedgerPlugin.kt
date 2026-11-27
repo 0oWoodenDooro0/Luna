@@ -472,7 +472,13 @@ class LedgerPlugin(
                     put("type", "string")
                     put("description", "ISO-4217 currency code (defaults to $defaultCurrency)")
                 }
-                putJsonObject("category") { put("type", "string") }
+                putJsonObject("category") {
+                    put("type", "string")
+                    put(
+                        "description",
+                        "Normalized category (e.g. food, transport, shopping, housing, entertainment, health, subscription, salary, other)",
+                    )
+                }
                 putJsonObject("payment_method") { put("type", "string") }
                 putJsonObject("note") { put("type", "string") }
                 putJsonObject("occurred_at") {
@@ -494,7 +500,13 @@ class LedgerPlugin(
                 putJsonObject("from") { put("type", "string") }
                 putJsonObject("to") { put("type", "string") }
                 putJsonObject("type") { put("type", "string") }
-                putJsonObject("category") { put("type", "string") }
+                putJsonObject("category") {
+                    put("type", "string")
+                    put(
+                        "description",
+                        "Normalized category (e.g. food, transport, shopping, housing, entertainment, health, subscription, salary, other)",
+                    )
+                }
                 putJsonObject("payment_method") { put("type", "string") }
                 putJsonObject("keyword") { put("type", "string") }
                 putJsonObject("limit") { put("type", "integer") }
@@ -519,7 +531,13 @@ class LedgerPlugin(
                 putJsonObject("type") { put("type", "string") }
                 putJsonObject("amount") { put("type", "string") }
                 putJsonObject("currency") { put("type", "string") }
-                putJsonObject("category") { put("type", "string") }
+                putJsonObject("category") {
+                    put("type", "string")
+                    put(
+                        "description",
+                        "Normalized category (e.g. food, transport, shopping, housing, entertainment, health, subscription, salary, other)",
+                    )
+                }
                 putJsonObject("payment_method") { put("type", "string") }
                 putJsonObject("clear_payment_method") { put("type", "boolean") }
                 putJsonObject("note") { put("type", "string") }
